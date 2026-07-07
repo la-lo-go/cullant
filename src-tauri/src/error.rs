@@ -9,6 +9,8 @@ pub enum AppError {
     Db(#[from] rusqlite::Error),
     #[error("no project is open")]
     NoProject,
+    #[error("decode error: {0}")]
+    Decode(String),
     #[error("{0}")]
     Other(String),
 }

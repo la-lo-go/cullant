@@ -1,137 +1,176 @@
 <script lang="ts">
-  import { invoke, convertFileSrc } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { catalog } from "$lib/stores/catalog.svelte";
+  import { session } from "$lib/stores/session.svelte";
+  import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
+  import VirtualGrid from "$lib/components/VirtualGrid.svelte";
+  import FilterBar from "$lib/components/FilterBar.svelte";
+  import KeybindingsDialog from "$lib/components/KeybindingsDialog.svelte";
+  import type { SortKey } from "$lib/api";
 
-  interface ProjectInfo {
-    rootPath: string;
-    dbPath: string;
-    schemaVersion: number;
-    fileCount: number;
+  let showKeybindings = $state(false);
+
+  async function pickProject() {
+    const path = await open({ directory: true, title: "Open project folder" });
+    if (path) await catalog.open(path);
   }
 
-  let project = $state<ProjectInfo | null>(null);
-  let error = $state("");
-
-  // M0 smoke test: an image served through the cullant:// protocol,
-  // proving pixels never cross the IPC bridge.
-  const testImageUrl = convertFileSrc("test", "cullant");
-
-  async function openProject() {
-    error = "";
-    try {
-      const path = await open({ directory: true, title: "Open project folder" });
-      if (!path) return;
-      project = await invoke<ProjectInfo>("open_project", { path });
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  async function closeProject() {
-    await invoke("close_project");
-    project = null;
+  function onSortChange(e: Event) {
+    catalog.setSort((e.target as HTMLSelectElement).value as SortKey);
   }
 </script>
 
-<main class="container">
-  <h1>Cullant</h1>
-  <p class="tagline">Fast, keyboard-first photo culling</p>
+<svelte:window onkeydown={handleKeydown} />
 
-  {#if project}
-    <section class="project">
-      <h2>Project open</h2>
-      <dl>
-        <dt>Root</dt>
-        <dd>{project.rootPath}</dd>
-        <dt>Database</dt>
-        <dd>{project.dbPath}</dd>
-        <dt>Schema version</dt>
-        <dd>{project.schemaVersion}</dd>
-        <dt>Indexed files</dt>
-        <dd>{project.fileCount}</dd>
-      </dl>
-      <button onclick={closeProject}>Close project</button>
-    </section>
+<main class="app">
+  {#if catalog.project}
+    <header class="toolbar">
+      <span class="title">Cullant</span>
+      <span class="path" title={catalog.project.rootPath}>{catalog.project.rootPath}</span>
+      <span class="spacer"></span>
+      {#if catalog.scanning}
+        <span class="status scanning">Scanning… {catalog.scanFound || ""}</span>
+      {:else}
+        <span class="status">{catalog.items.length} photos</span>
+      {/if}
+      <button
+        class:active={session.mirrorMode}
+        title="Mirror mode: RAW+JPEG pairs act as one photo (M)"
+        onclick={() => (session.mirrorMode = !session.mirrorMode)}
+      >
+        {session.mirrorMode ? "🔗 Mirror" : "⛓ Separate"}
+      </button>
+      <select value={catalog.sort} onchange={onSortChange}>
+        <option value="capture">Capture time</option>
+        <option value="name">Name</option>
+      </select>
+      <button title="Keyboard shortcuts" onclick={() => (showKeybindings = true)}>⌨</button>
+      <button onclick={() => catalog.close()}>Close</button>
+    </header>
+
+    {#if session.filterBarVisible}
+      <FilterBar />
+    {/if}
+
+    <VirtualGrid items={session.filtered} />
   {:else}
-    <button onclick={openProject}>Open project…</button>
+    <div class="welcome">
+      <h1>Cullant</h1>
+      <p>Fast, keyboard-first photo culling</p>
+      <button class="primary" onclick={pickProject}>Open project…</button>
+      {#if catalog.error}
+        <p class="error">{catalog.error}</p>
+      {/if}
+    </div>
   {/if}
 
-  {#if error}
-    <p class="error">{error}</p>
+  {#if showKeybindings}
+    <KeybindingsDialog onclose={() => (showKeybindings = false)} />
   {/if}
-
-  <section class="protocol-test">
-    <p>Protocol smoke test (<code>cullant://test</code>):</p>
-    <img src={testImageUrl} alt="cullant protocol test" width="64" height="64" />
-  </section>
 </main>
 
 <style>
-  :root {
+  :global(html, body) {
+    margin: 0;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  :global(:root) {
     font-family: Inter, "Segoe UI", Avenir, Helvetica, Arial, sans-serif;
-    font-size: 15px;
+    font-size: 14px;
     color: #e8e8e8;
     background-color: #1b1b1f;
+    color-scheme: dark;
   }
 
-  .container {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: 3rem 1rem;
+  .app {
     display: flex;
     flex-direction: column;
+    height: 100vh;
+  }
+
+  .toolbar {
+    display: flex;
     align-items: center;
-    gap: 1rem;
-    text-align: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: #232329;
+    border-bottom: 1px solid #333;
+    flex: none;
   }
 
-  h1 {
-    margin: 0;
+  .title {
+    font-weight: 700;
   }
 
-  .tagline {
-    margin: 0;
-    opacity: 0.7;
+  .path {
+    opacity: 0.55;
+    font-size: 12px;
+    max-width: 30%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
+  .spacer {
+    flex: 1;
+  }
+
+  .status {
+    font-size: 12px;
+    opacity: 0.75;
+  }
+
+  .status.scanning {
+    color: #6bb2ff;
+  }
+
+  select,
   button {
-    border-radius: 8px;
+    border-radius: 6px;
     border: 1px solid #3a3a42;
-    padding: 0.6em 1.4em;
-    font-size: 1em;
-    font-weight: 500;
+    padding: 4px 10px;
+    font-size: 13px;
     font-family: inherit;
     color: #e8e8e8;
     background-color: #2a2a30;
     cursor: pointer;
   }
 
-  button:hover {
+  button:hover,
+  select:hover {
     border-color: #6b6bff;
   }
 
-  .project dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.25rem 1rem;
-    text-align: left;
+  button.active {
+    border-color: #6b8bff;
   }
 
-  .project dt {
-    opacity: 0.6;
+  .welcome {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
   }
 
-  .project dd {
+  .welcome h1 {
     margin: 0;
-    word-break: break-all;
+  }
+
+  .welcome p {
+    margin: 0 0 1rem;
+    opacity: 0.7;
+  }
+
+  button.primary {
+    padding: 10px 22px;
+    font-size: 15px;
   }
 
   .error {
     color: #ff6b6b;
-  }
-
-  .protocol-test {
-    margin-top: 2rem;
-    opacity: 0.8;
   }
 </style>

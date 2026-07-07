@@ -1,17 +1,23 @@
 mod commands;
 mod db;
+mod decode;
+mod engine;
 mod error;
 mod protocol;
+mod scan;
+mod thumbs;
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use db::Db;
+use thumbs::ThumbPool;
 
 /// State of the currently open project.
 pub struct ProjectState {
     pub root: PathBuf,
-    pub db: Db,
+    pub db: Arc<Db>,
+    pub thumbs: ThumbPool,
 }
 
 #[derive(Default)]
@@ -27,12 +33,30 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState::default())
-        .register_asynchronous_uri_scheme_protocol("cullant", |_ctx, request, responder| {
-            responder.respond(protocol::handle(request));
+        .register_asynchronous_uri_scheme_protocol("cullant", |ctx, request, responder| {
+            protocol::handle(ctx.app_handle(), request, responder);
+        })
+        .setup(|app| {
+            // Dev/test hook: auto-open a project folder at startup.
+            if let Ok(path) = std::env::var("CULLANT_OPEN_PROJECT") {
+                use tauri::Manager;
+                let state = app.state::<AppState>();
+                match commands::project::do_open_project(&path, app.handle(), &state) {
+                    Ok(info) => tracing::info!("auto-opened project {}", info.root_path),
+                    Err(e) => tracing::error!("CULLANT_OPEN_PROJECT failed: {e}"),
+                }
+            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::project::open_project,
+            commands::project::current_project,
+            commands::project::rescan_project,
             commands::project::close_project,
+            commands::catalog::query_items,
+            commands::culling::set_rating,
+            commands::culling::set_flag,
+            commands::culling::set_label,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
