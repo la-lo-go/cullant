@@ -13,12 +13,14 @@ import { tags } from "./tags.svelte";
 export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
 
 const SHOW_NAMES_KEY = "cullant.showNames";
+const SHOW_FILMSTRIP_KEY = "cullant.showFilmstrip";
 
-function loadShowNames(): boolean {
+function loadBoolPref(key: string, fallback: boolean): boolean {
   try {
-    return JSON.parse(localStorage.getItem(SHOW_NAMES_KEY) ?? "true") !== false;
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : JSON.parse(raw) === true;
   } catch {
-    return true;
+    return fallback;
   }
 }
 
@@ -47,12 +49,24 @@ class SessionStore {
   selectionAnchor = $state<number | null>(null);
 
   /** Show filenames under grid thumbnails (persisted). */
-  showNames = $state<boolean>(loadShowNames());
+  showNames = $state<boolean>(loadBoolPref(SHOW_NAMES_KEY, true));
 
   toggleShowNames() {
     this.showNames = !this.showNames;
     try {
       localStorage.setItem(SHOW_NAMES_KEY, JSON.stringify(this.showNames));
+    } catch {
+      // persistence is best-effort
+    }
+  }
+
+  /** Show the filmstrip/carousel in the loupe and compare views (persisted). */
+  showFilmstrip = $state<boolean>(loadBoolPref(SHOW_FILMSTRIP_KEY, true));
+
+  toggleShowFilmstrip() {
+    this.showFilmstrip = !this.showFilmstrip;
+    try {
+      localStorage.setItem(SHOW_FILMSTRIP_KEY, JSON.stringify(this.showFilmstrip));
     } catch {
       // persistence is best-effort
     }

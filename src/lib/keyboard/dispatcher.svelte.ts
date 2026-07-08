@@ -115,6 +115,9 @@ function execute(id: CommandId, e: KeyboardEvent) {
       // Only meaningful in the loupe; harmless elsewhere.
       view.infoOpen = !view.infoOpen;
       return;
+    case "ui.toggleFilmstrip":
+      session.toggleShowFilmstrip();
+      return;
   }
 }
 

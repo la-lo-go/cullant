@@ -9,6 +9,7 @@
   import X from "@lucide/svelte/icons/x";
   import Scissors from "@lucide/svelte/icons/scissors";
   import Info from "@lucide/svelte/icons/info";
+  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
 
   const item = $derived(session.focused);
 </script>
@@ -35,6 +36,14 @@
       {#if view.infoOpen}
         <MetadataPanel {item} />
       {/if}
+      <button
+        class="back filmstrip-btn"
+        class:active={session.showFilmstrip}
+        title="Show/hide filmstrip (F)"
+        onclick={() => session.toggleShowFilmstrip()}
+      >
+        <PanelBottom size={16} />
+      </button>
       <div class="info">
         <span class="filename">{item.relPath}</span>
         {#if session.mirrorMode && item.groupSize > 1}
@@ -49,7 +58,9 @@
         <span class="pos">{session.focusedIndex + 1} / {session.filtered.length}</span>
       </div>
     </div>
-    <Filmstrip items={session.filtered} />
+    {#if session.showFilmstrip}
+      <Filmstrip items={session.filtered} />
+    {/if}
   {:else}
     <div class="empty">No photo selected</div>
   {/if}
@@ -142,6 +153,15 @@
   }
 
   .info-btn.active {
+    background: rgba(107, 139, 255, 0.5);
+    color: #fff;
+  }
+
+  .filmstrip-btn {
+    top: 82px;
+  }
+
+  .filmstrip-btn.active {
     background: rgba(107, 139, 255, 0.5);
     color: #fff;
   }

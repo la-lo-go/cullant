@@ -7,6 +7,7 @@
   import X from "@lucide/svelte/icons/x";
   import Pin from "@lucide/svelte/icons/pin";
   import PinOff from "@lucide/svelte/icons/pin-off";
+  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
 
   type Side = "left" | "right";
 
@@ -60,6 +61,14 @@
 <div class="compare">
   <div class="panes">
     <button class="back" title="Back to grid (Esc)" onclick={() => (view.mode = "grid")}><X size={16} /></button>
+    <button
+      class="back filmstrip-btn"
+      class:active={session.showFilmstrip}
+      title="Show/hide filmstrip (F)"
+      onclick={() => session.toggleShowFilmstrip()}
+    >
+      <PanelBottom size={16} />
+    </button>
     {#if left}
       <div class="pane" class:pinned={pinnedSide === "left"}>
         <ZoomImage item={left} standalone />
@@ -97,7 +106,9 @@
       <div class="pane empty">End of set</div>
     {/if}
   </div>
-  <Filmstrip items={session.filtered} />
+  {#if session.showFilmstrip}
+    <Filmstrip items={session.filtered} />
+  {/if}
 </div>
 
 <style>
@@ -138,6 +149,15 @@
 
   .back:hover {
     background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+  }
+
+  .filmstrip-btn {
+    top: 46px;
+  }
+
+  .filmstrip-btn.active {
+    background: rgba(107, 139, 255, 0.5);
     color: #fff;
   }
 
