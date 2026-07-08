@@ -7,6 +7,12 @@ export interface ProjectInfo {
   fileCount: number;
 }
 
+export interface RecentProject {
+  path: string;
+  lastOpened: number;
+  available: boolean;
+}
+
 export interface ItemLite {
   id: number;
   groupId: number;
@@ -129,6 +135,8 @@ export const api = {
   currentProject: () => invoke<ProjectInfo | null>("current_project"),
   closeProject: () => invoke("close_project"),
   rescanProject: () => invoke("rescan_project"),
+  listRecentProjects: () => invoke<RecentProject[]>("list_recent_projects"),
+  removeRecentProject: (path: string) => invoke("remove_recent_project", { path }),
   queryItems: (sort: SortKey, media: MediaTab) =>
     invoke<ItemLite[]>("query_items", { sort, media }),
   mediaCounts: () => invoke<MediaCounts>("media_counts"),
@@ -185,4 +193,9 @@ export function previewUrl(item: ItemLite): string {
 
 export function videoUrl(item: ItemLite): string {
   return cullantUrl(`video/${item.id}?v=${item.mtime}`);
+}
+
+/** Preview thumbnail for a homepage recent-project card (0-based list index + preview slot). */
+export function recentThumbUrl(index: number, slot: number): string {
+  return cullantUrl(`recent-thumb/${index}/${slot}`);
 }

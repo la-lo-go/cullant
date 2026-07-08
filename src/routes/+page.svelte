@@ -15,6 +15,7 @@
   import CommitDialog from "$lib/components/CommitDialog.svelte";
   import MoveDialog from "$lib/components/MoveDialog.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import ProjectGallery from "$lib/components/ProjectGallery.svelte";
   import { api, type SortKey } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import Search from "@lucide/svelte/icons/search";
@@ -176,13 +177,16 @@
       {/if}
     {/if}
   {:else}
-    <div class="welcome">
-      <h1>Cullant</h1>
-      <p>Fast, keyboard-first photo culling</p>
-      <button class="primary" onclick={pickProject}>Open project…</button>
-      {#if catalog.error}
-        <p class="error">{catalog.error}</p>
-      {/if}
+    <div class="home">
+      <div class="welcome">
+        <h1>Cullant</h1>
+        <p>Fast, keyboard-first photo culling</p>
+        <button class="primary" onclick={pickProject}>Open project…</button>
+        {#if catalog.error}
+          <p class="error">{catalog.error}</p>
+        {/if}
+      </div>
+      <ProjectGallery onopen={(path) => void catalog.open(path)} />
     </div>
   {/if}
 
@@ -390,13 +394,21 @@
     cursor: not-allowed;
   }
 
-  .welcome {
+  .home {
     flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .welcome {
+    flex: none;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
+    padding: 48px 0 24px;
   }
 
   .welcome h1 {

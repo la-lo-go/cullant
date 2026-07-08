@@ -53,6 +53,8 @@ pub fn run() {
             commands::project::current_project,
             commands::project::rescan_project,
             commands::project::close_project,
+            commands::recent::list_recent_projects,
+            commands::recent::remove_recent_project,
             commands::catalog::query_items,
             commands::catalog::media_counts,
             commands::culling::set_rating,

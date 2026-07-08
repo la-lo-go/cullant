@@ -1,13 +1,18 @@
+use std::path::PathBuf;
+
 use tauri::http::{header, Request, Response, StatusCode};
 use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
 
+use crate::commands::recent;
 use crate::error::AppResult;
-use crate::thumbs::{ThumbKind, ThumbRequest};
+use crate::thumbs::{cache_rel_path, ThumbKind, ThumbRequest};
 use crate::AppState;
 
 /// Handler for the `cullant://` scheme (served as `http://cullant.localhost/…`
 /// on Windows). Routes: /thumb/{id}, /preview/{id} (async via the thumb pool),
-/// /test (static smoke check). Pixels never cross base64 IPC.
+/// /recent-thumb/{index}/{slot} (homepage preview, reads a closed project's
+/// own thumb cache directly), /test (static smoke check). Pixels never cross
+/// base64 IPC.
 pub fn handle<R: Runtime>(
     app: &AppHandle<R>,
     request: Request<Vec<u8>>,
@@ -17,6 +22,11 @@ pub fn handle<R: Runtime>(
     let mut parts = path.trim_start_matches('/').splitn(2, '/');
     let route = parts.next().unwrap_or("");
     let rest = parts.next().unwrap_or("");
+
+    if route == "recent-thumb" {
+        respond_recent_thumb(app, responder, rest);
+        return;
+    }
 
     match (route, rest.parse::<i64>()) {
         ("thumb", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Thumb),
@@ -178,6 +188,68 @@ fn respond_video<R: Runtime>(
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("video read: {e}"),
         )),
+    }
+}
+
+/// Serve a preview thumbnail for a homepage recent-project card, identified
+/// by its position in the recent list plus a preview slot (0..N). Reads
+/// straight from that project's own `.cullant` cache on disk — it need not
+/// be the currently open project, so this bypasses AppState/ThumbPool
+/// entirely and never generates a thumbnail that doesn't already exist.
+fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResponder, rest: &str) {
+    let mut nums = rest.splitn(2, '/');
+    let (Some(index), Some(slot)) = (
+        nums.next().and_then(|s| s.parse::<usize>().ok()),
+        nums.next().and_then(|s| s.parse::<usize>().ok()),
+    ) else {
+        responder.respond(plain(
+            StatusCode::BAD_REQUEST,
+            "bad recent-thumb route".into(),
+        ));
+        return;
+    };
+
+    let list = recent::load_recent(app);
+    let Some(entry) = list.get(index) else {
+        responder.respond(plain(
+            StatusCode::NOT_FOUND,
+            "no such recent project".into(),
+        ));
+        return;
+    };
+
+    let root = PathBuf::from(&entry.path);
+    let db_path = root.join(".cullant").join("cullant.db");
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY;
+    let candidate = rusqlite::Connection::open_with_flags(&db_path, flags)
+        .ok()
+        .and_then(|conn| {
+            conn.query_row(
+                "SELECT id, mtime FROM files WHERE status = 0 AND kind IN (0, 1)
+             ORDER BY id DESC LIMIT 1 OFFSET ?1",
+                [slot as i64],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+            )
+            .ok()
+        });
+
+    let Some((file_id, mtime)) = candidate else {
+        responder.respond(plain(StatusCode::NOT_FOUND, "no thumb available".into()));
+        return;
+    };
+
+    let cache_rel = cache_rel_path(file_id, mtime, ThumbKind::Thumb);
+    let cache_abs = root.join(".cullant").join("thumbs").join(cache_rel);
+    match std::fs::read(&cache_abs) {
+        Ok(bytes) => responder.respond(
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "image/jpeg")
+                .header(header::CACHE_CONTROL, "no-store")
+                .body(bytes)
+                .unwrap(),
+        ),
+        Err(_) => responder.respond(plain(StatusCode::NOT_FOUND, "thumb not cached".into())),
     }
 }
 

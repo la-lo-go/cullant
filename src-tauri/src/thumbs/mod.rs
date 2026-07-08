@@ -160,7 +160,7 @@ pub fn pregenerate_all(
     Ok(total)
 }
 
-fn cache_rel_path(file_id: i64, mtime: i64, kind: ThumbKind) -> String {
+pub(crate) fn cache_rel_path(file_id: i64, mtime: i64, kind: ThumbKind) -> String {
     let bucket = (file_id % 256) as u8;
     let suffix = match kind {
         ThumbKind::Thumb => "t",

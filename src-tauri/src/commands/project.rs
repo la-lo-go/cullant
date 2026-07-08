@@ -109,6 +109,7 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
         thumbs,
     });
     tracing::info!("opened project at {root_str}");
+    crate::commands::recent::record_opened(app, &root_str);
 
     spawn_scan(app.clone(), db, root);
 
