@@ -21,7 +21,11 @@ export type CommandId =
   | "label.blue"
   | "label.purple"
   | "ui.toggleFilterBar"
-  | "ui.toggleMirror";
+  | "ui.toggleMirror"
+  | "view.grid"
+  | "view.viewer"
+  | "view.compare"
+  | "zoom.toggle";
 
 export interface CommandMeta {
   id: CommandId;
@@ -54,6 +58,10 @@ export const COMMANDS: CommandMeta[] = [
   { id: "label.purple", title: "Purple label", classify: true },
   { id: "ui.toggleFilterBar", title: "Show/hide filter bar" },
   { id: "ui.toggleMirror", title: "Toggle RAW+JPEG mirror mode" },
+  { id: "view.grid", title: "Grid view" },
+  { id: "view.viewer", title: "Loupe view" },
+  { id: "view.compare", title: "Compare view" },
+  { id: "zoom.toggle", title: "Toggle 100% zoom" },
 ];
 
 /** Lightroom-compatible defaults (see docs/keymap research). */
@@ -81,6 +89,10 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "label.purple": ["-"],
   "ui.toggleFilterBar": ["\\"],
   "ui.toggleMirror": ["m"],
+  "view.grid": ["g"],
+  "view.viewer": ["e", "enter"],
+  "view.compare": ["c"],
+  "zoom.toggle": ["z", "space"],
 };
 
 const STORAGE_KEY = "cullant.keymap.v1";

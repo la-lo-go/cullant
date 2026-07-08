@@ -1,4 +1,5 @@
 import { session } from "../stores/session.svelte";
+import { view } from "../stores/view.svelte";
 import {
   effectiveBindings,
   loadOverrides,
@@ -70,6 +71,18 @@ function execute(id: CommandId, e: KeyboardEvent) {
       return;
     case "ui.toggleMirror":
       session.mirrorMode = !session.mirrorMode;
+      return;
+    case "view.grid":
+      view.mode = "grid";
+      return;
+    case "view.viewer":
+      view.mode = "viewer";
+      return;
+    case "view.compare":
+      view.mode = "compare";
+      return;
+    case "zoom.toggle":
+      if (view.mode !== "grid") view.toggleZoom();
       return;
   }
 }

@@ -17,6 +17,9 @@ pub const PREVIEW_LONG_EDGE: u32 = 2560;
 pub enum ThumbKind {
     Thumb = 0,
     Preview = 1,
+    /// Full-resolution pixels for focus checks: the unresized embedded
+    /// preview for RAWs, the original bytes for plain images.
+    Full = 3,
 }
 
 pub struct ThumbRequest {
@@ -118,6 +121,7 @@ fn cache_rel_path(file_id: i64, mtime: i64, kind: ThumbKind) -> String {
     let suffix = match kind {
         ThumbKind::Thumb => "t",
         ThumbKind::Preview => "p",
+        ThumbKind::Full => "f",
     };
     format!("{bucket:02x}/{file_id}_{mtime}_{suffix}.jpg")
 }
@@ -146,13 +150,18 @@ fn produce(db: &Arc<Db>, root: &Path, file_id: i64, kind: ThumbKind) -> AppResul
         )?)
     })?;
 
+    let source_path = root.join(&rel_path);
+
+    // Full view of a plain image: stream the original, no transcode, no cache.
+    if kind == ThumbKind::Full && file_kind == 1 {
+        return Ok(std::fs::read(&source_path)?);
+    }
+
     let cache_rel = cache_rel_path(file_id, mtime, kind);
     let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
     if let Ok(bytes) = std::fs::read(&cache_abs) {
         return Ok(bytes);
     }
-
-    let source_path = root.join(&rel_path);
     let decoded: DynamicImage = match file_kind {
         0 => decode::raw::embedded_preview(&source_path)?,
         1 => image::open(&source_path)
@@ -166,11 +175,15 @@ fn produce(db: &Arc<Db>, root: &Path, file_id: i64, kind: ThumbKind) -> AppResul
 
     let (src_w, src_h) = (decoded.width(), decoded.height());
     let oriented = apply_orientation(decoded, orientation.unwrap_or(1));
-    let long_edge = match kind {
-        ThumbKind::Thumb => THUMB_LONG_EDGE,
-        ThumbKind::Preview => PREVIEW_LONG_EDGE,
+    let (long_edge, quality) = match kind {
+        ThumbKind::Thumb => (THUMB_LONG_EDGE, 80),
+        ThumbKind::Preview => (PREVIEW_LONG_EDGE, 80),
+        // Unresized: u32::MAX long edge means "never scale down".
+        // TODO(post-MVP): true demosaic via rawler develop as a fallback for
+        // cameras whose embedded preview is smaller than the sensor.
+        ThumbKind::Full => (u32::MAX, 90),
     };
-    let jpeg = encode_scaled_jpeg(&oriented, long_edge, 80)?;
+    let jpeg = encode_scaled_jpeg(&oriented, long_edge, quality)?;
 
     if let Some(parent) = cache_abs.parent() {
         std::fs::create_dir_all(parent)?;

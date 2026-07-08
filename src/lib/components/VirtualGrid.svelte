@@ -1,6 +1,7 @@
 <script lang="ts">
   import { thumbUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
+  import { view } from "../stores/view.svelte";
 
   let { items }: { items: ItemLite[] } = $props();
 
@@ -79,6 +80,7 @@
         class:focused={v.index === session.focusedIndex}
         style="transform: translate({v.x}px, {v.y}px); width:{CELL}px; height:{CELL}px"
         onpointerdown={() => (session.focusedIndex = v.index)}
+        ondblclick={() => (view.mode = "viewer")}
         role="button"
         tabindex="-1"
       >

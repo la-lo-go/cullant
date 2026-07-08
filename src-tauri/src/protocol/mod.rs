@@ -21,6 +21,7 @@ pub fn handle<R: Runtime>(
     match (route, rest.parse::<i64>()) {
         ("thumb", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Thumb),
         ("preview", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Preview),
+        ("full", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Full),
         ("test", _) => responder.respond(
             Response::builder()
                 .status(StatusCode::OK)

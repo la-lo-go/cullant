@@ -2,8 +2,11 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { session } from "$lib/stores/session.svelte";
+  import { view } from "$lib/stores/view.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
   import VirtualGrid from "$lib/components/VirtualGrid.svelte";
+  import Viewer from "$lib/components/Viewer.svelte";
+  import CompareView from "$lib/components/CompareView.svelte";
   import FilterBar from "$lib/components/FilterBar.svelte";
   import KeybindingsDialog from "$lib/components/KeybindingsDialog.svelte";
   import type { SortKey } from "$lib/api";
@@ -33,6 +36,11 @@
       {:else}
         <span class="status">{catalog.items.length} photos</span>
       {/if}
+      <div class="segmented">
+        <button class:active={view.mode === "grid"} title="Grid (G)" onclick={() => (view.mode = "grid")}>▦</button>
+        <button class:active={view.mode === "viewer"} title="Loupe (E)" onclick={() => (view.mode = "viewer")}>🔍</button>
+        <button class:active={view.mode === "compare"} title="Compare (C)" onclick={() => (view.mode = "compare")}>⿲</button>
+      </div>
       <button
         class:active={session.mirrorMode}
         title="Mirror mode: RAW+JPEG pairs act as one photo (M)"
@@ -48,11 +56,17 @@
       <button onclick={() => catalog.close()}>Close</button>
     </header>
 
-    {#if session.filterBarVisible}
+    {#if session.filterBarVisible && view.mode === "grid"}
       <FilterBar />
     {/if}
 
-    <VirtualGrid items={session.filtered} />
+    {#if view.mode === "grid"}
+      <VirtualGrid items={session.filtered} />
+    {:else if view.mode === "viewer"}
+      <Viewer />
+    {:else}
+      <CompareView />
+    {/if}
   {:else}
     <div class="welcome">
       <h1>Cullant</h1>
@@ -145,6 +159,15 @@
 
   button.active {
     border-color: #6b8bff;
+  }
+
+  .segmented {
+    display: flex;
+    gap: 2px;
+  }
+
+  .segmented button {
+    padding: 4px 8px;
   }
 
   .welcome {
