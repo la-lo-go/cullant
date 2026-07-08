@@ -18,14 +18,20 @@ Cullant is an open-source desktop app for going through a shoot fast: load a pro
 ## Status / roadmap
 
 - [x] M0 — scaffold: Tauri v2 + Svelte 5, SQLite schema, `cullant://` protocol, folder picker
-- [ ] M1 — recursive scan, thumbnail pipeline, virtualized grid
-- [ ] M2 — culling state, keyboard engine, filters
-- [ ] M3 — viewer, filmstrip, compare, 100% zoom
-- [ ] M4 — RAW+JPEG mirror mode
-- [ ] M5 — task tags
-- [ ] M6 — pending actions, rules, commit, XMP
-- [ ] M7 — video tab
-- [ ] M8 — polish + installer
+- [x] M1 — recursive scan, thumbnail pipeline, virtualized grid
+- [x] M2 — culling state, keyboard engine, filters
+- [x] M3 — viewer, filmstrip, compare, 100% zoom
+- [x] M4 — RAW+JPEG mirror mode (decouple/recouple, J/Ctrl+J)
+- [x] M5 — task tags (custom, scoped, T+digit chord)
+- [x] M6 — pending actions, commit dialog, XMP sidecars, deletion modes
+- [x] M7 — video tab (Range-streamed playback)
+- [ ] M8 — polish: settings pane, move/copy rules UI, commit history/undo UI, installer signing, real-RAW test pass
+
+Default shortcuts (all remappable via the ⌨ dialog): `P`/`X`/`U` flags · `1-5` stars ·
+`6-9`/`-` color labels · `T`+`1-9` task tags · `←→↑↓` navigate · Caps Lock auto-advance
+(Shift inverts) · `G`/`E`/`C` grid/loupe/compare · `Z`/`Space` 100% zoom · `J` RAW↔JPEG ·
+`Ctrl+J` decouple pair · `M` mirror mode · `Del` / `Alt+Del` / `Shift+Del` queue delete
+(pair / RAW only / JPEG only) · `Ctrl+Enter` commit · `\` filter bar
 
 Post-MVP: AI-assisted culling (similar-shot grouping, best-of-burst suggestions), HEIC, focus peaking, face zoom.
 
