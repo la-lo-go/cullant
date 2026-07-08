@@ -45,6 +45,37 @@ export interface TagChange {
   tagged: boolean;
 }
 
+export type ActionKind = "delete" | "move" | "copy";
+export type PairScope = "both" | "rawonly" | "jpegonly";
+export type DeletionMode = "recycle" | "permanent" | "trash";
+
+export interface PendingAction {
+  id: number;
+  fileId: number;
+  relPath: string;
+  action: ActionKind;
+  dest: string | null;
+  pairToken: string | null;
+  origin: number;
+}
+
+export interface CommitPlan {
+  deletes: PendingAction[];
+  moves: PendingAction[];
+  copies: PendingAction[];
+  xmpCount: number;
+  deletionMode: DeletionMode;
+  conflicts: string[];
+  planHash: string;
+}
+
+export interface CommitOutcome {
+  commitId: number;
+  ok: number;
+  errors: number;
+  errorSamples: string[];
+}
+
 export type SortKey = "capture" | "name";
 export type MediaTab = "photos" | "videos";
 
@@ -92,6 +123,20 @@ export const api = {
   deleteTaskTag: (tagId: number) => invoke("delete_task_tag", { tagId }),
   toggleTaskTag: (targets: Targets, tagId: number) =>
     invoke<TagChange[]>("toggle_task_tag", { targets, tagId }),
+  enqueueAction: (
+    targets: Targets,
+    action: ActionKind,
+    dest: string | null,
+    pairScope: PairScope
+  ) => invoke<number>("enqueue_action", { targets, action, dest, pairScope }),
+  removePending: (pendingIds: number[]) => invoke("remove_pending", { pendingIds }),
+  clearPending: () => invoke("clear_pending"),
+  listPending: () => invoke<PendingAction[]>("list_pending"),
+  commitPreview: () => invoke<CommitPlan>("commit_preview"),
+  commitExecute: (planHash: string) => invoke<CommitOutcome>("commit_execute", { planHash }),
+  getProjectSetting: (key: string) => invoke<string | null>("get_project_setting", { key }),
+  setProjectSetting: (key: string, value: string) =>
+    invoke("set_project_setting", { key, value }),
 };
 
 // The cullant:// scheme is served as http://cullant.localhost/ on Windows.

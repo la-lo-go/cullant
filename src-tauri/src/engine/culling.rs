@@ -77,9 +77,8 @@ where
         }
         let mut out = Vec::with_capacity(ids.len());
         {
-            let mut stmt = tx.prepare_cached(
-                "SELECT id, rating, flag, label FROM files WHERE id = ?1",
-            )?;
+            let mut stmt =
+                tx.prepare_cached("SELECT id, rating, flag, label FROM files WHERE id = ?1")?;
             for id in &ids {
                 out.push(stmt.query_row(params![id], |r| {
                     Ok(CullState {
@@ -145,16 +144,10 @@ mod tests {
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
         let (raw_id, jpg_id) = db
             .call(|c| {
-                let raw: i64 = c.query_row(
-                    "SELECT id FROM files WHERE ext = 'cr3'",
-                    [],
-                    |r| r.get(0),
-                )?;
-                let jpg: i64 = c.query_row(
-                    "SELECT id FROM files WHERE ext = 'jpg'",
-                    [],
-                    |r| r.get(0),
-                )?;
+                let raw: i64 =
+                    c.query_row("SELECT id FROM files WHERE ext = 'cr3'", [], |r| r.get(0))?;
+                let jpg: i64 =
+                    c.query_row("SELECT id FROM files WHERE ext = 'jpg'", [], |r| r.get(0))?;
                 Ok((raw, jpg))
             })
             .unwrap();

@@ -1,0 +1,377 @@
+<script lang="ts">
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { onMount } from "svelte";
+  import {
+    api,
+    type CommitOutcome,
+    type CommitPlan,
+    type DeletionMode,
+    type PendingAction,
+  } from "../api";
+  import { session } from "../stores/session.svelte";
+  import { catalog } from "../stores/catalog.svelte";
+
+  let plan = $state<CommitPlan | null>(null);
+  let running = $state(false);
+  let progress = $state({ done: 0, total: 0 });
+  let outcome = $state<CommitOutcome | null>(null);
+  let error = $state("");
+  let expanded = $state<"deletes" | "moves" | "copies" | null>(null);
+
+  const deletionModeNames: Record<DeletionMode, string> = {
+    recycle: "Recycle Bin (recoverable)",
+    permanent: "Permanent delete",
+    trash: "Project _trash folder",
+  };
+
+  async function refresh() {
+    error = "";
+    try {
+      plan = await api.commitPreview();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function changeMode(e: Event) {
+    const mode = (e.target as HTMLSelectElement).value;
+    await api.setProjectSetting("deletionMode", mode);
+    await refresh();
+  }
+
+  async function execute() {
+    if (!plan) return;
+    running = true;
+    outcome = null;
+    error = "";
+    try {
+      outcome = await api.commitExecute(plan.planHash);
+      await catalog.refresh();
+      await session.refreshPending();
+      plan = await api.commitPreview();
+    } catch (e) {
+      error = String(e);
+      await refresh();
+    } finally {
+      running = false;
+    }
+  }
+
+  async function unqueue(p: PendingAction) {
+    await api.removePending([p.id]);
+    await session.refreshPending();
+    await refresh();
+  }
+
+  function close() {
+    session.commitDialogOpen = false;
+  }
+
+  onMount(() => {
+    refresh();
+    let unlisten: UnlistenFn | undefined;
+    listen<{ done: number; total: number }>("commit:progress", (e) => {
+      progress = e.payload;
+    }).then((u) => (unlisten = u));
+    return () => unlisten?.();
+  });
+
+  const total = $derived(
+    plan ? plan.deletes.length + plan.moves.length + plan.copies.length + plan.xmpCount : 0
+  );
+</script>
+
+<div
+  class="backdrop"
+  onclick={close}
+  onkeydown={(e) => e.key === "Escape" && close()}
+  role="presentation"
+>
+  <div
+    class="dialog"
+    onclick={(e) => e.stopPropagation()}
+    onkeydown={(e) => e.stopPropagation()}
+    role="dialog"
+    tabindex="-1"
+  >
+    <header>
+      <h2>Commit pending actions</h2>
+      <button onclick={close}>Close</button>
+    </header>
+
+    {#if plan}
+      {#if plan.conflicts.length > 0}
+        <div class="conflicts">
+          ⚠ {plan.conflicts.length} conflict(s):
+          <ul>
+            {#each plan.conflicts.slice(0, 5) as c}<li>{c}</li>{/each}
+          </ul>
+        </div>
+      {/if}
+
+      <div class="rows">
+        <button class="row" onclick={() => (expanded = expanded === "deletes" ? null : "deletes")}>
+          <span class="icon">🗑</span>
+          <span class="what">Delete {plan.deletes.length} file(s)</span>
+          <span class="how">{deletionModeNames[plan.deletionMode]}</span>
+        </button>
+        {#if expanded === "deletes"}
+          <ul class="detail">
+            {#each plan.deletes as p}
+              <li>
+                {p.relPath}
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}>✕</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        <button class="row" onclick={() => (expanded = expanded === "moves" ? null : "moves")}>
+          <span class="icon">📁</span>
+          <span class="what">Move {plan.moves.length} file(s)</span>
+        </button>
+        {#if expanded === "moves"}
+          <ul class="detail">
+            {#each plan.moves as p}
+              <li>
+                {p.relPath} → {p.dest}/
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}>✕</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        <button class="row" onclick={() => (expanded = expanded === "copies" ? null : "copies")}>
+          <span class="icon">📄</span>
+          <span class="what">Copy {plan.copies.length} file(s)</span>
+        </button>
+        {#if expanded === "copies"}
+          <ul class="detail">
+            {#each plan.copies as p}
+              <li>
+                {p.relPath} → {p.dest}/
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}>✕</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+
+        <div class="row static">
+          <span class="icon">🏷</span>
+          <span class="what">Write {plan.xmpCount} XMP sidecar(s)</span>
+          <span class="how">rating · flag · color label</span>
+        </div>
+      </div>
+
+      <div class="mode">
+        <label for="delmode">Deletion mode</label>
+        <select id="delmode" value={plan.deletionMode} onchange={changeMode} disabled={running}>
+          <option value="recycle">Recycle Bin</option>
+          <option value="trash">Project _trash folder</option>
+          <option value="permanent">Permanent (no undo!)</option>
+        </select>
+      </div>
+
+      {#if running}
+        <progress max={progress.total || 1} value={progress.done}></progress>
+      {/if}
+
+      {#if outcome}
+        <p class="outcome" class:bad={outcome.errors > 0}>
+          Done: {outcome.ok} ok{outcome.errors > 0 ? `, ${outcome.errors} failed` : ""}.
+          {#each outcome.errorSamples as s}<br />· {s}{/each}
+        </p>
+      {/if}
+
+      {#if error}
+        <p class="error">{error}</p>
+      {/if}
+
+      <footer>
+        <span class="summary">{total} operation(s)</span>
+        <button class="primary" disabled={running || total === 0} onclick={execute}>
+          {plan.deletionMode === "permanent" && plan.deletes.length > 0
+            ? `⚠ Execute (deletes ${plan.deletes.length} files permanently)`
+            : "Execute"}
+        </button>
+      </footer>
+    {:else}
+      <p>Loading…</p>
+      {#if error}<p class="error">{error}</p>{/if}
+    {/if}
+  </div>
+</div>
+
+<style>
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+
+  .dialog {
+    background: #232329;
+    border: 1px solid #3a3a42;
+    border-radius: 10px;
+    padding: 16px 20px;
+    width: 520px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow-y: auto;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 16px;
+    flex: 1;
+  }
+
+  .conflicts {
+    background: #3a2e1e;
+    border: 1px solid #7a5c2e;
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .conflicts ul {
+    margin: 4px 0 0;
+    padding-left: 18px;
+  }
+
+  .rows {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    padding: 8px 10px;
+    background: #2a2a30;
+    border: 1px solid #3a3a42;
+    border-radius: 6px;
+    color: #e8e8e8;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .row.static {
+    cursor: default;
+  }
+
+  .what {
+    flex: 1;
+  }
+
+  .how {
+    opacity: 0.55;
+    font-size: 12px;
+  }
+
+  .detail {
+    margin: 0;
+    padding: 4px 12px 8px 34px;
+    font-size: 12px;
+    opacity: 0.85;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+
+  .detail li {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .unqueue {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 4px;
+  }
+
+  .unqueue:hover {
+    color: #ff6b6b;
+  }
+
+  .mode {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  select,
+  button {
+    border-radius: 6px;
+    border: 1px solid #3a3a42;
+    padding: 5px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    color: #e8e8e8;
+    background-color: #2a2a30;
+    cursor: pointer;
+  }
+
+  footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-top: 1px solid #2e2e36;
+    padding-top: 10px;
+  }
+
+  .summary {
+    flex: 1;
+    font-size: 12px;
+    opacity: 0.6;
+  }
+
+  .primary {
+    border-color: #6b8bff;
+    font-weight: 600;
+  }
+
+  .primary:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  progress {
+    width: 100%;
+  }
+
+  .outcome {
+    font-size: 13px;
+    color: #6be675;
+    margin: 0;
+  }
+
+  .outcome.bad {
+    color: #ffb86b;
+  }
+
+  .error {
+    color: #ff6b6b;
+    font-size: 13px;
+    margin: 0;
+  }
+</style>

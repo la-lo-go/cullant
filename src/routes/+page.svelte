@@ -12,13 +12,17 @@
   import KeybindingsDialog from "$lib/components/KeybindingsDialog.svelte";
   import PairSyncDialog from "$lib/components/PairSyncDialog.svelte";
   import TagEditor from "$lib/components/TagEditor.svelte";
+  import CommitDialog from "$lib/components/CommitDialog.svelte";
   import type { SortKey } from "$lib/api";
 
   let showKeybindings = $state(false);
 
-  // Load the project's tag list whenever a project is (re)opened.
+  // Load the project's tag list + pending queue whenever a project opens.
   $effect(() => {
-    if (catalog.project) void tags.refresh();
+    if (catalog.project) {
+      void tags.refresh();
+      void session.refreshPending();
+    }
   });
 
   async function pickProject() {
@@ -60,6 +64,14 @@
         <option value="capture">Capture time</option>
         <option value="name">Name</option>
       </select>
+      <button
+        class="commit"
+        class:haswork={session.pendingCount > 0}
+        title="Review & commit pending actions (Ctrl+Enter)"
+        onclick={() => (session.commitDialogOpen = true)}
+      >
+        Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}
+      </button>
       <button title="Task tags" onclick={() => (tags.editorOpen = true)}>🏷</button>
       <button title="Keyboard shortcuts" onclick={() => (showKeybindings = true)}>⌨</button>
       <button onclick={() => catalog.close()}>Close</button>
@@ -97,6 +109,10 @@
 
   {#if tags.editorOpen}
     <TagEditor onclose={() => (tags.editorOpen = false)} />
+  {/if}
+
+  {#if session.commitDialogOpen}
+    <CommitDialog />
   {/if}
 </main>
 
@@ -181,6 +197,11 @@
   .segmented {
     display: flex;
     gap: 2px;
+  }
+
+  button.commit.haswork {
+    border-color: #ffb86b;
+    color: #ffd9a8;
   }
 
   .segmented button {

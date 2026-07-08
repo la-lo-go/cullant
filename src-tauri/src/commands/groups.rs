@@ -5,11 +5,7 @@ use crate::error::{AppError, AppResult};
 use crate::AppState;
 
 #[tauri::command]
-pub fn decouple_group(
-    group_id: i64,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<()> {
+pub fn decouple_group(group_id: i64, app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     let db = {
         let guard = state.project.lock().unwrap();
         guard.as_ref().ok_or(AppError::NoProject)?.db.clone()

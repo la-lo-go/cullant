@@ -28,7 +28,11 @@ export type CommandId =
   | "zoom.toggle"
   | "pair.toggleShown"
   | "pair.toggleCoupling"
-  | "tag.chord";
+  | "tag.chord"
+  | "delete.pair"
+  | "delete.rawOnly"
+  | "delete.jpegOnly"
+  | "commit.open";
 
 export interface CommandMeta {
   id: CommandId;
@@ -68,6 +72,10 @@ export const COMMANDS: CommandMeta[] = [
   { id: "pair.toggleShown", title: "Show RAW ↔ JPEG half of pair" },
   { id: "pair.toggleCoupling", title: "Decouple / recouple pair" },
   { id: "tag.chord", title: "Task tag chord (then 1-9)", classify: true },
+  { id: "delete.pair", title: "Queue delete (whole pair)", classify: true },
+  { id: "delete.rawOnly", title: "Queue delete: RAW only", classify: true },
+  { id: "delete.jpegOnly", title: "Queue delete: JPEG only", classify: true },
+  { id: "commit.open", title: "Review & commit pending actions" },
 ];
 
 /** Lightroom-compatible defaults (see docs/keymap research). */
@@ -102,6 +110,10 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "pair.toggleShown": ["j"],
   "pair.toggleCoupling": ["ctrl+j"],
   "tag.chord": ["t"],
+  "delete.pair": ["delete"],
+  "delete.rawOnly": ["alt+delete"],
+  "delete.jpegOnly": ["shift+delete"],
+  "commit.open": ["ctrl+enter"],
 };
 
 const STORAGE_KEY = "cullant.keymap.v1";
@@ -129,13 +141,17 @@ export function effectiveBindings(
   return map;
 }
 
-/** Normalize a KeyboardEvent to a binding string like "ctrl+shift+p". */
-export function normalizeKey(e: KeyboardEvent): string {
+/**
+ * Normalize a KeyboardEvent to a binding string like "ctrl+shift+delete".
+ * Lookup strategy: try WITH shift first (explicit shift bindings win), then
+ * without it — for classification keys shift is the auto-advance inverter,
+ * not part of the binding.
+ */
+export function normalizeKey(e: KeyboardEvent, includeShift = true): string {
   const parts: string[] = [];
   if (e.ctrlKey) parts.push("ctrl");
   if (e.altKey) parts.push("alt");
-  // Shift is intentionally NOT part of classification bindings (it's the
-  // auto-advance inverter), but is kept for explicit shift+ bindings.
+  if (includeShift && e.shiftKey) parts.push("shift");
   const key = e.key.toLowerCase();
   parts.push(key === " " ? "space" : key);
   return parts.join("+");

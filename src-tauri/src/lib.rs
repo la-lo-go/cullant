@@ -64,6 +64,14 @@ pub fn run() {
             commands::tags::update_task_tag,
             commands::tags::delete_task_tag,
             commands::tags::toggle_task_tag,
+            commands::actions::enqueue_action,
+            commands::actions::remove_pending,
+            commands::actions::clear_pending,
+            commands::actions::list_pending,
+            commands::actions::commit_preview,
+            commands::actions::commit_execute,
+            commands::actions::get_project_setting,
+            commands::actions::set_project_setting,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

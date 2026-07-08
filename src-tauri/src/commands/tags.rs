@@ -33,22 +33,14 @@ pub fn create_task_tag(
 }
 
 #[tauri::command]
-pub fn update_task_tag(
-    tag: TaskTag,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<()> {
+pub fn update_task_tag(tag: TaskTag, app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     tags::update(&project_db(&state)?, tag)?;
     let _ = app.emit("tags:changed", ());
     Ok(())
 }
 
 #[tauri::command]
-pub fn delete_task_tag(
-    tag_id: i64,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<()> {
+pub fn delete_task_tag(tag_id: i64, app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     tags::delete(&project_db(&state)?, tag_id)?;
     let _ = app.emit("tags:changed", ());
     Ok(())

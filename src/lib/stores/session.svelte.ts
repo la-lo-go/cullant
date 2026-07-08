@@ -1,5 +1,12 @@
 import { listen } from "@tauri-apps/api/event";
-import { api, type CullState, type ItemLite, type SyncFrom, type Targets } from "../api";
+import {
+  api,
+  type CullState,
+  type ItemLite,
+  type PairScope,
+  type SyncFrom,
+  type Targets,
+} from "../api";
 import { catalog } from "./catalog.svelte";
 import { tags } from "./tags.svelte";
 
@@ -184,6 +191,29 @@ class SessionStore {
     tags.applyChanges(await api.toggleTaskTag(t, tagId));
   }
 
+  // --- pending actions ---
+  /** File ids with a queued delete (for grid badges). */
+  pendingDeleteIds = $state<Set<number>>(new Set());
+  pendingCount = $state(0);
+  commitDialogOpen = $state(false);
+
+  async refreshPending() {
+    const pending = await api.listPending();
+    this.pendingCount = pending.length;
+    this.pendingDeleteIds = new Set(
+      pending.filter((p) => p.action === "delete").map((p) => p.fileId)
+    );
+  }
+
+  /** Queue a delete for the focused photo. Scope picks pair members. */
+  async queueDelete(scope: PairScope, event?: KeyboardEvent) {
+    const t = this.targets();
+    if (!t) return;
+    await api.enqueueAction(t, "delete", null, scope);
+    this.maybeAdvance(event);
+    await this.refreshPending();
+  }
+
   /** Group id awaiting a recouple sync choice (renders PairSyncDialog). */
   recoupleDialogFor = $state<number | null>(null);
 
@@ -221,3 +251,5 @@ export const session = new SessionStore();
 // Multi-window / background changes reconcile through the same merge.
 listen<CullState[]>("state:changed", (e) => session.applyStates(e.payload));
 listen("groups:changed", () => catalog.refresh());
+listen("pending:changed", () => session.refreshPending());
+listen("commit:done", () => catalog.refresh());

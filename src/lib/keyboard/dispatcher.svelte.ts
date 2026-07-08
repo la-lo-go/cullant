@@ -92,6 +92,15 @@ function execute(id: CommandId, e: KeyboardEvent) {
     case "tag.chord":
       armTagChord();
       return;
+    case "delete.pair":
+      return void session.queueDelete("both", e);
+    case "delete.rawOnly":
+      return void session.queueDelete("rawonly", e);
+    case "delete.jpegOnly":
+      return void session.queueDelete("jpegonly", e);
+    case "commit.open":
+      session.commitDialogOpen = true;
+      return;
   }
 }
 
@@ -137,15 +146,17 @@ export function handleKeydown(e: KeyboardEvent) {
     return;
   }
 
-  // Per-tag custom shortcuts (assigned in the tag editor) win over nothing —
-  // they're merged after the base keymap so remapped base keys keep priority.
-  const command = keymap.bindings.get(normalized);
+  // Explicit binding (with shift) wins; otherwise retry without shift —
+  // there shift only means "invert auto-advance" for classification keys.
+  const command =
+    keymap.bindings.get(normalized) ?? keymap.bindings.get(normalizeKey(e, false));
   if (command) {
     e.preventDefault();
     execute(command, e);
     return;
   }
 
+  // Per-tag custom shortcuts (assigned in the tag editor).
   const tag = tags.all.find((t) => t.shortcut === normalized);
   if (tag) {
     e.preventDefault();

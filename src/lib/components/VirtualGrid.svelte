@@ -100,7 +100,9 @@
           {:else if v.item.kind === 0}
             <span class="chip raw">RAW</span>
           {/if}
-          {#if v.item.flag !== 0}
+          {#if session.pendingDeleteIds.has(v.item.id)}
+            <span class="badge pending" title="Queued for deletion">🗑</span>
+          {:else if v.item.flag !== 0}
             <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
               {v.item.flag === 1 ? "✔" : "✖"}
             </span>
@@ -212,6 +214,10 @@
 
   .badge.reject {
     color: #ff6b6b;
+  }
+
+  .badge.pending {
+    outline: 1px solid #ffb86b;
   }
 
   .stars {

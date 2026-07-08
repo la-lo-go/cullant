@@ -72,10 +72,11 @@ pub fn create(
     color: Option<String>,
 ) -> AppResult<TaskTag> {
     db.call(move |conn| {
-        let sort_order: i64 = conn
-            .query_row("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM task_tags", [], |r| {
-                r.get(0)
-            })?;
+        let sort_order: i64 = conn.query_row(
+            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM task_tags",
+            [],
+            |r| r.get(0),
+        )?;
         conn.execute(
             "INSERT INTO task_tags (name, shortcut, scope, color, sort_order)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -99,7 +100,14 @@ pub fn update(db: &Arc<Db>, tag: TaskTag) -> AppResult<()> {
         let n = conn.execute(
             "UPDATE task_tags SET name = ?2, shortcut = ?3, scope = ?4, color = ?5,
              sort_order = ?6 WHERE id = ?1",
-            params![tag.id, tag.name, tag.shortcut, tag.scope, tag.color, tag.sort_order],
+            params![
+                tag.id,
+                tag.name,
+                tag.shortcut,
+                tag.scope,
+                tag.color,
+                tag.sort_order
+            ],
         )?;
         if n == 0 {
             return Err(AppError::Other(format!("no such tag: {}", tag.id)));
@@ -144,8 +152,7 @@ pub fn toggle(db: &Arc<Db>, targets: Targets, tag_id: i64) -> AppResult<Vec<TagC
         // tag, remove it everywhere; otherwise add it where missing.
         let mut eligible = Vec::new();
         {
-            let mut kind_stmt =
-                tx.prepare_cached("SELECT kind FROM files WHERE id = ?1")?;
+            let mut kind_stmt = tx.prepare_cached("SELECT kind FROM files WHERE id = ?1")?;
             for id in &ids {
                 let kind: i64 = kind_stmt.query_row(params![id], |r| r.get(0))?;
                 let is_video = kind == 2;
@@ -161,9 +168,8 @@ pub fn toggle(db: &Arc<Db>, targets: Targets, tag_id: i64) -> AppResult<Vec<TagC
         }
 
         let all_tagged = {
-            let mut has_stmt = tx.prepare_cached(
-                "SELECT 1 FROM file_tags WHERE file_id = ?1 AND tag_id = ?2",
-            )?;
+            let mut has_stmt =
+                tx.prepare_cached("SELECT 1 FROM file_tags WHERE file_id = ?1 AND tag_id = ?2")?;
             let mut all = !eligible.is_empty();
             for id in &eligible {
                 if has_stmt
@@ -180,9 +186,8 @@ pub fn toggle(db: &Arc<Db>, targets: Targets, tag_id: i64) -> AppResult<Vec<TagC
 
         let mut changes = Vec::new();
         if all_tagged {
-            let mut del = tx.prepare_cached(
-                "DELETE FROM file_tags WHERE file_id = ?1 AND tag_id = ?2",
-            )?;
+            let mut del =
+                tx.prepare_cached("DELETE FROM file_tags WHERE file_id = ?1 AND tag_id = ?2")?;
             for id in &eligible {
                 del.execute(params![id, tag_id])?;
                 changes.push(TagChange {
