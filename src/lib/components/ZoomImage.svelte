@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { previewUrl, cullantUrl, type ItemLite } from "../api";
   import { view } from "../stores/view.svelte";
 
@@ -15,11 +16,30 @@
 
   // Fit view uses the 2560px preview; 100% view swaps in the full-res source
   // (unresized embedded JPEG for RAW, original file for images).
-  const src = $derived(
-    view.zoomed
-      ? cullantUrl(`full/${item.id}?v=${item.mtime}`)
-      : previewUrl(item)
-  );
+  const fitSrc = $derived(previewUrl(item));
+  const fullSrc = $derived(cullantUrl(`full/${item.id}?v=${item.mtime}`));
+
+  // Double-buffer the fit view: keep showing the previous photo until the new
+  // preview has loaded, so rapid arrowing never flashes a blank pane.
+  let displayedSrc = $state(untrack(() => previewUrl(item)));
+  let displayedAlt = $state(untrack(() => item.name));
+
+  $effect(() => {
+    const target = fitSrc;
+    const alt = item.name;
+    if (target === displayedSrc) return;
+    const loader = new Image();
+    // On error swap anyway — a broken image beats silently showing the wrong photo.
+    loader.onload = loader.onerror = () => {
+      displayedSrc = target;
+      displayedAlt = alt;
+    };
+    loader.src = target;
+    return () => {
+      // A newer target superseded this load; drop it so swaps stay in order.
+      loader.onload = loader.onerror = null;
+    };
+  });
 
   // At 100%, one image pixel = one CSS pixel of the ORIGINAL resolution.
   const fullW = $derived(item.width ?? naturalW);
@@ -100,7 +120,7 @@
 >
   {#if view.zoomed}
     <img
-      {src}
+      src={fullSrc}
       alt={item.name}
       style="transform: translate({offset.x}px, {offset.y}px); width: {fullW}px; height: {fullH}px;"
       class="full"
@@ -108,7 +128,7 @@
       onload={onImageLoad}
     />
   {:else}
-    <img {src} alt={item.name} class="fit" draggable="false" onload={onImageLoad} />
+    <img src={displayedSrc} alt={displayedAlt} class="fit" draggable="false" onload={onImageLoad} />
   {/if}
 </div>
 

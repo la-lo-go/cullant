@@ -10,6 +10,12 @@
   } from "../api";
   import { session } from "../stores/session.svelte";
   import { catalog } from "../stores/catalog.svelte";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import FolderInput from "@lucide/svelte/icons/folder-input";
+  import Copy from "@lucide/svelte/icons/copy";
+  import Tag from "@lucide/svelte/icons/tag";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import X from "@lucide/svelte/icons/x";
 
   let plan = $state<CommitPlan | null>(null);
   let running = $state(false);
@@ -102,7 +108,8 @@
     {#if plan}
       {#if plan.conflicts.length > 0}
         <div class="conflicts">
-          ⚠ {plan.conflicts.length} conflict(s):
+          <TriangleAlert size={14} style="vertical-align: -2px" />
+          {plan.conflicts.length} conflict(s):
           <ul>
             {#each plan.conflicts.slice(0, 5) as c}<li>{c}</li>{/each}
           </ul>
@@ -111,7 +118,7 @@
 
       <div class="rows">
         <button class="row" onclick={() => (expanded = expanded === "deletes" ? null : "deletes")}>
-          <span class="icon">🗑</span>
+          <span class="icon"><Trash2 size={16} /></span>
           <span class="what">Delete {plan.deletes.length} file(s)</span>
           <span class="how">{deletionModeNames[plan.deletionMode]}</span>
         </button>
@@ -120,14 +127,14 @@
             {#each plan.deletes as p}
               <li>
                 {p.relPath}
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}>✕</button>
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}><X size={12} /></button>
               </li>
             {/each}
           </ul>
         {/if}
 
         <button class="row" onclick={() => (expanded = expanded === "moves" ? null : "moves")}>
-          <span class="icon">📁</span>
+          <span class="icon"><FolderInput size={16} /></span>
           <span class="what">Move {plan.moves.length} file(s)</span>
         </button>
         {#if expanded === "moves"}
@@ -135,14 +142,14 @@
             {#each plan.moves as p}
               <li>
                 {p.relPath} → {p.dest}/
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}>✕</button>
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}><X size={12} /></button>
               </li>
             {/each}
           </ul>
         {/if}
 
         <button class="row" onclick={() => (expanded = expanded === "copies" ? null : "copies")}>
-          <span class="icon">📄</span>
+          <span class="icon"><Copy size={16} /></span>
           <span class="what">Copy {plan.copies.length} file(s)</span>
         </button>
         {#if expanded === "copies"}
@@ -150,14 +157,14 @@
             {#each plan.copies as p}
               <li>
                 {p.relPath} → {p.dest}/
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}>✕</button>
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}><X size={12} /></button>
               </li>
             {/each}
           </ul>
         {/if}
 
         <div class="row static">
-          <span class="icon">🏷</span>
+          <span class="icon"><Tag size={16} /></span>
           <span class="what">Write {plan.xmpCount} XMP sidecar(s)</span>
           <span class="how">rating · flag · color label</span>
         </div>
@@ -190,9 +197,12 @@
       <footer>
         <span class="summary">{total} operation(s)</span>
         <button class="primary" disabled={running || total === 0} onclick={execute}>
-          {plan.deletionMode === "permanent" && plan.deletes.length > 0
-            ? `⚠ Execute (deletes ${plan.deletes.length} files permanently)`
-            : "Execute"}
+          {#if plan.deletionMode === "permanent" && plan.deletes.length > 0}
+            <TriangleAlert size={14} style="vertical-align: -2px" />
+            Execute (deletes {plan.deletes.length} files permanently)
+          {:else}
+            Execute
+          {/if}
         </button>
       </footer>
     {:else}
@@ -275,6 +285,12 @@
     cursor: default;
   }
 
+  .icon {
+    display: inline-flex;
+    align-items: center;
+    opacity: 0.85;
+  }
+
   .what {
     flex: 1;
   }
@@ -300,6 +316,8 @@
   }
 
   .unqueue {
+    display: inline-flex;
+    align-items: center;
     background: none;
     border: none;
     color: #888;
@@ -346,6 +364,9 @@
   }
 
   .primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     border-color: #6b8bff;
     font-weight: 600;
   }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { thumbUrl, videoUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
+  import Scissors from "@lucide/svelte/icons/scissors";
 
   let { items }: { items: ItemLite[] } = $props();
 
@@ -53,6 +54,11 @@
         {:else}
           <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
         {/if}
+        {#if session.mirrorMode && v.item.groupSize > 1}
+          <span class="chip" class:split={v.item.decoupled}>
+            {#if v.item.decoupled}<Scissors size={8} /><span>SPLIT</span>{:else}RAW+JPG{/if}
+          </span>
+        {/if}
         {#if v.item.flag !== 0}
           <span class="dot" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}></span>
         {/if}
@@ -100,6 +106,26 @@
     object-fit: contain;
     border-radius: 3px;
     user-select: none;
+  }
+
+  .chip {
+    position: absolute;
+    top: 8px;
+    left: 5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 8px;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #8fd0ff;
+    pointer-events: none;
+  }
+
+  .chip.split {
+    color: #ffb86b;
   }
 
   .dot {

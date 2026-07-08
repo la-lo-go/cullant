@@ -1,12 +1,14 @@
 <script lang="ts">
   import { session, LABELS, type FlagFilter } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import X from "@lucide/svelte/icons/x";
 
-  const flagOptions: { value: FlagFilter; label: string }[] = [
+  const flagOptions: { value: FlagFilter; label: string; icon?: typeof Check }[] = [
     { value: "all", label: "All" },
-    { value: "pick", label: "✔ Picks" },
+    { value: "pick", label: "Picks", icon: Check },
     { value: "unflagged", label: "Unflagged" },
-    { value: "reject", label: "✖ Rejects" },
+    { value: "reject", label: "Rejects", icon: X },
   ];
 
   const labelColors: Record<string, string> = {
@@ -43,7 +45,8 @@
           session.clampFocus();
         }}
       >
-        {opt.label}
+        {#if opt.icon}<opt.icon size={12} />{/if}
+        <span>{opt.label}</span>
         <span class="count">{count(opt.value)}</span>
       </button>
     {/each}
@@ -118,6 +121,9 @@
   }
 
   .seg {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     border: 1px solid transparent;
     background: transparent;
     color: #bbb;
@@ -140,7 +146,6 @@
 
   .count {
     opacity: 0.55;
-    margin-left: 4px;
   }
 
   .star {

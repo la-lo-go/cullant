@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api, type TaskTag } from "../api";
   import { tags } from "../stores/tags.svelte";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -89,7 +90,7 @@
         <button class="key" class:waiting={recording === tag.id} onclick={() => recordShortcut(tag)}>
           {recording === tag.id ? "press key…" : (tag.shortcut ?? "—")}
         </button>
-        <button class="del" title="Delete tag" onclick={() => remove(tag)}>🗑</button>
+        <button class="del" title="Delete tag" onclick={() => remove(tag)}><Trash2 size={14} /></button>
       {/each}
     </div>
 
@@ -208,6 +209,8 @@
   }
 
   .del {
+    display: inline-flex;
+    align-items: center;
     opacity: 0.6;
   }
 

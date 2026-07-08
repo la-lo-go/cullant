@@ -27,8 +27,22 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Kick off scan + metadata pass on a background thread and notify the UI
-/// through scan:progress / scan:done / metadata:done events.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ThumbsProgress {
+    done: usize,
+    total: usize,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ThumbsDone {
+    total: usize,
+}
+
+/// Kick off scan + metadata pass + thumbnail pregeneration on a background
+/// thread and notify the UI through scan:progress / scan:done /
+/// metadata:done / thumbs:progress / thumbs:done events.
 fn spawn_scan(app: AppHandle, db: Arc<Db>, root: PathBuf) {
     std::thread::Builder::new()
         .name("scanner".into())
@@ -38,8 +52,16 @@ fn spawn_scan(app: AppHandle, db: Arc<Db>, root: PathBuf) {
                 let _ = app.emit("scan:error", e.to_string());
                 return;
             }
-            if let Err(e) = scan::metadata::run_metadata_pass(&app, &db, root) {
+            if let Err(e) = scan::metadata::run_metadata_pass(&app, &db, root.clone()) {
                 tracing::error!("metadata pass failed: {e}");
+            }
+            match crate::thumbs::pregenerate_all(&db, &root, |done, total| {
+                let _ = app.emit("thumbs:progress", ThumbsProgress { done, total });
+            }) {
+                Ok(total) => {
+                    let _ = app.emit("thumbs:done", ThumbsDone { total });
+                }
+                Err(e) => tracing::error!("thumb pregeneration failed: {e}"),
             }
         })
         .expect("failed to spawn scanner thread");

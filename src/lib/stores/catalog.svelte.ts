@@ -16,6 +16,9 @@ class CatalogStore {
   media = $state<MediaTab>("photos");
   scanning = $state(false);
   scanFound = $state(0);
+  /** True while the initial scan + thumbnail preload blocks the grid. */
+  preloading = $state(false);
+  thumbProgress = $state({ done: 0, total: 0 });
   error = $state("");
 
   /// Adopt a project the backend already opened (CULLANT_OPEN_PROJECT).
@@ -23,6 +26,8 @@ class CatalogStore {
     const info = await api.currentProject();
     if (info) {
       this.project = info;
+      this.preloading = true;
+      this.thumbProgress = { done: 0, total: 0 };
       await this.refresh();
     }
   }
@@ -33,6 +38,8 @@ class CatalogStore {
       this.project = await api.openProject(path);
       this.scanning = true;
       this.scanFound = 0;
+      this.preloading = true;
+      this.thumbProgress = { done: 0, total: 0 };
       await this.refresh();
     } catch (e) {
       this.error = String(e);
@@ -44,6 +51,7 @@ class CatalogStore {
     this.project = null;
     this.items = [];
     this.scanning = false;
+    this.preloading = false;
   }
 
   async refresh() {
@@ -77,7 +85,17 @@ listen<ScanDone>("scan:done", async () => {
 listen("metadata:done", async () => {
   await catalog.refresh();
 });
+listen<{ done: number; total: number }>("thumbs:progress", (e) => {
+  catalog.thumbProgress = e.payload;
+});
+listen<{ total: number }>("thumbs:done", async (e) => {
+  catalog.thumbProgress = { done: e.payload.total, total: e.payload.total };
+  catalog.preloading = false;
+  await catalog.refresh();
+});
 listen<string>("scan:error", (e) => {
   catalog.scanning = false;
+  // Safety valve: never leave the user trapped behind the preload panel.
+  catalog.preloading = false;
   catalog.error = e.payload;
 });

@@ -116,6 +116,50 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, root: PathBuf) {
     }
 }
 
+/// Generate grid thumbnails (`ThumbKind::Thumb`) for every present photo that
+/// doesn't have a fresh one yet, in parallel on the rayon pool. Per-file
+/// decode failures are logged and counted as done so one bad file never
+/// stalls the pass. `progress(done, total)` is called from this thread
+/// between chunks and once on completion; returns the total number of files
+/// that needed work.
+pub fn pregenerate_all(
+    db: &Arc<Db>,
+    root: &Path,
+    mut progress: impl FnMut(usize, usize),
+) -> AppResult<usize> {
+    use rayon::prelude::*;
+
+    let ids: Vec<i64> = db.call(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT f.id FROM files f
+             LEFT JOIN thumbnails t ON t.file_id = f.id AND t.kind = 0
+             WHERE f.status = 0 AND f.kind IN (0, 1)
+               AND (t.file_id IS NULL OR t.source_mtime <> f.mtime)",
+        )?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })?;
+
+    let total = ids.len();
+    if total == 0 {
+        progress(0, 0);
+        return Ok(0);
+    }
+
+    let mut done = 0usize;
+    for chunk in ids.chunks(32) {
+        chunk.par_iter().for_each(|&file_id| {
+            if let Err(e) = produce(db, root, file_id, ThumbKind::Thumb) {
+                tracing::debug!("thumb pregeneration skipped file {file_id}: {e}");
+            }
+        });
+        done += chunk.len();
+        progress(done, total);
+    }
+
+    Ok(total)
+}
+
 fn cache_rel_path(file_id: i64, mtime: i64, kind: ThumbKind) -> String {
     let bucket = (file_id % 256) as u8;
     let suffix = match kind {
@@ -325,5 +369,42 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM thumbnails", [], |r| r.get(0))?))
             .unwrap();
         assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn pregenerates_all_grid_thumbs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        for i in 0..3u32 {
+            let img = image::RgbImage::from_fn(640, 480, move |x, _| {
+                image::Rgb([(x % 255) as u8, (i * 40) as u8, 90])
+            });
+            img.save(root.join(format!("photo{i}.jpg"))).unwrap();
+        }
+
+        let db = Arc::new(Db::open(root).unwrap());
+        let done = crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        assert_eq!(done.file_count, 3);
+
+        let mut last = (0usize, 0usize);
+        let total = pregenerate_all(&db, root, |d, t| last = (d, t)).unwrap();
+        assert_eq!(total, 3);
+        assert_eq!(last, (3, 3));
+
+        let rows: i64 = db
+            .call(|c| {
+                Ok(
+                    c.query_row("SELECT COUNT(*) FROM thumbnails WHERE kind = 0", [], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .unwrap();
+        assert_eq!(rows, 3);
+
+        // Everything is fresh now: a second pass finds nothing to do.
+        let total_again = pregenerate_all(&db, root, |_, _| {}).unwrap();
+        assert_eq!(total_again, 0);
     }
 }

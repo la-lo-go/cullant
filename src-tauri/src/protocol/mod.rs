@@ -92,7 +92,10 @@ fn respond_video<R: Runtime>(
     let (db, root) = {
         let guard = state.project.lock().unwrap();
         let Some(project) = guard.as_ref() else {
-            responder.respond(plain(StatusCode::SERVICE_UNAVAILABLE, "no project open".into()));
+            responder.respond(plain(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no project open".into(),
+            ));
             return;
         };
         (project.db.clone(), project.root.clone())
@@ -106,7 +109,10 @@ fn respond_video<R: Runtime>(
         )?)
     });
     let Ok(rel_path) = rel_path else {
-        responder.respond(plain(StatusCode::NOT_FOUND, format!("no such file: {file_id}")));
+        responder.respond(plain(
+            StatusCode::NOT_FOUND,
+            format!("no such file: {file_id}"),
+        ));
         return;
     };
 
@@ -136,7 +142,9 @@ fn respond_video<R: Runtime>(
 
         let (start, end) = match range {
             Some((s, e)) => {
-                let e = e.unwrap_or(len.saturating_sub(1)).min(len.saturating_sub(1));
+                let e = e
+                    .unwrap_or(len.saturating_sub(1))
+                    .min(len.saturating_sub(1));
                 (s, e.min(s + WINDOW - 1))
             }
             None => (0, (WINDOW - 1).min(len.saturating_sub(1))),

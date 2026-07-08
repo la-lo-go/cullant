@@ -3,6 +3,11 @@
   import { session } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
+  import Check from "@lucide/svelte/icons/check";
+  import X from "@lucide/svelte/icons/x";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Scissors from "@lucide/svelte/icons/scissors";
+  import Play from "@lucide/svelte/icons/play";
 
   let { items }: { items: ItemLite[] } = $props();
 
@@ -89,7 +94,7 @@
           {#if v.item.kind === 2}
             <!-- preload=metadata shows the first frame; only ~30 cells live -->
             <video src={videoUrl(v.item)} preload="metadata" muted></video>
-            <span class="chip video">▶</span>
+            <span class="chip video"><Play size={10} /></span>
           {:else}
             <img
               src={thumbUrl(v.item)}
@@ -101,16 +106,16 @@
           {/if}
           {#if session.mirrorMode && v.item.groupSize > 1}
             <span class="chip pair" class:split={v.item.decoupled}>
-              {v.item.decoupled ? "✂ SPLIT" : "RAW+JPG"}
+              {#if v.item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
             </span>
           {:else if v.item.kind === 0}
             <span class="chip raw">RAW</span>
           {/if}
           {#if session.pendingDeleteIds.has(v.item.id)}
-            <span class="badge pending" title="Queued for deletion">🗑</span>
+            <span class="badge pending" title="Queued for deletion"><Trash2 size={12} /></span>
           {:else if v.item.flag !== 0}
             <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
-              {v.item.flag === 1 ? "✔" : "✖"}
+              {#if v.item.flag === 1}<Check size={12} />{:else}<X size={12} />{/if}
             </span>
           {/if}
           {#if v.item.rating > 0}
@@ -196,6 +201,9 @@
     position: absolute;
     top: 4px;
     left: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     font-size: 10px;
     font-weight: 600;
     padding: 1px 5px;
@@ -216,8 +224,10 @@
     position: absolute;
     top: 4px;
     right: 4px;
+    display: inline-flex;
+    align-items: center;
     font-size: 12px;
-    padding: 1px 4px;
+    padding: 2px 4px;
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.55);
   }

@@ -82,6 +82,10 @@ function execute(id: CommandId, e: KeyboardEvent) {
     case "view.compare":
       view.mode = "compare";
       return;
+    case "view.back":
+      // Esc returns to the grid from loupe/compare; in grid it does nothing.
+      if (view.mode !== "grid") view.mode = "grid";
+      return;
     case "zoom.toggle":
       if (view.mode !== "grid") view.toggleZoom();
       return;

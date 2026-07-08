@@ -25,6 +25,7 @@ export type CommandId =
   | "view.grid"
   | "view.viewer"
   | "view.compare"
+  | "view.back"
   | "zoom.toggle"
   | "pair.toggleShown"
   | "pair.toggleCoupling"
@@ -69,6 +70,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "view.grid", title: "Grid view" },
   { id: "view.viewer", title: "Loupe view" },
   { id: "view.compare", title: "Compare view" },
+  { id: "view.back", title: "Back to grid" },
   { id: "zoom.toggle", title: "Toggle 100% zoom" },
   { id: "pair.toggleShown", title: "Show RAW ↔ JPEG half of pair" },
   { id: "pair.toggleCoupling", title: "Decouple / recouple pair" },
@@ -108,6 +110,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "view.grid": ["g"],
   "view.viewer": ["e", "enter"],
   "view.compare": ["c"],
+  "view.back": ["escape"],
   "zoom.toggle": ["z", "space"],
   "pair.toggleShown": ["j"],
   "pair.toggleCoupling": ["ctrl+j"],
