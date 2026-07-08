@@ -37,7 +37,8 @@ export type CommandId =
   | "action.moveCopy"
   | "commit.open"
   | "info.toggle"
-  | "ui.toggleFilmstrip";
+  | "ui.toggleFilmstrip"
+  | "ui.toggleFolderTree";
 
 export interface CommandMeta {
   id: CommandId;
@@ -86,6 +87,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "commit.open", title: "Review & commit pending actions" },
   { id: "info.toggle", title: "Show/hide camera metadata" },
   { id: "ui.toggleFilmstrip", title: "Show/hide filmstrip" },
+  { id: "ui.toggleFolderTree", title: "Show/hide folder tree" },
 ];
 
 /** Lightroom-compatible defaults (see docs/keymap research). */
@@ -129,6 +131,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "commit.open": ["ctrl+enter"],
   "info.toggle": ["i"],
   "ui.toggleFilmstrip": ["f"],
+  "ui.toggleFolderTree": ["d"],
 };
 
 const STORAGE_KEY = "cullant.keymap.v1";

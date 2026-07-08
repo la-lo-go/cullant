@@ -72,6 +72,9 @@ function execute(id: CommandId, e: KeyboardEvent) {
     case "ui.toggleFilterBar":
       session.filterBarVisible = !session.filterBarVisible;
       return;
+    case "ui.toggleFolderTree":
+      session.folderTreeVisible = !session.folderTreeVisible;
+      return;
     case "ui.toggleMirror":
       session.setMirrorMode(!session.mirrorMode);
       return;

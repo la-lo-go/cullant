@@ -24,6 +24,18 @@ function loadBoolPref(key: string, fallback: boolean): boolean {
   }
 }
 
+/** Directory portion of a relPath, using forward slashes, "" for the root. */
+export function dirOf(relPath: string): string {
+  const idx = Math.max(relPath.lastIndexOf("/"), relPath.lastIndexOf("\\"));
+  return idx === -1 ? "" : relPath.slice(0, idx).replace(/\\/g, "/");
+}
+
+/** Whether a file's directory is `folder` itself or one of its descendants. */
+function isInFolder(relPath: string, folder: string): boolean {
+  const dir = dirOf(relPath);
+  return dir === folder || dir.startsWith(`${folder}/`);
+}
+
 export const LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
 export type Label = (typeof LABELS)[number];
 
@@ -34,6 +46,9 @@ class SessionStore {
   labelFilter = $state<string | null>(null);
   tagFilter = $state<number | null>(null);
   filterBarVisible = $state(true);
+  /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
+  folderFilter = $state<string | null>(null);
+  folderTreeVisible = $state(true);
 
   // --- mirror mode (M4 flips the display; fan-out is live already) ---
   mirrorMode = $state(true);
@@ -117,6 +132,9 @@ class SessionStore {
     }
     if (this.tagFilter !== null) {
       out = out.filter((i) => i.tagIds.includes(this.tagFilter!));
+    }
+    if (this.folderFilter !== null) {
+      out = out.filter((i) => isInFolder(i.relPath, this.folderFilter!));
     }
     return out;
   });
@@ -378,6 +396,12 @@ $effect.root(() => {
     if (kept.length !== session.selectedIds.size) {
       session.selectedIds = new Set(kept);
     }
+  });
+
+  // A different project's folders have nothing to do with the last one's.
+  $effect(() => {
+    void catalog.project;
+    session.folderFilter = null;
   });
 });
 

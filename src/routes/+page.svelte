@@ -6,6 +6,7 @@
   import { view } from "$lib/stores/view.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
   import VirtualGrid from "$lib/components/VirtualGrid.svelte";
+  import FolderTree from "$lib/components/FolderTree.svelte";
   import Viewer from "$lib/components/Viewer.svelte";
   import CompareView from "$lib/components/CompareView.svelte";
   import FilterBar from "$lib/components/FilterBar.svelte";
@@ -29,6 +30,7 @@
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
+  import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
 
   let showKeybindings = $state(false);
   let showCloseConfirm = $state(false);
@@ -128,6 +130,13 @@
       >
         <Type size={14} />
       </button>
+      <button
+        class:active={session.folderTreeVisible}
+        title="Show/hide folder tree (D)"
+        onclick={blurring(() => (session.folderTreeVisible = !session.folderTreeVisible))}
+      >
+        <FolderTreeIcon size={14} />
+      </button>
       <select value={catalog.sort} onchange={onSortChange}>
         <option value="capture">Capture time</option>
         <option value="name">Name</option>
@@ -169,7 +178,12 @@
       {/if}
 
       {#if view.mode === "grid"}
-        <VirtualGrid items={session.filtered} />
+        <div class="grid-area">
+          {#if session.folderTreeVisible}
+            <FolderTree />
+          {/if}
+          <VirtualGrid items={session.filtered} />
+        </div>
       {:else if view.mode === "viewer"}
         <Viewer />
       {:else}
@@ -399,6 +413,16 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+
+  .grid-area {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+  }
+
+  .grid-area :global(.viewport) {
+    flex: 1;
   }
 
   .welcome {
