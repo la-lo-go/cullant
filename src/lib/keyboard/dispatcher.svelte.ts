@@ -84,6 +84,10 @@ function execute(id: CommandId, e: KeyboardEvent) {
     case "zoom.toggle":
       if (view.mode !== "grid") view.toggleZoom();
       return;
+    case "pair.toggleShown":
+      return session.togglePairHalf();
+    case "pair.toggleCoupling":
+      return void session.togglePairCoupling();
   }
 }
 

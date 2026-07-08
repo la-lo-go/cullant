@@ -92,7 +92,11 @@
             draggable="false"
             loading="eager"
           />
-          {#if v.item.kind === 0}
+          {#if session.mirrorMode && v.item.groupSize > 1}
+            <span class="chip pair" class:split={v.item.decoupled}>
+              {v.item.decoupled ? "✂ SPLIT" : "RAW+JPG"}
+            </span>
+          {:else if v.item.kind === 0}
             <span class="chip raw">RAW</span>
           {/if}
           {#if v.item.flag !== 0}
@@ -170,6 +174,14 @@
     border-radius: 4px;
     background: rgba(0, 0, 0, 0.55);
     color: #ddd;
+  }
+
+  .chip.pair {
+    color: #8fd0ff;
+  }
+
+  .chip.pair.split {
+    color: #ffb86b;
   }
 
   .badge {

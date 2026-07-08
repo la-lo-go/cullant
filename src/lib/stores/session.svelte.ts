@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { api, type CullState, type ItemLite, type Targets } from "../api";
+import { api, type CullState, type ItemLite, type SyncFrom, type Targets } from "../api";
 import { catalog } from "./catalog.svelte";
 
 export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
@@ -26,8 +26,35 @@ class SessionStore {
   // classification; Shift inverts the behaviour one-shot.
   autoAdvancePref = $state(false);
 
+  /** groupId -> member id the user flipped to with J (mirror mode only). */
+  shownAlt = $state<Record<number, number>>({});
+
+  /** Fast lookup of a group's members. */
+  groupIndex = $derived.by(() => {
+    const map = new Map<number, ItemLite[]>();
+    for (const item of catalog.items) {
+      const members = map.get(item.groupId);
+      if (members) members.push(item);
+      else map.set(item.groupId, [item]);
+    }
+    return map;
+  });
+
   filtered = $derived.by(() => {
-    let out = catalog.items;
+    let out: ItemLite[];
+    if (this.mirrorMode) {
+      // One entry per logical photo; J may swap which member is displayed.
+      out = catalog.items
+        .filter((i) => i.isPrimary || i.groupSize <= 1)
+        .map((i) => {
+          const altId = this.shownAlt[i.groupId];
+          if (altId === undefined || altId === i.id) return i;
+          const alt = this.groupIndex.get(i.groupId)?.find((m) => m.id === altId);
+          return alt ?? i;
+        });
+    } else {
+      out = catalog.items;
+    }
     if (this.flagFilter !== "all") {
       const want = this.flagFilter === "pick" ? 1 : this.flagFilter === "reject" ? -1 : 0;
       out = out.filter((i) => i.flag === want);
@@ -40,6 +67,19 @@ class SessionStore {
     }
     return out;
   });
+
+  /** Flip which half of the focused pair is displayed (J). */
+  togglePairHalf() {
+    const item = this.focused;
+    if (!item || item.groupSize < 2) return;
+    const members = this.groupIndex.get(item.groupId) ?? [];
+    const other = members.find((m) => m.id !== item.id);
+    if (!other) return;
+    const next = { ...this.shownAlt };
+    if (this.shownAlt[item.groupId] === other.id) delete next[item.groupId];
+    else next[item.groupId] = other.id;
+    this.shownAlt = next;
+  }
 
   focused = $derived<ItemLite | undefined>(this.filtered[this.focusedIndex]);
 
@@ -131,6 +171,27 @@ class SessionStore {
     this.applyStates(await api.setLabel(t, next));
   }
 
+  /** Group id awaiting a recouple sync choice (renders PairSyncDialog). */
+  recoupleDialogFor = $state<number | null>(null);
+
+  /** Ctrl+J: decouple a linked pair, or start recoupling a split one. */
+  async togglePairCoupling() {
+    const item = this.focused;
+    if (!item || item.groupSize < 2) return;
+    if (item.decoupled) {
+      this.recoupleDialogFor = item.groupId;
+    } else {
+      await api.decoupleGroup(item.groupId);
+      await catalog.refresh();
+    }
+  }
+
+  async recouple(groupId: number, syncFrom: SyncFrom) {
+    this.recoupleDialogFor = null;
+    await api.recoupleGroup(groupId, syncFrom);
+    await catalog.refresh();
+  }
+
   private localGuess(id: number, patch: Partial<CullState>): CullState {
     const current = catalog.items.find((i) => i.id === id);
     return {
@@ -146,3 +207,4 @@ export const session = new SessionStore();
 
 // Multi-window / background changes reconcile through the same merge.
 listen<CullState[]>("state:changed", (e) => session.applyStates(e.payload));
+listen("groups:changed", () => catalog.refresh());

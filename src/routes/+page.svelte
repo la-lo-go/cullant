@@ -9,6 +9,7 @@
   import CompareView from "$lib/components/CompareView.svelte";
   import FilterBar from "$lib/components/FilterBar.svelte";
   import KeybindingsDialog from "$lib/components/KeybindingsDialog.svelte";
+  import PairSyncDialog from "$lib/components/PairSyncDialog.svelte";
   import type { SortKey } from "$lib/api";
 
   let showKeybindings = $state(false);
@@ -80,6 +81,10 @@
 
   {#if showKeybindings}
     <KeybindingsDialog onclose={() => (showKeybindings = false)} />
+  {/if}
+
+  {#if session.recoupleDialogFor !== null}
+    <PairSyncDialog groupId={session.recoupleDialogFor} />
   {/if}
 </main>
 

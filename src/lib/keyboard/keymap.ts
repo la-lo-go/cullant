@@ -25,7 +25,9 @@ export type CommandId =
   | "view.grid"
   | "view.viewer"
   | "view.compare"
-  | "zoom.toggle";
+  | "zoom.toggle"
+  | "pair.toggleShown"
+  | "pair.toggleCoupling";
 
 export interface CommandMeta {
   id: CommandId;
@@ -62,6 +64,8 @@ export const COMMANDS: CommandMeta[] = [
   { id: "view.viewer", title: "Loupe view" },
   { id: "view.compare", title: "Compare view" },
   { id: "zoom.toggle", title: "Toggle 100% zoom" },
+  { id: "pair.toggleShown", title: "Show RAW ↔ JPEG half of pair" },
+  { id: "pair.toggleCoupling", title: "Decouple / recouple pair" },
 ];
 
 /** Lightroom-compatible defaults (see docs/keymap research). */
@@ -93,6 +97,8 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "view.viewer": ["e", "enter"],
   "view.compare": ["c"],
   "zoom.toggle": ["z", "space"],
+  "pair.toggleShown": ["j"],
+  "pair.toggleCoupling": ["ctrl+j"],
 };
 
 const STORAGE_KEY = "cullant.keymap.v1";

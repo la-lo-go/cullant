@@ -21,7 +21,12 @@ export interface ItemLite {
   label: string | null;
   width: number | null;
   height: number | null;
+  isPrimary: boolean;
+  groupSize: number;
+  decoupled: boolean;
 }
+
+export type SyncFrom = "raw" | "jpeg" | "none";
 
 export type SortKey = "capture" | "name";
 export type MediaTab = "photos" | "videos";
@@ -60,6 +65,9 @@ export const api = {
     invoke<CullState[]>("set_flag", { targets, flag }),
   setLabel: (targets: Targets, label: string | null) =>
     invoke<CullState[]>("set_label", { targets, label }),
+  decoupleGroup: (groupId: number) => invoke("decouple_group", { groupId }),
+  recoupleGroup: (groupId: number, syncFrom: SyncFrom) =>
+    invoke("recouple_group", { groupId, syncFrom }),
 };
 
 // The cullant:// scheme is served as http://cullant.localhost/ on Windows.

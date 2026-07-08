@@ -20,6 +20,9 @@ pub struct ItemLite {
     pub label: Option<String>,
     pub width: Option<i64>,
     pub height: Option<i64>,
+    pub is_primary: bool,
+    pub group_size: i64,
+    pub decoupled: bool,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -68,9 +71,16 @@ pub fn query_items(
             SortKey::Name => "rel_path ASC",
         };
         let sql = format!(
-            "SELECT id, group_id, kind, rel_path, basename, ext, mtime, capture_time,
-                    rating, flag, label, width, height
-             FROM files WHERE status = 0 AND {kind_filter} ORDER BY {order}"
+            "SELECT f.id, f.group_id, f.kind, f.rel_path, f.basename, f.ext, f.mtime,
+                    f.capture_time, f.rating, f.flag, f.label, f.width, f.height,
+                    (g.primary_file_id = f.id) AS is_primary,
+                    (SELECT COUNT(*) FROM files m
+                      WHERE m.group_id = f.group_id AND m.status = 0) AS group_size,
+                    g.decoupled
+             FROM files f
+             JOIN groups g ON g.id = f.group_id
+             WHERE f.status = 0 AND {kind_filter}
+             ORDER BY {order}"
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |r| {
@@ -88,6 +98,9 @@ pub fn query_items(
                 label: r.get(10)?,
                 width: r.get(11)?,
                 height: r.get(12)?,
+                is_primary: r.get::<_, Option<bool>>(13)?.unwrap_or(true),
+                group_size: r.get(14)?,
+                decoupled: r.get(15)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
