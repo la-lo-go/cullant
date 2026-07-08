@@ -13,7 +13,7 @@
   import PairSyncDialog from "$lib/components/PairSyncDialog.svelte";
   import TagEditor from "$lib/components/TagEditor.svelte";
   import CommitDialog from "$lib/components/CommitDialog.svelte";
-  import type { SortKey } from "$lib/api";
+  import { api, type SortKey } from "$lib/api";
 
   let showKeybindings = $state(false);
 
@@ -86,6 +86,7 @@
       >
         Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}
       </button>
+      <button title="Rescan project folder" onclick={() => api.rescanProject()}>⟳</button>
       <button title="Task tags" onclick={() => (tags.editorOpen = true)}>🏷</button>
       <button title="Keyboard shortcuts" onclick={() => (showKeybindings = true)}>⌨</button>
       <button onclick={() => catalog.close()}>Close</button>
