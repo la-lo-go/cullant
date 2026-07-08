@@ -90,18 +90,27 @@
   } | null = null;
   let edgeRaf = 0;
 
-  function onPointerDown(e: PointerEvent) {
-    if (e.button !== 0 || !viewport) return; // marquee/selection: primary button only
+  /** Cells are a uniform grid — geometry replaces DOM hit-testing. Returns
+   *  null off-grid (scrollbar) or the hit index (may be out of range). */
+  function hitTest(e: { clientX: number; clientY: number }): { x: number; y: number; index: number; onCell: boolean } | null {
+    if (!viewport) return null;
     const rect = viewport.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const viewY = e.clientY - rect.top;
-    if (x >= viewport.clientWidth) return; // scrollbar, not the grid
+    if (x >= viewport.clientWidth) return null; // scrollbar, not the grid
     const y = viewY + viewport.scrollTop;
-
-    // Cells are a uniform grid — geometry replaces DOM hit-testing.
     const col = Math.floor(x / CELL);
     const index = Math.floor(y / CELL) * cols + col;
     const onCell = col < cols && index >= 0 && index < items.length;
+    return { x, y, index, onCell };
+  }
+
+  function onPointerDown(e: PointerEvent) {
+    if (e.button !== 0 || !viewport) return; // marquee/selection: primary button only
+    const hit = hitTest(e);
+    if (!hit) return;
+    const { x, y, index, onCell } = hit;
+    const viewY = y - viewport.scrollTop;
     if (onCell) {
       if (e.shiftKey) session.rangeSelect(index, e.ctrlKey);
       else if (e.ctrlKey) session.toggleSelect(index);
@@ -182,6 +191,14 @@
     session.selectedIds = next;
   }
 
+  /** Double-click a cell to open the loupe. Pointer capture (set in
+   *  onPointerDown) redirects click/dblclick hit-testing to .viewport, so
+   *  this can't live on the .cell element — recompute the hit cell instead. */
+  function onDblClick(e: MouseEvent) {
+    const hit = hitTest(e);
+    if (hit?.onCell) view.mode = "viewer";
+  }
+
   function endDrag(e: PointerEvent) {
     if (!drag || e.pointerId !== drag.pointerId) return;
     if (viewport?.hasPointerCapture(e.pointerId)) viewport.releasePointerCapture(e.pointerId);
@@ -207,6 +224,7 @@
   onpointermove={onPointerMove}
   onpointerup={endDrag}
   onpointercancel={endDrag}
+  ondblclick={onDblClick}
 >
   <div class="canvas" style="height:{totalRows * CELL}px">
     {#each visible as v}
@@ -215,7 +233,6 @@
         class:focused={v.index === session.focusedIndex}
         class:selected={session.selectedIds.has(v.item.id)}
         style="transform: translate({v.x}px, {v.y}px); width:{CELL}px; height:{CELL}px"
-        ondblclick={() => (view.mode = "viewer")}
         role="button"
         tabindex="-1"
       >
