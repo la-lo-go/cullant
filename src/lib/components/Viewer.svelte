@@ -27,6 +27,7 @@
         class="back info-btn"
         class:active={view.infoOpen}
         title="Camera metadata (I)"
+        data-metadata-toggle
         onclick={() => (view.infoOpen = !view.infoOpen)}
       >
         <Info size={16} />

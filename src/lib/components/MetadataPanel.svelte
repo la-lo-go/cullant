@@ -41,12 +41,12 @@
       : null
   );
 
-  // label / value rows, "—" when absent.
+  // label / value rows; entries whose value is unknown ("—") are omitted.
   const rows = $derived.by(() => {
     if (!meta) return [];
     const dims =
       meta.width && meta.height ? `${meta.width} × ${meta.height}` : "—";
-    return [
+    const all: [string, string][] = [
       ["Camera", meta.camera ?? "—"],
       ["Lens", meta.lens ?? "—"],
       ["Focal", meta.focalLength ?? "—"],
@@ -58,11 +58,23 @@
       ["Dimensions", dims],
       ["Size", fmtSize(meta.size)],
       ["Captured", fmtDate(meta.captureTime)],
-    ] as [string, string][];
+    ];
+    return all.filter(([, value]) => value !== "—");
   });
+
+  let panelEl = $state<HTMLElement | null>(null);
+
+  function handleOutsideClick(e: PointerEvent) {
+    const target = e.target as HTMLElement | null;
+    if (!panelEl || !target) return;
+    if (panelEl.contains(target) || target.closest("[data-metadata-toggle]")) return;
+    view.infoOpen = false;
+  }
 </script>
 
-<aside class="panel">
+<svelte:window onpointerdown={handleOutsideClick} />
+
+<aside class="panel" bind:this={panelEl}>
   <header>
     <span>Metadata</span>
     <button class="close" title="Close (I)" onclick={() => (view.infoOpen = false)}>
