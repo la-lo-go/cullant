@@ -196,6 +196,7 @@ class SessionStore {
   pendingDeleteIds = $state<Set<number>>(new Set());
   pendingCount = $state(0);
   commitDialogOpen = $state(false);
+  moveDialogOpen = $state(false);
 
   async refreshPending() {
     const pending = await api.listPending();

@@ -32,6 +32,7 @@ export type CommandId =
   | "delete.pair"
   | "delete.rawOnly"
   | "delete.jpegOnly"
+  | "action.moveCopy"
   | "commit.open";
 
 export interface CommandMeta {
@@ -75,6 +76,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "delete.pair", title: "Queue delete (whole pair)", classify: true },
   { id: "delete.rawOnly", title: "Queue delete: RAW only", classify: true },
   { id: "delete.jpegOnly", title: "Queue delete: JPEG only", classify: true },
+  { id: "action.moveCopy", title: "Queue move/copy to folder…" },
   { id: "commit.open", title: "Review & commit pending actions" },
 ];
 
@@ -113,6 +115,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "delete.pair": ["delete"],
   "delete.rawOnly": ["alt+delete"],
   "delete.jpegOnly": ["shift+delete"],
+  "action.moveCopy": ["v"],
   "commit.open": ["ctrl+enter"],
 };
 

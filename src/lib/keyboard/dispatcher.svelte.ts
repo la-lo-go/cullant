@@ -98,6 +98,9 @@ function execute(id: CommandId, e: KeyboardEvent) {
       return void session.queueDelete("rawonly", e);
     case "delete.jpegOnly":
       return void session.queueDelete("jpegonly", e);
+    case "action.moveCopy":
+      session.moveDialogOpen = true;
+      return;
     case "commit.open":
       session.commitDialogOpen = true;
       return;

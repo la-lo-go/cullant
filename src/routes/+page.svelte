@@ -13,6 +13,7 @@
   import PairSyncDialog from "$lib/components/PairSyncDialog.svelte";
   import TagEditor from "$lib/components/TagEditor.svelte";
   import CommitDialog from "$lib/components/CommitDialog.svelte";
+  import MoveDialog from "$lib/components/MoveDialog.svelte";
   import { api, type SortKey } from "$lib/api";
 
   let showKeybindings = $state(false);
@@ -128,6 +129,10 @@
 
   {#if session.commitDialogOpen}
     <CommitDialog />
+  {/if}
+
+  {#if session.moveDialogOpen}
+    <MoveDialog />
   {/if}
 </main>
 
