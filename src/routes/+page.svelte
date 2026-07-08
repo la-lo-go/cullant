@@ -42,6 +42,20 @@
     <header class="toolbar">
       <span class="title">Cullant</span>
       <span class="path" title={catalog.project.rootPath}>{catalog.project.rootPath}</span>
+      <div class="segmented">
+        <button
+          class:active={catalog.media === "photos"}
+          onclick={() => catalog.setMedia("photos").then(() => session.clampFocus())}
+        >
+          Photos
+        </button>
+        <button
+          class:active={catalog.media === "videos"}
+          onclick={() => catalog.setMedia("videos").then(() => session.clampFocus())}
+        >
+          Videos
+        </button>
+      </div>
       <span class="spacer"></span>
       {#if catalog.scanning}
         <span class="status scanning">Scanning… {catalog.scanFound || ""}</span>

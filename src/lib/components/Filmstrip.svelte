@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { thumbUrl, type ItemLite } from "../api";
+  import { thumbUrl, videoUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
 
   let { items }: { items: ItemLite[] } = $props();
@@ -48,7 +48,11 @@
         role="button"
         tabindex="-1"
       >
-        <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
+        {#if v.item.kind === 2}
+          <video src={videoUrl(v.item)} preload="metadata" muted></video>
+        {:else}
+          <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
+        {/if}
         {#if v.item.flag !== 0}
           <span class="dot" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}></span>
         {/if}
@@ -89,7 +93,8 @@
     outline-offset: -2px;
   }
 
-  img {
+  img,
+  video {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;

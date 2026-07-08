@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { videoUrl } from "../api";
   import { session } from "../stores/session.svelte";
   import ZoomImage from "./ZoomImage.svelte";
   import Filmstrip from "./Filmstrip.svelte";
@@ -9,7 +10,12 @@
 <div class="viewer">
   {#if item}
     <div class="stage">
-      <ZoomImage {item} />
+      {#if item.kind === 2}
+        <!-- svelte-ignore a11y_media_has_caption -->
+        <video class="player" src={videoUrl(item)} controls preload="metadata"></video>
+      {:else}
+        <ZoomImage {item} />
+      {/if}
       <div class="info">
         <span class="filename">{item.relPath}</span>
         {#if item.rating > 0}<span class="stars">{"★".repeat(item.rating)}</span>{/if}
@@ -39,6 +45,13 @@
     display: flex;
     flex-direction: column;
     position: relative;
+  }
+
+  .player {
+    flex: 1;
+    min-height: 0;
+    background: #131316;
+    outline: none;
   }
 
   .info {

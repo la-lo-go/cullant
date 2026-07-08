@@ -55,6 +55,11 @@ class CatalogStore {
     this.sort = sort;
     await this.refresh();
   }
+
+  async setMedia(media: MediaTab) {
+    this.media = media;
+    await this.refresh();
+  }
 }
 
 export const catalog = new CatalogStore();

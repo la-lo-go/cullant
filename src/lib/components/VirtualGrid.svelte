@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { thumbUrl, type ItemLite } from "../api";
+  import { thumbUrl, videoUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
@@ -86,13 +86,19 @@
         tabindex="-1"
       >
         <div class="frame" style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}>
-          <img
-            src={thumbUrl(v.item)}
-            alt=""
-            decoding="async"
-            draggable="false"
-            loading="eager"
-          />
+          {#if v.item.kind === 2}
+            <!-- preload=metadata shows the first frame; only ~30 cells live -->
+            <video src={videoUrl(v.item)} preload="metadata" muted></video>
+            <span class="chip video">▶</span>
+          {:else}
+            <img
+              src={thumbUrl(v.item)}
+              alt=""
+              decoding="async"
+              draggable="false"
+              loading="eager"
+            />
+          {/if}
           {#if session.mirrorMode && v.item.groupSize > 1}
             <span class="chip pair" class:split={v.item.decoupled}>
               {v.item.decoupled ? "✂ SPLIT" : "RAW+JPG"}
@@ -171,11 +177,19 @@
     border-bottom: 3px solid var(--label-color);
   }
 
-  img {
+  img,
+  video {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     user-select: none;
+  }
+
+  .chip.video {
+    left: auto;
+    right: 4px;
+    bottom: 4px;
+    top: auto;
   }
 
   .chip {

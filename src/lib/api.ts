@@ -155,3 +155,7 @@ export function thumbUrl(item: ItemLite): string {
 export function previewUrl(item: ItemLite): string {
   return cullantUrl(`preview/${item.id}?v=${item.mtime}`);
 }
+
+export function videoUrl(item: ItemLite): string {
+  return cullantUrl(`video/${item.id}?v=${item.mtime}`);
+}
