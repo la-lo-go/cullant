@@ -164,9 +164,12 @@
       return;
     }
     // Plain wheel navigates photos: accumulate deltas so one physical notch
-    // (or an equivalent trackpad swipe) steps exactly one photo.
-    if (Math.sign(e.deltaY) !== Math.sign(wheelAccum)) wheelAccum = 0;
-    wheelAccum += e.deltaY;
+    // (or an equivalent trackpad swipe) steps exactly one photo. Horizontal
+    // scroll (trackpad swipe, or Shift+wheel which browsers report as
+    // deltaX) navigates the same way as vertical.
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (Math.sign(delta) !== Math.sign(wheelAccum)) wheelAccum = 0;
+    wheelAccum += delta;
     if (Math.abs(wheelAccum) >= WHEEL_NAV_THRESHOLD) {
       session.moveFocus(wheelAccum > 0 ? 1 : -1);
       wheelAccum = 0;
