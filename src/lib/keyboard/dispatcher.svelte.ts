@@ -42,6 +42,8 @@ function execute(id: CommandId, e: KeyboardEvent) {
       return session.focusEdge(false);
     case "nav.end":
       return session.focusEdge(true);
+    case "select.all":
+      return session.selectAll();
     case "rate.0":
     case "rate.1":
     case "rate.2":
@@ -71,7 +73,7 @@ function execute(id: CommandId, e: KeyboardEvent) {
       session.filterBarVisible = !session.filterBarVisible;
       return;
     case "ui.toggleMirror":
-      session.mirrorMode = !session.mirrorMode;
+      session.setMirrorMode(!session.mirrorMode);
       return;
     case "view.grid":
       view.mode = "grid";
@@ -83,8 +85,9 @@ function execute(id: CommandId, e: KeyboardEvent) {
       view.mode = "compare";
       return;
     case "view.back":
-      // Esc returns to the grid from loupe/compare; in grid it does nothing.
+      // Esc returns to the grid from loupe/compare; in grid it clears selection.
       if (view.mode !== "grid") view.mode = "grid";
+      else session.clearSelection();
       return;
     case "zoom.toggle":
       if (view.mode !== "grid") view.toggleZoom();
@@ -107,6 +110,10 @@ function execute(id: CommandId, e: KeyboardEvent) {
       return;
     case "commit.open":
       session.commitDialogOpen = true;
+      return;
+    case "info.toggle":
+      // Only meaningful in the loupe; harmless elsewhere.
+      view.infoOpen = !view.infoOpen;
       return;
   }
 }

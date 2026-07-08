@@ -4,9 +4,11 @@
   import { view } from "../stores/view.svelte";
   import ZoomImage from "./ZoomImage.svelte";
   import Filmstrip from "./Filmstrip.svelte";
+  import MetadataPanel from "./MetadataPanel.svelte";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import Scissors from "@lucide/svelte/icons/scissors";
+  import Info from "@lucide/svelte/icons/info";
 
   const item = $derived(session.focused);
 </script>
@@ -21,6 +23,17 @@
         <ZoomImage {item} />
       {/if}
       <button class="back" title="Back to grid (Esc)" onclick={() => (view.mode = "grid")}><X size={16} /></button>
+      <button
+        class="back info-btn"
+        class:active={view.infoOpen}
+        title="Camera metadata (I)"
+        onclick={() => (view.infoOpen = !view.infoOpen)}
+      >
+        <Info size={16} />
+      </button>
+      {#if view.infoOpen}
+        <MetadataPanel {item} />
+      {/if}
       <div class="info">
         <span class="filename">{item.relPath}</span>
         {#if session.mirrorMode && item.groupSize > 1}
@@ -120,6 +133,15 @@
 
   .back:hover {
     background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+  }
+
+  .info-btn {
+    top: 46px;
+  }
+
+  .info-btn.active {
+    background: rgba(107, 139, 255, 0.5);
     color: #fff;
   }
 

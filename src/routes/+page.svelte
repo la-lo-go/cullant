@@ -23,6 +23,7 @@
   import Unlink from "@lucide/svelte/icons/unlink";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Tag from "@lucide/svelte/icons/tag";
+  import Type from "@lucide/svelte/icons/type";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
 
@@ -59,6 +60,13 @@
       (e.currentTarget as HTMLElement).blur();
     };
   }
+
+  /** Show only the last `maxSegments` path segments, with a leading ellipsis. */
+  function truncatePath(path: string, maxSegments = 3): string {
+    const segments = path.split(/[\\/]+/).filter(Boolean);
+    if (segments.length <= maxSegments) return path;
+    return "…" + "\\" + segments.slice(-maxSegments).join("\\");
+  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -67,7 +75,7 @@
   {#if catalog.project}
     <header class="toolbar">
       <span class="title">Cullant</span>
-      <span class="path" title={catalog.project.rootPath}>{catalog.project.rootPath}</span>
+      <span class="path" title={catalog.project.rootPath}>{truncatePath(catalog.project.rootPath)}</span>
       <div class="segmented">
         <button
           class:active={catalog.media === "photos"}
@@ -96,9 +104,16 @@
       <button
         class:active={session.mirrorMode}
         title="Mirror mode: RAW+JPEG pairs act as one photo (M)"
-        onclick={blurring(() => (session.mirrorMode = !session.mirrorMode))}
+        onclick={blurring(() => session.setMirrorMode(!session.mirrorMode))}
       >
         {#if session.mirrorMode}<Link size={14} /><span>Mirror</span>{:else}<Unlink size={14} /><span>Separate</span>{/if}
+      </button>
+      <button
+        class:active={session.showNames}
+        title="Show/hide file names"
+        onclick={blurring(() => session.toggleShowNames())}
+      >
+        <Type size={14} />
       </button>
       <select value={catalog.sort} onchange={onSortChange}>
         <option value="capture">Capture time</option>

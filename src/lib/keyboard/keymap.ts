@@ -5,6 +5,7 @@ export type CommandId =
   | "nav.up"
   | "nav.home"
   | "nav.end"
+  | "select.all"
   | "rate.0"
   | "rate.1"
   | "rate.2"
@@ -34,7 +35,8 @@ export type CommandId =
   | "delete.rawOnly"
   | "delete.jpegOnly"
   | "action.moveCopy"
-  | "commit.open";
+  | "commit.open"
+  | "info.toggle";
 
 export interface CommandMeta {
   id: CommandId;
@@ -50,6 +52,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "nav.up", title: "Row up" },
   { id: "nav.home", title: "First photo" },
   { id: "nav.end", title: "Last photo" },
+  { id: "select.all", title: "Select all" },
   { id: "rate.0", title: "Clear stars", classify: true },
   { id: "rate.1", title: "1 star", classify: true },
   { id: "rate.2", title: "2 stars", classify: true },
@@ -80,6 +83,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "delete.jpegOnly", title: "Queue delete: JPEG only", classify: true },
   { id: "action.moveCopy", title: "Queue move/copy to folder…" },
   { id: "commit.open", title: "Review & commit pending actions" },
+  { id: "info.toggle", title: "Show/hide camera metadata" },
 ];
 
 /** Lightroom-compatible defaults (see docs/keymap research). */
@@ -90,6 +94,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "nav.up": ["arrowup"],
   "nav.home": ["home"],
   "nav.end": ["end"],
+  "select.all": ["ctrl+a"],
   "rate.0": ["0"],
   "rate.1": ["1"],
   "rate.2": ["2"],
@@ -120,6 +125,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "delete.jpegOnly": ["shift+delete"],
   "action.moveCopy": ["v"],
   "commit.open": ["ctrl+enter"],
+  "info.toggle": ["i"],
 };
 
 const STORAGE_KEY = "cullant.keymap.v1";

@@ -99,6 +99,19 @@
   {/if}
 
   <span class="spacer"></span>
+  {#if session.selectedIds.size > 0}
+    <span class="selection">
+      <span>{session.selectedIds.size} selected</span>
+      <button
+        class="clearsel"
+        title="Clear selection (Esc)"
+        aria-label="Clear selection"
+        onclick={() => session.clearSelection()}
+      >
+        <X size={12} />
+      </button>
+    </span>
+  {/if}
   <span class="showing">{session.filtered.length} shown</span>
 </div>
 
@@ -217,5 +230,28 @@
 
   .showing {
     opacity: 0.6;
+  }
+
+  .selection {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #9db4ff;
+  }
+
+  .clearsel {
+    display: inline-flex;
+    align-items: center;
+    background: none;
+    border: none;
+    color: #9db4ff;
+    cursor: pointer;
+    padding: 1px 2px;
+    border-radius: 4px;
+  }
+
+  .clearsel:hover {
+    color: #fff;
+    background: #2a2a30;
   }
 </style>

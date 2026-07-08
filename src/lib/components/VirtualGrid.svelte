@@ -70,22 +70,151 @@
   function onScroll() {
     if (viewport) scrollTop = viewport.scrollTop;
   }
+
+  // --- pointer selection: click routing + drag marquee ---
+  const DRAG_THRESHOLD = 6; // px of movement before a cell-drag becomes a marquee
+  const EDGE_ZONE = 40; // px from viewport top/bottom that auto-scrolls
+  const EDGE_STEP = 7; // px scrolled per frame while in the edge zone
+
+  /** Marquee rectangle in canvas (content) coordinates; null when idle. */
+  let marquee = $state<{ x: number; y: number; w: number; h: number } | null>(null);
+
+  let drag: {
+    pointerId: number;
+    startX: number;
+    startY: number; // canvas coords, so scrolling mid-drag keeps the origin
+    base: Set<number>; // selection to add to (Ctrl held at drag start)
+    active: boolean;
+    lastX: number;
+    lastViewY: number; // viewport-relative, for edge auto-scroll
+  } | null = null;
+  let edgeRaf = 0;
+
+  function onPointerDown(e: PointerEvent) {
+    if (e.button !== 0 || !viewport) return; // marquee/selection: primary button only
+    const rect = viewport.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const viewY = e.clientY - rect.top;
+    if (x >= viewport.clientWidth) return; // scrollbar, not the grid
+    const y = viewY + viewport.scrollTop;
+
+    // Cells are a uniform grid — geometry replaces DOM hit-testing.
+    const col = Math.floor(x / CELL);
+    const index = Math.floor(y / CELL) * cols + col;
+    const onCell = col < cols && index >= 0 && index < items.length;
+    if (onCell) {
+      if (e.shiftKey) session.rangeSelect(index, e.ctrlKey);
+      else if (e.ctrlKey) session.toggleSelect(index);
+      else session.selectOnly(index);
+    }
+    if (e.shiftKey) return; // Shift is range-select; never starts a marquee
+
+    drag = {
+      pointerId: e.pointerId,
+      startX: x,
+      startY: y,
+      base: e.ctrlKey ? new Set(session.selectedIds) : new Set(),
+      // Empty canvas space starts the marquee at once (a plain click there
+      // clears the selection); dragging off a cell needs the threshold.
+      active: !onCell,
+      lastX: x,
+      lastViewY: viewY,
+    };
+    viewport.setPointerCapture(e.pointerId);
+    if (drag.active) applyMarquee(x, y);
+  }
+
+  function onPointerMove(e: PointerEvent) {
+    if (!drag || e.pointerId !== drag.pointerId || !viewport) return;
+    const rect = viewport.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const viewY = e.clientY - rect.top;
+    const y = viewY + viewport.scrollTop;
+    if (!drag.active) {
+      if (
+        Math.abs(x - drag.startX) < DRAG_THRESHOLD &&
+        Math.abs(y - drag.startY) < DRAG_THRESHOLD
+      ) {
+        return;
+      }
+      drag.active = true;
+    }
+    drag.lastX = x;
+    drag.lastViewY = viewY;
+    applyMarquee(x, y);
+    if (!edgeRaf) edgeRaf = requestAnimationFrame(edgeScroll);
+  }
+
+  /** Gentle auto-scroll while the marquee pointer sits near an edge. */
+  function edgeScroll() {
+    edgeRaf = 0;
+    if (!drag?.active || !viewport) return;
+    let dy = 0;
+    if (drag.lastViewY < EDGE_ZONE) dy = -EDGE_STEP;
+    else if (drag.lastViewY > height - EDGE_ZONE) dy = EDGE_STEP;
+    if (dy !== 0) {
+      viewport.scrollTop += dy;
+      scrollTop = viewport.scrollTop;
+      applyMarquee(drag.lastX, drag.lastViewY + viewport.scrollTop);
+      edgeRaf = requestAnimationFrame(edgeScroll);
+    }
+  }
+
+  function applyMarquee(x: number, y: number) {
+    if (!drag) return;
+    const x0 = Math.min(drag.startX, x);
+    const x1 = Math.max(drag.startX, x);
+    const y0 = Math.min(drag.startY, y);
+    const y1 = Math.max(drag.startY, y);
+    marquee = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+
+    const next = new Set(drag.base);
+    const c0 = Math.max(0, Math.floor(x0 / CELL));
+    const c1 = Math.min(cols - 1, Math.floor(x1 / CELL));
+    const r0 = Math.max(0, Math.floor(y0 / CELL));
+    const r1 = Math.min(totalRows - 1, Math.floor(y1 / CELL));
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const i = r * cols + c;
+        if (i < items.length) next.add(items[i].id);
+      }
+    }
+    session.selectedIds = next;
+  }
+
+  function endDrag(e: PointerEvent) {
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    if (viewport?.hasPointerCapture(e.pointerId)) viewport.releasePointerCapture(e.pointerId);
+    drag = null;
+    marquee = null;
+    if (edgeRaf) {
+      cancelAnimationFrame(edgeRaf);
+      edgeRaf = 0;
+    }
+  }
 </script>
 
 <div
   class="viewport"
+  role="grid"
+  aria-label="Photo grid"
+  tabindex="-1"
   bind:this={viewport}
   bind:clientWidth={width}
   bind:clientHeight={height}
   onscroll={onScroll}
+  onpointerdown={onPointerDown}
+  onpointermove={onPointerMove}
+  onpointerup={endDrag}
+  onpointercancel={endDrag}
 >
   <div class="canvas" style="height:{totalRows * CELL}px">
     {#each visible as v}
       <div
         class="cell"
         class:focused={v.index === session.focusedIndex}
+        class:selected={session.selectedIds.has(v.item.id)}
         style="transform: translate({v.x}px, {v.y}px); width:{CELL}px; height:{CELL}px"
-        onpointerdown={() => (session.focusedIndex = v.index)}
         ondblclick={() => (view.mode = "viewer")}
         role="button"
         tabindex="-1"
@@ -133,9 +262,17 @@
             </span>
           {/if}
         </div>
-        <span class="name">{v.item.name}.{v.item.ext}</span>
+        {#if session.showNames}
+          <span class="name">{v.item.name}.{v.item.ext}</span>
+        {/if}
       </div>
     {/each}
+    {#if marquee}
+      <div
+        class="marquee"
+        style="transform: translate({marquee.x}px, {marquee.y}px); width:{marquee.w}px; height:{marquee.h}px"
+      ></div>
+    {/if}
   </div>
 </div>
 
@@ -161,12 +298,18 @@
     box-sizing: border-box;
     gap: 4px;
     border-radius: 8px;
+    user-select: none; /* marquee drags must not select label text */
   }
 
   .cell.focused {
     outline: 2px solid #6b8bff;
     outline-offset: -2px;
     background: rgba(107, 139, 255, 0.08);
+  }
+
+  .cell.selected {
+    background: rgba(107, 139, 255, 0.16);
+    box-shadow: inset 0 0 0 1px rgba(107, 139, 255, 0.55);
   }
 
   .frame {
@@ -180,6 +323,19 @@
     align-items: center;
     justify-content: center;
     border-bottom: 3px solid var(--label-color);
+    /* Portrait images are height-constrained and would sit flush on the
+       frame's bottom edge; keep a small constant gap below any image. */
+    padding-bottom: 4px;
+  }
+
+  .marquee {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: 1px dashed #6b8bff;
+    background: #6b8bff22;
+    pointer-events: none;
+    z-index: 2;
   }
 
   img,

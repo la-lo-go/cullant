@@ -29,6 +29,25 @@ export interface ItemLite {
 
 export type SyncFrom = "raw" | "jpeg" | "none";
 
+export interface FileMetadata {
+  relPath: string;
+  kind: number;
+  size: number;
+  width: number | null;
+  height: number | null;
+  captureTime: number | null;
+  camera: string | null;
+  lens: string | null;
+  iso: number | null;
+  exposureTime: string | null;
+  fNumber: string | null;
+  focalLength: string | null;
+  exposureBias: string | null;
+  flash: string | null;
+  gpsLat: number | null;
+  gpsLon: number | null;
+}
+
 export interface TaskTag {
   id: number;
   name: string;
@@ -137,6 +156,8 @@ export const api = {
   getProjectSetting: (key: string) => invoke<string | null>("get_project_setting", { key }),
   setProjectSetting: (key: string, value: string) =>
     invoke("set_project_setting", { key, value }),
+  getFileMetadata: (fileId: number) =>
+    invoke<FileMetadata>("get_file_metadata", { fileId }),
 };
 
 // The cullant:// scheme is served as http://cullant.localhost/ on Windows.

@@ -12,6 +12,16 @@ import { tags } from "./tags.svelte";
 
 export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
 
+const SHOW_NAMES_KEY = "cullant.showNames";
+
+function loadShowNames(): boolean {
+  try {
+    return JSON.parse(localStorage.getItem(SHOW_NAMES_KEY) ?? "true") !== false;
+  } catch {
+    return true;
+  }
+}
+
 export const LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
 export type Label = (typeof LABELS)[number];
 
@@ -30,6 +40,23 @@ class SessionStore {
   focusedIndex = $state(0);
   /** Column count reported by the grid so ↑/↓ move one visual row. */
   gridCols = $state(1);
+
+  /** Multi-selection: file ids of selected items (reassigned on every change). */
+  selectedIds = $state<Set<number>>(new Set());
+  /** Index into `filtered` where the last explicit selection started (Shift ranges). */
+  selectionAnchor = $state<number | null>(null);
+
+  /** Show filenames under grid thumbnails (persisted). */
+  showNames = $state<boolean>(loadShowNames());
+
+  toggleShowNames() {
+    this.showNames = !this.showNames;
+    try {
+      localStorage.setItem(SHOW_NAMES_KEY, JSON.stringify(this.showNames));
+    } catch {
+      // persistence is best-effort
+    }
+  }
 
   // Auto-advance: Lightroom semantics. Caps Lock ON advances after any
   // classification; Shift inverts the behaviour one-shot.
@@ -122,7 +149,84 @@ class SessionStore {
     this.focusedIndex = end ? Math.max(0, this.filtered.length - 1) : 0;
   }
 
+  // --- multi-selection (Windows-style) ---
+
+  /** Plain click: focus only, drop any selection. */
+  selectOnly(index: number) {
+    this.focusedIndex = index;
+    this.selectionAnchor = index;
+    if (this.selectedIds.size > 0) this.selectedIds = new Set();
+  }
+
+  /** Ctrl+click: toggle one item; an empty selection is seeded from focus. */
+  toggleSelect(index: number) {
+    const item = this.filtered[index];
+    if (!item) return;
+    const wasEmpty = this.selectedIds.size === 0;
+    const next = new Set(this.selectedIds);
+    if (wasEmpty && this.focused) next.add(this.focused.id);
+    // Ctrl+clicking the focused item of an empty selection selects it —
+    // seed + toggle would cancel out, so skip the toggle in that one case.
+    if (!(wasEmpty && this.focused?.id === item.id)) {
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
+    }
+    this.selectedIds = next;
+    this.focusedIndex = index;
+    this.selectionAnchor = index;
+  }
+
+  /** Shift+click: contiguous range from the anchor. `additive` = Ctrl held. */
+  rangeSelect(index: number, additive = false) {
+    if (this.filtered.length === 0) return;
+    const anchor = this.selectionAnchor ?? this.focusedIndex;
+    const lo = Math.min(anchor, index);
+    const hi = Math.max(anchor, index);
+    const next = additive ? new Set(this.selectedIds) : new Set<number>();
+    for (let i = lo; i <= hi; i++) {
+      const item = this.filtered[i];
+      if (item) next.add(item.id);
+    }
+    this.selectedIds = next;
+    this.focusedIndex = index;
+    this.selectionAnchor = anchor;
+  }
+
+  clearSelection() {
+    if (this.selectedIds.size > 0) this.selectedIds = new Set();
+    this.selectionAnchor = null;
+  }
+
+  selectAll() {
+    this.selectedIds = new Set(this.filtered.map((i) => i.id));
+  }
+
+  /**
+   * Toggle mirror/separate while keeping the same photo under focus. Flipping
+   * the mode changes what `filtered` contains (pairs collapse/expand), so the
+   * bare index would point at a different photo — re-find it by file id, then
+   * by group, then clamp. Selection ids also change meaning, so drop them.
+   */
+  setMirrorMode(on: boolean) {
+    if (on === this.mirrorMode) return;
+    const current = this.focused;
+    this.mirrorMode = on;
+    this.clearSelection();
+    if (!current) {
+      this.clampFocus();
+      return;
+    }
+    const next = this.filtered;
+    let idx = next.findIndex((i) => i.id === current.id);
+    if (idx < 0) idx = next.findIndex((i) => i.groupId === current.groupId);
+    this.focusedIndex = idx >= 0 ? idx : Math.min(this.focusedIndex, next.length - 1);
+    this.clampFocus();
+  }
+
   private targets(): Targets | null {
+    if (this.selectedIds.size > 0) {
+      return { ids: [...this.selectedIds], asGroups: this.mirrorMode };
+    }
     const item = this.focused;
     if (!item) return null;
     return { ids: [item.id], asGroups: this.mirrorMode };
@@ -248,6 +352,18 @@ class SessionStore {
 }
 
 export const session = new SessionStore();
+
+// Keep the selection valid: when `filtered` changes (filters, mirror mode,
+// rescans) prune ids that are no longer visible.
+$effect.root(() => {
+  $effect(() => {
+    const present = new Set(session.filtered.map((i) => i.id));
+    const kept = [...session.selectedIds].filter((id) => present.has(id));
+    if (kept.length !== session.selectedIds.size) {
+      session.selectedIds = new Set(kept);
+    }
+  });
+});
 
 // Multi-window / background changes reconcile through the same merge.
 listen<CullState[]>("state:changed", (e) => session.applyStates(e.payload));
