@@ -31,6 +31,7 @@ impl Db {
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         migrations::run(&mut conn)?;
+        crate::engine::tags::seed_defaults(&conn)?;
 
         let (tx, rx) = mpsc::channel::<Job>();
         thread::Builder::new()

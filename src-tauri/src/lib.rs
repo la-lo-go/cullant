@@ -59,6 +59,11 @@ pub fn run() {
             commands::culling::set_label,
             commands::groups::decouple_group,
             commands::groups::recouple_group,
+            commands::tags::list_task_tags,
+            commands::tags::create_task_tag,
+            commands::tags::update_task_tag,
+            commands::tags::delete_task_tag,
+            commands::tags::toggle_task_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

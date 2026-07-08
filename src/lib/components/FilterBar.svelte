@@ -1,5 +1,6 @@
 <script lang="ts">
   import { session, LABELS, type FlagFilter } from "../stores/session.svelte";
+  import { tags } from "../stores/tags.svelte";
 
   const flagOptions: { value: FlagFilter; label: string }[] = [
     { value: "all", label: "All" },
@@ -75,6 +76,24 @@
       ></button>
     {/each}
   </div>
+
+  {#if tags.all.length > 0}
+    <div class="group tagfilter" title="Task tag filter">
+      {#each tags.all as tag}
+        <button
+          class="tagseg"
+          class:active={session.tagFilter === tag.id}
+          style="--c: {tag.color ?? '#888'}"
+          onclick={() => {
+            session.tagFilter = session.tagFilter === tag.id ? null : tag.id;
+            session.clampFocus();
+          }}
+        >
+          <span class="tagdot"></span>{tag.name}
+        </button>
+      {/each}
+    </div>
+  {/if}
 
   <span class="spacer"></span>
   <span class="showing">{session.filtered.length} shown</span>
@@ -154,6 +173,37 @@
   .dot.active {
     opacity: 1;
     border-color: #fff;
+  }
+
+  .tagseg {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #bbb;
+    padding: 3px 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  .tagseg:hover {
+    background: #2a2a30;
+  }
+
+  .tagseg.active {
+    background: #33333c;
+    color: #fff;
+    border-color: var(--c);
+  }
+
+  .tagdot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--c);
   }
 
   .spacer {

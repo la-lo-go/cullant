@@ -2,6 +2,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { session } from "$lib/stores/session.svelte";
+  import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
   import VirtualGrid from "$lib/components/VirtualGrid.svelte";
@@ -10,9 +11,15 @@
   import FilterBar from "$lib/components/FilterBar.svelte";
   import KeybindingsDialog from "$lib/components/KeybindingsDialog.svelte";
   import PairSyncDialog from "$lib/components/PairSyncDialog.svelte";
+  import TagEditor from "$lib/components/TagEditor.svelte";
   import type { SortKey } from "$lib/api";
 
   let showKeybindings = $state(false);
+
+  // Load the project's tag list whenever a project is (re)opened.
+  $effect(() => {
+    if (catalog.project) void tags.refresh();
+  });
 
   async function pickProject() {
     const path = await open({ directory: true, title: "Open project folder" });
@@ -53,6 +60,7 @@
         <option value="capture">Capture time</option>
         <option value="name">Name</option>
       </select>
+      <button title="Task tags" onclick={() => (tags.editorOpen = true)}>🏷</button>
       <button title="Keyboard shortcuts" onclick={() => (showKeybindings = true)}>⌨</button>
       <button onclick={() => catalog.close()}>Close</button>
     </header>
@@ -85,6 +93,10 @@
 
   {#if session.recoupleDialogFor !== null}
     <PairSyncDialog groupId={session.recoupleDialogFor} />
+  {/if}
+
+  {#if tags.editorOpen}
+    <TagEditor onclose={() => (tags.editorOpen = false)} />
   {/if}
 </main>
 

@@ -23,6 +23,7 @@ pub struct ItemLite {
     pub is_primary: bool,
     pub group_size: i64,
     pub decoupled: bool,
+    pub tag_ids: Vec<i64>,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -76,7 +77,9 @@ pub fn query_items(
                     (g.primary_file_id = f.id) AS is_primary,
                     (SELECT COUNT(*) FROM files m
                       WHERE m.group_id = f.group_id AND m.status = 0) AS group_size,
-                    g.decoupled
+                    g.decoupled,
+                    (SELECT GROUP_CONCAT(tag_id) FROM file_tags t
+                      WHERE t.file_id = f.id) AS tag_ids
              FROM files f
              JOIN groups g ON g.id = f.group_id
              WHERE f.status = 0 AND {kind_filter}
@@ -101,6 +104,10 @@ pub fn query_items(
                 is_primary: r.get::<_, Option<bool>>(13)?.unwrap_or(true),
                 group_size: r.get(14)?,
                 decoupled: r.get(15)?,
+                tag_ids: r
+                    .get::<_, Option<String>>(16)?
+                    .map(|csv| csv.split(',').filter_map(|s| s.parse().ok()).collect())
+                    .unwrap_or_default(),
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

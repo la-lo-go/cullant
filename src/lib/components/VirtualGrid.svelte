@@ -1,6 +1,7 @@
 <script lang="ts">
   import { thumbUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
+  import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
 
   let { items }: { items: ItemLite[] } = $props();
@@ -107,6 +108,17 @@
           {#if v.item.rating > 0}
             <span class="stars">{"★".repeat(v.item.rating)}</span>
           {/if}
+          {#if v.item.tagIds.length > 0}
+            <span class="tags">
+              {#each v.item.tagIds.slice(0, 4) as tagId}
+                <span
+                  class="tagdot"
+                  style="background: {tags.byId.get(tagId)?.color ?? '#888'}"
+                  title={tags.byId.get(tagId)?.name}
+                ></span>
+              {/each}
+            </span>
+          {/if}
         </div>
         <span class="name">{v.item.name}.{v.item.ext}</span>
       </div>
@@ -209,6 +221,21 @@
     color: #ffd166;
     font-size: 12px;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  }
+
+  .tags {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    display: flex;
+    gap: 3px;
+  }
+
+  .tagdot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
   }
 
   .name {

@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { api, type CullState, type ItemLite, type SyncFrom, type Targets } from "../api";
 import { catalog } from "./catalog.svelte";
+import { tags } from "./tags.svelte";
 
 export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
 
@@ -12,6 +13,7 @@ class SessionStore {
   flagFilter = $state<FlagFilter>("all");
   minRating = $state(0);
   labelFilter = $state<string | null>(null);
+  tagFilter = $state<number | null>(null);
   filterBarVisible = $state(true);
 
   // --- mirror mode (M4 flips the display; fan-out is live already) ---
@@ -64,6 +66,9 @@ class SessionStore {
     }
     if (this.labelFilter !== null) {
       out = out.filter((i) => i.label === this.labelFilter);
+    }
+    if (this.tagFilter !== null) {
+      out = out.filter((i) => i.tagIds.includes(this.tagFilter!));
     }
     return out;
   });
@@ -169,6 +174,14 @@ class SessionStore {
     this.applyStates(t.ids.map((id) => this.localGuess(id, { label: next })));
     this.maybeAdvance(event);
     this.applyStates(await api.setLabel(t, next));
+  }
+
+  /** Toggle a task tag on the focused photo (fan-out included). */
+  async toggleTag(tagId: number, event?: KeyboardEvent) {
+    const t = this.targets();
+    if (!t) return;
+    this.maybeAdvance(event);
+    tags.applyChanges(await api.toggleTaskTag(t, tagId));
   }
 
   /** Group id awaiting a recouple sync choice (renders PairSyncDialog). */

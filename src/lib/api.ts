@@ -24,9 +24,26 @@ export interface ItemLite {
   isPrimary: boolean;
   groupSize: number;
   decoupled: boolean;
+  tagIds: number[];
 }
 
 export type SyncFrom = "raw" | "jpeg" | "none";
+
+export interface TaskTag {
+  id: number;
+  name: string;
+  shortcut: string | null;
+  scope: number; // 0=photo 1=video 2=both
+  color: string | null;
+  sortOrder: number;
+  builtin: boolean;
+}
+
+export interface TagChange {
+  fileId: number;
+  tagId: number;
+  tagged: boolean;
+}
 
 export type SortKey = "capture" | "name";
 export type MediaTab = "photos" | "videos";
@@ -68,6 +85,13 @@ export const api = {
   decoupleGroup: (groupId: number) => invoke("decouple_group", { groupId }),
   recoupleGroup: (groupId: number, syncFrom: SyncFrom) =>
     invoke("recouple_group", { groupId, syncFrom }),
+  listTaskTags: () => invoke<TaskTag[]>("list_task_tags"),
+  createTaskTag: (name: string, shortcut: string | null, scope: number, color: string | null) =>
+    invoke<TaskTag>("create_task_tag", { name, shortcut, scope, color }),
+  updateTaskTag: (tag: TaskTag) => invoke("update_task_tag", { tag }),
+  deleteTaskTag: (tagId: number) => invoke("delete_task_tag", { tagId }),
+  toggleTaskTag: (targets: Targets, tagId: number) =>
+    invoke<TagChange[]>("toggle_task_tag", { targets, tagId }),
 };
 
 // The cullant:// scheme is served as http://cullant.localhost/ on Windows.

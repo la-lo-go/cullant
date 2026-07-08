@@ -38,7 +38,7 @@ fn now_secs() -> i64 {
 }
 
 /// Expand target ids according to group fan-out rules.
-fn expand_targets(conn: &Connection, targets: &Targets) -> AppResult<Vec<i64>> {
+pub(crate) fn expand_targets(conn: &Connection, targets: &Targets) -> AppResult<Vec<i64>> {
     if !targets.as_groups {
         return Ok(targets.ids.clone());
     }

@@ -1,4 +1,5 @@
 import { session } from "../stores/session.svelte";
+import { tags } from "../stores/tags.svelte";
 import { view } from "../stores/view.svelte";
 import {
   effectiveBindings,
@@ -88,7 +89,34 @@ function execute(id: CommandId, e: KeyboardEvent) {
       return session.togglePairHalf();
     case "pair.toggleCoupling":
       return void session.togglePairCoupling();
+    case "tag.chord":
+      armTagChord();
+      return;
   }
+}
+
+// --- T + digit chord for task tags ---
+let chordTimer: ReturnType<typeof setTimeout> | null = null;
+
+export const chord = $state({ armed: false });
+
+function armTagChord() {
+  chord.armed = true;
+  if (chordTimer) clearTimeout(chordTimer);
+  chordTimer = setTimeout(() => (chord.armed = false), 2000);
+}
+
+function handleChord(e: KeyboardEvent): boolean {
+  if (!chord.armed) return false;
+  chord.armed = false;
+  if (chordTimer) clearTimeout(chordTimer);
+  const n = Number(e.key);
+  if (Number.isInteger(n) && n >= 1 && n <= 9) {
+    const tag = tags.all[n - 1];
+    if (tag) void session.toggleTag(tag.id, e);
+    return true; // digit consumed by the chord, never reaches rate.N
+  }
+  return false; // any other key cancels the chord and runs normally
 }
 
 export function handleKeydown(e: KeyboardEvent) {
@@ -104,9 +132,23 @@ export function handleKeydown(e: KeyboardEvent) {
     return;
   }
 
+  if (handleChord(e)) {
+    e.preventDefault();
+    return;
+  }
+
+  // Per-tag custom shortcuts (assigned in the tag editor) win over nothing —
+  // they're merged after the base keymap so remapped base keys keep priority.
   const command = keymap.bindings.get(normalized);
   if (command) {
     e.preventDefault();
     execute(command, e);
+    return;
+  }
+
+  const tag = tags.all.find((t) => t.shortcut === normalized);
+  if (tag) {
+    e.preventDefault();
+    void session.toggleTag(tag.id, e);
   }
 }
