@@ -26,6 +26,8 @@
   import Type from "@lucide/svelte/icons/type";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import ImageIcon from "@lucide/svelte/icons/image";
+  import VideoIcon from "@lucide/svelte/icons/video";
 
   let showKeybindings = $state(false);
   let showCloseConfirm = $state(false);
@@ -76,18 +78,28 @@
     <header class="toolbar">
       <span class="title">Cullant</span>
       <span class="path" title={catalog.project.rootPath}>{truncatePath(catalog.project.rootPath)}</span>
-      <div class="segmented">
+      <div class="media-toggle">
         <button
+          class="media-btn"
           class:active={catalog.media === "photos"}
+          disabled={catalog.mediaCounts.photos === 0}
+          title={catalog.mediaCounts.photos === 0 ? "No photos in this project" : "Show photos"}
           onclick={blurring(() => void catalog.setMedia("photos").then(() => session.clampFocus()))}
         >
-          Photos
+          <ImageIcon size={14} />
+          <span>Photos</span>
+          <span class="count">{catalog.mediaCounts.photos}</span>
         </button>
         <button
+          class="media-btn"
           class:active={catalog.media === "videos"}
+          disabled={catalog.mediaCounts.videos === 0}
+          title={catalog.mediaCounts.videos === 0 ? "No videos in this project" : "Show videos"}
           onclick={blurring(() => void catalog.setMedia("videos").then(() => session.clampFocus()))}
         >
-          Videos
+          <VideoIcon size={14} />
+          <span>Videos</span>
+          <span class="count">{catalog.mediaCounts.videos}</span>
         </button>
       </div>
       <span class="spacer"></span>
@@ -338,6 +350,44 @@
 
   .segmented button {
     padding: 4px 8px;
+  }
+
+  .media-toggle {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    border-radius: 8px;
+    background: #1e1e23;
+    border: 1px solid #333;
+  }
+
+  .media-btn {
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    padding: 5px 12px;
+    font-weight: 600;
+  }
+
+  .media-btn:hover:not(:disabled) {
+    border-color: #6b6bff;
+  }
+
+  .media-btn.active {
+    background: #3a3a5c;
+    border-color: #6b8bff;
+    color: #fff;
+  }
+
+  .media-btn .count {
+    font-weight: 400;
+    opacity: 0.65;
+    font-size: 11px;
+  }
+
+  .media-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
   }
 
   .welcome {

@@ -42,6 +42,40 @@ pub enum MediaTab {
     Videos,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaCounts {
+    pub photos: i64,
+    pub videos: i64,
+}
+
+/// Total present-file counts per media kind, independent of the active tab —
+/// used to disable the Photos/Videos toggle when one side is empty.
+#[tauri::command]
+pub fn media_counts(state: State<'_, AppState>) -> AppResult<MediaCounts> {
+    let db = {
+        let guard = state.project.lock().unwrap();
+        guard
+            .as_ref()
+            .ok_or(crate::error::AppError::NoProject)?
+            .db
+            .clone()
+    };
+    db.call(|conn| {
+        let photos: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE status = 0 AND kind IN (0, 1)",
+            [],
+            |r| r.get(0),
+        )?;
+        let videos: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE status = 0 AND kind = 2",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(MediaCounts { photos, videos })
+    })
+}
+
 /// Return the light-weight index of all present files for one media tab.
 /// ~100 bytes per item; the whole catalog crosses IPC once and the frontend
 /// filters/virtualizes locally.

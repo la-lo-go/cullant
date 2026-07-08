@@ -54,6 +54,7 @@ pub fn run() {
             commands::project::rescan_project,
             commands::project::close_project,
             commands::catalog::query_items,
+            commands::catalog::media_counts,
             commands::culling::set_rating,
             commands::culling::set_flag,
             commands::culling::set_label,

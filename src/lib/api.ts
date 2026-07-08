@@ -27,6 +27,11 @@ export interface ItemLite {
   tagIds: number[];
 }
 
+export interface MediaCounts {
+  photos: number;
+  videos: number;
+}
+
 export type SyncFrom = "raw" | "jpeg" | "none";
 
 export interface FileMetadata {
@@ -126,6 +131,7 @@ export const api = {
   rescanProject: () => invoke("rescan_project"),
   queryItems: (sort: SortKey, media: MediaTab) =>
     invoke<ItemLite[]>("query_items", { sort, media }),
+  mediaCounts: () => invoke<MediaCounts>("media_counts"),
   setRating: (targets: Targets, rating: number) =>
     invoke<CullState[]>("set_rating", { targets, rating }),
   setFlag: (targets: Targets, flag: number) =>

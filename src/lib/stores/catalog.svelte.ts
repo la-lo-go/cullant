@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import {
   api,
   type ItemLite,
+  type MediaCounts,
   type MediaTab,
   type ProjectInfo,
   type ScanDone,
@@ -20,6 +21,8 @@ class CatalogStore {
   preloading = $state(false);
   thumbProgress = $state({ done: 0, total: 0 });
   error = $state("");
+  /** Total present-file counts per kind, independent of the active tab. */
+  mediaCounts = $state<MediaCounts>({ photos: 0, videos: 0 });
 
   /// Adopt a project the backend already opened (CULLANT_OPEN_PROJECT).
   async adoptCurrent() {
@@ -57,6 +60,7 @@ class CatalogStore {
   async refresh() {
     if (!this.project) return;
     this.items = await api.queryItems(this.sort, this.media);
+    this.mediaCounts = await api.mediaCounts();
   }
 
   async setSort(sort: SortKey) {
