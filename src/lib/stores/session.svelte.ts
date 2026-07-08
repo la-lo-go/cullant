@@ -143,10 +143,12 @@ class SessionStore {
   moveFocus(delta: number) {
     const max = Math.max(0, this.filtered.length - 1);
     this.focusedIndex = Math.min(max, Math.max(0, this.focusedIndex + delta));
+    this.selectionAnchor = this.focusedIndex;
   }
 
   focusEdge(end: boolean) {
     this.focusedIndex = end ? Math.max(0, this.filtered.length - 1) : 0;
+    this.selectionAnchor = this.focusedIndex;
   }
 
   // --- multi-selection (Windows-style) ---

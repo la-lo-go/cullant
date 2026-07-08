@@ -45,7 +45,10 @@
         class="cell"
         class:focused={v.index === session.focusedIndex}
         style="transform: translateX({v.x}px); width:{CELL}px"
-        onpointerdown={() => (session.focusedIndex = v.index)}
+        onpointerdown={() => {
+          session.focusedIndex = v.index;
+          session.selectionAnchor = v.index;
+        }}
         role="button"
         tabindex="-1"
       >
