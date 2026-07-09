@@ -54,6 +54,69 @@
     }
   });
 
+  /**
+   * Unified "back" action shared by desktop and Android. Hierarchy:
+   *   1. If any modal/overlay is open, close the top-most one (and stop).
+   *   2. Else if in loupe/compare, return to the grid.
+   *   3. Else (grid, nothing open) treat it as "close the project" and open the
+   *      close-project confirmation. Backing out of THAT dialog hits rule 1.
+   */
+  function goBack() {
+    // Top-most first, matching the visual stacking order of the dialogs below.
+    if (showKeybindings) {
+      showKeybindings = false;
+      return;
+    }
+    if (session.recoupleDialogFor !== null) {
+      session.recoupleDialogFor = null;
+      return;
+    }
+    if (tags.editorOpen) {
+      tags.editorOpen = false;
+      return;
+    }
+    if (session.commitDialogOpen) {
+      session.commitDialogOpen = false;
+      return;
+    }
+    if (session.moveDialogOpen) {
+      session.moveDialogOpen = false;
+      return;
+    }
+    if (showCloseConfirm) {
+      showCloseConfirm = false;
+      return;
+    }
+    if (session.filtersPanelOpen) {
+      session.filtersPanelOpen = false;
+      return;
+    }
+    if (view.mode !== "grid") {
+      view.mode = "grid";
+      return;
+    }
+    // At the grid root: offer to close the project. On the welcome screen
+    // (no project open) there's nothing to back out of, so do nothing.
+    if (catalog.project) showCloseConfirm = true;
+  }
+
+  // History-API "trap" so the OS/browser back gesture never navigates away or
+  // exits the app. We seed a history entry on mount, and every popstate (Android
+  // hardware/gesture back, desktop mouse back button, Alt+Left) runs goBack()
+  // then re-seeds another entry so subsequent backs stay captured. goBack()
+  // always does something (down to showing the close-confirm), so we always
+  // re-seed and never fall off our own history. Programmatic pushState does not
+  // itself fire popstate, so there is no feedback loop.
+  $effect(() => {
+    history.pushState(null, "", location.href);
+    const onPopState = () => {
+      goBack();
+      history.pushState(null, "", location.href);
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  });
+
   // Whether the open project has any subfolders — used to hide the folder
   // tree toggle when there's nothing to scope by.
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
