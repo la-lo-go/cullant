@@ -10,13 +10,22 @@
   import Scissors from "@lucide/svelte/icons/scissors";
   import Info from "@lucide/svelte/icons/info";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
+  import { edgeBounce } from "../anim";
 
   const item = $derived(session.focused);
+
+  let stage = $state<HTMLElement | null>(null);
+  // Bounce the image when the user tries to step past the first/last photo.
+  $effect(() => {
+    const b = session.edgeBump;
+    if (b.n === 0 || !stage) return;
+    edgeBounce(stage, b.dir, "x");
+  });
 </script>
 
 <div class="viewer">
   {#if item}
-    <div class="stage">
+    <div class="stage" bind:this={stage}>
       {#if item.kind === 2}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video class="player" src={videoUrl(item)} controls preload="metadata"></video>

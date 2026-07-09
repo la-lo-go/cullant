@@ -228,9 +228,28 @@ class SessionStore {
     if (this.focusedIndex < 0) this.focusedIndex = 0;
   }
 
+  /** Re-keyed whenever a navigation is blocked at the first/last item, so the
+   *  active view can play a quick "no more" bounce. `dir` is -1 (start) / +1
+   *  (end); `axis` is the movement axis; `n` increments to re-trigger. */
+  edgeBump = $state<{ dir: 1 | -1; axis: "x" | "y"; n: number }>({
+    dir: 1,
+    axis: "x",
+    n: 0,
+  });
+
   moveFocus(delta: number) {
     const max = Math.max(0, this.filtered.length - 1);
-    this.focusedIndex = Math.min(max, Math.max(0, this.focusedIndex + delta));
+    const next = Math.min(max, Math.max(0, this.focusedIndex + delta));
+    if (next === this.focusedIndex && delta !== 0) {
+      // Already at the edge — signal a bounce instead of a silent no-op.
+      this.edgeBump = {
+        dir: delta > 0 ? 1 : -1,
+        axis: Math.abs(delta) === 1 ? "x" : "y",
+        n: this.edgeBump.n + 1,
+      };
+      return;
+    }
+    this.focusedIndex = next;
     this.selectionAnchor = this.focusedIndex;
   }
 

@@ -8,8 +8,17 @@
   import Pin from "@lucide/svelte/icons/pin";
   import PinOff from "@lucide/svelte/icons/pin-off";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
+  import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
+
+  let panes = $state<HTMLElement | null>(null);
+  // Bounce the panes when stepping past the first/last photo.
+  $effect(() => {
+    const b = session.edgeBump;
+    if (b.n === 0 || !panes) return;
+    edgeBounce(panes, b.dir, "x");
+  });
 
   // 2-up compare. Each pane owns its zoom (ZoomImage `standalone`), so the two
   // photos can be inspected at different magnifications independently.
@@ -59,7 +68,7 @@
 </script>
 
 <div class="compare">
-  <div class="panes">
+  <div class="panes" bind:this={panes}>
     <button class="back" title="Back to grid (Esc)" onclick={() => (view.mode = "grid")}><X size={16} /></button>
     <button
       class="back filmstrip-btn"

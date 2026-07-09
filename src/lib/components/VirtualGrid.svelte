@@ -8,6 +8,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Scissors from "@lucide/svelte/icons/scissors";
   import Play from "@lucide/svelte/icons/play";
+  import { edgeBounce } from "../anim";
 
   let { items }: { items: ItemLite[] } = $props();
 
@@ -23,9 +24,17 @@
   };
 
   let viewport = $state<HTMLDivElement | null>(null);
+  let canvasEl = $state<HTMLDivElement | null>(null);
   let scrollTop = $state(0);
   let width = $state(0);
   let height = $state(0);
+
+  // Bounce the grid when arrow keys try to move past the first/last cell.
+  $effect(() => {
+    const b = session.edgeBump;
+    if (b.n === 0 || !canvasEl) return;
+    edgeBounce(canvasEl, b.dir, b.axis);
+  });
 
   // Cell pitch (thumbnail + label + gap). Smaller on narrow viewports so phones
   // show several columns instead of one huge cell.
@@ -273,7 +282,7 @@
   onpointercancel={endDrag}
   ondblclick={onDblClick}
 >
-  <div class="canvas" style="height:{totalRows * CELL}px">
+  <div class="canvas" bind:this={canvasEl} style="height:{totalRows * CELL}px">
     {#each visible as v}
       <div
         class="cell"
