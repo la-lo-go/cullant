@@ -58,6 +58,10 @@
   // tree toggle when there's nothing to scope by.
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
 
+  // Whether the active tab has any RAW files — used to hide the Mirror/Separate
+  // toggle when there are no RAWs to fan actions out to.
+  const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
+
   async function pickProject() {
     // Android has no filesystem folder dialog; use the SAF tree picker, which
     // returns a content:// URI. Desktop uses the native directory dialog.
@@ -126,13 +130,17 @@
         <button class:active={view.mode === "viewer"} title="Loupe (E)" onclick={blurring(() => (view.mode = "viewer"))}><Search size={14} /></button>
         <button class:active={view.mode === "compare"} title="Compare (C)" onclick={blurring(() => (view.mode = "compare"))}><Columns2 size={14} /></button>
       </div>
-      <button
-        class:active={session.mirrorMode}
-        title="Mirror mode: RAW+JPEG pairs act as one photo (M)"
-        onclick={blurring(() => session.setMirrorMode(!session.mirrorMode))}
-      >
-        {#if session.mirrorMode}<Link size={14} /><span>Mirror</span>{:else}<Unlink size={14} /><span>Separate</span>{/if}
-      </button>
+      {#if hasRaws}
+        <button
+          class:active={session.mirrorMode}
+          title={session.mirrorMode
+            ? "Mirror mode: RAW+JPEG pairs act as one photo — click to separate (M)"
+            : "Separate mode: RAW and JPEG act independently — click to mirror (M)"}
+          onclick={blurring(() => session.setMirrorMode(!session.mirrorMode))}
+        >
+          {#if session.mirrorMode}<Link size={14} /><span>Mirror</span>{:else}<Unlink size={14} /><span>Separate</span>{/if}
+        </button>
+      {/if}
       <button
         class:active={session.showNames}
         title="Show/hide file names"
