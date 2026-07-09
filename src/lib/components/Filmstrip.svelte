@@ -68,6 +68,41 @@
       // capture may already be gone
     }
   }
+
+  // Tap-vs-scroll detection for cells: a finger dragging the strip should scroll
+  // it, not steal focus to whatever cell it first landed on. We record the
+  // pointer down position/index and only select on pointerup if it barely moved.
+  const TAP_SLOP = 8; // px of movement still counted as a tap (not a scroll)
+  let tapPointerId: number | null = null;
+  let tapStartX = 0;
+  let tapStartY = 0;
+  let tapIndex = -1;
+
+  function onCellPointerDown(e: PointerEvent, index: number) {
+    // Do NOT setPointerCapture here — that would swallow the strip's native
+    // horizontal scroll. We only read coordinates.
+    tapPointerId = e.pointerId;
+    tapStartX = e.clientX;
+    tapStartY = e.clientY;
+    tapIndex = index;
+  }
+
+  function onCellPointerUp(e: PointerEvent) {
+    if (tapPointerId !== e.pointerId || tapIndex < 0) return;
+    const moved =
+      Math.abs(e.clientX - tapStartX) > TAP_SLOP ||
+      Math.abs(e.clientY - tapStartY) > TAP_SLOP;
+    if (!moved) {
+      session.focusedIndex = tapIndex;
+      session.selectionAnchor = tapIndex;
+    }
+    resetTap();
+  }
+
+  function resetTap() {
+    tapPointerId = null;
+    tapIndex = -1;
+  }
 </script>
 
 {#if session.showFilmstrip}
@@ -96,10 +131,9 @@
             class="cell"
             class:focused={v.index === session.focusedIndex}
             style="transform: translateX({v.x}px); width:{CELL}px"
-            onpointerdown={() => {
-              session.focusedIndex = v.index;
-              session.selectionAnchor = v.index;
-            }}
+            onpointerdown={(e) => onCellPointerDown(e, v.index)}
+            onpointerup={onCellPointerUp}
+            onpointercancel={resetTap}
             role="button"
             tabindex="-1"
           >
