@@ -11,8 +11,25 @@
   import Info from "@lucide/svelte/icons/info";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import { edgeBounce } from "../anim";
+  import { previewUrl } from "../api";
+  import { settings } from "../stores/settings.svelte";
 
   const item = $derived(session.focused);
+
+  // Warm neighboring previews so arrowing never waits on a cold decode. The
+  // ThumbPool is LIFO, so a real navigation enqueued after these warms still
+  // jumps the queue. In "window" preview mode the app relies on this warming
+  // entirely, so reach much further out.
+  $effect(() => {
+    const offsets =
+      settings.previewMode === "window"
+        ? Array.from({ length: 40 }, (_, i) => (i % 2 === 0 ? i / 2 + 1 : -(i + 1) / 2))
+        : [1, -1, 2];
+    for (const off of offsets) {
+      const n = session.filtered[session.focusedIndex + off];
+      if (n && n.kind !== 2) new Image().src = previewUrl(n);
+    }
+  });
 
   let stage = $state<HTMLElement | null>(null);
   // Bounce the image when the user tries to step past the first/last photo.

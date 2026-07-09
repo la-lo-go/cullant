@@ -9,6 +9,7 @@ import {
   type ScanProgress,
   type SortKey,
 } from "../api";
+import { settings } from "./settings.svelte";
 
 class CatalogStore {
   project = $state<ProjectInfo | null>(null);
@@ -22,6 +23,8 @@ class CatalogStore {
   /** True while the initial scan + thumbnail preload blocks the grid. */
   preloading = $state(false);
   thumbProgress = $state({ done: 0, total: 0 });
+  /** Background preview pregeneration (previews:progress); total 0 = idle. */
+  previewProgress = $state({ done: 0, total: 0 });
   error = $state("");
   /** Total present-file counts per kind, independent of the active tab. */
   mediaCounts = $state<MediaCounts>({ photos: 0, videos: 0 });
@@ -40,7 +43,7 @@ class CatalogStore {
   async open(path: string) {
     this.error = "";
     try {
-      this.project = await api.openProject(path);
+      this.project = await api.openProject(path, settings.previewMode);
       this.scanning = true;
       this.scanFound = 0;
       this.preloading = true;
@@ -99,6 +102,11 @@ listen("metadata:done", async () => {
 });
 listen<{ done: number; total: number }>("thumbs:progress", (e) => {
   catalog.thumbProgress = e.payload;
+});
+listen<{ done: number; total: number }>("previews:progress", (e) => {
+  // Reset to idle once the background tier completes.
+  catalog.previewProgress =
+    e.payload.done >= e.payload.total ? { done: 0, total: 0 } : e.payload;
 });
 listen<{ total: number }>("thumbs:done", async (e) => {
   catalog.thumbProgress = { done: e.payload.total, total: e.payload.total };

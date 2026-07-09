@@ -5,6 +5,7 @@
   import { recent } from "$lib/stores/recent.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
+  import { settings } from "$lib/stores/settings.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
   import VirtualGrid from "$lib/components/VirtualGrid.svelte";
   import FolderTree from "$lib/components/FolderTree.svelte";
@@ -187,6 +188,13 @@
       <span class="spacer"></span>
       {#if catalog.scanning}
         <span class="status scanning">Scanning… {catalog.scanFound || ""}</span>
+      {:else if catalog.previewProgress.total > 0}
+        <span
+          class="status scanning"
+          title="Generating previews in the background — photos you open jump the queue"
+        >
+          Previews… {catalog.previewProgress.done} / {catalog.previewProgress.total}
+        </span>
       {/if}
       <div class="segmented">
         <button class:active={view.mode === "grid"} title="Grid (G)" onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
@@ -264,7 +272,7 @@
       >
         Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}
       </button>
-      <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject())}><RefreshCw size={14} /></button>
+      <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject(settings.previewMode))}><RefreshCw size={14} /></button>
       <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
       <button title="Keyboard shortcuts" onclick={blurring(() => (showKeybindings = true))}><Keyboard size={14} /></button>
       <button onclick={blurring(() => (showCloseConfirm = true))}>Close project</button>

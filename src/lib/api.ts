@@ -108,6 +108,8 @@ export interface CommitOutcome {
 
 export type SortKey = "capture" | "name";
 export type MediaTab = "photos" | "videos";
+/** How 2560px previews are pregenerated (mirrors the backend enum). */
+export type PreviewMode = "all" | "background" | "window";
 
 export interface ScanProgress {
   found: number;
@@ -131,13 +133,15 @@ export interface CullState {
 }
 
 export const api = {
-  openProject: (path: string) => invoke<ProjectInfo>("open_project", { path }),
+  openProject: (path: string, previewMode?: PreviewMode) =>
+    invoke<ProjectInfo>("open_project", { path, previewMode }),
   // Android SAF folder picker; returns a content:// tree URI (or null if
   // cancelled) suitable to pass to openProject. No-op returning null on desktop.
   pickSafTree: () => invoke<string | null>("pick_saf_tree"),
   currentProject: () => invoke<ProjectInfo | null>("current_project"),
   closeProject: () => invoke("close_project"),
-  rescanProject: () => invoke("rescan_project"),
+  rescanProject: (previewMode?: PreviewMode) =>
+    invoke("rescan_project", { previewMode }),
   listRecentProjects: () => invoke<RecentProject[]>("list_recent_projects"),
   removeRecentProject: (path: string) => invoke("remove_recent_project", { path }),
   queryItems: (sort: SortKey, media: MediaTab, desc: boolean) =>
