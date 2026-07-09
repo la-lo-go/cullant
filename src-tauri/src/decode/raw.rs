@@ -6,23 +6,11 @@ use rawler::rawsource::RawSource;
 
 use crate::error::{AppError, AppResult};
 
-/// Extract the camera-embedded preview JPEG from RAW bytes — the fast path
-/// for culling: no demosaic, just pull the largest preview the container has.
-/// `name` is only used for error/log messages (a rel_path). Takes owned bytes
-/// so it works over any storage backend (real file or SAF stream), not just an
-/// mmap'able path.
-pub fn embedded_preview(bytes: Arc<Vec<u8>>, name: &str) -> AppResult<DynamicImage> {
-    let source = RawSource::new_from_shared_vec(bytes).with_path(name);
-    Ok(embedded_preview_scaled(&source, u32::MAX, name)?.image)
-}
-
 /// A decoded embedded image plus whether it was the container's full-size one
 /// (only then do its dimensions approximate the original file's dimensions,
 /// making them safe to record as `files.width/height`).
 pub struct DecodedRaw {
     pub image: DynamicImage,
-    /// Read by the thumbs/ingest refactor (next commits).
-    #[allow(dead_code)]
     pub is_full: bool,
 }
 

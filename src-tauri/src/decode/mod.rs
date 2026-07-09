@@ -20,7 +20,6 @@ use crate::store::{read_all, ProjectStore};
 ///
 /// `RawSource` derefs to `&[u8]`, so the same source also feeds the EXIF and
 /// plain-JPEG decode paths without another read.
-#[allow(dead_code)] // wired in by the thumbs/ingest refactor (next commits)
 pub fn open_source(store: &dyn ProjectStore, rel: &str) -> AppResult<RawSource> {
     if let Some(path) = store.local_path(rel) {
         if let Ok(source) = RawSource::new(&path) {

@@ -14,7 +14,6 @@ use crate::error::{AppError, AppResult};
 /// scaled path can't help or can't be trusted: images too small for even a 1/2
 /// factor (zune is faster at scale 1), exotic pixel formats (CMYK, 16-bit),
 /// any decode error, or a result that somehow undershoots the target.
-#[allow(dead_code)] // wired in by the thumbs/ingest refactor (next commits)
 pub fn decode_scaled(bytes: &[u8], min_long_edge: u32, name: &str) -> AppResult<DynamicImage> {
     match try_scaled(bytes, min_long_edge) {
         Ok(Some(img)) => return Ok(img),
