@@ -454,7 +454,9 @@
 
 
   button.active {
-    border-color: #6b8bff;
+    background: #3a3a5c;
+    border-color: transparent;
+    color: #fff;
   }
 
   /* Same pill treatment as the Photos/Videos toggle. */
