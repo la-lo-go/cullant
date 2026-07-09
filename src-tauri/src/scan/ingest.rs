@@ -33,7 +33,8 @@ use crate::store::ProjectStore;
 use crate::thumbs::{self, SourceMeta, ThumbKind, PREVIEW_LONG_EDGE, THUMB_LONG_EDGE};
 
 /// Files handled per parallel burst; also the metadata write-batch size.
-const CHUNK: usize = 32;
+/// Smaller on Android to bound the number of in-flight decode buffers.
+const CHUNK: usize = if cfg!(target_os = "android") { 8 } else { 32 };
 
 /// How 2560px previews are pregenerated. Chosen in the frontend settings and
 /// passed with open/rescan; `All` is the default (matches CULLANT_OPEN_PROJECT).

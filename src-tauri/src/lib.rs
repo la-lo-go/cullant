@@ -35,6 +35,19 @@ pub struct AppState {
 pub fn run() {
     tracing_subscriber::fmt().init();
 
+    // Mobile: cap the decode pool. Phones report 8 cores but sustain far
+    // fewer under thermal/memory pressure, and each in-flight decode holds
+    // multi-MB buffers. Best-effort — a later init error just keeps defaults.
+    #[cfg(target_os = "android")]
+    {
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get().min(4))
+            .unwrap_or(2);
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global();
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
