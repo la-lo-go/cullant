@@ -401,9 +401,14 @@
     border-color: #6b8bff;
   }
 
+  /* Same pill treatment as the Photos/Videos toggle. */
   .segmented {
     display: flex;
-    gap: 2px;
+    gap: 3px;
+    padding: 2px;
+    border-radius: 8px;
+    background: #1e1e23;
+    border: 1px solid #333;
   }
 
   button.commit.haswork {
@@ -424,7 +429,20 @@
   }
 
   .segmented button {
-    padding: 3px 7px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    padding: 4px 9px;
+  }
+
+  .segmented button:hover:not(:disabled) {
+    border-color: #6b6bff;
+  }
+
+  .segmented button.active {
+    background: #3a3a5c;
+    border-color: #6b8bff;
+    color: #fff;
   }
 
   .media-toggle {
