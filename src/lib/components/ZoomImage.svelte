@@ -1,8 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { previewUrl, cullantUrl, type ItemLite } from "../api";
+  import { previewUrl, thumbUrl, cullantUrl, type ItemLite } from "../api";
   import { view, clampScale } from "../stores/view.svelte";
   import { session } from "../stores/session.svelte";
+  import { settings } from "../stores/settings.svelte";
 
   let { item, standalone = false }: { item: ItemLite; standalone?: boolean } = $props();
 
@@ -84,21 +85,40 @@
   // preview has loaded, so rapid arrowing never flashes a blank pane.
   let displayedSrc = $state(untrack(() => previewUrl(item)));
   let displayedAlt = $state(untrack(() => item.name));
+  /** True while the fit view shows the upscaled grid thumb as a stand-in. */
+  let softPreview = $state(false);
 
   $effect(() => {
     const target = fitSrc;
     const alt = item.name;
-    if (target === displayedSrc) return;
+    const progressive = settings.progressiveLoupe;
+    const thumb = thumbUrl(item);
+    if (target === untrack(() => displayedSrc)) return;
     const loader = new Image();
     // On error swap anyway — a broken image beats silently showing the wrong photo.
     loader.onload = loader.onerror = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      softPreview = false;
       displayedSrc = target;
       displayedAlt = alt;
     };
     loader.src = target;
+    // Progressive fit: if the sharp preview takes longer than a beat, paint
+    // the (virtually always cached) grid thumb immediately, softened, and let
+    // the preview replace it on load. Cached previews land before the timer,
+    // so revisits never flash the soft frame.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    if (progressive) {
+      timer = setTimeout(() => {
+        softPreview = true;
+        displayedSrc = thumb;
+        displayedAlt = alt;
+      }, 80);
+    }
     return () => {
       // A newer target superseded this load; drop it so swaps stay in order.
       loader.onload = loader.onerror = null;
+      if (timer !== undefined) clearTimeout(timer);
     };
   });
 
@@ -351,7 +371,14 @@
       <span class="pct">{Math.round(z.scale * 100)}%</span>
     </div>
   {:else}
-    <img src={displayedSrc} alt={displayedAlt} class="fit" draggable="false" onload={onImageLoad} />
+    <img
+      src={displayedSrc}
+      alt={displayedAlt}
+      class="fit"
+      class:soft={softPreview}
+      draggable="false"
+      onload={onImageLoad}
+    />
   {/if}
 </div>
 
@@ -384,6 +411,11 @@
     max-height: 100%;
     object-fit: contain;
     user-select: none;
+  }
+
+  /* Upscaled grid thumb standing in while the sharp preview decodes. */
+  img.fit.soft {
+    filter: blur(4px);
   }
 
   img.full {
