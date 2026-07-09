@@ -591,13 +591,12 @@
   /* Peek tab shown at the left edge when the folder tree is collapsed. */
   .tree-peek {
     flex: none;
-    align-self: flex-start;
+    align-self: center;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 18px;
     height: 44px;
-    margin-top: 8px;
     padding: 0;
     border: 1px solid #2e2e36;
     border-left: none;

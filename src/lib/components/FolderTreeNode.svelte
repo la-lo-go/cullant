@@ -88,6 +88,9 @@
 
   .name {
     flex: 1;
+    /* Allow the flex item to shrink below its content width so the label
+       ellipsizes instead of forcing the row wider than the panel. */
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

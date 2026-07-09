@@ -89,6 +89,10 @@
     flex: none;
     width: var(--tree-w, 210px);
     overflow-y: auto;
+    /* overflow-y: auto forces overflow-x to compute to auto (spec), so long
+       folder names would produce a horizontal scrollbar. Clip instead — node
+       labels already ellipsize. */
+    overflow-x: hidden;
     background: #1e1e23;
     border-right: 1px solid #2e2e36;
   }
@@ -175,6 +179,9 @@
 
   .name {
     flex: 1;
+    /* Allow the flex item to shrink below its content width so ellipsis kicks
+       in instead of forcing the row wider. */
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
