@@ -16,8 +16,19 @@
   let lastY = 0;
   let wheelAccum = 0;
 
+  // Active touch points (by pointerId), plus pinch/swipe gesture state. Only
+  // touch pointers use these; mouse/pen keep the classic drag-to-pan behavior.
+  const pointers = new Map<number, { x: number; y: number }>();
+  let pinchStartDist = 0;
+  let pinchStartScale = 1;
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+
   const WHEEL_ZOOM = 1.15;
   const WHEEL_NAV_THRESHOLD = 50;
+  const SWIPE_NAV_THRESHOLD = 55;
+
+  const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
   // Standalone panes (compare) keep their own non-persistent zoom state;
   // the loupe uses the shared store so zoom survives stepping through a burst.
@@ -186,26 +197,117 @@
     (e.currentTarget as HTMLElement).blur();
   }
 
+  function frameRelative(clientX: number, clientY: number): { x: number; y: number } {
+    if (!frame) return { x: 0.5, y: 0.5 };
+    const r = frame.getBoundingClientRect();
+    return { x: (clientX - r.left) / r.width, y: (clientY - r.top) / r.height };
+  }
+
+  function fitScale(): number {
+    return Math.min(1, frameW / (fullW || 1), frameH / (fullH || 1));
+  }
+
+  function panBy(dx: number, dy: number) {
+    if (!dispW || !dispH) return;
+    z.cx = clamp01(z.cx - dx / dispW);
+    z.cy = clamp01(z.cy - dy / dispH);
+  }
+
   function onPointerDown(e: PointerEvent) {
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+
+    if (e.pointerType === "touch") {
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pointers.size === 2) {
+        // Second finger down: begin a pinch, entering zoom from fit if needed.
+        const [a, b] = [...pointers.values()];
+        pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
+        pinchStartScale = z.zoomed ? z.scale : fitScale();
+        if (!z.zoomed) {
+          const p = frameRelative((a.x + b.x) / 2, (a.y + b.y) / 2);
+          z.cx = p.x;
+          z.cy = p.y;
+          z.scale = pinchStartScale;
+          z.zoomed = true;
+        }
+        dragging = false;
+      } else if (pointers.size === 1) {
+        swipeStartX = e.clientX;
+        swipeStartY = e.clientY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        dragging = z.zoomed; // one finger pans only when already zoomed
+      }
+      return;
+    }
+
+    // Mouse / pen: drag to pan when zoomed (unchanged desktop behavior).
     if (!z.zoomed) return;
     dragging = true;
     lastX = e.clientX;
     lastY = e.clientY;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }
 
   function onPointerMove(e: PointerEvent) {
+    if (e.pointerType === "touch") {
+      if (!pointers.has(e.pointerId)) return;
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (pointers.size >= 2) {
+        const [a, b] = [...pointers.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        if (pinchStartDist > 0) z.scale = clampScale(pinchStartScale * (d / pinchStartDist));
+        return;
+      }
+      // One finger, zoomed: pan. Not zoomed: nothing live (swipe decided on up).
+      if (z.zoomed && dragging) {
+        panBy(e.clientX - lastX, e.clientY - lastY);
+        lastX = e.clientX;
+        lastY = e.clientY;
+      }
+      return;
+    }
+
     if (!dragging || !z.zoomed || !dispW || !dispH) return;
-    const dx = e.clientX - lastX;
-    const dy = e.clientY - lastY;
+    panBy(e.clientX - lastX, e.clientY - lastY);
     lastX = e.clientX;
     lastY = e.clientY;
-    z.cx = Math.min(1, Math.max(0, z.cx - dx / dispW));
-    z.cy = Math.min(1, Math.max(0, z.cy - dy / dispH));
   }
 
-  function onPointerUp() {
+  function onPointerUp(e: PointerEvent) {
+    if (e.pointerType === "touch") {
+      const wasSingle = pointers.size === 1;
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinchStartDist = 0;
+
+      // A single-finger horizontal flick in fit view navigates photos.
+      if (wasSingle && !z.zoomed) {
+        const dx = e.clientX - swipeStartX;
+        const dy = e.clientY - swipeStartY;
+        if (Math.abs(dx) > SWIPE_NAV_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
+          session.moveFocus(dx < 0 ? 1 : -1);
+        }
+      }
+
+      // Lifting one finger of a pinch: let the remaining finger keep panning.
+      if (pointers.size === 1 && z.zoomed) {
+        const [p] = [...pointers.values()];
+        lastX = p.x;
+        lastY = p.y;
+        dragging = true;
+      } else if (pointers.size === 0) {
+        dragging = false;
+      }
+      return;
+    }
+
     dragging = false;
+  }
+
+  function onPointerCancel(e: PointerEvent) {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinchStartDist = 0;
+    if (pointers.size === 0) dragging = false;
   }
 </script>
 
@@ -220,6 +322,7 @@
   onpointerdown={onPointerDown}
   onpointermove={onPointerMove}
   onpointerup={onPointerUp}
+  onpointercancel={onPointerCancel}
   role="img"
 >
   {#if z.zoomed}
@@ -263,6 +366,8 @@
     align-items: center;
     justify-content: center;
     background: #131316;
+    /* We handle swipe/pinch/pan ourselves via pointer events. */
+    touch-action: none;
   }
 
   .frame.zoomed {
