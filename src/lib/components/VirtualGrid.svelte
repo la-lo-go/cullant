@@ -14,6 +14,7 @@
 
   const OVERSCAN_ROWS = 2;
   const LONG_PRESS_MS = 400; // touch: hold this long to start a marquee
+  const MARGIN_Y = 14; // breathing room above the first row and below the last
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -45,9 +46,12 @@
   // equal margins sit on both edges instead of collecting all on the right.
   const padX = $derived(Math.max(0, (width - cols * CELL) / 2));
   const totalRows = $derived(Math.ceil(items.length / cols));
-  const firstRow = $derived(Math.max(0, Math.floor(scrollTop / CELL) - OVERSCAN_ROWS));
+  // The grid is shifted down by MARGIN_Y, so offset the visible-window math by it.
+  const firstRow = $derived(
+    Math.max(0, Math.floor((scrollTop - MARGIN_Y) / CELL) - OVERSCAN_ROWS)
+  );
   const lastRow = $derived(
-    Math.min(totalRows, Math.ceil((scrollTop + height) / CELL) + OVERSCAN_ROWS)
+    Math.min(totalRows, Math.ceil((scrollTop + height - MARGIN_Y) / CELL) + OVERSCAN_ROWS)
   );
 
   // Report layout so keyboard ↑/↓ move one visual row.
@@ -59,7 +63,7 @@
   $effect(() => {
     const row = Math.floor(session.focusedIndex / cols);
     if (!viewport) return;
-    const top = row * CELL;
+    const top = MARGIN_Y + row * CELL;
     const bottom = top + CELL;
     if (top < viewport.scrollTop) {
       viewport.scrollTo({ top });
@@ -77,7 +81,7 @@
       for (let col = 0; col < cols; col++) {
         const index = row * cols + col;
         if (index >= items.length) break;
-        out.push({ item: items[index], index, x: padX + col * CELL, y: row * CELL });
+        out.push({ item: items[index], index, x: padX + col * CELL, y: MARGIN_Y + row * CELL });
       }
     }
     return out;
@@ -127,7 +131,7 @@
     if (x >= viewport.clientWidth) return null; // scrollbar, not the grid
     const y = viewY + viewport.scrollTop;
     const col = Math.floor((x - padX) / CELL);
-    const index = Math.floor(y / CELL) * cols + col;
+    const index = Math.floor((y - MARGIN_Y) / CELL) * cols + col;
     const onCell = col >= 0 && col < cols && index >= 0 && index < items.length;
     return { x, y, index, onCell };
   }
@@ -235,8 +239,8 @@
     const next = new Set(drag.base);
     const c0 = Math.max(0, Math.floor((x0 - padX) / CELL));
     const c1 = Math.min(cols - 1, Math.floor((x1 - padX) / CELL));
-    const r0 = Math.max(0, Math.floor(y0 / CELL));
-    const r1 = Math.min(totalRows - 1, Math.floor(y1 / CELL));
+    const r0 = Math.max(0, Math.floor((y0 - MARGIN_Y) / CELL));
+    const r1 = Math.min(totalRows - 1, Math.floor((y1 - MARGIN_Y) / CELL));
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
         const i = r * cols + c;
@@ -282,7 +286,7 @@
   onpointercancel={endDrag}
   ondblclick={onDblClick}
 >
-  <div class="canvas" bind:this={canvasEl} style="height:{totalRows * CELL}px">
+  <div class="canvas" bind:this={canvasEl} style="height:{totalRows * CELL + MARGIN_Y * 2}px">
     {#each visible as v}
       <div
         class="cell"
