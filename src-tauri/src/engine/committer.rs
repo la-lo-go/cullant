@@ -157,11 +157,7 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
 
 /// Delete one file (by rel_path) according to the mode, through the store.
 /// Returns undo info JSON (with a project-relative trash path when applicable).
-fn delete_via_store(
-    store: &dyn ProjectStore,
-    rel: &str,
-    mode: DeletionMode,
-) -> AppResult<String> {
+fn delete_via_store(store: &dyn ProjectStore, rel: &str, mode: DeletionMode) -> AppResult<String> {
     match mode {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         DeletionMode::Recycle => match store.local_path(rel) {
@@ -370,9 +366,13 @@ pub fn execute(
                 }
                 store.create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
                 if action_i == 1 {
-                    store.move_to(&p.rel_path, &dest_dir).map_err(|e| e.to_string())?;
+                    store
+                        .move_to(&p.rel_path, &dest_dir)
+                        .map_err(|e| e.to_string())?;
                 } else {
-                    store.copy(&p.rel_path, &dest_rel).map_err(|e| e.to_string())?;
+                    store
+                        .copy(&p.rel_path, &dest_rel)
+                        .map_err(|e| e.to_string())?;
                 }
                 Ok(())
             })();

@@ -38,7 +38,10 @@ pub fn write_sidecar(
     use std::io::Write;
 
     let sc_rel = sidecar_rel(rel_path);
-    let output = match read_all(store, &sc_rel).ok().and_then(|b| String::from_utf8(b).ok()) {
+    let output = match read_all(store, &sc_rel)
+        .ok()
+        .and_then(|b| String::from_utf8(b).ok())
+    {
         Some(existing) => merge_into_existing(&existing, state).unwrap_or_else(|e| {
             tracing::warn!("sidecar merge failed for {sc_rel} ({e}); rewriting fresh");
             fresh_sidecar(state)

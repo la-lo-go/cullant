@@ -6,8 +6,9 @@ use serde::Serialize;
 use tauri::State;
 
 use crate::db::Db;
+use crate::decode;
 use crate::error::{AppError, AppResult};
-use crate::store::{read_all, ProjectStore};
+use crate::store::ProjectStore;
 use crate::AppState;
 
 /// Camera/EXIF metadata for the loupe info panel. Common fields come from the
@@ -68,11 +69,10 @@ pub fn get_file_metadata(file_id: i64, state: State<'_, AppState>) -> AppResult<
     })?;
 
     // Best-effort deep read; a file without EXIF still returns the DB fields.
-    if let Ok(bytes) = read_all(store.as_ref(), &meta.rel_path) {
-        let name = meta.rel_path.clone();
+    if let Ok(source) = decode::open_source(store.as_ref(), &meta.rel_path) {
         match meta.kind {
-            0 => read_raw_exif(Arc::new(bytes), &name, &mut meta),
-            1 => read_image_exif(&bytes, &mut meta),
+            0 => read_raw_exif(&source, &mut meta),
+            1 => read_image_exif(source.buf(), &mut meta),
             _ => {}
         }
     }
@@ -82,15 +82,13 @@ pub fn get_file_metadata(file_id: i64, state: State<'_, AppState>) -> AppResult<
 
 // --- RAW (rawler) ---
 
-fn read_raw_exif(bytes: Arc<Vec<u8>>, name: &str, meta: &mut FileMetadata) {
+fn read_raw_exif(source: &rawler::rawsource::RawSource, meta: &mut FileMetadata) {
     use rawler::decoders::RawDecodeParams;
-    use rawler::rawsource::RawSource;
 
-    let source = RawSource::new_from_shared_vec(bytes).with_path(name);
-    let Ok(decoder) = rawler::get_decoder(&source) else {
+    let Ok(decoder) = rawler::get_decoder(source) else {
         return;
     };
-    let Ok(md) = decoder.raw_metadata(&source, &RawDecodeParams::default()) else {
+    let Ok(md) = decoder.raw_metadata(source, &RawDecodeParams::default()) else {
         return;
     };
     let e = &md.exif;

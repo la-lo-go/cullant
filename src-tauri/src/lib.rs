@@ -48,7 +48,12 @@ pub fn run() {
             if let Ok(path) = std::env::var("CULLANT_OPEN_PROJECT") {
                 use tauri::Manager;
                 let state = app.state::<AppState>();
-                match commands::project::do_open_project(&path, app.handle(), &state) {
+                match commands::project::do_open_project(
+                    &path,
+                    app.handle(),
+                    &state,
+                    Default::default(),
+                ) {
                     Ok(info) => tracing::info!("auto-opened project {}", info.root_path),
                     Err(e) => tracing::error!("CULLANT_OPEN_PROJECT failed: {e}"),
                 }

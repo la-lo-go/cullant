@@ -140,8 +140,7 @@ impl ProjectStore for SafStore {
     fn list_recursive(&self, skip_dirs: &[&str]) -> AppResult<Vec<StoreEntry>> {
         let mut files = Vec::new();
         // (rel_prefix, document_id) worklist, starting at the root.
-        let mut stack: Vec<(String, String)> =
-            vec![(String::new(), self.root_document_id.clone())];
+        let mut stack: Vec<(String, String)> = vec![(String::new(), self.root_document_id.clone())];
 
         while let Some((prefix, parent_doc)) = stack.pop() {
             let entries: Vec<SafEntry> = self

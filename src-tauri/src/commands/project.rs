@@ -8,6 +8,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::db::{migrations, Db};
 use crate::error::{AppError, AppResult};
+use crate::scan::ingest::PreviewMode;
 use crate::store::ProjectStore;
 use crate::thumbs::ThumbPool;
 use crate::{scan, AppState, ProjectState};
@@ -28,23 +29,17 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct ThumbsProgress {
-    done: usize,
-    total: usize,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct ThumbsDone {
-    total: usize,
-}
-
-/// Kick off scan + metadata pass + thumbnail pregeneration on a background
-/// thread and notify the UI through scan:progress / scan:done /
-/// metadata:done / thumbs:progress / thumbs:done events.
-fn spawn_scan(app: AppHandle, db: Arc<Db>, store: Arc<dyn ProjectStore>, root: PathBuf) {
+/// Kick off scan + the fused ingest pass (metadata + thumbnails + previews)
+/// on a background thread; the UI is notified through scan:progress /
+/// scan:done / metadata:done / thumbs:progress / thumbs:done /
+/// previews:progress events.
+fn spawn_scan(
+    app: AppHandle,
+    db: Arc<Db>,
+    store: Arc<dyn ProjectStore>,
+    root: PathBuf,
+    mode: PreviewMode,
+) {
     std::thread::Builder::new()
         .name("scanner".into())
         .spawn(move || {
@@ -53,16 +48,8 @@ fn spawn_scan(app: AppHandle, db: Arc<Db>, store: Arc<dyn ProjectStore>, root: P
                 let _ = app.emit("scan:error", e.to_string());
                 return;
             }
-            if let Err(e) = scan::metadata::run_metadata_pass(&app, &db, store.as_ref()) {
-                tracing::error!("metadata pass failed: {e}");
-            }
-            match crate::thumbs::pregenerate_all(&db, store.as_ref(), &root, |done, total| {
-                let _ = app.emit("thumbs:progress", ThumbsProgress { done, total });
-            }) {
-                Ok(total) => {
-                    let _ = app.emit("thumbs:done", ThumbsDone { total });
-                }
-                Err(e) => tracing::error!("thumb pregeneration failed: {e}"),
+            if let Err(e) = scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &root, mode) {
+                tracing::error!("ingest pass failed: {e}");
             }
         })
         .expect("failed to spawn scanner thread");
@@ -71,10 +58,11 @@ fn spawn_scan(app: AppHandle, db: Arc<Db>, store: Arc<dyn ProjectStore>, root: P
 #[tauri::command]
 pub fn open_project(
     path: String,
+    preview_mode: Option<PreviewMode>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectInfo> {
-    do_open_project(&path, &app, &state)
+    do_open_project(&path, &app, &state, preview_mode.unwrap_or_default())
 }
 
 /// Launch the Android SAF folder picker and return the picked `content://` tree
@@ -102,11 +90,16 @@ pub fn pick_saf_tree(app: AppHandle) -> AppResult<Option<String>> {
 }
 
 /// Shared by the IPC command and the CULLANT_OPEN_PROJECT dev/startup hook.
-pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResult<ProjectInfo> {
+pub fn do_open_project(
+    path: &str,
+    app: &AppHandle,
+    state: &AppState,
+    mode: PreviewMode,
+) -> AppResult<ProjectInfo> {
     // On Android a project is a SAF `content://` tree, not a filesystem path.
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
-        return open_saf_project(path, app, state);
+        return open_saf_project(path, app, state, mode);
     }
 
     let root = PathBuf::from(path);
@@ -144,7 +137,7 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
     tracing::info!("opened project at {root_str}");
     crate::commands::recent::record_opened(app, &root_str);
 
-    spawn_scan(app.clone(), db, store, root);
+    spawn_scan(app.clone(), db, store, root, mode);
 
     Ok(ProjectInfo {
         root_path: root_str,
@@ -181,7 +174,12 @@ pub(crate) fn project_data_base<R: tauri::Runtime>(
 /// media; the DB and thumbnail cache live in private app storage keyed by a hash
 /// of the tree URI, because SQLite cannot run inside a SAF tree.
 #[cfg(target_os = "android")]
-fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppResult<ProjectInfo> {
+fn open_saf_project(
+    tree_uri: &str,
+    app: &AppHandle,
+    state: &AppState,
+    mode: PreviewMode,
+) -> AppResult<ProjectInfo> {
     use tauri_plugin_saf::SafExt;
 
     let root_doc = app
@@ -226,7 +224,7 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
     tracing::info!("opened SAF project {tree_uri}");
     crate::commands::recent::record_opened(app, tree_uri);
 
-    spawn_scan(app.clone(), db, store, base);
+    spawn_scan(app.clone(), db, store, base, mode);
 
     Ok(ProjectInfo {
         root_path: tree_uri.to_string(),
@@ -265,7 +263,11 @@ pub fn current_project(state: State<'_, AppState>) -> AppResult<Option<ProjectIn
 }
 
 #[tauri::command]
-pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+pub fn rescan_project(
+    preview_mode: Option<PreviewMode>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
     let (db, store, root) = {
         let guard = state.project.lock().unwrap();
         let project = guard.as_ref().ok_or(AppError::NoProject)?;
@@ -275,7 +277,7 @@ pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<(
             project.root.clone(),
         )
     };
-    spawn_scan(app, db, store, root);
+    spawn_scan(app, db, store, root, preview_mode.unwrap_or_default());
     Ok(())
 }
 

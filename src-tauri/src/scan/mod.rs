@@ -1,4 +1,4 @@
-pub mod metadata;
+pub mod ingest;
 
 use std::collections::HashMap;
 #[cfg(test)]
