@@ -28,6 +28,9 @@
   let height = $state(0);
 
   const cols = $derived(Math.max(1, Math.floor(width / CELL)));
+  // Center the block of columns: split the leftover horizontal space evenly so
+  // equal margins sit on both edges instead of collecting all on the right.
+  const padX = $derived(Math.max(0, (width - cols * CELL) / 2));
   const totalRows = $derived(Math.ceil(items.length / cols));
   const firstRow = $derived(Math.max(0, Math.floor(scrollTop / CELL) - OVERSCAN_ROWS));
   const lastRow = $derived(
@@ -61,7 +64,7 @@
       for (let col = 0; col < cols; col++) {
         const index = row * cols + col;
         if (index >= items.length) break;
-        out.push({ item: items[index], index, x: col * CELL, y: row * CELL });
+        out.push({ item: items[index], index, x: padX + col * CELL, y: row * CELL });
       }
     }
     return out;
@@ -99,9 +102,9 @@
     const viewY = e.clientY - rect.top;
     if (x >= viewport.clientWidth) return null; // scrollbar, not the grid
     const y = viewY + viewport.scrollTop;
-    const col = Math.floor(x / CELL);
+    const col = Math.floor((x - padX) / CELL);
     const index = Math.floor(y / CELL) * cols + col;
-    const onCell = col < cols && index >= 0 && index < items.length;
+    const onCell = col >= 0 && col < cols && index >= 0 && index < items.length;
     return { x, y, index, onCell };
   }
 
@@ -178,8 +181,8 @@
     marquee = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 
     const next = new Set(drag.base);
-    const c0 = Math.max(0, Math.floor(x0 / CELL));
-    const c1 = Math.min(cols - 1, Math.floor(x1 / CELL));
+    const c0 = Math.max(0, Math.floor((x0 - padX) / CELL));
+    const c1 = Math.min(cols - 1, Math.floor((x1 - padX) / CELL));
     const r0 = Math.max(0, Math.floor(y0 / CELL));
     const r1 = Math.min(totalRows - 1, Math.floor(y1 / CELL));
     for (let r = r0; r <= r1; r++) {
