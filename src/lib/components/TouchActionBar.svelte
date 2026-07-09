@@ -84,6 +84,9 @@
     .touchbar {
       display: flex;
       align-items: center;
+      /* Center the button groups; "safe" falls back to start when the content
+         overflows so the leading items stay reachable while scrolling. */
+      justify-content: safe center;
       gap: 8px;
       overflow-x: auto;
       flex-wrap: nowrap;
