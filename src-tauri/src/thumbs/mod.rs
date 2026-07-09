@@ -149,6 +149,11 @@ pub fn pregenerate_all(
         return Ok(0);
     }
 
+    // Announce the total up front (before decoding the first thumbnail) so the
+    // preload panel can immediately show `0 / N` instead of `0 / ?` for the
+    // whole first-chunk window.
+    progress(0, total);
+
     let mut done = 0usize;
     for chunk in ids.chunks(32) {
         chunk.par_iter().for_each(|&file_id| {
