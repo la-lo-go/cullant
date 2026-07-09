@@ -16,9 +16,13 @@
 
   let stage = $state<HTMLElement | null>(null);
   // Bounce the image when the user tries to step past the first/last photo.
+  // Track the last-seen bump so switching *into* this view (which remounts the
+  // component with an already-nonzero counter) doesn't replay a stale bounce.
+  let lastBump = session.edgeBump.n;
   $effect(() => {
     const b = session.edgeBump;
-    if (b.n === 0 || !stage) return;
+    if (b.n === lastBump || !stage) return;
+    lastBump = b.n;
     edgeBounce(stage, b.dir, "x");
   });
 </script>

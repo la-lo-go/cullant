@@ -13,10 +13,13 @@
   type Side = "left" | "right";
 
   let panes = $state<HTMLElement | null>(null);
-  // Bounce the panes when stepping past the first/last photo.
+  // Bounce the panes when stepping past the first/last photo. Track the
+  // last-seen bump so switching into this view doesn't replay a stale bounce.
+  let lastBump = session.edgeBump.n;
   $effect(() => {
     const b = session.edgeBump;
-    if (b.n === 0 || !panes) return;
+    if (b.n === lastBump || !panes) return;
+    lastBump = b.n;
     edgeBounce(panes, b.dir, "x");
   });
 

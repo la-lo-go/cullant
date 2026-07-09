@@ -31,9 +31,13 @@
   let height = $state(0);
 
   // Bounce the grid when arrow keys try to move past the first/last cell.
+  // Track the last-seen bump so switching into the grid view doesn't replay a
+  // stale bounce on mount.
+  let lastBump = session.edgeBump.n;
   $effect(() => {
     const b = session.edgeBump;
-    if (b.n === 0 || !canvasEl) return;
+    if (b.n === lastBump || !canvasEl) return;
+    lastBump = b.n;
     edgeBounce(canvasEl, b.dir, b.axis);
   });
 
