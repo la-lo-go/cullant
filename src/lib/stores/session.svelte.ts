@@ -45,7 +45,25 @@ class SessionStore {
   minRating = $state(0);
   labelFilter = $state<string | null>(null);
   tagFilter = $state<number | null>(null);
-  filterBarVisible = $state(true);
+  /** Whether the Filters dropdown panel is open. */
+  filtersPanelOpen = $state(false);
+
+  /** True when any filter narrows the grid (used to badge the Filters button). */
+  hasActiveFilters = $derived(
+    this.flagFilter !== "all" ||
+      this.minRating > 0 ||
+      this.labelFilter !== null ||
+      this.tagFilter !== null,
+  );
+
+  /** Reset every filter to its neutral value. */
+  clearFilters() {
+    this.flagFilter = "all";
+    this.minRating = 0;
+    this.labelFilter = null;
+    this.tagFilter = null;
+    this.clampFocus();
+  }
   /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
   folderFilter = $state<string | null>(null);
   folderTreeVisible = $state(true);

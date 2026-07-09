@@ -70,7 +70,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "label.green", title: "Green label", classify: true },
   { id: "label.blue", title: "Blue label", classify: true },
   { id: "label.purple", title: "Purple label", classify: true },
-  { id: "ui.toggleFilterBar", title: "Show/hide filter bar" },
+  { id: "ui.toggleFilterBar", title: "Toggle filters panel" },
   { id: "ui.toggleMirror", title: "Toggle RAW+JPEG mirror mode" },
   { id: "view.grid", title: "Grid view" },
   { id: "view.viewer", title: "Loupe view" },

@@ -70,7 +70,7 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     case "label.purple":
       return session.label("Purple", e);
     case "ui.toggleFilterBar":
-      session.filterBarVisible = !session.filterBarVisible;
+      session.filtersPanelOpen = !session.filtersPanelOpen;
       return;
     case "ui.toggleFolderTree":
       session.folderTreeVisible = !session.folderTreeVisible;

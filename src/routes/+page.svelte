@@ -10,7 +10,8 @@
   import FolderTree from "$lib/components/FolderTree.svelte";
   import Viewer from "$lib/components/Viewer.svelte";
   import CompareView from "$lib/components/CompareView.svelte";
-  import FilterBar from "$lib/components/FilterBar.svelte";
+  import FiltersPanel from "$lib/components/FiltersPanel.svelte";
+  import SelectionBar from "$lib/components/SelectionBar.svelte";
   import TouchActionBar from "$lib/components/TouchActionBar.svelte";
   import { buildFolderTree } from "$lib/components/folderTree";
   import KeybindingsDialog from "$lib/components/KeybindingsDialog.svelte";
@@ -33,6 +34,7 @@
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
+  import Filter from "@lucide/svelte/icons/filter";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -152,6 +154,20 @@
       >
         <FolderTreeIcon size={14} />
       </button>
+      <div class="filters-anchor">
+        <button
+          class:active={session.filtersPanelOpen}
+          class:haswork={session.hasActiveFilters}
+          title="Filters"
+          onclick={blurring(() => (session.filtersPanelOpen = !session.filtersPanelOpen))}
+        >
+          <Filter size={14} />
+          <span>Filters</span>
+        </button>
+        {#if session.filtersPanelOpen}
+          <FiltersPanel />
+        {/if}
+      </div>
       <select value={catalog.sort} onchange={onSortChange}>
         <option value="capture">Capture time</option>
         <option value="name">Name</option>
@@ -189,8 +205,8 @@
         {/if}
       </div>
     {:else}
-      {#if session.filterBarVisible && view.mode === "grid"}
-        <FilterBar />
+      {#if session.selectedIds.size > 0 && view.mode === "grid"}
+        <SelectionBar />
       {/if}
 
       {#if view.mode === "grid"}
@@ -381,6 +397,18 @@
   button.commit.haswork {
     border-color: #ffb86b;
     color: #ffd9a8;
+  }
+
+  /* Anchors the Filters dropdown under its toolbar button. */
+  .filters-anchor {
+    position: relative;
+    display: inline-flex;
+  }
+
+  /* Active-filters indicator on the Filters button. */
+  .filters-anchor button.haswork {
+    border-color: #6b8bff;
+    color: #cfd9ff;
   }
 
   .segmented button {
