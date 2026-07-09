@@ -11,8 +11,8 @@
 
   let { items }: { items: ItemLite[] } = $props();
 
-  const CELL = 200; // cell pitch in px (thumbnail + label + gap)
   const OVERSCAN_ROWS = 2;
+  const LONG_PRESS_MS = 400; // touch: hold this long to start a marquee
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -26,6 +26,10 @@
   let scrollTop = $state(0);
   let width = $state(0);
   let height = $state(0);
+
+  // Cell pitch (thumbnail + label + gap). Smaller on narrow viewports so phones
+  // show several columns instead of one huge cell.
+  const CELL = $derived(width > 0 && width < 520 ? 120 : 200);
 
   const cols = $derived(Math.max(1, Math.floor(width / CELL)));
   // Center the block of columns: split the leftover horizontal space evenly so
@@ -92,6 +96,17 @@
     lastViewY: number; // viewport-relative, for edge auto-scroll
   } | null = null;
   let edgeRaf = 0;
+  // Touch: a pending long-press (before it turns into a marquee).
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+  let touchStart: { x: number; y: number } | null = null;
+
+  function cancelLongPress() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    touchStart = null;
+  }
 
   /** Cells are a uniform grid — geometry replaces DOM hit-testing. Returns
    *  null off-grid (scrollbar) or the hit index (may be out of range). */
@@ -121,22 +136,50 @@
     }
     if (e.shiftKey) return; // Shift is range-select; never starts a marquee
 
-    drag = {
-      pointerId: e.pointerId,
-      startX: x,
-      startY: y,
-      base: e.ctrlKey ? new Set(session.selectedIds) : new Set(),
-      // Empty canvas space starts the marquee at once (a plain click there
-      // clears the selection); dragging off a cell needs the threshold.
-      active: !onCell,
-      lastX: x,
-      lastViewY: viewY,
+    const beginMarquee = (active: boolean) => {
+      drag = {
+        pointerId: e.pointerId,
+        startX: x,
+        startY: y,
+        base: e.ctrlKey ? new Set(session.selectedIds) : new Set(),
+        active,
+        lastX: x,
+        lastViewY: viewY,
+      };
+      viewport!.setPointerCapture(e.pointerId);
+      if (drag.active) applyMarquee(x, y);
     };
-    viewport.setPointerCapture(e.pointerId);
-    if (drag.active) applyMarquee(x, y);
+
+    if (e.pointerType === "touch") {
+      // A plain touch drag scrolls the grid; only a long-press (finger held
+      // still) starts a marquee. The cell tap above already set the selection.
+      cancelLongPress();
+      touchStart = { x: e.clientX, y: e.clientY };
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        touchStart = null;
+        beginMarquee(true);
+      }, LONG_PRESS_MS);
+      return;
+    }
+
+    // Mouse/pen: empty space starts the marquee at once (a plain click there
+    // clears the selection); dragging off a cell needs the movement threshold.
+    beginMarquee(!onCell);
   }
 
   function onPointerMove(e: PointerEvent) {
+    // Still deciding tap-vs-long-press: any real movement means a scroll, so
+    // drop the pending marquee and let the browser scroll.
+    if (longPressTimer && touchStart) {
+      if (
+        Math.abs(e.clientX - touchStart.x) > DRAG_THRESHOLD ||
+        Math.abs(e.clientY - touchStart.y) > DRAG_THRESHOLD
+      ) {
+        cancelLongPress();
+      }
+      return;
+    }
     if (!drag || e.pointerId !== drag.pointerId || !viewport) return;
     const rect = viewport.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -203,6 +246,7 @@
   }
 
   function endDrag(e: PointerEvent) {
+    cancelLongPress(); // clear a pending touch long-press (this was a tap/scroll)
     if (!drag || e.pointerId !== drag.pointerId) return;
     if (viewport?.hasPointerCapture(e.pointerId)) viewport.releasePointerCapture(e.pointerId);
     drag = null;
@@ -302,6 +346,9 @@
     overflow-y: auto;
     overflow-x: hidden;
     contain: strict;
+    /* Let the browser handle vertical scroll; a long-press marquee takes over
+       via pointer capture. */
+    touch-action: pan-y;
   }
 
   .canvas {
