@@ -1,8 +1,7 @@
 <script lang="ts">
   import { recentThumbUrl, type RecentProject } from "../api";
   import { recent } from "../stores/recent.svelte";
-  import Folder from "@lucide/svelte/icons/folder";
-  import FolderX from "@lucide/svelte/icons/folder-x";
+  import ImageOff from "@lucide/svelte/icons/image-off";
   import X from "@lucide/svelte/icons/x";
 
   let { onopen }: { onopen: (path: string) => void } = $props();
@@ -51,9 +50,8 @@
           onclick={() => openCard(project)}
           disabled={!project.available}
         >
-          <div class="folder-icon">
+          <div class="preview">
             {#if project.available}
-              <Folder size={64} strokeWidth={1} />
               {#each PREVIEW_SLOTS as slot, i}
                 <img
                   class="peek peek-{i}"
@@ -64,7 +62,7 @@
                 />
               {/each}
             {:else}
-              <FolderX size={64} strokeWidth={1} />
+              <ImageOff size={40} strokeWidth={1.25} />
             {/if}
           </div>
           <span class="name">{folderName(project.path)}</span>
@@ -104,9 +102,9 @@
 
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    gap: 14px;
-    max-width: 900px;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+    max-width: 960px;
     margin: 0 auto;
   }
 
@@ -118,15 +116,15 @@
     gap: 2px;
     padding: 14px 10px 10px;
     border-radius: 10px;
-    border: 1px solid transparent;
-    background: transparent;
+    border: 1px solid #2c2c34;
+    background: #202024;
     color: inherit;
     font-family: inherit;
     cursor: pointer;
   }
 
   .card:hover:not(:disabled) {
-    background: #232329;
+    background: #26262c;
     border-color: #3a3a42;
   }
 
@@ -135,45 +133,54 @@
     opacity: 0.55;
   }
 
-  .folder-icon {
+  /* A clean fanned stack of the project's photos (no folder, no glare). */
+  .preview {
     position: relative;
-    width: 64px;
-    height: 64px;
-    color: #6b8bff;
-    margin-bottom: 6px;
-  }
-
-  .card.unavailable .folder-icon {
+    width: 132px;
+    height: 96px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     color: #77777f;
   }
 
   .peek {
     position: absolute;
-    width: 28px;
-    height: 28px;
+    width: 84px;
+    height: 84px;
     object-fit: cover;
-    border-radius: 3px;
+    border-radius: 5px;
     border: 2px solid #1b1b1f;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
-    top: 6px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
+    transition: transform 180ms ease-out;
   }
 
   .peek-0 {
-    left: 6px;
-    transform: rotate(-8deg);
-    z-index: 3;
+    transform: translateX(-8px) rotate(-8deg);
+    z-index: 1;
   }
 
   .peek-1 {
-    left: 22px;
-    transform: rotate(3deg);
-    z-index: 2;
+    transform: translateY(-2px) rotate(2deg);
+    z-index: 3;
   }
 
   .peek-2 {
-    left: 36px;
-    transform: rotate(11deg);
-    z-index: 1;
+    transform: translateX(8px) rotate(9deg);
+    z-index: 2;
+  }
+
+  .card:hover .peek-0 {
+    transform: translateX(-32px) translateY(-4px) rotate(-14deg);
+  }
+
+  .card:hover .peek-1 {
+    transform: translateY(-9px) rotate(2deg);
+  }
+
+  .card:hover .peek-2 {
+    transform: translateX(32px) translateY(-4px) rotate(14deg);
   }
 
   .name {

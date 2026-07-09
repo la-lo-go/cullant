@@ -84,10 +84,10 @@
     .touchbar {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       overflow-x: auto;
       flex-wrap: nowrap;
-      padding: 8px calc(10px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom))
+      padding: 4px calc(10px + env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom))
         calc(10px + env(safe-area-inset-left));
       background: #202026;
       border-top: 1px solid #3a3a42;
@@ -121,7 +121,7 @@
     align-items: center;
     justify-content: center;
     min-width: 44px;
-    min-height: 44px;
+    min-height: 42px;
     border: 1px solid #3a3a42;
     border-radius: 8px;
     background: #2a2a30;

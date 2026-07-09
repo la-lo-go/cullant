@@ -2,6 +2,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { session } from "$lib/stores/session.svelte";
+  import { recent } from "$lib/stores/recent.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
@@ -10,6 +11,8 @@
   import Viewer from "$lib/components/Viewer.svelte";
   import CompareView from "$lib/components/CompareView.svelte";
   import FilterBar from "$lib/components/FilterBar.svelte";
+  import TouchActionBar from "$lib/components/TouchActionBar.svelte";
+  import { buildFolderTree } from "$lib/components/folderTree";
   import KeybindingsDialog from "$lib/components/KeybindingsDialog.svelte";
   import PairSyncDialog from "$lib/components/PairSyncDialog.svelte";
   import TagEditor from "$lib/components/TagEditor.svelte";
@@ -27,10 +30,13 @@
   import Tag from "@lucide/svelte/icons/tag";
   import Type from "@lucide/svelte/icons/type";
   import Keyboard from "@lucide/svelte/icons/keyboard";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+
+  const REPO_URL = "https://github.com/la-lo-go/cullant";
 
   let showKeybindings = $state(false);
   let showCloseConfirm = $state(false);
@@ -43,8 +49,16 @@
     }
   });
 
+  // Whether the open project has any subfolders — used to disable the folder
+  // tree toggle when there's nothing to scope by.
+  const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
+
   async function pickProject() {
-    const path = await open({ directory: true, title: "Open project folder" });
+    // Android has no filesystem folder dialog; use the SAF tree picker, which
+    // returns a content:// URI. Desktop uses the native directory dialog.
+    const path = navigator.userAgent.includes("Android")
+      ? await api.pickSafTree()
+      : await open({ directory: true, title: "Open project folder" });
     if (path) await catalog.open(path);
   }
 
@@ -132,7 +146,8 @@
       </button>
       <button
         class:active={session.folderTreeVisible}
-        title="Show/hide folder tree (D)"
+        disabled={!hasSubfolders}
+        title={hasSubfolders ? "Show/hide folder tree (D)" : "No subfolders in this project"}
         onclick={blurring(() => (session.folderTreeVisible = !session.folderTreeVisible))}
       >
         <FolderTreeIcon size={14} />
@@ -157,13 +172,14 @@
 
     {#if catalog.preloading}
       <div class="preload">
-        <span class="spin"><LoaderCircle size={36} /></span>
         {#if catalog.scanning}
           <p class="phase">Scanning… {catalog.scanFound || ""}</p>
           <progress></progress>
         {:else}
           <p class="phase">
-            Generating thumbnails… {catalog.thumbProgress.done} / {catalog.thumbProgress.total}
+            Generating thumbnails… {catalog.thumbProgress.done} / {catalog.thumbProgress.total > 0
+              ? catalog.thumbProgress.total
+              : "?"}
           </p>
           {#if catalog.thumbProgress.total > 0}
             <progress max={catalog.thumbProgress.total} value={catalog.thumbProgress.done}></progress>
@@ -189,9 +205,10 @@
       {:else}
         <CompareView />
       {/if}
+      <TouchActionBar />
     {/if}
   {:else}
-    <div class="home">
+    <div class="home" class:centered={recent.list.length === 0}>
       <div class="welcome">
         <h1>Cullant</h1>
         <p>Fast, keyboard-first photo culling</p>
@@ -199,6 +216,10 @@
         {#if catalog.error}
           <p class="error">{catalog.error}</p>
         {/if}
+        <button class="opensource" onclick={() => openUrl(REPO_URL)}>
+          <ExternalLink size={13} />
+          Open source on GitHub
+        </button>
       </div>
       <ProjectGallery onopen={(path) => void catalog.open(path)} />
     </div>
@@ -262,8 +283,8 @@
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 12px;
+    gap: 8px;
+    padding: 4px 10px;
     background: #232329;
     border-bottom: 1px solid #333;
     flex: none;
@@ -271,6 +292,7 @@
 
   .title {
     font-weight: 700;
+    font-size: 13px;
   }
 
   .path {
@@ -312,12 +334,18 @@
     border-color: #6b6bff;
   }
 
+  .toolbar button,
+  .toolbar select {
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+
   .toolbar button {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 26px;
+    gap: 5px;
+    min-height: 22px;
   }
 
   .preload {
@@ -340,17 +368,6 @@
     width: 320px;
   }
 
-  .spin {
-    display: inline-flex;
-    color: #6b8bff;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
 
   button.active {
     border-color: #6b8bff;
@@ -367,13 +384,13 @@
   }
 
   .segmented button {
-    padding: 4px 8px;
+    padding: 3px 7px;
   }
 
   .media-toggle {
     display: flex;
     gap: 3px;
-    padding: 3px;
+    padding: 2px;
     border-radius: 8px;
     background: #1e1e23;
     border: 1px solid #333;
@@ -383,8 +400,9 @@
     border: 1px solid transparent;
     border-radius: 6px;
     background: transparent;
-    padding: 5px 12px;
+    padding: 3px 10px;
     font-weight: 600;
+    font-size: 12px;
   }
 
   .media-btn:hover:not(:disabled) {
@@ -413,6 +431,10 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+
+  .home.centered {
+    justify-content: center;
   }
 
   .grid-area {
@@ -451,5 +473,22 @@
 
   .error {
     color: #ff6b6b;
+  }
+
+  button.opensource {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 0.75rem;
+    border: none;
+    background: none;
+    padding: 2px 4px;
+    font-size: 12px;
+    color: #8fa6ff;
+  }
+
+  button.opensource:hover {
+    color: #b0c0ff;
+    text-decoration: underline;
   }
 </style>
