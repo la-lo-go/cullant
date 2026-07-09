@@ -28,6 +28,9 @@
     ),
   );
 
+  // Hover-preview state for the minimum-rating star row (0 = not hovering).
+  let hovered = $state(0);
+
   function count(value: FlagFilter): number {
     const c = session.counts;
     switch (value) {
@@ -88,8 +91,11 @@
       {#each [1, 2, 3, 4, 5] as star (star)}
         <button
           class="star"
-          class:lit={session.minRating >= star}
+          class:lit={hovered === 0 && session.minRating >= star}
+          class:preview={hovered >= star}
           aria-label={`At least ${star} stars`}
+          onmouseenter={() => (hovered = star)}
+          onmouseleave={() => (hovered = 0)}
           onclick={() => {
             session.minRating = session.minRating === star ? 0 : star;
             session.clampFocus();
@@ -269,6 +275,10 @@
 
   .star.lit {
     color: #ffd166;
+  }
+
+  .star.preview {
+    color: #8a8a93;
   }
 
   .dot {

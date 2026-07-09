@@ -24,6 +24,9 @@
     ),
   );
 
+  // Hover-preview state for the star row (0 = not hovering).
+  let hovered = $state(0);
+
   // These act on session.targets(), which is the current selection when one exists.
   const rate = (r: number) => void session.rate(r);
   const flag = (f: number) => void session.flag(f);
@@ -48,7 +51,14 @@
 
   <div class="group stars">
     {#each [1, 2, 3, 4, 5] as star (star)}
-      <button class="star" aria-label={`Set ${star} stars`} onclick={() => rate(star)}>★</button>
+      <button
+        class="star"
+        class:preview={hovered >= star}
+        aria-label={`Set ${star} stars`}
+        onmouseenter={() => (hovered = star)}
+        onmouseleave={() => (hovered = 0)}
+        onclick={() => rate(star)}>★</button
+      >
     {/each}
     <button class="star zero" aria-label="Clear rating" onclick={() => rate(0)}>0</button>
   </div>
@@ -161,8 +171,8 @@
     line-height: 1;
   }
 
-  .star:hover {
-    color: #ffd166;
+  .star.preview {
+    color: #8a8a93;
   }
 
   .star.zero {
