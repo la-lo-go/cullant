@@ -124,8 +124,6 @@
       <span class="spacer"></span>
       {#if catalog.scanning}
         <span class="status scanning">Scanning… {catalog.scanFound || ""}</span>
-      {:else}
-        <span class="status">{catalog.items.length} photos</span>
       {/if}
       <div class="segmented">
         <button class:active={view.mode === "grid"} title="Grid (G)" onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
