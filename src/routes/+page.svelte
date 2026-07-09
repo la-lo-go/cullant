@@ -491,6 +491,7 @@
     border-radius: 6px;
     background: transparent;
     padding: 4px 9px;
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
 
   .segmented button:hover:not(:disabled) {
@@ -501,6 +502,18 @@
     background: #3a3a5c;
     border-color: transparent;
     color: #fff;
+    animation: pill-pop 0.15s ease;
+  }
+
+  /* Quick, subtle scale pop when a pill becomes active. Transform-only so it
+     never shifts layout. */
+  @keyframes pill-pop {
+    0% {
+      transform: scale(0.9);
+    }
+    100% {
+      transform: scale(1);
+    }
   }
 
   /* Sort buttons carry a label plus a direction arrow when active. */
@@ -528,6 +541,7 @@
     padding: 3px 10px;
     font-weight: 600;
     font-size: 12px;
+    transition: background-color 0.15s ease, color 0.15s ease;
   }
 
   .media-btn:hover:not(:disabled) {
@@ -538,6 +552,7 @@
     background: #3a3a5c;
     border-color: transparent;
     color: #fff;
+    animation: pill-pop 0.15s ease;
   }
 
   .media-btn .count {
