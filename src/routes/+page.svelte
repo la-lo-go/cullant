@@ -302,6 +302,34 @@
     color-scheme: dark;
   }
 
+  /* App-styled scrollbars: a thin thumb in the app's periwinkle accent hugging
+     the content edge, a fully transparent track so no bar ever reads as its
+     own column. The 2px transparent border (clipped to content-box) insets the
+     thumb so the visible bar is only ~4px. */
+  :global(::-webkit-scrollbar) {
+    width: 8px;
+    height: 8px;
+  }
+
+  :global(::-webkit-scrollbar-track) {
+    background: transparent;
+  }
+
+  :global(::-webkit-scrollbar-thumb) {
+    background-color: rgba(107, 139, 255, 0.5);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  :global(::-webkit-scrollbar-thumb:hover) {
+    background-color: rgba(107, 139, 255, 0.85);
+  }
+
+  :global(::-webkit-scrollbar-corner) {
+    background: transparent;
+  }
+
   .app {
     display: flex;
     flex-direction: column;
