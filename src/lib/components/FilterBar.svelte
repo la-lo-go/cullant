@@ -1,8 +1,20 @@
 <script lang="ts">
   import { session, LABELS, type FlagFilter } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
+  import { catalog } from "../stores/catalog.svelte";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
+
+  // Only show task tags whose scope matches the current media tab.
+  // scope: 0=photo, 1=video, 2=both.
+  const scopedTags = $derived(
+    tags.all.filter(
+      (tag) =>
+        tag.scope === 2 ||
+        (tag.scope === 0 && catalog.media === "photos") ||
+        (tag.scope === 1 && catalog.media === "videos"),
+    ),
+  );
 
   const flagOptions: { value: FlagFilter; label: string; icon?: typeof Check }[] = [
     { value: "all", label: "All" },
@@ -80,9 +92,9 @@
     {/each}
   </div>
 
-  {#if tags.all.length > 0}
+  {#if scopedTags.length > 0}
     <div class="group tagfilter" title="Task tag filter">
-      {#each tags.all as tag}
+      {#each scopedTags as tag}
         <button
           class="tagseg"
           class:active={session.tagFilter === tag.id}
@@ -119,12 +131,12 @@
   .filterbar {
     display: flex;
     align-items: center;
-    gap: 16px;
-    padding: 6px 12px;
+    gap: 11px;
+    padding: 3px 10px;
     background: #202026;
     border-bottom: 1px solid #2e2e36;
     flex: none;
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .group {
@@ -140,10 +152,10 @@
     border: 1px solid transparent;
     background: transparent;
     color: #bbb;
-    padding: 3px 8px;
+    padding: 2px 7px;
     border-radius: 5px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
     font-family: inherit;
   }
 
@@ -165,7 +177,7 @@
     background: none;
     border: none;
     color: #4a4a52;
-    font-size: 15px;
+    font-size: 14px;
     cursor: pointer;
     padding: 0 1px;
   }
@@ -175,8 +187,8 @@
   }
 
   .dot {
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
     border-radius: 50%;
     background: var(--c);
     border: 2px solid transparent;
@@ -200,10 +212,10 @@
     border: 1px solid transparent;
     background: transparent;
     color: #bbb;
-    padding: 3px 8px;
+    padding: 2px 7px;
     border-radius: 5px;
     cursor: pointer;
-    font-size: 12px;
+    font-size: 11px;
     font-family: inherit;
   }
 
