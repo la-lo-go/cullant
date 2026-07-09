@@ -127,6 +127,13 @@
     position: relative;
   }
 
+  /* Portrait / narrow: stack the two panes vertically instead of side by side. */
+  @media (max-width: 640px), (max-aspect-ratio: 3 / 4) {
+    .panes {
+      flex-direction: column;
+    }
+  }
+
   .back {
     position: absolute;
     top: 10px;

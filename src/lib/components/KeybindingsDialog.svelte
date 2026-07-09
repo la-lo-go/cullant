@@ -63,6 +63,7 @@
     border-radius: 10px;
     padding: 16px 20px;
     width: 460px;
+    max-width: calc(100vw - 24px);
     max-height: 80vh;
     display: flex;
     flex-direction: column;

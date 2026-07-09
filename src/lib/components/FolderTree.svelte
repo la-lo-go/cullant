@@ -42,6 +42,20 @@
     border-right: 1px solid #2e2e36;
   }
 
+  /* On narrow screens the tree floats over the grid instead of squeezing it
+     into one column; toggle it off with the same toolbar/keyboard control. */
+  @media (max-width: 720px) {
+    .tree {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 20;
+      width: min(75%, 240px);
+      box-shadow: 4px 0 18px rgba(0, 0, 0, 0.55);
+    }
+  }
+
   .header {
     padding: 8px 10px;
     font-size: 11px;

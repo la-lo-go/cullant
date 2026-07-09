@@ -107,6 +107,7 @@
     top: 10px;
     right: 48px;
     width: 260px;
+    max-width: calc(100vw - 60px);
     max-height: calc(100% - 60px);
     overflow-y: auto;
     background: #232329;

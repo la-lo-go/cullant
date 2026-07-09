@@ -306,6 +306,19 @@
     flex: none;
   }
 
+  /* Narrow screens: wrap the toolbar to a couple of rows and drop the least
+     useful bits so every control stays reachable instead of overflowing. */
+  @media (max-width: 720px) {
+    .toolbar {
+      flex-wrap: wrap;
+      row-gap: 4px;
+    }
+    .toolbar .path,
+    .toolbar .spacer {
+      display: none;
+    }
+  }
+
   .title {
     font-weight: 700;
     font-size: 13px;
@@ -469,6 +482,7 @@
     flex: 1;
     min-height: 0;
     display: flex;
+    position: relative; /* anchors the folder-tree overlay on narrow screens */
   }
 
   .grid-area :global(.viewport) {

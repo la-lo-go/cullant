@@ -66,6 +66,7 @@
     border-radius: 10px;
     padding: 16px 20px;
     width: 380px;
+    max-width: calc(100vw - 24px);
     outline: none;
   }
 
