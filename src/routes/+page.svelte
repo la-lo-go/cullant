@@ -51,7 +51,7 @@
     }
   });
 
-  // Whether the open project has any subfolders — used to disable the folder
+  // Whether the open project has any subfolders — used to hide the folder
   // tree toggle when there's nothing to scope by.
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
 
@@ -144,14 +144,15 @@
       >
         <Type size={14} />
       </button>
-      <button
-        class:active={session.folderTreeVisible}
-        disabled={!hasSubfolders}
-        title={hasSubfolders ? "Show/hide folder tree (D)" : "No subfolders in this project"}
-        onclick={blurring(() => (session.folderTreeVisible = !session.folderTreeVisible))}
-      >
-        <FolderTreeIcon size={14} />
-      </button>
+      {#if hasSubfolders}
+        <button
+          class:active={session.folderTreeVisible}
+          title="Show/hide folder tree (D)"
+          onclick={blurring(() => (session.folderTreeVisible = !session.folderTreeVisible))}
+        >
+          <FolderTreeIcon size={14} />
+        </button>
+      {/if}
       <div class="filters-anchor">
         <button
           class:active={session.filtersPanelOpen}
