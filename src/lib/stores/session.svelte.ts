@@ -237,11 +237,20 @@ class SessionStore {
     n: 0,
   });
 
+  /** Timestamp of the last emitted edge bump; throttles bursts (fast wheel). */
+  private lastEdgeBumpAt = 0;
+  /** Minimum gap between edge bumps so a hard scroll produces one clean nudge. */
+  private static readonly EDGE_BUMP_COOLDOWN_MS = 250;
+
   moveFocus(delta: number) {
     const max = Math.max(0, this.filtered.length - 1);
     const next = Math.min(max, Math.max(0, this.focusedIndex + delta));
     if (next === this.focusedIndex && delta !== 0) {
-      // Already at the edge — signal a bounce instead of a silent no-op.
+      // Already at the edge — signal a bounce instead of a silent no-op, but
+      // throttle so a fast wheel/swipe burst yields a single clean nudge.
+      const now = Date.now();
+      if (now - this.lastEdgeBumpAt < SessionStore.EDGE_BUMP_COOLDOWN_MS) return;
+      this.lastEdgeBumpAt = now;
       this.edgeBump = {
         dir: delta > 0 ? 1 : -1,
         axis: Math.abs(delta) === 1 ? "x" : "y",
