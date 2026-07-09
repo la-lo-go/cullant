@@ -489,7 +489,7 @@
 
   .segmented button.active {
     background: #3a3a5c;
-    border-color: #6b8bff;
+    border-color: transparent;
     color: #fff;
   }
 
@@ -526,7 +526,7 @@
 
   .media-btn.active {
     background: #3a3a5c;
-    border-color: #6b8bff;
+    border-color: transparent;
     color: #fff;
   }
 
