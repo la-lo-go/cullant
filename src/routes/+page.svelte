@@ -21,6 +21,7 @@
   import CommitDialog from "$lib/components/CommitDialog.svelte";
   import MoveDialog from "$lib/components/MoveDialog.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
+  import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
   import { api } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
@@ -39,12 +40,14 @@
   import VideoIcon from "@lucide/svelte/icons/video";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
   import Filter from "@lucide/svelte/icons/filter";
+  import SettingsIcon from "@lucide/svelte/icons/settings";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
   const REPO_URL = "https://github.com/la-lo-go/cullant";
 
   let showKeybindings = $state(false);
+  let showSettings = $state(false);
   let showCloseConfirm = $state(false);
 
   // Load the project's tag list + pending queue whenever a project opens.
@@ -66,6 +69,10 @@
     // Top-most first, matching the visual stacking order of the dialogs below.
     if (showKeybindings) {
       showKeybindings = false;
+      return;
+    }
+    if (showSettings) {
+      showSettings = false;
       return;
     }
     if (session.recoupleDialogFor !== null) {
@@ -275,6 +282,7 @@
       <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject(settings.previewMode))}><RefreshCw size={14} /></button>
       <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
       <button title="Keyboard shortcuts" onclick={blurring(() => (showKeybindings = true))}><Keyboard size={14} /></button>
+      <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
       <button onclick={blurring(() => (showCloseConfirm = true))}>Close project</button>
     </header>
 
@@ -333,6 +341,10 @@
         {#if catalog.error}
           <p class="error">{catalog.error}</p>
         {/if}
+        <button class="opensource" onclick={() => (showSettings = true)}>
+          <SettingsIcon size={13} />
+          Settings
+        </button>
         <button class="opensource" onclick={() => openUrl(REPO_URL)}>
           <ExternalLink size={13} />
           Open source on GitHub
@@ -344,6 +356,16 @@
 
   {#if showKeybindings}
     <KeybindingsDialog onclose={() => (showKeybindings = false)} />
+  {/if}
+
+  {#if showSettings}
+    <SettingsDialog
+      onclose={() => (showSettings = false)}
+      onshowkeybindings={() => {
+        showSettings = false;
+        showKeybindings = true;
+      }}
+    />
   {/if}
 
   {#if session.recoupleDialogFor !== null}
