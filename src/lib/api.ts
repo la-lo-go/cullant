@@ -132,6 +132,9 @@ export interface CullState {
 
 export const api = {
   openProject: (path: string) => invoke<ProjectInfo>("open_project", { path }),
+  // Android SAF folder picker; returns a content:// tree URI (or null if
+  // cancelled) suitable to pass to openProject. No-op returning null on desktop.
+  pickSafTree: () => invoke<string | null>("pick_saf_tree"),
   currentProject: () => invoke<ProjectInfo | null>("current_project"),
   closeProject: () => invoke("close_project"),
   rescanProject: () => invoke("rescan_project"),
@@ -174,10 +177,13 @@ export const api = {
     invoke<FileMetadata>("get_file_metadata", { fileId }),
 };
 
-// The cullant:// scheme is served as http://cullant.localhost/ on Windows.
-const CULLANT_BASE = navigator.userAgent.includes("Windows")
-  ? "http://cullant.localhost/"
-  : "cullant://localhost/";
+// The cullant:// scheme is served as http://cullant.localhost/ on Windows and
+// Android (WebView2 / Android WebView rewrite), and as cullant://localhost/ on
+// macOS/iOS/Linux.
+const CULLANT_BASE =
+  navigator.userAgent.includes("Windows") || navigator.userAgent.includes("Android")
+    ? "http://cullant.localhost/"
+    : "cullant://localhost/";
 
 export function cullantUrl(path: string): string {
   return CULLANT_BASE + path;
