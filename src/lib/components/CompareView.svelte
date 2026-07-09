@@ -106,9 +106,7 @@
       <div class="pane empty">End of set</div>
     {/if}
   </div>
-  {#if session.showFilmstrip}
-    <Filmstrip items={session.filtered} />
-  {/if}
+  <Filmstrip items={session.filtered} />
 </div>
 
 <style>

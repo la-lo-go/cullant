@@ -25,6 +25,7 @@
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Search from "@lucide/svelte/icons/search";
   import Columns2 from "@lucide/svelte/icons/columns-2";
   import Link from "@lucide/svelte/icons/link";
@@ -225,6 +226,15 @@
         <div class="grid-area">
           {#if session.folderTreeVisible}
             <FolderTree />
+          {:else if hasSubfolders}
+            <button
+              class="tree-peek"
+              title="Show folder tree (D)"
+              aria-label="Show folder tree"
+              onclick={blurring(() => (session.folderTreeVisible = true))}
+            >
+              <ChevronRight size={16} />
+            </button>
           {/if}
           <VirtualGrid items={session.filtered} />
         </div>
@@ -551,6 +561,30 @@
 
   .grid-area :global(.viewport) {
     flex: 1;
+  }
+
+  /* Peek tab shown at the left edge when the folder tree is collapsed. */
+  .tree-peek {
+    flex: none;
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 44px;
+    margin-top: 8px;
+    padding: 0;
+    border: 1px solid #2e2e36;
+    border-left: none;
+    border-radius: 0 6px 6px 0;
+    background: #1e1e23;
+    color: #a9c0ff;
+    cursor: pointer;
+  }
+
+  .tree-peek:hover {
+    background: #26262c;
+    border-color: #6b8bff;
   }
 
   .welcome {

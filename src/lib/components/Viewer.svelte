@@ -58,9 +58,7 @@
         <span class="pos">{session.focusedIndex + 1} / {session.filtered.length}</span>
       </div>
     </div>
-    {#if session.showFilmstrip}
-      <Filmstrip items={session.filtered} />
-    {/if}
+    <Filmstrip items={session.filtered} />
   {:else}
     <div class="empty">No photo selected</div>
   {/if}

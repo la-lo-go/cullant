@@ -2,6 +2,7 @@
   import { thumbUrl, videoUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
   import Scissors from "@lucide/svelte/icons/scissors";
+  import ChevronUp from "@lucide/svelte/icons/chevron-up";
 
   let { items }: { items: ItemLite[] } = $props();
 
@@ -31,53 +32,169 @@
     const target = session.focusedIndex * CELL - width / 2 + CELL / 2;
     strip.scrollTo({ left: Math.max(0, target) });
   });
+
+  // Drag the top edge to resize; dragging it below COLLAPSE_AT hides the strip
+  // (the peek arrow at the bottom, and the F toggle, bring it back).
+  const MIN_H = 72;
+  const MAX_H = 320;
+  const COLLAPSE_AT = 56;
+
+  let resizing = $state(false);
+
+  function startResize(e: PointerEvent) {
+    e.preventDefault();
+    resizing = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function onResizeMove(e: PointerEvent) {
+    if (!resizing || !strip) return;
+    const h = strip.getBoundingClientRect().bottom - e.clientY;
+    if (h < COLLAPSE_AT) {
+      resizing = false;
+      session.setShowFilmstrip(false);
+      return;
+    }
+    session.filmstripHeight = Math.min(MAX_H, Math.max(MIN_H, h));
+  }
+
+  function endResize(e: PointerEvent) {
+    if (!resizing) return;
+    resizing = false;
+    session.setFilmstripHeight(session.filmstripHeight);
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // capture may already be gone
+    }
+  }
 </script>
 
-<div
-  class="strip"
-  bind:this={strip}
-  bind:clientWidth={width}
-  onscroll={() => strip && (scrollLeft = strip.scrollLeft)}
->
-  <div class="canvas" style="width:{items.length * CELL}px">
-    {#each visible as v}
-      <div
-        class="cell"
-        class:focused={v.index === session.focusedIndex}
-        style="transform: translateX({v.x}px); width:{CELL}px"
-        onpointerdown={() => {
-          session.focusedIndex = v.index;
-          session.selectionAnchor = v.index;
-        }}
-        role="button"
-        tabindex="-1"
-      >
-        {#if v.item.kind === 2}
-          <video src={videoUrl(v.item)} preload="metadata" muted></video>
-        {:else}
-          <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
-        {/if}
-        {#if session.mirrorMode && v.item.groupSize > 1}
-          <span class="chip" class:split={v.item.decoupled}>
-            {#if v.item.decoupled}<Scissors size={8} /><span>SPLIT</span>{:else}RAW+JPG{/if}
-          </span>
-        {/if}
-        {#if v.item.flag !== 0}
-          <span class="dot" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}></span>
-        {/if}
+{#if session.showFilmstrip}
+  <div class="filmstrip" style="height: {session.filmstripHeight}px">
+    <!-- Top-edge resize handle. -->
+    <div
+      class="resize-handle"
+      class:resizing
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize filmstrip"
+      onpointerdown={startResize}
+      onpointermove={onResizeMove}
+      onpointerup={endResize}
+      onpointercancel={endResize}
+    ></div>
+    <div
+      class="strip"
+      bind:this={strip}
+      bind:clientWidth={width}
+      onscroll={() => strip && (scrollLeft = strip.scrollLeft)}
+    >
+      <div class="canvas" style="width:{items.length * CELL}px">
+        {#each visible as v}
+          <div
+            class="cell"
+            class:focused={v.index === session.focusedIndex}
+            style="transform: translateX({v.x}px); width:{CELL}px"
+            onpointerdown={() => {
+              session.focusedIndex = v.index;
+              session.selectionAnchor = v.index;
+            }}
+            role="button"
+            tabindex="-1"
+          >
+            {#if v.item.kind === 2}
+              <video src={videoUrl(v.item)} preload="metadata" muted></video>
+            {:else}
+              <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
+            {/if}
+            {#if session.mirrorMode && v.item.groupSize > 1}
+              <span class="chip" class:split={v.item.decoupled}>
+                {#if v.item.decoupled}<Scissors size={8} /><span>SPLIT</span>{:else}RAW+JPG{/if}
+              </span>
+            {/if}
+            {#if v.item.flag !== 0}
+              <span class="dot" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}></span>
+            {/if}
+          </div>
+        {/each}
       </div>
-    {/each}
+    </div>
   </div>
-</div>
+{:else}
+  <button
+    class="strip-peek"
+    title="Show filmstrip (F)"
+    aria-label="Show filmstrip"
+    onclick={() => session.setShowFilmstrip(true)}
+  >
+    <ChevronUp size={16} />
+  </button>
+{/if}
 
 <style>
-  .strip {
-    height: 104px;
+  .filmstrip {
+    position: relative;
     flex: none;
-    overflow-x: auto;
-    overflow-y: hidden;
     background: #1e1e23;
     border-top: 1px solid #2e2e36;
+  }
+
+  .strip {
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  /* Grabbable strip straddling the top edge; a hairline reveals on hover/drag. */
+  .resize-handle {
+    position: absolute;
+    top: -3px;
+    left: 0;
+    right: 0;
+    height: 7px;
+    cursor: row-resize;
+    z-index: 25;
+    touch-action: none;
+  }
+
+  .resize-handle::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 3px;
+    height: 2px;
+    background: transparent;
+    transition: background 0.12s;
+  }
+
+  .resize-handle:hover::after,
+  .resize-handle.resizing::after {
+    background: #6b8bff;
+  }
+
+  /* Peek tab shown at the bottom edge when the filmstrip is collapsed. */
+  .strip-peek {
+    flex: none;
+    align-self: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid #2e2e36;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    background: #1e1e23;
+    color: #a9c0ff;
+    cursor: pointer;
+  }
+
+  .strip-peek:hover {
+    background: #26262c;
+    border-color: #6b8bff;
   }
 
   .canvas {

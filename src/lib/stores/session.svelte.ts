@@ -14,6 +14,8 @@ export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
 
 const SHOW_NAMES_KEY = "cullant.showNames";
 const SHOW_FILMSTRIP_KEY = "cullant.showFilmstrip";
+const FOLDER_TREE_WIDTH_KEY = "cullant.folderTreeWidth";
+const FILMSTRIP_HEIGHT_KEY = "cullant.filmstripHeight";
 
 function loadBoolPref(key: string, fallback: boolean): boolean {
   try {
@@ -21,6 +23,24 @@ function loadBoolPref(key: string, fallback: boolean): boolean {
     return raw === null ? fallback : JSON.parse(raw) === true;
   } catch {
     return fallback;
+  }
+}
+
+function loadNumPref(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    const n = raw === null ? NaN : Number(JSON.parse(raw));
+    return Number.isFinite(n) ? n : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveNumPref(key: string, value: number) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // persistence is best-effort
   }
 }
 
@@ -67,6 +87,13 @@ class SessionStore {
   /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
   folderFilter = $state<string | null>(null);
   folderTreeVisible = $state(true);
+  /** Width of the folder-tree panel in px (persisted, drag-resizable). */
+  folderTreeWidth = $state<number>(loadNumPref(FOLDER_TREE_WIDTH_KEY, 210));
+
+  setFolderTreeWidth(px: number) {
+    this.folderTreeWidth = px;
+    saveNumPref(FOLDER_TREE_WIDTH_KEY, px);
+  }
 
   // --- mirror mode (M4 flips the display; fan-out is live already) ---
   mirrorMode = $state(true);
@@ -95,14 +122,25 @@ class SessionStore {
 
   /** Show the filmstrip/carousel in the loupe and compare views (persisted). */
   showFilmstrip = $state<boolean>(loadBoolPref(SHOW_FILMSTRIP_KEY, true));
+  /** Height of the filmstrip/carousel in px (persisted, drag-resizable). */
+  filmstripHeight = $state<number>(loadNumPref(FILMSTRIP_HEIGHT_KEY, 104));
 
-  toggleShowFilmstrip() {
-    this.showFilmstrip = !this.showFilmstrip;
+  setShowFilmstrip(show: boolean) {
+    this.showFilmstrip = show;
     try {
-      localStorage.setItem(SHOW_FILMSTRIP_KEY, JSON.stringify(this.showFilmstrip));
+      localStorage.setItem(SHOW_FILMSTRIP_KEY, JSON.stringify(show));
     } catch {
       // persistence is best-effort
     }
+  }
+
+  toggleShowFilmstrip() {
+    this.setShowFilmstrip(!this.showFilmstrip);
+  }
+
+  setFilmstripHeight(px: number) {
+    this.filmstripHeight = px;
+    saveNumPref(FILMSTRIP_HEIGHT_KEY, px);
   }
 
   // Auto-advance: Lightroom semantics. Caps Lock ON advances after any

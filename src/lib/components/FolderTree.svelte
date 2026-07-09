@@ -17,10 +17,48 @@
       session.folderFilter = null;
     }
   });
+
+  // Drag-to-resize the panel. Dragging the right edge past COLLAPSE_AT hides
+  // the panel altogether (a peek arrow in +page.svelte brings it back).
+  const MIN_W = 160;
+  const MAX_W = 480;
+  const COLLAPSE_AT = 120;
+
+  let aside = $state<HTMLElement | null>(null);
+  let resizing = $state(false);
+
+  function startResize(e: PointerEvent) {
+    e.preventDefault();
+    resizing = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function onResizeMove(e: PointerEvent) {
+    if (!resizing || !aside) return;
+    const w = e.clientX - aside.getBoundingClientRect().left;
+    if (w < COLLAPSE_AT) {
+      // Collapse but keep the last usable width for when it reopens.
+      resizing = false;
+      session.folderTreeVisible = false;
+      return;
+    }
+    session.folderTreeWidth = Math.min(MAX_W, Math.max(MIN_W, w));
+  }
+
+  function endResize(e: PointerEvent) {
+    if (!resizing) return;
+    resizing = false;
+    session.setFolderTreeWidth(session.folderTreeWidth);
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // capture may already be gone
+    }
+  }
 </script>
 
 {#if children.length > 0}
-  <aside class="tree">
+  <aside class="tree" bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
     <div class="header">Folders</div>
     <button class="node root" class:active={session.folderFilter === null} onclick={() => (session.folderFilter = null)}>
       <Images size={13} />
@@ -30,16 +68,58 @@
     {#each children as child (child.path)}
       <FolderTreeNode node={child} depth={0} />
     {/each}
+    <!-- Right-edge resize handle (hidden on narrow screens where the tree floats). -->
+    <div
+      class="resize-handle"
+      class:resizing
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize folder panel"
+      onpointerdown={startResize}
+      onpointermove={onResizeMove}
+      onpointerup={endResize}
+      onpointercancel={endResize}
+    ></div>
   </aside>
 {/if}
 
 <style>
   .tree {
+    position: relative;
     flex: none;
-    width: 210px;
+    width: var(--tree-w, 210px);
     overflow-y: auto;
     background: #1e1e23;
     border-right: 1px solid #2e2e36;
+  }
+
+  /* Grabbable strip straddling the right edge; widens the hit area without a
+     visible chrome until hovered/dragged. */
+  .resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: -3px;
+    width: 7px;
+    cursor: col-resize;
+    z-index: 25;
+    touch-action: none;
+  }
+
+  .resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    width: 2px;
+    background: transparent;
+    transition: background 0.12s;
+  }
+
+  .resize-handle:hover::after,
+  .resize-handle.resizing::after {
+    background: #6b8bff;
   }
 
   /* On narrow screens the tree floats over the grid instead of squeezing it
@@ -53,6 +133,10 @@
       z-index: 20;
       width: min(75%, 240px);
       box-shadow: 4px 0 18px rgba(0, 0, 0, 0.55);
+    }
+
+    .resize-handle {
+      display: none;
     }
   }
 
