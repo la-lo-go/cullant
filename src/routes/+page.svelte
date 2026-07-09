@@ -21,8 +21,10 @@
   import MoveDialog from "$lib/components/MoveDialog.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
-  import { api, type SortKey } from "$lib/api";
+  import { api } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import Search from "@lucide/svelte/icons/search";
   import Columns2 from "@lucide/svelte/icons/columns-2";
   import Link from "@lucide/svelte/icons/link";
@@ -62,13 +64,6 @@
       ? await api.pickSafTree()
       : await open({ directory: true, title: "Open project folder" });
     if (path) await catalog.open(path);
-  }
-
-  function onSortChange(e: Event) {
-    const el = e.currentTarget as HTMLSelectElement;
-    catalog.setSort(el.value as SortKey);
-    // Drop DOM focus, or ←/→ would change the sort instead of navigating.
-    el.blur();
   }
 
   /**
@@ -167,10 +162,28 @@
           <FiltersPanel />
         {/if}
       </div>
-      <select value={catalog.sort} onchange={onSortChange}>
-        <option value="capture">Capture time</option>
-        <option value="name">Name</option>
-      </select>
+      <div class="segmented sortseg">
+        <button
+          class:active={catalog.sort === "capture"}
+          title="Sort by capture time (click again to reverse)"
+          onclick={blurring(() => void catalog.setSort("capture"))}
+        >
+          <span>Capture</span>
+          {#if catalog.sort === "capture"}
+            {#if catalog.sortDesc}<ArrowDown size={13} />{:else}<ArrowUp size={13} />{/if}
+          {/if}
+        </button>
+        <button
+          class:active={catalog.sort === "name"}
+          title="Sort by name (click again to reverse)"
+          onclick={blurring(() => void catalog.setSort("name"))}
+        >
+          <span>Name</span>
+          {#if catalog.sort === "name"}
+            {#if catalog.sortDesc}<ArrowDown size={13} />{:else}<ArrowUp size={13} />{/if}
+          {/if}
+        </button>
+      </div>
       <button
         class="commit"
         class:haswork={session.pendingCount > 0}
@@ -345,7 +358,6 @@
     color: #6bb2ff;
   }
 
-  select,
   button {
     border-radius: 6px;
     border: 1px solid #3a3a42;
@@ -357,13 +369,11 @@
     cursor: pointer;
   }
 
-  button:hover,
-  select:hover {
+  button:hover {
     border-color: #6b6bff;
   }
 
-  .toolbar button,
-  .toolbar select {
+  .toolbar button {
     padding: 3px 8px;
     font-size: 12px;
   }
@@ -443,6 +453,15 @@
     background: #3a3a5c;
     border-color: #6b8bff;
     color: #fff;
+  }
+
+  /* Sort buttons carry a label plus a direction arrow when active. */
+  .sortseg button {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    font-weight: 600;
   }
 
   .media-toggle {

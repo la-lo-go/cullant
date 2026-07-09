@@ -140,8 +140,8 @@ export const api = {
   rescanProject: () => invoke("rescan_project"),
   listRecentProjects: () => invoke<RecentProject[]>("list_recent_projects"),
   removeRecentProject: (path: string) => invoke("remove_recent_project", { path }),
-  queryItems: (sort: SortKey, media: MediaTab) =>
-    invoke<ItemLite[]>("query_items", { sort, media }),
+  queryItems: (sort: SortKey, media: MediaTab, desc: boolean) =>
+    invoke<ItemLite[]>("query_items", { sort, media, desc }),
   mediaCounts: () => invoke<MediaCounts>("media_counts"),
   setRating: (targets: Targets, rating: number) =>
     invoke<CullState[]>("set_rating", { targets, rating }),

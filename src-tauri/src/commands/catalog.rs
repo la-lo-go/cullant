@@ -83,6 +83,7 @@ pub fn media_counts(state: State<'_, AppState>) -> AppResult<MediaCounts> {
 pub fn query_items(
     sort: Option<SortKey>,
     media: Option<MediaTab>,
+    desc: Option<bool>,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<ItemLite>> {
     let db = {
@@ -96,14 +97,18 @@ pub fn query_items(
 
     let sort = sort.unwrap_or_default();
     let media = media.unwrap_or_default();
+    let desc = desc.unwrap_or(false);
     db.call(move |conn| {
         let kind_filter = match media {
             MediaTab::Photos => "kind IN (0, 1)",
             MediaTab::Videos => "kind = 2",
         };
+        // The tie-breaker follows the primary direction so a reversed sort is a
+        // true mirror of the ascending one.
+        let dir = if desc { "DESC" } else { "ASC" };
         let order = match sort {
-            SortKey::Capture => "COALESCE(capture_time, mtime) ASC, rel_path ASC",
-            SortKey::Name => "rel_path ASC",
+            SortKey::Capture => format!("COALESCE(capture_time, mtime) {dir}, rel_path {dir}"),
+            SortKey::Name => format!("rel_path {dir}"),
         };
         let sql = format!(
             "SELECT f.id, f.group_id, f.kind, f.rel_path, f.basename, f.ext, f.mtime,

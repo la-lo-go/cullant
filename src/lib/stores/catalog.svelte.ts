@@ -14,6 +14,8 @@ class CatalogStore {
   project = $state<ProjectInfo | null>(null);
   items = $state<ItemLite[]>([]);
   sort = $state<SortKey>("capture");
+  /** Descending order when true. Toggled by re-selecting the active sort. */
+  sortDesc = $state(false);
   media = $state<MediaTab>("photos");
   scanning = $state(false);
   scanFound = $state(0);
@@ -59,12 +61,18 @@ class CatalogStore {
 
   async refresh() {
     if (!this.project) return;
-    this.items = await api.queryItems(this.sort, this.media);
+    this.items = await api.queryItems(this.sort, this.media, this.sortDesc);
     this.mediaCounts = await api.mediaCounts();
   }
 
+  /// Pick a sort field; re-picking the active field flips the direction.
   async setSort(sort: SortKey) {
-    this.sort = sort;
+    if (this.sort === sort) {
+      this.sortDesc = !this.sortDesc;
+    } else {
+      this.sort = sort;
+      this.sortDesc = false;
+    }
     await this.refresh();
   }
 
