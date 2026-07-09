@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use rayon::prelude::*;
@@ -9,6 +8,7 @@ use tauri::{AppHandle, Emitter};
 use crate::db::Db;
 use crate::decode;
 use crate::error::AppResult;
+use crate::store::{read_all, ProjectStore};
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +30,11 @@ struct Extracted {
 /// Fill capture_time/orientation/camera/dims for files that don't have them
 /// yet. Runs on the rayon pool; DB updates are batched through the writer
 /// thread. Sort order in the UI improves progressively as this completes.
-pub fn run_metadata_pass(app: &AppHandle, db: &Arc<Db>, root: PathBuf) -> AppResult<usize> {
+pub fn run_metadata_pass(
+    app: &AppHandle,
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+) -> AppResult<usize> {
     let pending: Vec<(i64, String, i64)> = db.call(|conn| {
         let mut stmt = conn.prepare(
             "SELECT id, rel_path, kind FROM files
@@ -49,7 +53,6 @@ pub fn run_metadata_pass(app: &AppHandle, db: &Arc<Db>, root: PathBuf) -> AppRes
     let extracted: Vec<Extracted> = pending
         .par_iter()
         .map(|(id, rel_path, kind)| {
-            let path = root.join(rel_path);
             let mut out = Extracted {
                 id: *id,
                 capture_time: None,
@@ -60,15 +63,18 @@ pub fn run_metadata_pass(app: &AppHandle, db: &Arc<Db>, root: PathBuf) -> AppRes
                 width: None,
                 height: None,
             };
+            let Ok(bytes) = read_all(store, rel_path) else {
+                return out;
+            };
             if *kind == 0 {
-                if let Ok(meta) = decode::raw::read_metadata(&path) {
+                if let Ok(meta) = decode::raw::read_metadata(Arc::new(bytes), rel_path) {
                     out.capture_time = meta.capture_time;
                     out.orientation = meta.orientation;
                     out.camera = meta.camera;
                     out.lens = meta.lens;
                     out.iso = meta.iso;
                 }
-            } else if let Ok(meta) = decode::exif::read_metadata(&path) {
+            } else if let Ok(meta) = decode::exif::read_metadata(&bytes) {
                 out.capture_time = meta.capture_time;
                 out.orientation = meta.orientation;
                 out.camera = meta.camera;

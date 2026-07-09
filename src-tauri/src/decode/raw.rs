@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::sync::Arc;
 
 use image::DynamicImage;
 use rawler::decoders::RawDecodeParams;
@@ -6,11 +6,13 @@ use rawler::rawsource::RawSource;
 
 use crate::error::{AppError, AppResult};
 
-/// Extract the camera-embedded preview JPEG from a RAW file — the fast path
+/// Extract the camera-embedded preview JPEG from RAW bytes — the fast path
 /// for culling: no demosaic, just pull the largest preview the container has.
-pub fn embedded_preview(path: &Path) -> AppResult<DynamicImage> {
-    let source =
-        RawSource::new(path).map_err(|e| AppError::Decode(format!("{}: {e}", path.display())))?;
+/// `name` is only used for error/log messages (a rel_path). Takes owned bytes
+/// so it works over any storage backend (real file or SAF stream), not just an
+/// mmap'able path.
+pub fn embedded_preview(bytes: Arc<Vec<u8>>, name: &str) -> AppResult<DynamicImage> {
+    let source = RawSource::new_from_shared_vec(bytes).with_path(name);
     let decoder = rawler::get_decoder(&source).map_err(|e| AppError::Decode(format!("{e}")))?;
     let params = RawDecodeParams::default();
 
@@ -22,13 +24,10 @@ pub fn embedded_preview(path: &Path) -> AppResult<DynamicImage> {
         match attempt {
             Ok(Some(img)) => return Ok(img),
             Ok(None) => continue,
-            Err(e) => tracing::debug!("preview extraction step failed for {path:?}: {e}"),
+            Err(e) => tracing::debug!("preview extraction step failed for {name}: {e}"),
         }
     }
-    Err(AppError::Decode(format!(
-        "no embedded preview in {}",
-        path.display()
-    )))
+    Err(AppError::Decode(format!("no embedded preview in {name}")))
 }
 
 pub struct RawMeta {
@@ -39,9 +38,8 @@ pub struct RawMeta {
     pub iso: Option<u32>,
 }
 
-pub fn read_metadata(path: &Path) -> AppResult<RawMeta> {
-    let source =
-        RawSource::new(path).map_err(|e| AppError::Decode(format!("{}: {e}", path.display())))?;
+pub fn read_metadata(bytes: Arc<Vec<u8>>, name: &str) -> AppResult<RawMeta> {
+    let source = RawSource::new_from_shared_vec(bytes).with_path(name);
     let decoder = rawler::get_decoder(&source).map_err(|e| AppError::Decode(format!("{e}")))?;
     let md = decoder
         .raw_metadata(&source, &RawDecodeParams::default())

@@ -9,6 +9,7 @@ use rusqlite::params;
 use crate::db::Db;
 use crate::decode;
 use crate::error::{AppError, AppResult};
+use crate::store::{read_all, ProjectStore};
 
 pub const THUMB_LONG_EDGE: u32 = 384;
 pub const PREVIEW_LONG_EDGE: u32 = 2560;
@@ -43,7 +44,7 @@ pub struct ThumbPool {
 }
 
 impl ThumbPool {
-    pub fn start(db: Arc<Db>, root: PathBuf) -> ThumbPool {
+    pub fn start(db: Arc<Db>, store: Arc<dyn ProjectStore>, root: PathBuf) -> ThumbPool {
         let queue = Arc::new(Queue {
             items: Mutex::new(Some(Vec::new())),
             signal: Condvar::new(),
@@ -55,10 +56,11 @@ impl ThumbPool {
         for i in 0..workers {
             let queue = queue.clone();
             let db = db.clone();
+            let store = store.clone();
             let root = root.clone();
             thread::Builder::new()
                 .name(format!("thumb-{i}"))
-                .spawn(move || worker_loop(queue, db, root))
+                .spawn(move || worker_loop(queue, db, store, root))
                 .expect("failed to spawn thumb worker");
         }
 
@@ -94,7 +96,7 @@ impl Drop for ThumbPool {
     }
 }
 
-fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, root: PathBuf) {
+fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, root: PathBuf) {
     loop {
         let request = {
             let mut guard = queue.items.lock().unwrap();
@@ -111,7 +113,7 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, root: PathBuf) {
             }
         };
 
-        let result = produce(&db, &root, request.file_id, request.kind);
+        let result = produce(&db, store.as_ref(), &root, request.file_id, request.kind);
         (request.respond)(result);
     }
 }
@@ -124,6 +126,7 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, root: PathBuf) {
 /// that needed work.
 pub fn pregenerate_all(
     db: &Arc<Db>,
+    store: &dyn ProjectStore,
     root: &Path,
     mut progress: impl FnMut(usize, usize),
 ) -> AppResult<usize> {
@@ -149,7 +152,7 @@ pub fn pregenerate_all(
     let mut done = 0usize;
     for chunk in ids.chunks(32) {
         chunk.par_iter().for_each(|&file_id| {
-            if let Err(e) = produce(db, root, file_id, ThumbKind::Thumb) {
+            if let Err(e) = produce(db, store, root, file_id, ThumbKind::Thumb) {
                 tracing::debug!("thumb pregeneration skipped file {file_id}: {e}");
             }
         });
@@ -178,7 +181,15 @@ fn now_secs() -> i64 {
 }
 
 /// Return cached bytes for a thumbnail, generating (and caching) on miss.
-fn produce(db: &Arc<Db>, root: &Path, file_id: i64, kind: ThumbKind) -> AppResult<Vec<u8>> {
+/// Source media is read through `store`; the JPEG cache lives on the real
+/// filesystem under `root/.cullant/thumbs` (private app storage on Android).
+fn produce(
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+    root: &Path,
+    file_id: i64,
+    kind: ThumbKind,
+) -> AppResult<Vec<u8>> {
     let (rel_path, file_kind, mtime, orientation) = db.call(move |conn| {
         Ok(conn.query_row(
             "SELECT rel_path, kind, mtime, orientation FROM files WHERE id = ?1 AND status = 0",
@@ -194,11 +205,9 @@ fn produce(db: &Arc<Db>, root: &Path, file_id: i64, kind: ThumbKind) -> AppResul
         )?)
     })?;
 
-    let source_path = root.join(&rel_path);
-
     // Full view of a plain image: stream the original, no transcode, no cache.
     if kind == ThumbKind::Full && file_kind == 1 {
-        return Ok(std::fs::read(&source_path)?);
+        return read_all(store, &rel_path);
     }
 
     let cache_rel = cache_rel_path(file_id, mtime, kind);
@@ -207,9 +216,15 @@ fn produce(db: &Arc<Db>, root: &Path, file_id: i64, kind: ThumbKind) -> AppResul
         return Ok(bytes);
     }
     let decoded: DynamicImage = match file_kind {
-        0 => decode::raw::embedded_preview(&source_path)?,
-        1 => image::open(&source_path)
-            .map_err(|e| AppError::Decode(format!("{}: {e}", source_path.display())))?,
+        0 => {
+            let bytes = read_all(store, &rel_path)?;
+            decode::raw::embedded_preview(Arc::new(bytes), &rel_path)?
+        }
+        1 => {
+            let bytes = read_all(store, &rel_path)?;
+            image::load_from_memory(&bytes)
+                .map_err(|e| AppError::Decode(format!("{rel_path}: {e}")))?
+        }
         _ => {
             return Err(AppError::Decode(format!(
                 "no thumbnail source for kind {file_kind}"
@@ -350,6 +365,7 @@ mod tests {
         img.save(root.join("photo.jpg")).unwrap();
 
         let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
         let done = crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
         assert_eq!(done.file_count, 1);
 
@@ -357,13 +373,13 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        let bytes = produce(&db, root, id, ThumbKind::Thumb).unwrap();
+        let bytes = produce(&db, &store, root, id, ThumbKind::Thumb).unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap();
         assert_eq!(thumb.width(), 384);
         assert_eq!(thumb.height(), 288);
 
         // Second call must hit the disk cache (row exists + same bytes).
-        let again = produce(&db, root, id, ThumbKind::Thumb).unwrap();
+        let again = produce(&db, &store, root, id, ThumbKind::Thumb).unwrap();
         assert_eq!(bytes, again);
         let rows: i64 = db
             .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM thumbnails", [], |r| r.get(0))?))
@@ -384,11 +400,12 @@ mod tests {
         }
 
         let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
         let done = crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
         assert_eq!(done.file_count, 3);
 
         let mut last = (0usize, 0usize);
-        let total = pregenerate_all(&db, root, |d, t| last = (d, t)).unwrap();
+        let total = pregenerate_all(&db, &store, root, |d, t| last = (d, t)).unwrap();
         assert_eq!(total, 3);
         assert_eq!(last, (3, 3));
 
@@ -404,7 +421,7 @@ mod tests {
         assert_eq!(rows, 3);
 
         // Everything is fresh now: a second pass finds nothing to do.
-        let total_again = pregenerate_all(&db, root, |_, _| {}).unwrap();
+        let total_again = pregenerate_all(&db, &store, root, |_, _| {}).unwrap();
         assert_eq!(total_again, 0);
     }
 }

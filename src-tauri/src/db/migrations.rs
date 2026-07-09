@@ -126,6 +126,16 @@ const MIGRATIONS: &[&str] = &[
 
     INSERT INTO schema_meta (version) VALUES (1);
     "#,
+    // v2 — SAF document-id cache (Android only; empty/unused on desktop).
+    // Maps a project-root-relative path to its opaque SAF document id so the
+    // Android storage backend can address files without re-walking the tree.
+    r#"
+    CREATE TABLE saf_documents (
+      rel_path TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      is_dir INTEGER NOT NULL DEFAULT 0
+    );
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {

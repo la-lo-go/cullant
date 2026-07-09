@@ -1,4 +1,3 @@
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -8,6 +7,7 @@ use xxhash_rust::xxh3::Xxh3;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::store::{split_parent, ProjectStore};
 
 use super::actions::{ActionKind, PendingAction};
 use super::xmp::{self, XmpState};
@@ -100,7 +100,7 @@ fn xmp_dirty_raws(db: &Arc<Db>) -> AppResult<Vec<DirtyRaw>> {
     })
 }
 
-pub fn preview(db: &Arc<Db>, root: &Path) -> AppResult<CommitPlan> {
+pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> {
     let pending = super::actions::list(db)?;
     let deletion_mode =
         DeletionMode::from_setting(&get_setting(db, "deletionMode")?.unwrap_or_default());
@@ -116,8 +116,8 @@ pub fn preview(db: &Arc<Db>, root: &Path) -> AppResult<CommitPlan> {
             ActionKind::Move | ActionKind::Copy => {
                 if let Some(dest) = &p.dest {
                     let file_name = p.rel_path.rsplit('/').next().unwrap_or(&p.rel_path);
-                    let target = root.join(dest).join(file_name);
-                    if target.exists() {
+                    let dest_rel = format!("{}/{file_name}", dest.trim_matches('/'));
+                    if store.exists(&dest_rel).unwrap_or(false) {
                         conflicts.push(format!("{}: target already exists in {dest}", p.rel_path));
                     }
                 }
@@ -155,44 +155,71 @@ pub fn preview(db: &Arc<Db>, root: &Path) -> AppResult<CommitPlan> {
     })
 }
 
-/// Delete one path according to the mode. Returns undo info JSON.
-fn delete_path(root: &Path, abs: &Path, rel: &str, mode: DeletionMode) -> AppResult<String> {
+/// Delete one file (by rel_path) according to the mode, through the store.
+/// Returns undo info JSON (with a project-relative trash path when applicable).
+fn delete_via_store(
+    store: &dyn ProjectStore,
+    rel: &str,
+    mode: DeletionMode,
+) -> AppResult<String> {
     match mode {
-        DeletionMode::Recycle => {
-            trash::delete(abs).map_err(|e| AppError::Other(format!("recycle: {e}")))?;
-            Ok(r#"{"mode":"recycle"}"#.to_string())
-        }
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        DeletionMode::Recycle => match store.local_path(rel) {
+            Some(abs) => {
+                trash::delete(&abs).map_err(|e| AppError::Other(format!("recycle: {e}")))?;
+                Ok(r#"{"mode":"recycle"}"#.to_string())
+            }
+            // No real OS path (shouldn't happen on desktop): fall back to trash folder.
+            None => store_trash(store, rel),
+        },
+        // No OS recycle bin API on mobile — fall back to the project-local trash folder.
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        DeletionMode::Recycle => store_trash(store, rel),
         DeletionMode::Permanent => {
-            std::fs::remove_file(abs)?;
+            store.remove_file(rel)?;
             Ok(r#"{"mode":"permanent"}"#.to_string())
         }
-        DeletionMode::Trash => {
-            let mut target = root.join("_trash").join(rel);
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let mut n = 1;
-            while target.exists() {
-                target = root.join("_trash").join(format!("{rel}.{n}"));
-                n += 1;
-            }
-            std::fs::rename(abs, &target)?;
-            Ok(serde_json::json!({
-                "mode": "trash",
-                "trashPath": target.to_string_lossy()
-            })
-            .to_string())
-        }
+        DeletionMode::Trash => store_trash(store, rel),
     }
+}
+
+/// Move a file into the project-local `_trash` folder, preserving its relative
+/// directory structure, with `.N` suffixing on collision. Returns undo JSON
+/// carrying the (project-relative) trash path.
+fn store_trash(store: &dyn ProjectStore, rel: &str) -> AppResult<String> {
+    let (parent, name) = split_parent(rel);
+    let trash_parent = if parent.is_empty() {
+        "_trash".to_string()
+    } else {
+        format!("_trash/{parent}")
+    };
+    store.create_dir_all(&trash_parent)?;
+
+    // Pick a non-colliding target name inside the trash folder.
+    let mut unique = name.to_string();
+    let mut n = 1;
+    while store.exists(&format!("{trash_parent}/{unique}"))? {
+        unique = format!("{name}.{n}");
+        n += 1;
+    }
+    // move_to keeps the source name, so rename the source first when a suffix
+    // is needed, then move it into the trash folder.
+    let src_rel = if unique != name {
+        store.rename_in_place(rel, &unique)?
+    } else {
+        rel.to_string()
+    };
+    let final_rel = store.move_to(&src_rel, &trash_parent)?;
+    Ok(serde_json::json!({ "mode": "trash", "trashPath": final_rel }).to_string())
 }
 
 pub fn execute(
     db: &Arc<Db>,
-    root: &Path,
+    store: &dyn ProjectStore,
     plan_hash: &str,
     mut progress: impl FnMut(usize, usize),
 ) -> AppResult<CommitOutcome> {
-    let plan = preview(db, root)?;
+    let plan = preview(db, store)?;
     if plan.plan_hash != plan_hash {
         return Err(AppError::Other(
             "pending actions changed since the preview — review again".into(),
@@ -249,24 +276,16 @@ pub fn execute(
 
     // --- deletes ---
     for p in &plan.deletes {
-        let abs = root.join(&p.rel_path);
-        let mut result: Result<String, String> = if abs.exists() {
-            delete_path(root, &abs, &p.rel_path, plan.deletion_mode).map_err(|e| e.to_string())
+        let mut result: Result<String, String> = if store.exists(&p.rel_path).unwrap_or(false) {
+            delete_via_store(store, &p.rel_path, plan.deletion_mode).map_err(|e| e.to_string())
         } else {
             Err("file missing on disk".into())
         };
         // A RAW's sidecar travels with it.
         if result.is_ok() {
-            let sidecar = xmp::sidecar_path(root, &p.rel_path);
-            if sidecar.exists() && sidecar != abs {
-                let rel_sidecar = format!(
-                    "{}.xmp",
-                    p.rel_path
-                        .rsplit_once('.')
-                        .map(|(a, _)| a)
-                        .unwrap_or(&p.rel_path)
-                );
-                if let Err(e) = delete_path(root, &sidecar, &rel_sidecar, plan.deletion_mode) {
+            let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
+            if sidecar_rel != p.rel_path && store.exists(&sidecar_rel).unwrap_or(false) {
+                if let Err(e) = delete_via_store(store, &sidecar_rel, plan.deletion_mode) {
                     tracing::warn!("sidecar delete failed: {e}");
                 }
             }
@@ -329,30 +348,31 @@ pub fn execute(
     for (list, action_i) in [(&plan.moves, 1i64), (&plan.copies, 2i64)] {
         for p in list {
             let dest = p.dest.clone().unwrap_or_default();
-            let abs = root.join(&p.rel_path);
             let file_name = p
                 .rel_path
                 .rsplit('/')
                 .next()
                 .unwrap_or(&p.rel_path)
                 .to_string();
-            let dest_rel = format!("{}/{}", dest.trim_matches('/'), file_name);
-            let target = root.join(&dest_rel);
+            let dest_dir = dest.trim_matches('/').to_string();
+            let dest_rel = if dest_dir.is_empty() {
+                file_name.clone()
+            } else {
+                format!("{dest_dir}/{file_name}")
+            };
 
             let result: Result<(), String> = (|| {
-                if !abs.exists() {
+                if !store.exists(&p.rel_path).map_err(|e| e.to_string())? {
                     return Err("file missing on disk".into());
                 }
-                if target.exists() {
+                if store.exists(&dest_rel).map_err(|e| e.to_string())? {
                     return Err(format!("target exists: {dest_rel}"));
                 }
-                if let Some(parent) = target.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                }
+                store.create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
                 if action_i == 1 {
-                    std::fs::rename(&abs, &target).map_err(|e| e.to_string())?;
+                    store.move_to(&p.rel_path, &dest_dir).map_err(|e| e.to_string())?;
                 } else {
-                    std::fs::copy(&abs, &target).map_err(|e| e.to_string())?;
+                    store.copy(&p.rel_path, &dest_rel).map_err(|e| e.to_string())?;
                 }
                 Ok(())
             })();
@@ -414,10 +434,10 @@ pub fn execute(
             flag,
             label,
         };
-        let result: Result<PathBuf, String> =
-            xmp::write_sidecar(root, &rel_path, &state).map_err(|e| e.to_string());
+        let result: Result<String, String> =
+            xmp::write_sidecar(store, &rel_path, &state).map_err(|e| e.to_string());
         match &result {
-            Ok(path) => {
+            Ok(sc_rel) => {
                 ok += 1;
                 db.call(move |conn| {
                     conn.execute(
@@ -431,7 +451,7 @@ pub fn execute(
                     Some(file_id),
                     3,
                     Some(rel_path.clone()),
-                    Some(path.to_string_lossy().into_owned()),
+                    Some(sc_rel.clone()),
                     None,
                     Ok(()),
                 )?;
@@ -501,6 +521,7 @@ mod tests {
         fs::write(root.join("bad.jpg"), b"jpg").unwrap();
         fs::write(root.join("sel.jpg"), b"jpg").unwrap();
         let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
         set_setting(&db, "deletionMode", "trash").unwrap();
 
@@ -557,13 +578,13 @@ mod tests {
         )
         .unwrap();
 
-        let plan = preview(&db, root).unwrap();
+        let plan = preview(&db, &store).unwrap();
         assert_eq!(plan.deletes.len(), 1);
         assert_eq!(plan.moves.len(), 1);
         assert_eq!(plan.xmp_count, 1);
         assert!(plan.conflicts.is_empty());
 
-        let outcome = execute(&db, root, &plan.plan_hash, |_, _| {}).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
         assert_eq!(outcome.ok, 3);
 
@@ -610,6 +631,6 @@ mod tests {
             PairScope::Both,
         )
         .unwrap();
-        assert!(execute(&db, root, &plan.plan_hash, |_, _| {}).is_err());
+        assert!(execute(&db, &store, &plan.plan_hash, |_, _| {}).is_err());
     }
 }

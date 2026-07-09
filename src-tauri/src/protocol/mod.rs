@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use tauri::http::{header, Request, Response, StatusCode};
 use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
 
@@ -99,7 +97,7 @@ fn respond_video<R: Runtime>(
     const WINDOW: u64 = 8 * 1024 * 1024;
 
     let state = app.state::<AppState>();
-    let (db, root) = {
+    let (db, store) = {
         let guard = state.project.lock().unwrap();
         let Some(project) = guard.as_ref() else {
             responder.respond(plain(
@@ -108,7 +106,7 @@ fn respond_video<R: Runtime>(
             ));
             return;
         };
-        (project.db.clone(), project.root.clone())
+        (project.db.clone(), project.store.clone())
     };
 
     let rel_path: Result<String, _> = db.call(move |conn| {
@@ -126,15 +124,23 @@ fn respond_video<R: Runtime>(
         return;
     };
 
-    let path = root.join(&rel_path);
     let mime = if rel_path.to_lowercase().ends_with(".mov") {
         "video/quicktime"
     } else {
         "video/mp4"
     };
 
+    // Real `std::fs::File` on every backend (a detached fd on SAF), so the
+    // seekable Range logic below is unchanged.
+    let mut file = match store.open_read(&rel_path) {
+        Ok(f) => f,
+        Err(e) => {
+            responder.respond(plain(StatusCode::NOT_FOUND, format!("video open: {e}")));
+            return;
+        }
+    };
+
     let result = (|| -> std::io::Result<Response<Vec<u8>>> {
-        let mut file = std::fs::File::open(&path)?;
         let len = file.metadata()?.len();
 
         // Parse "Range: bytes=start-end" (end optional).
@@ -218,8 +224,17 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
         return;
     };
 
-    let root = PathBuf::from(&entry.path);
-    let db_path = root.join(".cullant").join("cullant.db");
+    let base = match crate::commands::project::project_data_base(app, &entry.path) {
+        Ok(b) => b,
+        Err(_) => {
+            responder.respond(plain(
+                StatusCode::NOT_FOUND,
+                "no such recent project".into(),
+            ));
+            return;
+        }
+    };
+    let db_path = base.join(".cullant").join("cullant.db");
     let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY;
     let candidate = rusqlite::Connection::open_with_flags(&db_path, flags)
         .ok()
@@ -239,7 +254,7 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
     };
 
     let cache_rel = cache_rel_path(file_id, mtime, ThumbKind::Thumb);
-    let cache_abs = root.join(".cullant").join("thumbs").join(cache_rel);
+    let cache_abs = base.join(".cullant").join("thumbs").join(cache_rel);
     match std::fs::read(&cache_abs) {
         Ok(bytes) => responder.respond(
             Response::builder()

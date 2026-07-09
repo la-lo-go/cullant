@@ -1,6 +1,4 @@
-use std::fs::File;
-use std::io::BufReader;
-use std::path::PathBuf;
+use std::io::Cursor;
 use std::sync::Arc;
 
 use rusqlite::params;
@@ -9,6 +7,7 @@ use tauri::State;
 
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
+use crate::store::{read_all, ProjectStore};
 use crate::AppState;
 
 /// Camera/EXIF metadata for the loupe info panel. Common fields come from the
@@ -36,15 +35,15 @@ pub struct FileMetadata {
     pub gps_lon: Option<f64>,
 }
 
-fn project(state: &AppState) -> AppResult<(Arc<Db>, PathBuf)> {
+fn project(state: &AppState) -> AppResult<(Arc<Db>, Arc<dyn ProjectStore>)> {
     let guard = state.project.lock().unwrap();
     let p = guard.as_ref().ok_or(AppError::NoProject)?;
-    Ok((p.db.clone(), p.root.clone()))
+    Ok((p.db.clone(), p.store.clone()))
 }
 
 #[tauri::command]
 pub fn get_file_metadata(file_id: i64, state: State<'_, AppState>) -> AppResult<FileMetadata> {
-    let (db, root) = project(&state)?;
+    let (db, store) = project(&state)?;
 
     let mut meta: FileMetadata = db.call(move |conn| {
         Ok(conn.query_row(
@@ -68,12 +67,14 @@ pub fn get_file_metadata(file_id: i64, state: State<'_, AppState>) -> AppResult<
         )?)
     })?;
 
-    let path = root.join(&meta.rel_path);
     // Best-effort deep read; a file without EXIF still returns the DB fields.
-    match meta.kind {
-        0 => read_raw_exif(&path, &mut meta),
-        1 => read_image_exif(&path, &mut meta),
-        _ => {}
+    if let Ok(bytes) = read_all(store.as_ref(), &meta.rel_path) {
+        let name = meta.rel_path.clone();
+        match meta.kind {
+            0 => read_raw_exif(Arc::new(bytes), &name, &mut meta),
+            1 => read_image_exif(&bytes, &mut meta),
+            _ => {}
+        }
     }
 
     Ok(meta)
@@ -81,13 +82,11 @@ pub fn get_file_metadata(file_id: i64, state: State<'_, AppState>) -> AppResult<
 
 // --- RAW (rawler) ---
 
-fn read_raw_exif(path: &std::path::Path, meta: &mut FileMetadata) {
+fn read_raw_exif(bytes: Arc<Vec<u8>>, name: &str, meta: &mut FileMetadata) {
     use rawler::decoders::RawDecodeParams;
     use rawler::rawsource::RawSource;
 
-    let Ok(source) = RawSource::new(path) else {
-        return;
-    };
+    let source = RawSource::new_from_shared_vec(bytes).with_path(name);
     let Ok(decoder) = rawler::get_decoder(&source) else {
         return;
     };
@@ -133,12 +132,9 @@ fn gps_component(
 
 // --- plain images (kamadak-exif) ---
 
-fn read_image_exif(path: &std::path::Path, meta: &mut FileMetadata) {
-    let Ok(file) = File::open(path) else {
-        return;
-    };
-    let mut reader = BufReader::new(file);
-    let Ok(exif) = exif::Reader::new().read_from_container(&mut reader) else {
+fn read_image_exif(bytes: &[u8], meta: &mut FileMetadata) {
+    let mut cursor = Cursor::new(bytes);
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut cursor) else {
         return;
     };
 

@@ -5,17 +5,23 @@ mod engine;
 mod error;
 mod protocol;
 mod scan;
+mod store;
 mod thumbs;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use db::Db;
+use store::ProjectStore;
 use thumbs::ThumbPool;
 
 /// State of the currently open project.
 pub struct ProjectState {
+    /// Real-filesystem base for this project's sidecar data (the `.cullant`
+    /// dir): the project root itself on desktop, a private app dir on Android.
     pub root: PathBuf,
+    /// Backend for the project's media (real fs on desktop, SAF on Android).
+    pub store: Arc<dyn ProjectStore>,
     pub db: Arc<Db>,
     pub thumbs: ThumbPool,
 }
@@ -32,6 +38,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_saf::init())
         .manage(AppState::default())
         .register_asynchronous_uri_scheme_protocol("cullant", |ctx, request, responder| {
             protocol::handle(ctx.app_handle(), request, responder);
@@ -50,6 +57,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::project::open_project,
+            commands::project::pick_saf_tree,
             commands::project::current_project,
             commands::project::rescan_project,
             commands::project::close_project,

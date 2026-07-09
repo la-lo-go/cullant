@@ -1,9 +1,8 @@
-use std::path::{Path, PathBuf};
-
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::{Reader, Writer};
 
 use crate::error::{AppError, AppResult};
+use crate::store::{read_all, ProjectStore};
 
 /// Culling state to export for one file.
 pub struct XmpState {
@@ -15,27 +14,40 @@ pub struct XmpState {
 const NS_XMP: &str = "http://ns.adobe.com/xap/1.0/";
 const NS_XMPDM: &str = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
 
-/// Sidecar path convention both Lightroom and Capture One read:
-/// `IMG_001.CR3` -> `IMG_001.xmp` (basename swap, not name.ext.xmp).
-pub fn sidecar_path(root: &Path, rel_path: &str) -> PathBuf {
-    let abs = root.join(rel_path);
-    abs.with_extension("xmp")
+/// Sidecar rel_path convention both Lightroom and Capture One read:
+/// `IMG_001.CR3` -> `IMG_001.xmp` (basename swap, not name.ext.xmp). Operates on
+/// the `/`-separated rel_path string so it's backend-agnostic.
+pub fn sidecar_rel(rel_path: &str) -> String {
+    let slash = rel_path.rfind('/');
+    match rel_path.rfind('.') {
+        // Only an extension if the dot is inside the last path segment.
+        Some(i) if slash.is_none_or(|s| i > s) => format!("{}.xmp", &rel_path[..i]),
+        _ => format!("{rel_path}.xmp"),
+    }
 }
 
-/// Write (or update) the sidecar for a RAW file. If a sidecar already exists —
-/// e.g. Lightroom stored develop settings in it — only OUR attributes are
-/// touched; everything else is preserved byte-for-byte where possible.
-pub fn write_sidecar(root: &Path, rel_path: &str, state: &XmpState) -> AppResult<PathBuf> {
-    let path = sidecar_path(root, rel_path);
-    let output = match std::fs::read_to_string(&path) {
-        Ok(existing) => merge_into_existing(&existing, state).unwrap_or_else(|e| {
-            tracing::warn!("sidecar merge failed for {path:?} ({e}); rewriting fresh");
+/// Write (or update) the sidecar for a RAW file, through the storage backend.
+/// If a sidecar already exists — e.g. Lightroom stored develop settings in it —
+/// only OUR attributes are touched; everything else is preserved where possible.
+/// Returns the sidecar's rel_path.
+pub fn write_sidecar(
+    store: &dyn ProjectStore,
+    rel_path: &str,
+    state: &XmpState,
+) -> AppResult<String> {
+    use std::io::Write;
+
+    let sc_rel = sidecar_rel(rel_path);
+    let output = match read_all(store, &sc_rel).ok().and_then(|b| String::from_utf8(b).ok()) {
+        Some(existing) => merge_into_existing(&existing, state).unwrap_or_else(|e| {
+            tracing::warn!("sidecar merge failed for {sc_rel} ({e}); rewriting fresh");
             fresh_sidecar(state)
         }),
-        Err(_) => fresh_sidecar(state),
+        None => fresh_sidecar(state),
     };
-    std::fs::write(&path, output)?;
-    Ok(path)
+    let mut f = store.open_write(&sc_rel, "application/xml")?;
+    f.write_all(output.as_bytes())?;
+    Ok(sc_rel)
 }
 
 fn flag_attrs(flag: i64) -> (Option<&'static str>, Option<&'static str>) {
@@ -175,14 +187,15 @@ mod tests {
     fn fresh_sidecar_is_written_and_parses() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("IMG_1.cr3"), b"raw").unwrap();
+        let store = crate::store::LocalFsStore::new(dir.path());
         let state = XmpState {
             rating: 4,
             flag: 1,
             label: Some("Red".into()),
         };
-        let path = write_sidecar(dir.path(), "IMG_1.cr3", &state).unwrap();
-        assert_eq!(path.file_name().unwrap(), "IMG_1.xmp");
-        let content = std::fs::read_to_string(&path).unwrap();
+        let sc_rel = write_sidecar(&store, "IMG_1.cr3", &state).unwrap();
+        assert_eq!(sc_rel, "IMG_1.xmp");
+        let content = std::fs::read_to_string(dir.path().join(&sc_rel)).unwrap();
         assert!(content.contains("xmp:Rating=\"4\""));
         assert!(content.contains("xmp:Label=\"Red\""));
         assert!(content.contains("xmpDM:pick=\"1\""));

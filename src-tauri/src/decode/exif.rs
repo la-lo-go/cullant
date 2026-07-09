@@ -1,6 +1,4 @@
-use std::fs::File;
-use std::io::BufReader;
-use std::path::Path;
+use std::io::Cursor;
 
 use time::macros::format_description;
 use time::PrimitiveDateTime;
@@ -26,9 +24,10 @@ pub fn parse_exif_datetime(s: &str) -> Option<i64> {
         .map(|dt| dt.assume_utc().unix_timestamp())
 }
 
-/// Read EXIF + dimensions from a non-RAW image (JPEG/TIFF/PNG/WebP).
+/// Read EXIF + dimensions from non-RAW image bytes (JPEG/TIFF/PNG/WebP).
 /// Everything is best-effort: a missing or corrupt EXIF block is not an error.
-pub fn read_metadata(path: &Path) -> AppResult<ImageMeta> {
+/// Takes bytes rather than a path so it works over any storage backend.
+pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
     let mut meta = ImageMeta {
         capture_time: None,
         orientation: None,
@@ -39,14 +38,15 @@ pub fn read_metadata(path: &Path) -> AppResult<ImageMeta> {
         height: None,
     };
 
-    if let Ok((w, h)) = image::image_dimensions(path) {
-        meta.width = Some(w);
-        meta.height = Some(h);
+    if let Ok(reader) = image::ImageReader::new(Cursor::new(bytes)).with_guessed_format() {
+        if let Ok((w, h)) = reader.into_dimensions() {
+            meta.width = Some(w);
+            meta.height = Some(h);
+        }
     }
 
-    let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let Ok(exif) = exif::Reader::new().read_from_container(&mut reader) else {
+    let mut cursor = Cursor::new(bytes);
+    let Ok(exif) = exif::Reader::new().read_from_container(&mut cursor) else {
         return Ok(meta);
     };
 

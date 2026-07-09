@@ -7,12 +7,13 @@ use crate::engine::actions::{self, ActionKind, PairScope, PendingAction};
 use crate::engine::committer::{self, CommitOutcome, CommitPlan};
 use crate::engine::culling::Targets;
 use crate::error::{AppError, AppResult};
+use crate::store::ProjectStore;
 use crate::AppState;
 
-fn project(state: &AppState) -> AppResult<(Arc<Db>, std::path::PathBuf)> {
+fn project(state: &AppState) -> AppResult<(Arc<Db>, Arc<dyn ProjectStore>)> {
     let guard = state.project.lock().unwrap();
     let p = guard.as_ref().ok_or(AppError::NoProject)?;
-    Ok((p.db.clone(), p.root.clone()))
+    Ok((p.db.clone(), p.store.clone()))
 }
 
 #[tauri::command]
@@ -58,8 +59,8 @@ pub fn list_pending(state: State<'_, AppState>) -> AppResult<Vec<PendingAction>>
 
 #[tauri::command]
 pub fn commit_preview(state: State<'_, AppState>) -> AppResult<CommitPlan> {
-    let (db, root) = project(&state)?;
-    committer::preview(&db, &root)
+    let (db, store) = project(&state)?;
+    committer::preview(&db, store.as_ref())
 }
 
 #[tauri::command]
@@ -68,9 +69,9 @@ pub fn commit_execute(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<CommitOutcome> {
-    let (db, root) = project(&state)?;
+    let (db, store) = project(&state)?;
     let progress_app = app.clone();
-    let outcome = committer::execute(&db, &root, &plan_hash, move |done, total| {
+    let outcome = committer::execute(&db, store.as_ref(), &plan_hash, move |done, total| {
         let _ = progress_app.emit(
             "commit:progress",
             serde_json::json!({ "done": done, "total": total }),

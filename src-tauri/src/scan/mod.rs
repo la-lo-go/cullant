@@ -1,6 +1,7 @@
 pub mod metadata;
 
 use std::collections::HashMap;
+#[cfg(test)]
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -8,11 +9,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
-use walkdir::WalkDir;
 
 use crate::db::Db;
 use crate::decode::{classify, FileKind};
 use crate::error::AppResult;
+use crate::store::{ProjectStore, StoreEntry};
 
 #[derive(Debug)]
 struct FoundFile {
@@ -52,55 +53,40 @@ fn unix_secs(t: SystemTime) -> i64 {
         .unwrap_or(0)
 }
 
-fn walk(root: &Path, progress: &mut dyn FnMut(usize)) -> Vec<FoundFile> {
+/// Turn the backend's flat file listing into classified [`FoundFile`]s,
+/// deriving ext/basename/dir from the `/`-separated rel_path (so it works the
+/// same for a real filesystem and a SAF tree). Non-media and extension-less
+/// files are dropped, matching the previous `WalkDir`-based behavior.
+fn collect_found(entries: Vec<StoreEntry>, progress: &mut dyn FnMut(usize)) -> Vec<FoundFile> {
     let mut found = Vec::new();
-    let entries = WalkDir::new(root)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|e| {
-            if e.depth() == 0 {
-                return true; // never filter the project root itself
-            }
-            let name = e.file_name().to_string_lossy();
-            !(e.file_type().is_dir()
-                && (SKIP_DIRS.contains(&name.as_ref()) || name.starts_with('.')))
-        });
-
-    for entry in entries.flatten() {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let path = entry.path();
-        let Some(ext) = path.extension().map(|e| e.to_string_lossy().to_lowercase()) else {
-            continue;
+    for entry in entries {
+        let last = entry.rel_path.rsplit('/').next().unwrap_or(&entry.rel_path);
+        // Extension = text after the last '.' in the final segment, but a
+        // leading-dot-only name (".gitignore") has no extension.
+        let ext = match last.rfind('.') {
+            Some(i) if i > 0 => last[i + 1..].to_lowercase(),
+            _ => continue,
         };
         let Some(kind) = classify(&ext) else {
             continue;
         };
-        let Ok(meta) = entry.metadata() else {
-            continue;
+        let basename = match last.rfind('.') {
+            Some(i) if i > 0 => last[..i].to_lowercase(),
+            _ => last.to_lowercase(),
         };
-        let Ok(rel) = path.strip_prefix(root) else {
-            continue;
-        };
-        let rel_path = rel.to_string_lossy().replace('\\', "/");
-        let basename = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let dir = match rel_path.rfind('/') {
-            Some(i) => rel_path[..i].to_string(),
+        let dir = match entry.rel_path.rfind('/') {
+            Some(i) => entry.rel_path[..i].to_string(),
             None => String::new(),
         };
 
         found.push(FoundFile {
-            rel_path,
+            rel_path: entry.rel_path,
             basename,
             dir,
             ext,
             kind,
-            size: meta.len() as i64,
-            mtime: meta.modified().map(unix_secs).unwrap_or(0),
+            size: entry.size,
+            mtime: entry.mtime,
         });
 
         if found.len() % 500 == 0 {
@@ -115,24 +101,41 @@ fn walk(root: &Path, progress: &mut dyn FnMut(usize)) -> Vec<FoundFile> {
 /// mark vanished ones missing, then pair RAW+image files that share
 /// dir+basename — but only ever merge *singleton* groups, so existing pairs
 /// (including decoupled ones) are never silently rebuilt.
-pub fn scan_project(app: &AppHandle, db: &Arc<Db>, root: &Path) -> AppResult<ScanDone> {
+pub fn scan_project(
+    app: &AppHandle,
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+) -> AppResult<ScanDone> {
     let app_progress = app.clone();
-    let done = scan_project_inner(db, root, &mut move |found| {
+    let done = scan_with_store(db, store, &mut move |found| {
         let _ = app_progress.emit("scan:progress", ScanProgress { found });
     })?;
     let _ = app.emit("scan:done", done.clone());
     Ok(done)
 }
 
-/// Core scan, separated from Tauri event emission so tests can drive it.
+/// Test/back-compat helper: scan a real-filesystem project root.
+#[cfg(test)]
 pub fn scan_project_inner(
     db: &Arc<Db>,
     root: &Path,
     progress: &mut dyn FnMut(usize),
 ) -> AppResult<ScanDone> {
+    let store = crate::store::LocalFsStore::new(root);
+    scan_with_store(db, &store, progress)
+}
+
+/// Core scan, over any [`ProjectStore`] backend and separated from Tauri event
+/// emission so tests can drive it.
+pub fn scan_with_store(
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+    progress: &mut dyn FnMut(usize),
+) -> AppResult<ScanDone> {
     let started = std::time::Instant::now();
-    let found = walk(root, progress);
+    let found = collect_found(store.list_recursive(SKIP_DIRS)?, progress);
     let total_found = found.len();
+    progress(total_found);
 
     let (new_files, missing_files, file_count) = db.call(move |conn| {
         let now_secs = unix_secs(SystemTime::now());

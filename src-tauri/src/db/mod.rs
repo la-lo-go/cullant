@@ -78,7 +78,7 @@ mod tests {
 
         assert!(db.path().exists());
         let version = db.call(|conn| migrations::current_version(conn)).unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
 
         // All core tables exist and are queryable.
         let table_count = db
@@ -102,6 +102,6 @@ mod tests {
         drop(Db::open(dir.path()).unwrap());
         let db = Db::open(dir.path()).unwrap();
         let version = db.call(|conn| migrations::current_version(conn)).unwrap();
-        assert_eq!(version, 1);
+        assert_eq!(version, 2);
     }
 }
