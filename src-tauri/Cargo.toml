@@ -33,6 +33,9 @@ walkdir = "2.5.0"
 rayon = "1.12.0"
 kamadak-exif = "0.6.1"
 image = "0.25.10"
+# Direct dep for its IDCT-scaled decode (decode at 1/2..1/8 resolution); the
+# image crate's zune-jpeg path has no scaled-decode API.
+jpeg-decoder = "0.3"
 fast_image_resize = { version = "6.0.0", features = ["image", "rayon"] }
 # Pinned exactly: rawler's API is explicitly not SemVer-stable.
 rawler = "=0.7.2"
