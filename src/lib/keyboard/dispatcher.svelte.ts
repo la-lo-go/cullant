@@ -28,7 +28,7 @@ class KeymapStore {
 
 export const keymap = new KeymapStore();
 
-function execute(id: CommandId, e: KeyboardEvent) {
+function execute(id: CommandId, e?: KeyboardEvent) {
   switch (id) {
     case "nav.next":
       return session.moveFocus(1);
@@ -146,6 +146,12 @@ function handleChord(e: KeyboardEvent): boolean {
     return true; // digit consumed by the chord, never reaches rate.N
   }
   return false; // any other key cancels the chord and runs normally
+}
+
+/** Run a command outside the keyboard path (e.g. from a touch button).
+ * No KeyboardEvent, so classification commands never invert auto-advance. */
+export function runCommand(id: CommandId) {
+  execute(id);
 }
 
 export function handleKeydown(e: KeyboardEvent) {
