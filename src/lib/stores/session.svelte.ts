@@ -99,7 +99,9 @@ class SessionStore {
   mirrorMode = $state(true);
 
   // --- focus / selection (indexes into `filtered`) ---
-  focusedIndex = $state(0);
+  /** Index into `filtered`; -1 is the sentinel "no item focused" state (no
+   *  grid cell matches, so nothing shows the focus outline). */
+  focusedIndex = $state(-1);
   /** Column count reported by the grid so ↑/↓ move one visual row. */
   gridCols = $state(1);
 
@@ -225,7 +227,17 @@ class SessionStore {
   clampFocus() {
     const max = Math.max(0, this.filtered.length - 1);
     if (this.focusedIndex > max) this.focusedIndex = max;
-    if (this.focusedIndex < 0) this.focusedIndex = 0;
+    // Preserve a deliberate -1 ("nothing focused"); only pull other
+    // out-of-range negatives up into the valid range.
+    else if (this.focusedIndex < -1) this.focusedIndex = 0;
+  }
+
+  /** Enter the "no item focused" state: no grid cell shows the focus outline,
+   *  and any active selection/anchor is dropped. Used on project open and when
+   *  switching the Photos/Videos media tab. */
+  clearFocus() {
+    this.focusedIndex = -1;
+    this.clearSelection();
   }
 
   /** Re-keyed whenever a navigation is blocked at the first/last item, so the

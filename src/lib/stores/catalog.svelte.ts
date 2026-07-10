@@ -9,6 +9,7 @@ import {
   type ScanProgress,
   type SortKey,
 } from "../api";
+import { session } from "./session.svelte";
 import { settings } from "./settings.svelte";
 import { view } from "./view.svelte";
 
@@ -64,6 +65,8 @@ class CatalogStore {
     if (this.mediaCounts.photos === 0 && this.mediaCounts.videos > 0) {
       await this.setMedia("videos");
     }
+    // A freshly opened project lands in the grid with nothing focused.
+    session.clearFocus();
   }
 
   async close() {
@@ -93,7 +96,11 @@ class CatalogStore {
 
   async setMedia(media: MediaTab) {
     this.media = media;
+    // Switching the media tab always returns to the grid with nothing focused,
+    // even when invoked from inside the loupe/compare view.
+    view.mode = "grid";
     await this.refresh();
+    session.clearFocus();
   }
 }
 
