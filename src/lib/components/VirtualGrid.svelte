@@ -44,9 +44,12 @@
 
   // Cell pitch (thumbnail + label + gap). Smaller on narrow viewports so phones
   // show several columns instead of one huge cell.
-  const CELL = $derived(width > 0 && width < 520 ? 120 : 200);
-
-  const cols = $derived(Math.max(1, Math.floor(width / CELL)));
+  const BASE_CELL = $derived(width > 0 && width < 520 ? 120 : 200);
+  // Never collapse below two columns: on very narrow viewports keep 2 columns
+  // and shrink the cells to fit instead. Wider viewports keep the base pitch.
+  const MIN_COLS = 2;
+  const cols = $derived(width > 0 ? Math.max(MIN_COLS, Math.floor(width / BASE_CELL)) : 1);
+  const CELL = $derived(cols * BASE_CELL <= width ? BASE_CELL : Math.max(1, Math.floor(width / cols)));
   // Center the block of columns: split the leftover horizontal space evenly so
   // equal margins sit on both edges instead of collecting all on the right.
   const padX = $derived(Math.max(0, (width - cols * CELL) / 2));
