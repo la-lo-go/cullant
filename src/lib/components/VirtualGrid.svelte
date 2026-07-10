@@ -304,7 +304,7 @@
         role="button"
         tabindex="-1"
       >
-        <div class="frame" style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}>
+        <div class="frame" class:labeled={v.item.label} style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}>
           {#if v.item.kind === 2}
             <!-- preload=metadata shows the first frame; only ~30 cells live -->
             <video src={videoUrl(v.item)} preload="metadata" muted></video>
@@ -415,6 +415,13 @@
     display: flex;
     align-items: center;
     justify-content: center;
+  }
+
+  /* Label-color indicator: a colored strip along the bottom of the thumbnail.
+     Only drawn for items that actually have a label — an unlabeled cell must
+     reserve zero space here, or the 3px would read as a bottom gap and make the
+     thumbnail's bottom gutter asymmetric with its top/sides. */
+  .frame.labeled {
     border-bottom: 3px solid var(--label-color);
   }
 
