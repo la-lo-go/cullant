@@ -147,7 +147,7 @@
   .back {
     position: absolute;
     top: 10px;
-    right: 10px;
+    right: calc(10px + var(--safe-right));
     z-index: 5;
     width: 28px;
     height: 28px;
@@ -213,6 +213,13 @@
   .pin-btn:hover {
     background: rgba(0, 0, 0, 0.7);
     color: #fff;
+  }
+
+  /* Only the first pane touches the left screen edge (side-by-side layout);
+     keep its overlays clear of a landscape navigation bar / cutout. */
+  .pane:first-child .pin-btn,
+  .pane:first-child .caption {
+    left: calc(10px + var(--safe-left));
   }
 
   .pin-btn.active {

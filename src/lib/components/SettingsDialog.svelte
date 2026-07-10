@@ -107,6 +107,25 @@
     </section>
 
     <section>
+      <h3>Display</h3>
+      <label class="option">
+        <input
+          type="checkbox"
+          checked={settings.edgeToEdge}
+          onchange={(e) => settings.setEdgeToEdge(e.currentTarget.checked)}
+        />
+        <span class="text">
+          <span class="label">Edge-to-edge fullscreen</span>
+          <span class="description">
+            Draw under the status bar, navigation bar and display cutout (mainly on
+            Android); toolbars keep a safe margin so every control stays reachable.
+            Off: the whole app stays clear of the system bars.
+          </span>
+        </span>
+      </label>
+    </section>
+
+    <section>
       <h3>Keyboard</h3>
       <button class="shortcuts" onclick={onshowkeybindings}>
         <Keyboard size={14} />
@@ -129,6 +148,9 @@
     align-items: center;
     justify-content: center;
     z-index: 100;
+    /* Keep the centered panel inside the safe area (system bars, cutout). */
+    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+    box-sizing: border-box;
   }
 
   .dialog {
@@ -138,7 +160,7 @@
     padding: 16px 20px;
     width: 460px;
     max-width: calc(100vw - 24px);
-    max-height: calc(100vh - 48px);
+    max-height: calc(100vh - 48px - var(--inset-top) - var(--inset-bottom));
     overflow-y: auto;
     outline: none;
   }

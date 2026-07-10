@@ -125,7 +125,7 @@
     display: flex;
     gap: 12px;
     align-items: center;
-    padding: 6px 12px;
+    padding: 6px calc(12px + var(--safe-right)) 6px calc(12px + var(--safe-left));
     font-size: 12px;
     background: linear-gradient(transparent, rgba(0, 0, 0, 0.6));
     pointer-events: none;
@@ -154,7 +154,7 @@
   .back {
     position: absolute;
     top: 10px;
-    right: 10px;
+    right: calc(10px + var(--safe-right));
     z-index: 5;
     width: 28px;
     height: 28px;

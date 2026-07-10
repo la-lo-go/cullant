@@ -105,7 +105,7 @@
   .panel {
     position: absolute;
     top: 10px;
-    right: 48px;
+    right: calc(48px + var(--safe-right));
     width: 260px;
     max-width: calc(100vw - 60px);
     max-height: calc(100% - 60px);

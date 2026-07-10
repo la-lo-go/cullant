@@ -5,6 +5,7 @@ export type { PreviewMode };
 
 const PREVIEW_MODE_KEY = "cullant.previewMode";
 const PROGRESSIVE_LOUPE_KEY = "cullant.progressiveLoupe";
+const EDGE_TO_EDGE_KEY = "cullant.edgeToEdge";
 
 function loadPreviewMode(): PreviewMode {
   try {
@@ -41,6 +42,14 @@ class SettingsStore {
   /** Paint the cached thumbnail instantly while the sharp preview loads. */
   progressiveLoupe = $state<boolean>(loadBool(PROGRESSIVE_LOUPE_KEY, true));
 
+  /**
+   * Edge-to-edge fullscreen (mainly Android). On: the app draws under the
+   * status/navigation bars and display cutout, and only the controls that
+   * touch a screen edge are padded by the safe-area insets. Off: the whole
+   * app is inset so nothing ever sits under the system bars.
+   */
+  edgeToEdge = $state<boolean>(loadBool(EDGE_TO_EDGE_KEY, false));
+
   setPreviewMode(mode: PreviewMode) {
     this.previewMode = mode;
     save(PREVIEW_MODE_KEY, mode);
@@ -49,6 +58,11 @@ class SettingsStore {
   setProgressiveLoupe(on: boolean) {
     this.progressiveLoupe = on;
     save(PROGRESSIVE_LOUPE_KEY, on);
+  }
+
+  setEdgeToEdge(on: boolean) {
+    this.edgeToEdge = on;
+    save(EDGE_TO_EDGE_KEY, on);
   }
 }
 

@@ -172,6 +172,10 @@
     flex: none;
     background: var(--surface);
     border-top: 1px solid var(--border);
+    /* Edge-to-edge: the surface bleeds under a landscape navigation bar or
+       cutout while the cells stay inside the safe area. */
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
 
   .strip {

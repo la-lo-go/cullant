@@ -90,8 +90,8 @@
       gap: 8px;
       overflow-x: auto;
       flex-wrap: nowrap;
-      padding: 4px calc(10px + env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom))
-        calc(10px + env(safe-area-inset-left));
+      padding: 4px calc(10px + var(--safe-right)) calc(4px + var(--safe-bottom))
+        calc(10px + var(--safe-left));
       background: var(--surface);
       border-top: 1px solid var(--border-strong);
       scrollbar-width: none;

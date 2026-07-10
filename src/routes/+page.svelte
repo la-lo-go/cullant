@@ -162,7 +162,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<main class="app">
+<main class="app" class:edge={settings.edgeToEdge}>
   {#if catalog.project}
     <header class="toolbar">
       <span class="title">Cullant</span>
@@ -428,6 +428,17 @@
     --accent-rgb: 63, 223, 202;
     --accent-fill: #227268;
 
+    /* Raw safe-area insets (status bar, navigation bar, display cutout —
+       Android/iOS). They follow the device orientation automatically, e.g. a
+       landscape rotation moves the cutout inset to the left or right side.
+       Always 0 on desktop. Fixed-position overlays (dialog backdrops) consume
+       these directly; everything in normal flow consumes the --safe-* set that
+       .app derives from them based on the edge-to-edge setting. */
+    --inset-top: env(safe-area-inset-top, 0px);
+    --inset-right: env(safe-area-inset-right, 0px);
+    --inset-bottom: env(safe-area-inset-bottom, 0px);
+    --inset-left: env(safe-area-inset-left, 0px);
+
     font-family: Inter, "Segoe UI", Avenir, Helvetica, Arial, sans-serif;
     font-size: 14px;
     color: #e8e8e8;
@@ -467,13 +478,34 @@
     display: flex;
     flex-direction: column;
     height: 100vh;
+    height: 100dvh; /* track the real viewport across Android rotations */
+    box-sizing: border-box;
+    /* Edge-to-edge OFF (default): inset the whole app so nothing ever sits
+       under the system bars or cutout, and zero out the --safe-* vars that
+       edge-hugging children (toolbar, touch bar, filmstrip…) consume. */
+    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+    --safe-top: 0px;
+    --safe-right: 0px;
+    --safe-bottom: 0px;
+    --safe-left: 0px;
+  }
+
+  /* Edge-to-edge ON: backgrounds bleed under the system bars; each control
+     that touches a screen edge pads itself by --safe-* to stay reachable. */
+  .app.edge {
+    padding: 0;
+    --safe-top: var(--inset-top);
+    --safe-right: var(--inset-right);
+    --safe-bottom: var(--inset-bottom);
+    --safe-left: var(--inset-left);
   }
 
   .toolbar {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 10px;
+    padding: calc(4px + var(--safe-top)) calc(10px + var(--safe-right)) 4px
+      calc(10px + var(--safe-left));
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
     flex: none;
@@ -686,6 +718,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
   }
 
   .home.centered {
@@ -697,6 +730,9 @@
     min-height: 0;
     display: flex;
     position: relative; /* anchors the folder-tree overlay on narrow screens */
+    /* Keep thumbnails out from under a landscape navigation bar / cutout. */
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
   }
 
   .grid-area :global(.viewport) {
@@ -778,7 +814,7 @@
     justify-content: center;
     align-items: center;
     gap: 6px;
-    padding: 16px 0 calc(16px + env(safe-area-inset-bottom));
+    padding: 16px 0 calc(16px + var(--safe-bottom));
   }
 
   button.ghlink {

@@ -65,6 +65,9 @@
     align-items: center;
     justify-content: center;
     z-index: 100;
+    /* Keep the centered panel inside the safe area (system bars, cutout). */
+    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+    box-sizing: border-box;
   }
 
   .dialog {
