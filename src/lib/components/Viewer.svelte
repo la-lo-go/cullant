@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { videoUrl } from "../api";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
   import ZoomImage from "./ZoomImage.svelte";
+  import VideoPlayer from "./VideoPlayer.svelte";
   import Filmstrip from "./Filmstrip.svelte";
   import MetadataPanel from "./MetadataPanel.svelte";
   import Check from "@lucide/svelte/icons/check";
@@ -48,8 +48,9 @@
   {#if item}
     <div class="stage" bind:this={stage}>
       {#if item.kind === 2}
-        <!-- svelte-ignore a11y_media_has_caption -->
-        <video class="player" src={videoUrl(item)} controls preload="metadata"></video>
+        {#key item.id}
+          <VideoPlayer {item} />
+        {/key}
       {:else}
         <ZoomImage {item} />
       {/if}
@@ -108,13 +109,6 @@
     display: flex;
     flex-direction: column;
     position: relative;
-  }
-
-  .player {
-    flex: 1;
-    min-height: 0;
-    background: var(--bg-stage);
-    outline: none;
   }
 
   .info {
