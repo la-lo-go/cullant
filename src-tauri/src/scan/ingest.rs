@@ -542,6 +542,72 @@ mod tests {
     }
 
     #[test]
+    fn exif_metadata_flows_through_ingest() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // 800x600 landscape with EXIF: known capture time, rotation 6 (90 CW),
+        // camera and ISO. The value 1718461805 is pinned by the exif unit test.
+        let img =
+            image::RgbImage::from_fn(800, 600, |x, _| image::Rgb([((x * 255) / 800) as u8; 3]));
+        let bytes = crate::bench::jpeg_with_exif(
+            &img,
+            &crate::bench::SyntheticExif {
+                date_time_original: "2024:06:15 14:30:05",
+                orientation: 6,
+                make: "Canon",
+                model: "EOS R5",
+                iso: 400,
+            },
+        );
+        std::fs::write(root.join("photo.jpg"), bytes).unwrap();
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let store = LocalFsStore::new(root);
+        run_ingest_inner(
+            &db,
+            &store,
+            root,
+            PreviewMode::All,
+            &mut |_, _| {},
+            &mut |_, _| {},
+            &mut |_, _| {},
+        )
+        .unwrap();
+
+        let (capture, orientation, camera, iso): (i64, i64, String, i64) = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT capture_time, orientation, camera, iso FROM files",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(
+            capture, 1718461805,
+            "capture_time must come from EXIF, not mtime"
+        );
+        assert_eq!(orientation, 6);
+        assert_eq!(camera, "Canon EOS R5");
+        assert_eq!(iso, 400);
+
+        // The freshly-extracted orientation must reach the same-pass render:
+        // landscape 800x600 + rotation 6 = portrait 288x384 thumbnail.
+        let (w, h): (i64, i64) = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT width, height FROM thumbnails WHERE kind = 0",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!((w, h), (288, 384));
+    }
+
+    #[test]
     fn background_mode_defers_all_previews_to_tier_two() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
