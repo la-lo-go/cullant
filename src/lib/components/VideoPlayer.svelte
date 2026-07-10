@@ -21,6 +21,53 @@
   let volume = $state(1);
   let fullscreen = $state(false);
 
+  // YouTube-style auto-hide of the transport chrome. `uiVisible` gates the bar's
+  // opacity + the wrapper's cursor; `hovering` is true while the pointer sits on
+  // the transport bar (so we never hide controls out from under the mouse). We
+  // only ever auto-hide while playing — a paused clip keeps its UI on screen.
+  const IDLE_MS = 2800;
+  let uiVisible = $state(true);
+  let hovering = $state(false);
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearIdle() {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  }
+
+  // Arm the hide timer. Hide only when playing && idle && not hovering a control.
+  function scheduleHide() {
+    clearIdle();
+    if (paused || hovering) return;
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (!paused && !hovering) uiVisible = false;
+    }, IDLE_MS);
+  }
+
+  // Any pointer activity (move or tap) reveals the UI and restarts the timer.
+  function revealUi() {
+    uiVisible = true;
+    scheduleHide();
+  }
+
+  // Keep the UI pinned while paused; resume the idle countdown once playing.
+  // Reading `paused` and `hovering` (via scheduleHide) makes this re-run when
+  // either changes, so hovering a control cancels a pending hide and leaving it
+  // re-arms the timer.
+  $effect(() => {
+    if (paused) {
+      uiVisible = true;
+      clearIdle();
+    } else {
+      scheduleHide();
+    }
+  });
+
+  $effect(() => () => clearIdle());
+
   // Reset transport state whenever we navigate to a different clip. The element
   // is reused (same <video> node, new src), so nothing resets on its own.
   $effect(() => {
@@ -28,6 +75,8 @@
     currentTime = 0;
     duration = 0;
     paused = true;
+    uiVisible = true;
+    hovering = false;
     // Grab focus so Space toggles playback immediately, without a prior click.
     wrap?.focus();
   });
@@ -86,11 +135,14 @@
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="video-wrap"
+  class:hide-cursor={!uiVisible}
   bind:this={wrap}
   tabindex="0"
   role="application"
   aria-label="Video player"
   onkeydown={onKeydown}
+  onpointermove={revealUi}
+  onpointerdown={revealUi}
 >
   <!-- svelte-ignore a11y_media_has_caption -->
   <video
@@ -106,7 +158,13 @@
     onclick={togglePlay}
   ></video>
 
-  <div class="controls">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="controls"
+    class:hidden={!uiVisible}
+    onpointerenter={() => { hovering = true; uiVisible = true; }}
+    onpointerleave={() => { hovering = false; }}
+  >
     <button class="ctl" title={paused ? "Play (Space)" : "Pause (Space)"} onclick={() => { togglePlay(); refocus(); }}>
       {#if paused}<Play size={16} />{:else}<Pause size={16} />{/if}
     </button>
@@ -186,6 +244,24 @@
     border-radius: 10px;
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(6px);
+    transition:
+      opacity 160ms ease,
+      transform 160ms ease;
+  }
+
+  /* Auto-hidden while playing + idle. Fast fade/slide out; pointer-events off so
+     an idle pointer resting over the (invisible) bar can't re-trigger hovering. */
+  .controls.hidden {
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+  }
+
+  /* Hide the cursor along with the chrome whenever the UI is hidden. The video's
+     own `cursor: pointer` must be overridden too. */
+  .hide-cursor,
+  .hide-cursor .player {
+    cursor: none;
   }
 
   .ctl {
