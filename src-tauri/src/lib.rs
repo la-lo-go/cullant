@@ -31,6 +31,54 @@ pub struct AppState {
     pub project: Mutex<Option<ProjectState>>,
 }
 
+/// Thin facade for the `bench_ingest` example. Not a stable API.
+#[doc(hidden)]
+pub mod bench {
+    use std::path::Path;
+    use std::sync::Arc;
+
+    pub use crate::db::Db;
+    pub use crate::scan::ingest::PreviewMode;
+    pub use crate::store::ProjectStore;
+
+    pub fn open_db(root: &Path) -> Db {
+        Db::open(root).expect("failed to open project db")
+    }
+
+    pub fn local_store(root: &Path) -> Arc<dyn ProjectStore> {
+        Arc::new(crate::store::LocalFsStore::new(root))
+    }
+
+    /// Walk + reconcile; returns the number of present files.
+    pub fn scan(db: &Arc<Db>, store: &dyn ProjectStore) -> i64 {
+        crate::scan::scan_with_store(db, store, &mut |_| {})
+            .expect("scan failed")
+            .file_count
+    }
+
+    /// Run the fused ingest; returns (tier-1 total, background previews done).
+    pub fn ingest(
+        db: &Arc<Db>,
+        store: &dyn ProjectStore,
+        root: &Path,
+        mode: PreviewMode,
+    ) -> (usize, usize) {
+        let mut tier1 = 0usize;
+        let mut previews = 0usize;
+        crate::scan::ingest::run_ingest_inner(
+            db,
+            store,
+            root,
+            mode,
+            &mut |_, total| tier1 = total,
+            &mut |_, _| {},
+            &mut |done, _| previews = done,
+        )
+        .expect("ingest failed");
+        (tier1, previews)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt().init();
