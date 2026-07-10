@@ -6,6 +6,7 @@ export type { PreviewMode };
 const PREVIEW_MODE_KEY = "cullant.previewMode";
 const PROGRESSIVE_LOUPE_KEY = "cullant.progressiveLoupe";
 const EDGE_TO_EDGE_KEY = "cullant.edgeToEdge";
+const ONBOARDED_PREVIEW_KEY = "cullant.onboardedPreview";
 
 function loadPreviewMode(): PreviewMode {
   try {
@@ -50,6 +51,13 @@ class SettingsStore {
    */
   edgeToEdge = $state<boolean>(loadBool(EDGE_TO_EDGE_KEY, false));
 
+  /**
+   * Whether the one-time preview-mode intro has been shown and confirmed.
+   * Gates the first interactive project open so the welcome dialog appears
+   * exactly once, ever.
+   */
+  onboardedPreview = $state<boolean>(loadBool(ONBOARDED_PREVIEW_KEY, false));
+
   setPreviewMode(mode: PreviewMode) {
     this.previewMode = mode;
     save(PREVIEW_MODE_KEY, mode);
@@ -63,6 +71,11 @@ class SettingsStore {
   setEdgeToEdge(on: boolean) {
     this.edgeToEdge = on;
     save(EDGE_TO_EDGE_KEY, on);
+  }
+
+  setOnboardedPreview(on: boolean) {
+    this.onboardedPreview = on;
+    save(ONBOARDED_PREVIEW_KEY, on);
   }
 }
 

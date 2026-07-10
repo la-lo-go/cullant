@@ -22,7 +22,9 @@
   import MoveDialog from "$lib/components/MoveDialog.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
+  import PreviewModeIntro from "$lib/components/PreviewModeIntro.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
+  import type { PreviewMode } from "$lib/api";
   import { api } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
@@ -51,6 +53,11 @@
   let showKeybindings = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
+
+  // First-run onboarding: the very first interactive open shows a one-time
+  // welcome dialog to pick the preview loading mode. `introPath` stashes the
+  // project the user asked to open while the dialog is up.
+  let introPath = $state<string | null>(null);
 
   // Load the project's tag list + pending queue whenever a project opens.
   $effect(() => {
@@ -141,7 +148,39 @@
     const path = navigator.userAgent.includes("Android")
       ? await api.pickSafTree()
       : await open({ directory: true, title: "Open project folder" });
-    if (path) await catalog.open(path);
+    if (path) await openProject(path);
+  }
+
+  /**
+   * Interactive open gate. On the very first open ever, stash the target path
+   * and show the preview-mode intro instead of opening immediately; the dialog
+   * confirms the choice and then opens. Afterwards, open directly.
+   */
+  async function openProject(path: string) {
+    if (!settings.onboardedPreview) {
+      introPath = path;
+      return;
+    }
+    await catalog.open(path);
+  }
+
+  /** Intro confirmed: persist the chosen mode, mark onboarded, then open. */
+  async function confirmIntro(mode: PreviewMode) {
+    const path = introPath;
+    introPath = null;
+    if (path === null) return;
+    settings.setPreviewMode(mode);
+    settings.setOnboardedPreview(true);
+    await catalog.open(path);
+  }
+
+  /**
+   * Intro cancelled/Escaped: abort the open and leave `onboardedPreview` false
+   * so the dialog reappears on the next attempt (least-surprising: the user
+   * never gets a project loaded with a mode they didn't confirm).
+   */
+  function cancelIntro() {
+    introPath = null;
   }
 
   /**
@@ -352,7 +391,7 @@
           <p class="error">{catalog.error}</p>
         {/if}
       </div>
-      <ProjectGallery onopen={(path) => void catalog.open(path)} />
+      <ProjectGallery onopen={(path) => void openProject(path)} />
       <footer class="home-footer">
         <button class="opensource" onclick={() => (showSettings = true)}>
           <SettingsIcon size={13} />
@@ -364,6 +403,10 @@
         </button>
       </footer>
     </div>
+  {/if}
+
+  {#if introPath !== null}
+    <PreviewModeIntro onstart={(mode) => void confirmIntro(mode)} oncancel={cancelIntro} />
   {/if}
 
   {#if showKeybindings}
