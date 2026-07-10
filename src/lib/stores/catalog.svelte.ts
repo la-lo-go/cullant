@@ -10,6 +10,7 @@ import {
   type SortKey,
 } from "../api";
 import { settings } from "./settings.svelte";
+import { view } from "./view.svelte";
 
 class CatalogStore {
   project = $state<ProjectInfo | null>(null);
@@ -36,7 +37,7 @@ class CatalogStore {
       this.project = info;
       this.preloading = true;
       this.thumbProgress = { done: 0, total: 0 };
-      await this.refresh();
+      await this.refreshForOpen();
     }
   }
 
@@ -48,9 +49,20 @@ class CatalogStore {
       this.scanFound = 0;
       this.preloading = true;
       this.thumbProgress = { done: 0, total: 0 };
-      await this.refresh();
+      await this.refreshForOpen();
     } catch (e) {
       this.error = String(e);
+    }
+  }
+
+  /// Refresh after opening a project: always land in the grid on the Photos
+  /// tab, falling back to Videos for a video-only project.
+  private async refreshForOpen() {
+    view.mode = "grid";
+    this.media = "photos";
+    await this.refresh();
+    if (this.mediaCounts.photos === 0 && this.mediaCounts.videos > 0) {
+      await this.setMedia("videos");
     }
   }
 
