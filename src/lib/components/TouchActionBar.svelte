@@ -10,11 +10,25 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import CheckCheck from "@lucide/svelte/icons/check-check";
 
+  // On touch devices the bar shows itself (coarse pointer). On desktop it is
+  // opt-in: the parent flips `forceShow` from a toolbar toggle.
+  let { forceShow = false }: { forceShow?: boolean } = $props();
+
   // The item the actions apply to (mirrors the keyboard path, which acts on the
   // focused item / current selection).
   const focused = $derived(session.focused);
   const rating = $derived(focused?.rating ?? 0);
   const flag = $derived(focused?.flag ?? 0);
+
+  // Run a command, then release focus so a clicked button never swallows the
+  // arrow keys used for grid navigation (mirrors the `blurring()` toolbar
+  // helper). On touch this blur is a harmless no-op.
+  function act(fn: () => void): (e: MouseEvent) => void {
+    return (e) => {
+      fn();
+      (e.currentTarget as HTMLElement).blur();
+    };
+  }
 
   function rate(n: number) {
     // Tapping the current rating clears it, Lightroom-style.
@@ -22,12 +36,12 @@
   }
 </script>
 
-<div class="touchbar" class:disabled={!focused}>
+<div class="touchbar" class:forced={forceShow} class:disabled={!focused}>
   <div class="group nav">
-    <button class="btn" aria-label="Previous" onclick={() => runCommand("nav.prev")}>
+    <button class="btn" aria-label="Previous" onclick={act(() => runCommand("nav.prev"))}>
       <ChevronLeft size={22} />
     </button>
-    <button class="btn" aria-label="Next" onclick={() => runCommand("nav.next")}>
+    <button class="btn" aria-label="Next" onclick={act(() => runCommand("nav.next"))}>
       <ChevronRight size={22} />
     </button>
   </div>
@@ -37,7 +51,7 @@
       class="btn"
       class:active-reject={flag === -1}
       aria-label="Reject"
-      onclick={() => runCommand(flag === -1 ? "flag.unflag" : "flag.reject")}
+      onclick={act(() => runCommand(flag === -1 ? "flag.unflag" : "flag.reject"))}
     >
       <Ban size={20} />
     </button>
@@ -45,7 +59,7 @@
       class="btn"
       class:active-pick={flag === 1}
       aria-label="Pick"
-      onclick={() => runCommand(flag === 1 ? "flag.unflag" : "flag.pick")}
+      onclick={act(() => runCommand(flag === 1 ? "flag.unflag" : "flag.pick"))}
     >
       <Flag size={20} />
     </button>
@@ -57,7 +71,7 @@
         class="btn star"
         class:on={rating >= n}
         aria-label={`Rate ${n}`}
-        onclick={() => rate(n)}
+        onclick={act(() => rate(n))}
       >
         <Star size={18} fill={rating >= n ? "currentColor" : "none"} />
       </button>
@@ -65,37 +79,44 @@
   </div>
 
   <div class="group actions">
-    <button class="btn danger" aria-label="Queue delete" onclick={() => runCommand("delete.pair")}>
+    <button class="btn danger" aria-label="Queue delete" onclick={act(() => runCommand("delete.pair"))}>
       <Trash2 size={20} />
     </button>
-    <button class="btn commit" aria-label="Review & commit" onclick={() => runCommand("commit.open")}>
+    <button class="btn commit" aria-label="Review & commit" onclick={act(() => runCommand("commit.open"))}>
       <CheckCheck size={20} />
     </button>
   </div>
 </div>
 
 <style>
-  /* Touch-only: hidden where a precise pointer (mouse) is primary. */
+  /* Hidden by default; a coarse (touch) pointer or the desktop opt-in toggle
+     (`.forced`) reveals it. Layout lives here so both paths share it. */
   .touchbar {
     display: none;
+    align-items: center;
+    /* Center the button groups; "safe" falls back to start when the content
+       overflows so the leading items stay reachable while scrolling. */
+    justify-content: safe center;
+    gap: 8px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding: 4px calc(10px + var(--safe-right)) calc(4px + var(--safe-bottom))
+      calc(10px + var(--safe-left));
+    background: var(--surface);
+    border-top: 1px solid var(--border-strong);
+    scrollbar-width: none;
   }
 
+  /* Always on where touch is the primary pointer. */
   @media (pointer: coarse) {
     .touchbar {
       display: flex;
-      align-items: center;
-      /* Center the button groups; "safe" falls back to start when the content
-         overflows so the leading items stay reachable while scrolling. */
-      justify-content: safe center;
-      gap: 8px;
-      overflow-x: auto;
-      flex-wrap: nowrap;
-      padding: 4px calc(10px + var(--safe-right)) calc(4px + var(--safe-bottom))
-        calc(10px + var(--safe-left));
-      background: var(--surface);
-      border-top: 1px solid var(--border-strong);
-      scrollbar-width: none;
     }
+  }
+
+  /* Desktop opt-in via the toolbar toggle. */
+  .touchbar.forced {
+    display: flex;
   }
 
   .touchbar::-webkit-scrollbar {

@@ -35,6 +35,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Tag from "@lucide/svelte/icons/tag";
   import Type from "@lucide/svelte/icons/type";
+  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
@@ -45,6 +46,8 @@
 
   const REPO_URL = "https://github.com/la-lo-go/cullant";
 
+  // Desktop opt-in for the touch action bar (always shown on touch devices).
+  let touchBarVisible = $state(false);
   let showKeybindings = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
@@ -225,6 +228,15 @@
       >
         <Type size={14} />
       </button>
+      <button
+        class="touchbar-toggle"
+        class:active={touchBarVisible}
+        title="Show/hide the action bar"
+        aria-label="Show/hide the action bar"
+        onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
+      >
+        <PanelBottom size={14} />
+      </button>
       {#if hasSubfolders}
         <button
           class:active={session.folderTreeVisible}
@@ -328,7 +340,7 @@
       {:else}
         <CompareView />
       {/if}
-      <TouchActionBar />
+      <TouchActionBar forceShow={touchBarVisible} />
     {/if}
   {:else}
     <div class="home" class:centered={recent.list.length === 0}>
@@ -509,6 +521,14 @@
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
     flex: none;
+  }
+
+  /* On touch devices the action bar is always visible, so its toggle is
+     redundant — hide it there. */
+  @media (pointer: coarse) {
+    .toolbar .touchbar-toggle {
+      display: none;
+    }
   }
 
   /* Narrow screens: wrap the toolbar to a couple of rows and drop the least
