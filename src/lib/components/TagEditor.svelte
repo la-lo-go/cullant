@@ -119,8 +119,8 @@
   }
 
   .dialog {
-    background: #232329;
-    border: 1px solid #3a3a42;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     padding: 16px 20px;
     width: 480px;
@@ -173,15 +173,15 @@
   }
 
   .key.waiting {
-    border-color: #6b6bff;
-    color: #6bb2ff;
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .create {
     display: flex;
     gap: 6px;
     align-items: center;
-    border-top: 1px solid #2e2e36;
+    border-top: 1px solid var(--border);
     padding-top: 10px;
   }
 
@@ -193,12 +193,12 @@
   select,
   button {
     border-radius: 6px;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     padding: 4px 8px;
     font-size: 13px;
     font-family: inherit;
     color: #e8e8e8;
-    background-color: #2a2a30;
+    background-color: var(--control);
   }
 
   button {
@@ -206,7 +206,7 @@
   }
 
   button:hover {
-    border-color: #6b6bff;
+    border-color: var(--accent);
   }
 
   .del {

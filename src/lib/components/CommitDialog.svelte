@@ -224,8 +224,8 @@
   }
 
   .dialog {
-    background: #232329;
-    border: 1px solid #3a3a42;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     padding: 16px 20px;
     width: 520px;
@@ -273,8 +273,8 @@
     gap: 10px;
     text-align: left;
     padding: 8px 10px;
-    background: #2a2a30;
-    border: 1px solid #3a3a42;
+    background: var(--control);
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
     color: #e8e8e8;
     font-size: 13px;
@@ -341,12 +341,12 @@
   select,
   button {
     border-radius: 6px;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     padding: 5px 10px;
     font-size: 13px;
     font-family: inherit;
     color: #e8e8e8;
-    background-color: #2a2a30;
+    background-color: var(--control);
     cursor: pointer;
   }
 
@@ -354,7 +354,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    border-top: 1px solid #2e2e36;
+    border-top: 1px solid var(--border);
     padding-top: 10px;
   }
 
@@ -368,7 +368,7 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    border-color: #6b8bff;
+    border-color: var(--accent);
     font-weight: 600;
   }
 

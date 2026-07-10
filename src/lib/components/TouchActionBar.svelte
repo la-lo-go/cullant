@@ -92,8 +92,8 @@
       flex-wrap: nowrap;
       padding: 4px calc(10px + env(safe-area-inset-right)) calc(4px + env(safe-area-inset-bottom))
         calc(10px + env(safe-area-inset-left));
-      background: #202026;
-      border-top: 1px solid #3a3a42;
+      background: var(--surface);
+      border-top: 1px solid var(--border-strong);
       scrollbar-width: none;
     }
   }
@@ -116,7 +116,7 @@
 
   .group + .group {
     padding-left: 10px;
-    border-left: 1px solid #33333b;
+    border-left: 1px solid var(--border);
   }
 
   .btn {
@@ -125,9 +125,9 @@
     justify-content: center;
     min-width: 44px;
     min-height: 42px;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     border-radius: 8px;
-    background: #2a2a30;
+    background: var(--control);
     color: #e8e8e8;
     padding: 0;
     -webkit-tap-highlight-color: transparent;
@@ -135,7 +135,7 @@
   }
 
   .btn:active {
-    background: #35353d;
+    background: var(--hover);
   }
 
   .star {
@@ -164,7 +164,7 @@
   }
 
   .btn.commit {
-    color: #6b8bff;
-    border-color: #4a4a72;
+    color: var(--accent);
+    border-color: var(--border-strong);
   }
 </style>

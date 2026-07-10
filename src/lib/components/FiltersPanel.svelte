@@ -166,8 +166,8 @@
     flex-direction: column;
     gap: 12px;
     padding: 12px 14px;
-    background: #232329;
-    border: 1px solid #3a3a42;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     font-size: 12px;
@@ -189,7 +189,7 @@
     align-items: center;
     gap: 4px;
     background: none;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
     color: #bbb;
     padding: 3px 8px;
@@ -200,7 +200,7 @@
 
   .clear:hover:not(:disabled) {
     color: #fff;
-    border-color: #55555f;
+    border-color: var(--border-strong);
   }
 
   .clear:disabled {
@@ -236,7 +236,7 @@
     align-items: center;
     gap: 4px;
     border: 1px solid transparent;
-    background: #2a2a30;
+    background: var(--control);
     color: #bbb;
     padding: 4px 9px;
     border-radius: 6px;
@@ -246,13 +246,13 @@
   }
 
   .seg:hover {
-    background: #33333c;
+    background: var(--control);
   }
 
   .seg.active {
-    background: #3a3a46;
+    background: var(--hover);
     color: #fff;
-    border-color: #6b8bff;
+    border-color: var(--accent);
   }
 
   .count {
@@ -305,7 +305,7 @@
     align-items: center;
     gap: 5px;
     border: 1px solid transparent;
-    background: #2a2a30;
+    background: var(--control);
     color: #bbb;
     padding: 4px 9px;
     border-radius: 6px;
@@ -315,11 +315,11 @@
   }
 
   .tagseg:hover {
-    background: #33333c;
+    background: var(--control);
   }
 
   .tagseg.active {
-    background: #3a3a46;
+    background: var(--hover);
     color: #fff;
     border-color: var(--c);
   }
@@ -333,7 +333,7 @@
 
   footer {
     color: #8a8a93;
-    border-top: 1px solid #33333b;
+    border-top: 1px solid var(--border);
     padding-top: 8px;
   }
 </style>

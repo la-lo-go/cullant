@@ -48,8 +48,8 @@
   }
 
   .dialog {
-    background: #232329;
-    border: 1px solid #3a3a42;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     padding: 16px 20px;
     width: 380px;
@@ -75,16 +75,16 @@
 
   button {
     border-radius: 6px;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     padding: 8px 10px;
     font-size: 13px;
     font-family: inherit;
     color: #e8e8e8;
-    background-color: #2a2a30;
+    background-color: var(--control);
     cursor: pointer;
   }
 
   button:hover {
-    border-color: #6b6bff;
+    border-color: var(--accent);
   }
 </style>

@@ -392,21 +392,21 @@
   }
 
   .cell.focused {
-    outline: 2px solid #6b8bff;
+    outline: 2px solid var(--accent);
     outline-offset: -2px;
-    background: rgba(107, 139, 255, 0.08);
+    background: rgba(var(--accent-rgb), 0.08);
   }
 
   .cell.selected {
-    background: rgba(107, 139, 255, 0.16);
-    box-shadow: inset 0 0 0 1px rgba(107, 139, 255, 0.55);
+    background: rgba(var(--accent-rgb), 0.16);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.55);
   }
 
   .frame {
     position: relative;
     flex: 1;
     min-height: 0;
-    background: #26262c;
+    background: var(--hover);
     border-radius: 6px;
     overflow: hidden;
     display: flex;
@@ -422,8 +422,8 @@
     position: absolute;
     top: 0;
     left: 0;
-    border: 1px dashed #6b8bff;
-    background: #6b8bff22;
+    border: 1px dashed var(--accent);
+    background: rgba(var(--accent-rgb), 0.13);
     pointer-events: none;
     z-index: 2;
   }

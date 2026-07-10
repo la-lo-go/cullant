@@ -68,8 +68,8 @@
   }
 
   .dialog {
-    background: #232329;
-    border: 1px solid #3a3a42;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     padding: 16px 20px;
     width: 360px;
@@ -93,16 +93,16 @@
   input,
   button {
     border-radius: 6px;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     padding: 7px 10px;
     font-size: 13px;
     font-family: inherit;
     color: #e8e8e8;
-    background-color: #2a2a30;
+    background-color: var(--control);
   }
 
   input:focus {
-    border-color: #6b8bff;
+    border-color: var(--accent);
     outline: none;
   }
 
@@ -117,6 +117,6 @@
   }
 
   button:hover {
-    border-color: #6b6bff;
+    border-color: var(--accent);
   }
 </style>

@@ -174,7 +174,7 @@
   }
 
   .filmstrip-btn.active {
-    background: rgba(107, 139, 255, 0.5);
+    background: rgba(var(--accent-rgb), 0.5);
     color: #fff;
   }
 
@@ -187,7 +187,7 @@
   }
 
   .pane.pinned {
-    outline: 1px solid rgba(107, 139, 255, 0.55);
+    outline: 1px solid rgba(var(--accent-rgb), 0.55);
     outline-offset: -1px;
   }
 
@@ -216,7 +216,7 @@
   }
 
   .pin-btn.active {
-    color: #8fa6ff;
+    color: var(--accent);
   }
 
   .caption {
@@ -232,7 +232,7 @@
   }
 
   .focused-caption {
-    outline: 1px solid #6b8bff;
+    outline: 1px solid var(--accent);
   }
 
   .pane.empty {

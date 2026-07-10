@@ -116,16 +116,16 @@
     gap: 2px;
     padding: 14px 10px 10px;
     border-radius: 10px;
-    border: 1px solid #2c2c34;
-    background: #202024;
+    border: 1px solid var(--border);
+    background: var(--surface);
     color: inherit;
     font-family: inherit;
     cursor: pointer;
   }
 
   .card:hover:not(:disabled) {
-    background: #26262c;
-    border-color: #3a3a42;
+    background: var(--hover);
+    border-color: var(--border-strong);
   }
 
   .card:disabled {
@@ -151,7 +151,7 @@
     height: 84px;
     object-fit: cover;
     border-radius: 5px;
-    border: 2px solid #1b1b1f;
+    border: 2px solid var(--bg);
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
     transition: transform 180ms ease-out;
   }
@@ -221,7 +221,7 @@
   }
 
   .remove:hover {
-    background: #3a3a42;
+    background: var(--border-strong);
     color: #fff;
   }
 </style>

@@ -110,8 +110,8 @@
     max-width: calc(100vw - 60px);
     max-height: calc(100% - 60px);
     overflow-y: auto;
-    background: #232329;
-    border: 1px solid #3a3a42;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 8px;
     padding: 10px 12px;
     z-index: 6;
@@ -165,9 +165,9 @@
     padding: 5px 8px;
     width: 100%;
     justify-content: center;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     border-radius: 6px;
-    background: #2a2a30;
+    background: var(--control);
     color: #8fd0ff;
     font-family: inherit;
     font-size: 12px;
@@ -175,7 +175,7 @@
   }
 
   .gps:hover {
-    border-color: #6b8bff;
+    border-color: var(--accent);
   }
 
   .path {

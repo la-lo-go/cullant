@@ -392,7 +392,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #131316;
+    background: var(--bg-stage);
     /* We handle swipe/pinch/pan ourselves via pointer events. */
     touch-action: none;
   }
@@ -445,7 +445,7 @@
     width: 90px;
     height: 12px;
     margin: 0;
-    accent-color: #8fa6ff;
+    accent-color: var(--accent);
     cursor: pointer;
   }
 

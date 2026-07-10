@@ -93,8 +93,8 @@
        folder names would produce a horizontal scrollbar. Clip instead — node
        labels already ellipsize. */
     overflow-x: hidden;
-    background: #1e1e23;
-    border-right: 1px solid #2e2e36;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
   }
 
   /* Grabbable strip straddling the right edge; widens the hit area without a
@@ -123,7 +123,7 @@
 
   .resize-handle:hover::after,
   .resize-handle.resizing::after {
-    background: #6b8bff;
+    background: var(--accent);
   }
 
   /* On narrow screens the tree floats over the grid instead of squeezing it
@@ -169,12 +169,12 @@
   }
 
   .node.root:hover {
-    background: #26262c;
+    background: var(--hover);
   }
 
   .node.root.active {
-    background: #2f3a5c;
-    color: #a9c0ff;
+    background: var(--accent-fill);
+    color: var(--accent);
   }
 
   .name {

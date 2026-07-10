@@ -405,15 +405,37 @@
     overflow: hidden;
   }
 
+  /* The single source of truth for the app's theme. Every component references
+     these via var(--…); nothing hardcodes a background or accent hex. To
+     retheme, change only the values here.
+       - surfaces: a warm dark-teal ramp anchored on --bg (the grid/menu base),
+         each step a touch lighter for panels → toolbar/dialogs → hover →
+         controls → borders, so the depth hierarchy is preserved.
+       - accent: a pale mint used for outlines/borders/focus/links/light text;
+         --accent-fill is its DARK counterpart for filled active states (white
+         text stays legible on it), and --accent-rgb feeds translucent tints. */
   :global(:root) {
+    --bg-stage: #191d1e;
+    --bg: #222728;
+    --surface: #272d2e;
+    --surface-2: #2c3334;
+    --hover: #313839;
+    --control: #384040;
+    --border: #3d4544;
+    --border-strong: #495251;
+
+    --accent: #ccece8;
+    --accent-rgb: 204, 236, 232;
+    --accent-fill: #2b3a38;
+
     font-family: Inter, "Segoe UI", Avenir, Helvetica, Arial, sans-serif;
     font-size: 14px;
     color: #e8e8e8;
-    background-color: #1b1b1f;
+    background-color: var(--bg);
     color-scheme: dark;
   }
 
-  /* App-styled scrollbars: a thin thumb in the app's periwinkle accent hugging
+  /* App-styled scrollbars: a thin thumb in the app accent (mint) hugging
      the content edge, a fully transparent track so no bar ever reads as its
      own column. The 2px transparent border (clipped to content-box) insets the
      thumb so the visible bar is only ~4px. */
@@ -427,14 +449,14 @@
   }
 
   :global(::-webkit-scrollbar-thumb) {
-    background-color: rgba(107, 139, 255, 0.5);
+    background-color: rgba(var(--accent-rgb), 0.5);
     border-radius: 8px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
 
   :global(::-webkit-scrollbar-thumb:hover) {
-    background-color: rgba(107, 139, 255, 0.85);
+    background-color: rgba(var(--accent-rgb), 0.85);
   }
 
   :global(::-webkit-scrollbar-corner) {
@@ -452,8 +474,8 @@
     align-items: center;
     gap: 8px;
     padding: 4px 10px;
-    background: #232329;
-    border-bottom: 1px solid #333;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
     flex: none;
   }
 
@@ -494,22 +516,22 @@
   }
 
   .status.scanning {
-    color: #6bb2ff;
+    color: var(--accent);
   }
 
   button {
     border-radius: 6px;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     padding: 4px 10px;
     font-size: 13px;
     font-family: inherit;
     color: #e8e8e8;
-    background-color: #2a2a30;
+    background-color: var(--control);
     cursor: pointer;
   }
 
   button:hover {
-    border-color: #6b6bff;
+    border-color: var(--accent);
   }
 
   .toolbar button {
@@ -532,7 +554,7 @@
     align-items: center;
     justify-content: center;
     gap: 14px;
-    background: #1b1b1f;
+    background: var(--bg);
   }
 
   .preload .phase {
@@ -547,7 +569,7 @@
 
 
   button.active {
-    background: #3a3a5c;
+    background: var(--accent-fill);
     border-color: transparent;
     color: #fff;
   }
@@ -558,8 +580,8 @@
     gap: 3px;
     padding: 2px;
     border-radius: 8px;
-    background: #1e1e23;
-    border: 1px solid #333;
+    background: var(--surface);
+    border: 1px solid var(--border);
   }
 
   button.commit.haswork {
@@ -575,8 +597,8 @@
 
   /* Active-filters indicator on the Filters button. */
   .filters-anchor button.haswork {
-    border-color: #6b8bff;
-    color: #cfd9ff;
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   .segmented button {
@@ -588,11 +610,11 @@
   }
 
   .segmented button:hover:not(:disabled) {
-    border-color: #6b6bff;
+    border-color: var(--accent);
   }
 
   .segmented button.active {
-    background: #3a3a5c;
+    background: var(--accent-fill);
     border-color: transparent;
     color: #fff;
     animation: pill-pop 0.15s ease;
@@ -623,8 +645,8 @@
     gap: 3px;
     padding: 2px;
     border-radius: 8px;
-    background: #1e1e23;
-    border: 1px solid #333;
+    background: var(--surface);
+    border: 1px solid var(--border);
   }
 
   .media-btn {
@@ -638,11 +660,11 @@
   }
 
   .media-btn:hover:not(:disabled) {
-    border-color: #6b6bff;
+    border-color: var(--accent);
   }
 
   .media-btn.active {
-    background: #3a3a5c;
+    background: var(--accent-fill);
     border-color: transparent;
     color: #fff;
     animation: pill-pop 0.15s ease;
@@ -691,17 +713,17 @@
     width: 18px;
     height: 44px;
     padding: 0;
-    border: 1px solid #2e2e36;
+    border: 1px solid var(--border);
     border-left: none;
     border-radius: 0 6px 6px 0;
-    background: #1e1e23;
-    color: #a9c0ff;
+    background: var(--surface);
+    color: var(--accent);
     cursor: pointer;
   }
 
   .tree-peek:hover {
-    background: #26262c;
-    border-color: #6b8bff;
+    background: var(--hover);
+    border-color: var(--accent);
   }
 
   .welcome {
@@ -741,11 +763,11 @@
     background: none;
     padding: 2px 4px;
     font-size: 12px;
-    color: #8fa6ff;
+    color: var(--accent);
   }
 
   button.opensource:hover {
-    color: #b0c0ff;
+    color: var(--accent);
     text-decoration: underline;
   }
 </style>

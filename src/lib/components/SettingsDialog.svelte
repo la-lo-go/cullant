@@ -136,8 +136,8 @@
   }
 
   .dialog {
-    background: #232329;
-    border: 1px solid #3a3a42;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     padding: 16px 20px;
     width: 460px;
@@ -177,12 +177,12 @@
   }
 
   .option:hover {
-    background: #2a2a31;
+    background: var(--hover);
   }
 
   .option input {
     margin-top: 3px;
-    accent-color: #6b8bff;
+    accent-color: var(--accent);
   }
 
   .text {
@@ -224,16 +224,16 @@
 
   button {
     border-radius: 6px;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     padding: 8px 12px;
     font-size: 13px;
     font-family: inherit;
     color: #e8e8e8;
-    background-color: #2a2a30;
+    background-color: var(--control);
     cursor: pointer;
   }
 
   button:hover {
-    border-color: #6b6bff;
+    border-color: var(--accent);
   }
 </style>

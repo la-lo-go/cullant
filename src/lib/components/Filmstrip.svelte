@@ -170,8 +170,8 @@
   .filmstrip {
     position: relative;
     flex: none;
-    background: #1e1e23;
-    border-top: 1px solid #2e2e36;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
   }
 
   .strip {
@@ -205,7 +205,7 @@
 
   .resize-handle:hover::after,
   .resize-handle.resizing::after {
-    background: #6b8bff;
+    background: var(--accent);
   }
 
   /* Peek tab shown at the bottom edge when the filmstrip is collapsed. */
@@ -218,17 +218,17 @@
     width: 44px;
     height: 18px;
     padding: 0;
-    border: 1px solid #2e2e36;
+    border: 1px solid var(--border);
     border-bottom: none;
     border-radius: 6px 6px 0 0;
-    background: #1e1e23;
-    color: #a9c0ff;
+    background: var(--surface);
+    color: var(--accent);
     cursor: pointer;
   }
 
   .strip-peek:hover {
-    background: #26262c;
-    border-color: #6b8bff;
+    background: var(--hover);
+    border-color: var(--accent);
   }
 
   .canvas {
@@ -249,7 +249,7 @@
   }
 
   .cell.focused {
-    outline: 2px solid #6b8bff;
+    outline: 2px solid var(--accent);
     outline-offset: -2px;
   }
 

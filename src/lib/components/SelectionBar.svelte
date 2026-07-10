@@ -95,8 +95,8 @@
     align-items: center;
     gap: 12px;
     padding: 4px 12px;
-    background: #232a3a;
-    border-bottom: 1px solid #34406a;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
     flex: none;
     font-size: 12px;
     overflow-x: auto;
@@ -107,12 +107,12 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    color: #9db4ff;
+    color: var(--accent);
     flex: none;
   }
 
   .head strong {
-    color: #cfd9ff;
+    color: var(--accent);
   }
 
   .clear {
@@ -120,7 +120,7 @@
     align-items: center;
     background: none;
     border: none;
-    color: #9db4ff;
+    color: var(--accent);
     cursor: pointer;
     padding: 1px 2px;
     border-radius: 4px;
@@ -128,7 +128,7 @@
 
   .clear:hover {
     color: #fff;
-    background: #33406a;
+    background: var(--accent-fill);
   }
 
   .apply {
@@ -149,15 +149,15 @@
     justify-content: center;
     width: 28px;
     height: 24px;
-    border: 1px solid #3a4260;
-    background: #2a3048;
-    color: #cdd6f0;
+    border: 1px solid var(--border-strong);
+    background: var(--accent-fill);
+    color: var(--accent);
     border-radius: 5px;
     cursor: pointer;
   }
 
   .btn:hover {
-    border-color: #6b8bff;
+    border-color: var(--accent);
     color: #fff;
   }
 
@@ -199,9 +199,9 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    border: 1px solid #3a4260;
-    background: #2a3048;
-    color: #cdd6f0;
+    border: 1px solid var(--border-strong);
+    background: var(--accent-fill);
+    color: var(--accent);
     padding: 3px 8px;
     border-radius: 5px;
     cursor: pointer;

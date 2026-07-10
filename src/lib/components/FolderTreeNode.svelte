@@ -67,12 +67,12 @@
   }
 
   .node:hover {
-    background: #26262c;
+    background: var(--hover);
   }
 
   .node.active {
-    background: #2f3a5c;
-    color: #a9c0ff;
+    background: var(--accent-fill);
+    color: var(--accent);
   }
 
   .chevron,

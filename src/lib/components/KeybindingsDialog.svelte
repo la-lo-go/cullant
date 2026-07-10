@@ -58,8 +58,8 @@
   }
 
   .dialog {
-    background: #232329;
-    border: 1px solid #3a3a42;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
     border-radius: 10px;
     padding: 16px 20px;
     width: 460px;
@@ -103,8 +103,8 @@
     font-size: 12px;
     min-width: 90px;
     text-align: center;
-    background: #2a2a30;
-    border: 1px solid #3a3a42;
+    background: var(--control);
+    border: 1px solid var(--border-strong);
     border-radius: 5px;
     padding: 3px 8px;
     color: #e8e8e8;
@@ -112,18 +112,18 @@
   }
 
   .key.waiting {
-    border-color: #6b6bff;
-    color: #6bb2ff;
+    border-color: var(--accent);
+    color: var(--accent);
   }
 
   button {
     border-radius: 6px;
-    border: 1px solid #3a3a42;
+    border: 1px solid var(--border-strong);
     padding: 4px 10px;
     font-size: 12px;
     font-family: inherit;
     color: #e8e8e8;
-    background-color: #2a2a30;
+    background-color: var(--control);
     cursor: pointer;
   }
 </style>

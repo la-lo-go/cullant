@@ -113,7 +113,7 @@
   .player {
     flex: 1;
     min-height: 0;
-    background: #131316;
+    background: var(--bg-stage);
     outline: none;
   }
 
@@ -181,7 +181,7 @@
   }
 
   .info-btn.active {
-    background: rgba(107, 139, 255, 0.5);
+    background: rgba(var(--accent-rgb), 0.5);
     color: #fff;
   }
 
@@ -190,7 +190,7 @@
   }
 
   .filmstrip-btn.active {
-    background: rgba(107, 139, 255, 0.5);
+    background: rgba(var(--accent-rgb), 0.5);
     color: #fff;
   }
 
