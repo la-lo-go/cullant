@@ -58,10 +58,21 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
         exif.get_field(tag, exif::In::PRIMARY)
             .and_then(|f| f.value.get_uint(0))
     };
+    // Raw ASCII bytes, NOT display_value(): kamadak reformats datetime tags
+    // for display ("2024-06-15 …"), which silently broke capture-time parsing
+    // (it expects the EXIF-native "2024:06:15 …") and made every plain image
+    // fall back to mtime.
+    let field_ascii = |tag| {
+        exif.get_field(tag, exif::In::PRIMARY)
+            .and_then(|f| match &f.value {
+                exif::Value::Ascii(v) => v.first().map(|b| String::from_utf8_lossy(b).into_owned()),
+                _ => None,
+            })
+    };
 
-    meta.capture_time = field_str(exif::Tag::DateTimeOriginal)
-        .or_else(|| field_str(exif::Tag::DateTime))
-        .and_then(|s| parse_exif_datetime(s.trim_matches('"')));
+    meta.capture_time = field_ascii(exif::Tag::DateTimeOriginal)
+        .or_else(|| field_ascii(exif::Tag::DateTime))
+        .and_then(|s| parse_exif_datetime(s.trim_end_matches('\0')));
     meta.orientation = field_uint(exif::Tag::Orientation).map(|v| v as u16);
     meta.iso = field_uint(exif::Tag::PhotographicSensitivity);
 
