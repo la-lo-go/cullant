@@ -35,13 +35,12 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Tag from "@lucide/svelte/icons/tag";
   import Type from "@lucide/svelte/icons/type";
-  import Keyboard from "@lucide/svelte/icons/keyboard";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
   import Filter from "@lucide/svelte/icons/filter";
   import SettingsIcon from "@lucide/svelte/icons/settings";
-  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
   const REPO_URL = "https://github.com/la-lo-go/cullant";
@@ -281,7 +280,6 @@
       </button>
       <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject(settings.previewMode))}><RefreshCw size={14} /></button>
       <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
-      <button title="Keyboard shortcuts" onclick={blurring(() => (showKeybindings = true))}><Keyboard size={14} /></button>
       <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
       <button onclick={blurring(() => (showCloseConfirm = true))}>Close project</button>
     </header>
@@ -341,16 +339,18 @@
         {#if catalog.error}
           <p class="error">{catalog.error}</p>
         {/if}
+      </div>
+      <ProjectGallery onopen={(path) => void catalog.open(path)} />
+      <footer class="home-footer">
         <button class="opensource" onclick={() => (showSettings = true)}>
           <SettingsIcon size={13} />
           Settings
         </button>
-        <button class="opensource" onclick={() => openUrl(REPO_URL)}>
-          <ExternalLink size={13} />
-          Open source on GitHub
+        <button class="ghlink" onclick={() => openUrl(REPO_URL)}>
+          <FolderGit2 size={15} />
+          <span>Cullant is free &amp; open source. Say hi or contribute on GitHub!</span>
         </button>
-      </div>
-      <ProjectGallery onopen={(path) => void catalog.open(path)} />
+      </footer>
     </div>
   {/if}
 
@@ -424,9 +424,9 @@
     --border: #3d4544;
     --border-strong: #495251;
 
-    --accent: #ccece8;
-    --accent-rgb: 204, 236, 232;
-    --accent-fill: #2b3a38;
+    --accent: #3fdfca;
+    --accent-rgb: 63, 223, 202;
+    --accent-fill: #227268;
 
     font-family: Inter, "Segoe UI", Avenir, Helvetica, Arial, sans-serif;
     font-size: 14px;
@@ -758,7 +758,6 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-top: 0.75rem;
     border: none;
     background: none;
     padding: 2px 4px;
@@ -769,5 +768,31 @@
   button.opensource:hover {
     color: var(--accent);
     text-decoration: underline;
+  }
+
+  .home-footer {
+    flex: none;
+    margin-top: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    padding: 16px 0 calc(16px + env(safe-area-inset-bottom));
+  }
+
+  button.ghlink {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    background: none;
+    padding: 6px 10px;
+    font-size: 13px;
+    color: #8a8a93;
+  }
+
+  button.ghlink:hover {
+    color: var(--accent);
   }
 </style>

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { settings, type PreviewMode } from "../stores/settings.svelte";
-  import { catalog } from "../stores/catalog.svelte";
   import Keyboard from "@lucide/svelte/icons/keyboard";
 
   let {
@@ -116,9 +115,6 @@
     </section>
 
     <div class="actions">
-      {#if catalog.project}
-        <span class="note">Preview mode applies on the next open or rescan.</span>
-      {/if}
       <button class="close" onclick={onclose}>Close</button>
     </div>
   </div>
@@ -216,11 +212,6 @@
     margin-top: 16px;
   }
 
-  .note {
-    font-size: 11px;
-    opacity: 0.5;
-    margin-right: auto;
-  }
 
   button {
     border-radius: 6px;
