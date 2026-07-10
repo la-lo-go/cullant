@@ -193,10 +193,32 @@ pub(crate) fn decode_for(
             let img = decode::jpeg::decode_scaled(source.buf(), min_long_edge, rel_path)?;
             Ok((img, dims))
         }
+        2 => {
+            // Videos: extract a poster frame via ffmpeg (needs a real local
+            // file). The frame is the video's display resolution, so its dims
+            // are trustworthy. Callers guard on availability first (see
+            // `produce`) so a missing ffmpeg never reaches here as a "failure".
+            let Some(path) = store.local_path(rel_path) else {
+                return Err(AppError::Decode(format!(
+                    "{rel_path}: video thumbnails require a local file"
+                )));
+            };
+            let img = decode::video::extract_poster(&path)?;
+            let dims = Some((img.width(), img.height()));
+            Ok((img, dims))
+        }
         _ => Err(AppError::Decode(format!(
             "no thumbnail source for kind {file_kind}"
         ))),
     }
+}
+
+/// Whether a video poster can be produced right now: ffmpeg on PATH and a real
+/// local file to feed it. When false, video thumbnailing is skipped WITHOUT a
+/// tombstone, so installing ffmpeg later (which doesn't change any file's
+/// mtime) still gets a chance on the next scan.
+pub(crate) fn video_poster_possible(store: &dyn ProjectStore, rel_path: &str) -> bool {
+    decode::video::is_available() && store.local_path(rel_path).is_some()
 }
 
 /// Identity + trusted facts about a decoded source, shared by every artifact
@@ -307,6 +329,14 @@ pub(crate) fn produce(
     if is_tombstoned(db, file_id, kind, mtime)? {
         return Err(AppError::Decode(format!(
             "{rel_path}: previously undecodable"
+        )));
+    }
+
+    // Video posters need ffmpeg + a local file. When unavailable, fail without
+    // tombstoning so a later ffmpeg install still gets a chance next scan.
+    if file_kind == 2 && !video_poster_possible(store, &rel_path) {
+        return Err(AppError::Decode(format!(
+            "{rel_path}: video thumbnails unavailable (ffmpeg missing?)"
         )));
     }
 

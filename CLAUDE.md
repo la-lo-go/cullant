@@ -60,3 +60,4 @@ npm run tauri build          # NSIS + MSI installers
 - Requires the MSVC toolchain (VS 2022 Build Tools, "Desktop development with C++") — without `link.exe` nothing compiles on Windows.
 - `walkdir` filter must not skip the depth-0 root (temp dirs start with `.` and were being filtered).
 - `rawler`'s API is not SemVer-stable — keep it pinned and wrapped in `decode/`.
+- **Video thumbnails need `ffmpeg` on `PATH`** — it's an *optional runtime* dependency (not a build/crate dependency), wrapped in `decode/video.rs`. Cullant shells out to it to extract one poster frame per video, then reuses the exact image-thumbnail resize/JPEG/cache path. When ffmpeg is absent, video thumbnailing is skipped gracefully (no crash, no tombstone — installing ffmpeg later retries on the next scan). A corrupt/undecodable video *is* tombstoned like a broken image.

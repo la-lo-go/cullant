@@ -156,17 +156,22 @@ pub fn run_ingest_inner(
 ) -> AppResult<()> {
     let pending: Vec<Pending> = db.call(|conn| {
         let mut stmt = conn.prepare(
+            // Previews (2560px loupe) are only ever generated for stills; a
+            // video's loupe plays the file itself, so `needs_preview` is forced
+            // false for kind 2 — videos need only the grid thumbnail.
             "SELECT f.id, f.rel_path, f.kind, f.mtime, f.orientation,
                     (f.capture_time IS NULL) AS needs_meta,
                     (tt.file_id IS NULL OR tt.source_mtime <> f.mtime) AS needs_thumb,
-                    (tp.file_id IS NULL OR tp.source_mtime <> f.mtime) AS needs_preview
+                    (f.kind IN (0, 1)
+                     AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime)) AS needs_preview
              FROM files f
              LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
              LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
-             WHERE f.status = 0 AND f.kind IN (0, 1)
+             WHERE f.status = 0 AND f.kind IN (0, 1, 2)
                AND (f.capture_time IS NULL
                     OR tt.file_id IS NULL OR tt.source_mtime <> f.mtime
-                    OR tp.file_id IS NULL OR tp.source_mtime <> f.mtime)",
+                    OR (f.kind IN (0, 1)
+                        AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime)))",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(Pending {
@@ -268,6 +273,12 @@ fn ingest_file(
     p: &Pending,
     previews_inline: bool,
 ) -> Option<Extracted> {
+    // Videos take a wholly separate path: ffmpeg poster extraction, no EXIF,
+    // no preview, and no `RawSource` (which would read the whole clip).
+    if p.kind == 2 {
+        return ingest_video(db, store, root, p);
+    }
+
     let render_thumb = p.needs_thumb;
     let render_preview = previews_inline && p.needs_preview;
     let mut extracted = p.needs_meta.then(|| Extracted::empty(p.id));
@@ -378,6 +389,60 @@ fn ingest_file(
         }
     }
 
+    extracted
+}
+
+/// Ingest one video: fall capture_time back to mtime (videos carry no
+/// image-path EXIF) and, when a thumbnail is due, extract a poster frame via
+/// ffmpeg and render it through the identical resize/JPEG/cache path as image
+/// thumbnails. Poster extraction is best-effort:
+/// - ffmpeg missing or no local file → skip WITHOUT a tombstone, so installing
+///   ffmpeg later (no mtime change) still gets a retry on the next scan;
+/// - a genuinely undecodable/corrupt video → tombstone the thumbnail so the
+///   pass and the on-demand pool stop grinding on it, exactly like a broken
+///   image.
+fn ingest_video(
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+    root: &Path,
+    p: &Pending,
+) -> Option<Extracted> {
+    // capture_time = COALESCE(NULL, mtime) via the batched update.
+    let extracted = p.needs_meta.then(|| Extracted::empty(p.id));
+
+    if !p.needs_thumb {
+        return extracted;
+    }
+    if !thumbs::video_poster_possible(store, &p.rel_path) {
+        tracing::debug!(
+            "video thumbnail skipped {} (ffmpeg unavailable)",
+            p.rel_path
+        );
+        return extracted;
+    }
+
+    // Guaranteed Some by video_poster_possible.
+    let Some(path) = store.local_path(&p.rel_path) else {
+        return extracted;
+    };
+    match decode::video::extract_poster(&path) {
+        Ok(img) => {
+            let meta = SourceMeta {
+                file_id: p.id,
+                mtime: p.mtime,
+                // ffmpeg auto-rotates on decode; the poster is already upright.
+                orientation: 1,
+                src_dims: Some((img.width(), img.height())),
+            };
+            if let Err(e) = thumbs::render_and_store(db, root, &meta, &img, ThumbKind::Thumb) {
+                tracing::debug!("video thumb render skipped {}: {e}", p.rel_path);
+            }
+        }
+        Err(e) => {
+            tracing::debug!("video poster extraction failed {}: {e}", p.rel_path);
+            let _ = thumbs::record_decode_failure(db, p.id, p.mtime, ThumbKind::Thumb);
+        }
+    }
     extracted
 }
 
@@ -667,6 +732,54 @@ mod tests {
         )
         .unwrap();
         assert_eq!(gate2, Some(0), "tombstoned files must not be retried");
+    }
+
+    #[test]
+    fn video_is_ingested_without_preview_and_never_panics() {
+        // Exercises the video branch end-to-end. The .mp4 bytes are not a real
+        // video, so the outcome depends on whether ffmpeg is installed:
+        //   - ffmpeg present: extraction fails -> thumbnail tombstoned;
+        //   - ffmpeg absent:  extraction skipped -> no thumbnail, no tombstone.
+        // Either way the pass must complete, the video must be counted in
+        // tier 1, get capture_time from mtime, and never receive a preview.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("clip.mp4"), b"not a real mp4").unwrap();
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let store = LocalFsStore::new(root);
+
+        let mut gate = None;
+        let mut preview_last = None;
+        run_ingest_inner(
+            &db,
+            &store,
+            root,
+            PreviewMode::All,
+            &mut |_, _| {},
+            &mut |_, total| gate = Some(total),
+            &mut |d, t| preview_last = Some((d, t)),
+        )
+        .unwrap();
+
+        // The video was tier-1 work (needs meta + thumb).
+        assert_eq!(gate, Some(1));
+        // Videos never get a 2560px preview, in any mode.
+        assert_eq!(preview_last, None);
+        assert_eq!(thumb_count(&db, 1), 0);
+
+        // capture_time falls back to mtime so the video isn't reprocessed forever.
+        let null_capture: i64 = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM files WHERE capture_time IS NULL",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(null_capture, 0);
     }
 
     #[test]

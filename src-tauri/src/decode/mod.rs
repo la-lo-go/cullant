@@ -1,6 +1,7 @@
 pub mod exif;
 pub mod jpeg;
 pub mod raw;
+pub mod video;
 
 use std::sync::Arc;
 
