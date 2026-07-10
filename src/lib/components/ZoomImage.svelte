@@ -32,12 +32,26 @@
   let lastTapTime = 0;
   let lastTapX = 0;
   let lastTapY = 0;
+  let lastToggleTime = 0;
 
   const WHEEL_ZOOM = 1.15;
   const WHEEL_NAV_THRESHOLD = 50;
   const SWIPE_NAV_THRESHOLD = 55;
-  const TAP_SLOP = 12;
+  // A tap must land within this radius of its own start to count. It's kept
+  // generous (not pixel-tight) because the FIRST tap of a zoom-OUT double-tap
+  // happens on a zoomed image where one-finger pan is armed, so the finger
+  // tends to drift a little; too tight a slop drops that tap and the double-tap
+  // never completes (the old bug: double-tap could only ever zoom in). Real
+  // pans move far more than this, so they're still never mistaken for taps.
+  const TAP_SLOP = 18;
   const DOUBLE_TAP_MS = 300;
+  /** Max spacing between the two taps of a double-tap (finger-down to down). */
+  const DOUBLE_TAP_DIST = 44;
+  /** Scales within this of `fit` count as "at fit" (i.e. not zoomed in). */
+  const ZOOM_EPS = 1e-3;
+  /** Collapse two zoom toggles fired within this window into one, so a manual
+   *  touch double-tap and any browser-synthesized dblclick can't both fire. */
+  const TOGGLE_GUARD_MS = 250;
   /** Damping exponent for pinching below fit — rubber-band resistance. */
   const RUBBER = 0.4;
 
@@ -249,14 +263,39 @@
     centerOn(u, px, py, s);
   }
 
+  /**
+   * Double-tap / double-click zoom toggle — identical for mouse and touch. The
+   * decision keys off the ACTUAL scale, not the `zoomed` mode flag (which can be
+   * true at fit during a pinch entry/settle), so it always matches what's on
+   * screen:
+   *   - zoomed in at all (scale > fit)  -> return to the whole-image fit view;
+   *   - at fit                          -> jump to 100% (1:1) on the tapped point.
+   * A photo smaller than the viewport has fit >= 1, so there is no larger
+   * "100%": hop to a modest 2x detail view instead (capped at MAX_SCALE), or
+   * stay put if even that isn't above fit — the least-surprising no-op.
+   */
   function toggleZoom(px: number, py: number) {
-    if (z.zoomed) {
+    // Swallow a duplicate toggle (e.g. our manual touch double-tap plus a
+    // browser-synthesized dblclick) so the two don't cancel each other out.
+    const now = performance.now();
+    if (now - lastToggleTime < TOGGLE_GUARD_MS) return;
+    lastToggleTime = now;
+
+    if (!refW || !refH) return;
+    cancelSettle();
+
+    if (z.zoomed && z.scale > fit + ZOOM_EPS) {
+      // Currently zoomed in -> back to fit. Keep scale synced to fit so the
+      // slider and a subsequent pinch start from the visible state.
       z.zoomed = false;
+      z.scale = fit;
+      z.cx = 0.5;
+      z.cy = 0.5;
       return;
     }
-    if (!refW || !refH) return;
-    // Fit <-> 100%; photos smaller than the frame (fit == 1) get 2x instead.
+    // At fit -> 100%; photos already >= fit at 1:1 (small photos) get 2x.
     const target = fit < 1 ? 1 : Math.min(2, MAX_SCALE);
+    if (target <= fit + ZOOM_EPS) return; // nothing larger than fit to reveal
     zoomAt(px, py, clampToRange(target));
   }
 
@@ -432,16 +471,19 @@
         const dy = e.clientY - swipeStartY;
         if (Math.hypot(dx, dy) <= TAP_SLOP) {
           // A quick second tap in place toggles fit <-> 100% (double-tap).
+          // Match the two taps on their finger-DOWN points (swipeStartX/Y):
+          // stable even if a tap incidentally nudged the pan while zoomed, so
+          // the zoom-OUT double-tap is as reliable as the zoom-IN one.
           const now = performance.now();
-          const nearLast = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 40;
+          const nearLast = Math.hypot(swipeStartX - lastTapX, swipeStartY - lastTapY) < DOUBLE_TAP_DIST;
           if (now - lastTapTime <= DOUBLE_TAP_MS && nearLast) {
             lastTapTime = 0;
             const p = framePoint(e);
             toggleZoom(p.x, p.y);
           } else {
             lastTapTime = now;
-            lastTapX = e.clientX;
-            lastTapY = e.clientY;
+            lastTapX = swipeStartX;
+            lastTapY = swipeStartY;
           }
         } else if (!z.zoomed && Math.abs(dx) > SWIPE_NAV_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
           // A single-finger horizontal flick in fit view navigates photos.
