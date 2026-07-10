@@ -8,6 +8,7 @@
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Scissors from "@lucide/svelte/icons/scissors";
   import Play from "@lucide/svelte/icons/play";
+  import FileWarning from "@lucide/svelte/icons/file-warning";
   import { edgeBounce } from "../anim";
 
   let { items }: { items: ItemLite[] } = $props();
@@ -305,6 +306,11 @@
             <!-- preload=metadata shows the first frame; only ~30 cells live -->
             <video src={videoUrl(v.item)} preload="metadata" muted></video>
             <span class="chip video"><Play size={10} /></span>
+          {:else if v.item.thumbFailed}
+            <div class="unreadable" title="{v.item.name}.{v.item.ext} — couldn't be decoded">
+              <FileWarning size={22} />
+              <span>{v.item.ext.toUpperCase()}</span>
+            </div>
           {:else}
             <img
               src={thumbUrl(v.item)}
@@ -428,6 +434,23 @@
     max-height: 100%;
     object-fit: contain;
     user-select: none;
+  }
+
+  /* Shown instead of a thumbnail when the source couldn't be decoded. */
+  .unreadable {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    color: #6a6a72;
+    user-select: none;
+  }
+
+  .unreadable span {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
   }
 
   .chip.video {

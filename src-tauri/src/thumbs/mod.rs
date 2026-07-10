@@ -254,12 +254,12 @@ pub(crate) fn render_and_store(
     let (out_w, out_h) = (oriented.width(), oriented.height());
     db.call(move |conn| {
         conn.execute(
-            "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at, failed)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
              ON CONFLICT(file_id, kind) DO UPDATE SET
                cache_path = excluded.cache_path, width = excluded.width,
                height = excluded.height, source_mtime = excluded.source_mtime,
-               generated_at = excluded.generated_at",
+               generated_at = excluded.generated_at, failed = 0",
             params![file_id, kind_i, cache_rel, out_w, out_h, mtime, now_secs()],
         )?;
         // Original dimensions come for free when the decode was full-size;
@@ -302,7 +302,22 @@ pub(crate) fn produce(
         return Ok(bytes);
     }
 
-    let (decoded, src_dims) = decode_for(store, &rel_path, file_kind, min_long_edge_for(kind))?;
+    // A previous attempt at this exact mtime already failed — don't grind on an
+    // undecodable file every time its cell scrolls back into view.
+    if is_tombstoned(db, file_id, kind, mtime)? {
+        return Err(AppError::Decode(format!(
+            "{rel_path}: previously undecodable"
+        )));
+    }
+
+    let (decoded, src_dims) = match decode_for(store, &rel_path, file_kind, min_long_edge_for(kind))
+    {
+        Ok(d) => d,
+        Err(e) => {
+            record_decode_failure(db, file_id, mtime, kind)?;
+            return Err(e);
+        }
+    };
     let meta = SourceMeta {
         file_id,
         mtime,
@@ -310,6 +325,44 @@ pub(crate) fn produce(
         src_dims,
     };
     render_and_store(db, root, &meta, &decoded, kind)
+}
+
+/// Record that a source could not be decoded for `kind` at `mtime`, so the
+/// ingest pass and the on-demand worker stop retrying it until the file
+/// changes. Stored as a `thumbnails` row with `failed = 1` and an empty
+/// cache_path.
+pub(crate) fn record_decode_failure(
+    db: &Arc<Db>,
+    file_id: i64,
+    mtime: i64,
+    kind: ThumbKind,
+) -> AppResult<()> {
+    let kind_i = kind as i64;
+    db.call(move |conn| {
+        conn.execute(
+            "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at, failed)
+             VALUES (?1, ?2, '', NULL, NULL, ?3, ?4, 1)
+             ON CONFLICT(file_id, kind) DO UPDATE SET
+               cache_path = '', width = NULL, height = NULL,
+               source_mtime = ?3, generated_at = ?4, failed = 1",
+            params![file_id, kind_i, mtime, now_secs()],
+        )?;
+        Ok(())
+    })
+}
+
+/// Whether a decode-failure tombstone exists for this (file, kind) at `mtime`.
+fn is_tombstoned(db: &Arc<Db>, file_id: i64, kind: ThumbKind, mtime: i64) -> AppResult<bool> {
+    let kind_i = kind as i64;
+    db.call(move |conn| {
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM thumbnails
+             WHERE file_id = ?1 AND kind = ?2 AND failed = 1 AND source_mtime = ?3",
+            params![file_id, kind_i, mtime],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    })
 }
 
 fn scaled_dims(w: u32, h: u32, long_edge: u32) -> (u32, u32) {

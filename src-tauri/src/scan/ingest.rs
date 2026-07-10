@@ -366,6 +366,16 @@ fn ingest_file(
                 tracing::debug!("preview render skipped {}: {e}", p.rel_path);
             }
         }
+    } else if render_thumb || render_preview {
+        // The source could not be decoded (unsupported/corrupt). Tombstone the
+        // due artifacts so later scans don't retry until the file changes, and
+        // the grid can flag it instead of requesting a thumb that 404s.
+        if render_thumb {
+            let _ = thumbs::record_decode_failure(db, p.id, p.mtime, ThumbKind::Thumb);
+        }
+        if render_preview {
+            let _ = thumbs::record_decode_failure(db, p.id, p.mtime, ThumbKind::Preview);
+        }
     }
 
     extracted
@@ -605,6 +615,58 @@ mod tests {
             })
             .unwrap();
         assert_eq!((w, h), (288, 384));
+    }
+
+    #[test]
+    fn undecodable_source_is_tombstoned_not_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // A .jpg extension over bytes that are not a valid JPEG.
+        std::fs::write(root.join("broken.jpg"), b"not really a jpeg at all").unwrap();
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let store = LocalFsStore::new(root);
+
+        // First pass: the file needs a thumb, fails to decode, gets tombstoned.
+        let mut gate = None;
+        run_ingest_inner(
+            &db,
+            &store,
+            root,
+            PreviewMode::All,
+            &mut |_, _| {},
+            &mut |_, total| gate = Some(total),
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(gate, Some(1));
+
+        let tombstones: i64 = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM thumbnails WHERE failed = 1",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert!(tombstones >= 1, "a decode failure must leave a tombstone");
+
+        // Second pass at the same mtime: nothing to retry.
+        let mut gate2 = None;
+        run_ingest_inner(
+            &db,
+            &store,
+            root,
+            PreviewMode::All,
+            &mut |_, _| {},
+            &mut |_, total| gate2 = Some(total),
+            &mut |_, _| {},
+        )
+        .unwrap();
+        assert_eq!(gate2, Some(0), "tombstoned files must not be retried");
     }
 
     #[test]

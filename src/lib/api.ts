@@ -31,6 +31,8 @@ export interface ItemLite {
   groupSize: number;
   decoupled: boolean;
   tagIds: number[];
+  /** Grid thumbnail could not be decoded (unsupported/corrupt source). */
+  thumbFailed: boolean;
 }
 
 export interface MediaCounts {

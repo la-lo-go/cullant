@@ -24,6 +24,9 @@ pub struct ItemLite {
     pub group_size: i64,
     pub decoupled: bool,
     pub tag_ids: Vec<i64>,
+    /// True when the grid thumbnail could not be decoded (unsupported/corrupt
+    /// source), so the UI shows a placeholder instead of requesting an image.
+    pub thumb_failed: bool,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -118,7 +121,10 @@ pub fn query_items(
                       WHERE m.group_id = f.group_id AND m.status = 0) AS group_size,
                     g.decoupled,
                     (SELECT GROUP_CONCAT(tag_id) FROM file_tags t
-                      WHERE t.file_id = f.id) AS tag_ids
+                      WHERE t.file_id = f.id) AS tag_ids,
+                    EXISTS(SELECT 1 FROM thumbnails th
+                      WHERE th.file_id = f.id AND th.kind = 0
+                        AND th.failed = 1 AND th.source_mtime = f.mtime) AS thumb_failed
              FROM files f
              JOIN groups g ON g.id = f.group_id
              WHERE f.status = 0 AND {kind_filter}
@@ -147,6 +153,7 @@ pub fn query_items(
                     .get::<_, Option<String>>(16)?
                     .map(|csv| csv.split(',').filter_map(|s| s.parse().ok()).collect())
                     .unwrap_or_default(),
+                thumb_failed: r.get::<_, i64>(17)? != 0,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

@@ -136,6 +136,13 @@ const MIGRATIONS: &[&str] = &[
       is_dir INTEGER NOT NULL DEFAULT 0
     );
     "#,
+    // v3 — decode-failure tombstones. A thumbnails row with failed = 1 records
+    // that a source could not be decoded at its current mtime, so the ingest
+    // pass and the on-demand thumb worker stop retrying it until the file
+    // changes. cache_path is '' for such rows.
+    r#"
+    ALTER TABLE thumbnails ADD COLUMN failed INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {
