@@ -244,10 +244,16 @@
     background: var(--accent);
   }
 
-  /* Peek tab shown at the bottom edge when the filmstrip is collapsed. */
+  /* Peek tab shown at the bottom edge when the filmstrip is collapsed. It floats
+     (absolute) so the collapsed strip reserves NO height — the freed band goes
+     back to the viewer/compare stage above. Anchored to the view's bottom edge
+     (its parent .viewer/.compare is position:relative). */
   .strip-peek {
-    flex: none;
-    align-self: center;
+    position: absolute;
+    left: 50%;
+    bottom: var(--safe-bottom);
+    transform: translateX(-50%);
+    z-index: 10;
     display: inline-flex;
     align-items: center;
     justify-content: center;

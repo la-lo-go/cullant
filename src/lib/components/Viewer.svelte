@@ -101,6 +101,8 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
+    /* Anchor for the collapsed filmstrip's floating peek tab. */
+    position: relative;
   }
 
   .stage {
