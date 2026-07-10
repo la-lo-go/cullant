@@ -25,6 +25,14 @@
     Purple: "#9a66d6",
   };
 
+  // Video ids whose pregenerated poster couldn't be served (ffmpeg absent or
+  // the clip was undecodable → 404). Those cells fall back to a live <video>.
+  let posterFailed = $state<Set<number>>(new Set());
+  function markPosterFailed(id: number) {
+    if (posterFailed.has(id)) return;
+    posterFailed = new Set(posterFailed).add(id);
+  }
+
   let viewport = $state<HTMLDivElement | null>(null);
   let canvasEl = $state<HTMLDivElement | null>(null);
   let scrollTop = $state(0);
@@ -306,8 +314,20 @@
       >
         <div class="frame" class:labeled={v.item.label} style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}>
           {#if v.item.kind === 2}
-            <!-- preload=metadata shows the first frame; only ~30 cells live -->
-            <video src={videoUrl(v.item)} preload="metadata" muted></video>
+            {#if posterFailed.has(v.item.id)}
+              <!-- No pregenerated poster (ffmpeg absent / undecodable): fall
+                   back to the first metadata frame of the video itself. -->
+              <video src={videoUrl(v.item)} preload="metadata" muted></video>
+            {:else}
+              <img
+                src={thumbUrl(v.item)}
+                alt=""
+                decoding="async"
+                draggable="false"
+                loading="eager"
+                onerror={() => markPosterFailed(v.item.id)}
+              />
+            {/if}
             <span class="chip video"><Play size={10} /></span>
           {:else if v.item.thumbFailed}
             <div class="unreadable" title="{v.item.name}.{v.item.ext} — couldn't be decoded">
