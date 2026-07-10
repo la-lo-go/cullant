@@ -1,11 +1,11 @@
 export type ViewMode = "grid" | "viewer" | "compare";
 
-export const MIN_SCALE = 0.1;
+/**
+ * Hard zoom ceiling: 4x of 1:1 pixel scale. The effective MINIMUM is the
+ * per-photo "fit" scale (whole image visible), which depends on the viewport
+ * and is therefore computed inside ZoomImage, not here.
+ */
 export const MAX_SCALE = 4;
-
-export function clampScale(s: number): number {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
-}
 
 /**
  * Zoom/pan state shared across photos and across viewer/compare: expressed in

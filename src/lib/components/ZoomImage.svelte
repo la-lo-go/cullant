@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { previewUrl, thumbUrl, cullantUrl, type ItemLite } from "../api";
-  import { view, clampScale } from "../stores/view.svelte";
+  import { view, MAX_SCALE } from "../stores/view.svelte";
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
 
@@ -10,24 +10,36 @@
   let frame = $state<HTMLDivElement | null>(null);
   let frameW = $state(0);
   let frameH = $state(0);
-  let naturalW = $state(0);
-  let naturalH = $state(0);
+  // Natural = rendered (orientation-corrected) pixel dimensions of each source.
+  let previewNaturalW = $state(0);
+  let previewNaturalH = $state(0);
+  let fullNaturalW = $state(0);
+  let fullNaturalH = $state(0);
   let dragging = false;
   let lastX = 0;
   let lastY = 0;
   let wheelAccum = 0;
 
-  // Active touch points (by pointerId), plus pinch/swipe gesture state. Only
-  // touch pointers use these; mouse/pen keep the classic drag-to-pan behavior.
+  // Active touch points (by pointerId), plus pinch/tap/swipe gesture state.
+  // Only touch pointers use these; mouse/pen keep the drag-to-pan behavior.
   const pointers = new Map<number, { x: number; y: number }>();
   let pinchStartDist = 0;
   let pinchStartScale = 1;
+  let pinchAnchor = { x: 0.5, y: 0.5 };
+  let pinchedThisGesture = false;
   let swipeStartX = 0;
   let swipeStartY = 0;
+  let lastTapTime = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
 
   const WHEEL_ZOOM = 1.15;
   const WHEEL_NAV_THRESHOLD = 50;
   const SWIPE_NAV_THRESHOLD = 55;
+  const TAP_SLOP = 12;
+  const DOUBLE_TAP_MS = 300;
+  /** Damping exponent for pinching below fit — rubber-band resistance. */
+  const RUBBER = 0.4;
 
   const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
@@ -65,6 +77,15 @@
     },
   };
   const z = $derived(standalone ? local : view);
+
+  // Per-item source dimensions must not leak across photos.
+  $effect(() => {
+    void item.id;
+    previewNaturalW = 0;
+    previewNaturalH = 0;
+    fullNaturalW = 0;
+    fullNaturalH = 0;
+  });
 
   // Standalone zoom is non-persistent: reset to fit whenever the item changes.
   $effect(() => {
@@ -122,11 +143,41 @@
     };
   });
 
-  // At scale 1.0, one image pixel = one CSS pixel of the ORIGINAL resolution.
-  const fullW = $derived(item.width ?? naturalW);
-  const fullH = $derived(item.height ?? naturalH);
-  const dispW = $derived(fullW * z.scale);
-  const dispH = $derived(fullH * z.scale);
+  // Authoritative full-resolution dimensions of the image AS DISPLAYED. The DB
+  // stores raw EXIF sensor dims with orientation in a separate column, so for
+  // rotated (portrait) shots item.width/height are swapped vs. what the
+  // browser renders — trusting them blindly is what used to squash photos.
+  // Prefer the loaded full image's natural size; before it loads, use DB dims
+  // but swap them when the preview (already rendered, hence orientation-
+  // correct) disagrees about portrait vs. landscape.
+  const refDims = $derived.by(() => {
+    if (fullNaturalW && fullNaturalH) return { w: fullNaturalW, h: fullNaturalH };
+    let w = item.width ?? 0;
+    let h = item.height ?? 0;
+    if (w && h && previewNaturalW && previewNaturalH) {
+      if (previewNaturalH > previewNaturalW !== h > w) [w, h] = [h, w];
+    }
+    if (!w || !h) {
+      w = previewNaturalW;
+      h = previewNaturalH;
+    }
+    return { w, h };
+  });
+  const refW = $derived(refDims.w);
+  const refH = $derived(refDims.h);
+
+  // The zoom model: ONE uniform scale factor in [fit, MAX_SCALE], where 1.0 is
+  // one source pixel per CSS pixel and `fit` is the contain-scale at which the
+  // whole photo is visible (capped at 1 — fit never upscales small photos).
+  const fit = $derived.by(() => {
+    if (!refW || !refH || !frameW || !frameH) return 1;
+    return Math.min(1, frameW / refW, frameH / refH);
+  });
+
+  const clampToRange = (s: number) => Math.min(MAX_SCALE, Math.max(fit, s));
+
+  const dispW = $derived(refW * z.scale);
+  const dispH = $derived(refH * z.scale);
 
   const offset = $derived.by(() => {
     if (!z.zoomed || !dispW || !dispH) return { x: 0, y: 0 };
@@ -143,55 +194,92 @@
     return Math.max(frameSize - dispSize, Math.min(0, v));
   }
 
-  function onImageLoad(e: Event) {
-    const img = e.target as HTMLImageElement;
-    naturalW = img.naturalWidth;
-    naturalH = img.naturalHeight;
+  /** Clamp a relative center so panning stops exactly at the image edges. */
+  function clampCenter(c: number, frameSize: number, dispSize: number): number {
+    if (dispSize <= frameSize) return 0.5;
+    const half = frameSize / (2 * dispSize);
+    return Math.min(1 - half, Math.max(half, c));
   }
 
-  function toRelative(e: MouseEvent): { x: number; y: number } {
-    if (!frame) return { x: 0.5, y: 0.5 };
-    const rect = frame.getBoundingClientRect();
-    if (z.zoomed) {
-      return { x: z.cx, y: z.cy };
+  function onFitLoad(e: Event) {
+    const img = e.currentTarget as HTMLImageElement;
+    previewNaturalW = img.naturalWidth;
+    previewNaturalH = img.naturalHeight;
+  }
+
+  function onFullLoad(e: Event) {
+    const img = e.currentTarget as HTMLImageElement;
+    fullNaturalW = img.naturalWidth;
+    fullNaturalH = img.naturalHeight;
+  }
+
+  function framePoint(e: { clientX: number; clientY: number }): { x: number; y: number } {
+    if (!frame) return { x: frameW / 2, y: frameH / 2 };
+    const r = frame.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  /** Image-relative point (0..1) currently under the given frame coords. */
+  function anchorUnder(px: number, py: number): { x: number; y: number } {
+    if (z.zoomed && dispW && dispH) {
+      return { x: clamp01((px - offset.x) / dispW), y: clamp01((py - offset.y) / dispH) };
     }
-    // In fit mode the image is letterboxed; approximate via frame coords.
+    // Fit view: the image sits letterboxed at fit scale, centered in the frame.
+    const w = refW * fit;
+    const h = refH * fit;
     return {
-      x: (e.clientX - rect.left) / rect.width,
-      y: (e.clientY - rect.top) / rect.height,
+      x: clamp01((px - (frameW - w) / 2) / (w || 1)),
+      y: clamp01((py - (frameH - h) / 2) / (h || 1)),
     };
   }
 
-  function toggleZoom(atX: number, atY: number) {
-    if (!z.zoomed) {
-      z.cx = atX;
-      z.cy = atY;
-      z.scale = 1;
+  /** Position the view so image point `u` sits under frame point (px, py) at scale s. */
+  function centerOn(u: { x: number; y: number }, px: number, py: number, s: number) {
+    const w = refW * s;
+    const h = refH * s;
+    z.cx = clampCenter(u.x + (frameW / 2 - px) / (w || 1), frameW, w);
+    z.cy = clampCenter(u.y + (frameH / 2 - py) / (h || 1), frameH, h);
+  }
+
+  /** Focal-point zoom: whatever is under (px, py) stays under (px, py). */
+  function zoomAt(px: number, py: number, s: number) {
+    const u = anchorUnder(px, py);
+    z.scale = s;
+    z.zoomed = true;
+    centerOn(u, px, py, s);
+  }
+
+  function toggleZoom(px: number, py: number) {
+    if (z.zoomed) {
+      z.zoomed = false;
+      return;
     }
-    z.zoomed = !z.zoomed;
+    if (!refW || !refH) return;
+    // Fit <-> 100%; photos smaller than the frame (fit == 1) get 2x instead.
+    const target = fit < 1 ? 1 : Math.min(2, MAX_SCALE);
+    zoomAt(px, py, clampToRange(target));
   }
 
   function onDblClick(e: MouseEvent) {
-    const p = toRelative(e);
+    const p = framePoint(e);
     toggleZoom(p.x, p.y);
   }
 
   function onWheel(e: WheelEvent) {
     e.preventDefault();
     if (e.ctrlKey) {
+      if (!refW || !refH || !frameW || !frameH) return;
       const factor = e.deltaY < 0 ? WHEEL_ZOOM : 1 / WHEEL_ZOOM;
-      if (z.zoomed) {
-        z.scale = clampScale(z.scale * factor);
-      } else if (factor > 1 && fullW && fullH && frameW && frameH) {
-        // Ctrl+wheel-in from fit: enter zoom centered on the cursor, starting
-        // from the fit scale so the zoom ramps up continuously.
-        const p = toRelative(e);
-        const fit = Math.min(1, frameW / fullW, frameH / fullH);
-        z.cx = p.x;
-        z.cy = p.y;
-        z.scale = clampScale(fit * factor);
-        z.zoomed = true;
+      const current = z.zoomed ? z.scale : fit;
+      const next = clampToRange(current * factor);
+      if (!z.zoomed && next <= fit) return; // already fully zoomed out
+      if (z.zoomed && next <= fit + 1e-6) {
+        // Wheeling out lands on fit: return to the clean fit view.
+        z.zoomed = false;
+        return;
       }
+      const p = framePoint(e);
+      zoomAt(p.x, p.y, next);
       return;
     }
     // Plain wheel navigates photos: accumulate deltas so one physical notch
@@ -207,9 +295,13 @@
     }
   }
 
+  // The slider spans the same model as every other input: fit -> MAX_SCALE.
+  const sliderMin = $derived(Math.max(1, Math.round(fit * 100)));
+  const sliderMax = MAX_SCALE * 100;
+
   function onSliderInput(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
-    z.scale = clampScale(Number(input.value) / 100);
+    z.scale = clampToRange(Number(input.value) / 100);
   }
 
   // The slider must never keep keyboard focus — arrows navigate photos.
@@ -217,41 +309,61 @@
     (e.currentTarget as HTMLElement).blur();
   }
 
-  function frameRelative(clientX: number, clientY: number): { x: number; y: number } {
-    if (!frame) return { x: 0.5, y: 0.5 };
-    const r = frame.getBoundingClientRect();
-    return { x: (clientX - r.left) / r.width, y: (clientY - r.top) / r.height };
-  }
-
-  function fitScale(): number {
-    return Math.min(1, frameW / (fullW || 1), frameH / (fullH || 1));
-  }
-
   function panBy(dx: number, dy: number) {
     if (!dispW || !dispH) return;
-    z.cx = clamp01(z.cx - dx / dispW);
-    z.cy = clamp01(z.cy - dy / dispH);
+    z.cx = clampCenter(z.cx - dx / dispW, frameW, dispW);
+    z.cy = clampCenter(z.cy - dy / dispH, frameH, dispH);
+  }
+
+  // Rubber-band release: briefly animate back to fit, then drop out of zoom
+  // mode (the fit view renders identically, so the swap is invisible).
+  let settling = $state(false);
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function cancelSettle() {
+    if (settleTimer !== undefined) {
+      clearTimeout(settleTimer);
+      settleTimer = undefined;
+    }
+    settling = false;
+  }
+
+  function settleToFit() {
+    settling = true;
+    z.scale = fit;
+    z.cx = 0.5;
+    z.cy = 0.5;
+    settleTimer = setTimeout(() => {
+      settleTimer = undefined;
+      settling = false;
+      if (z.zoomed && z.scale <= fit + 1e-6) z.zoomed = false;
+    }, 180);
   }
 
   function onPointerDown(e: PointerEvent) {
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    cancelSettle();
 
     if (e.pointerType === "touch") {
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
-        // Second finger down: begin a pinch, entering zoom from fit if needed.
+        // Second finger down: begin a pinch anchored on the finger midpoint.
+        pinchedThisGesture = true;
         const [a, b] = [...pointers.values()];
         pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
-        pinchStartScale = z.zoomed ? z.scale : fitScale();
+        pinchStartScale = z.zoomed ? z.scale : fit;
+        const m = framePoint({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 });
+        pinchAnchor = anchorUnder(m.x, m.y);
         if (!z.zoomed) {
-          const p = frameRelative((a.x + b.x) / 2, (a.y + b.y) / 2);
-          z.cx = p.x;
-          z.cy = p.y;
-          z.scale = pinchStartScale;
+          // Enter zoom seamlessly at the fit scale, so the pinch ramps up
+          // continuously from exactly what was on screen.
+          z.scale = fit;
           z.zoomed = true;
+          centerOn(pinchAnchor, m.x, m.y, fit);
         }
         dragging = false;
       } else if (pointers.size === 1) {
+        pinchedThisGesture = false;
         swipeStartX = e.clientX;
         swipeStartY = e.clientY;
         lastX = e.clientX;
@@ -274,12 +386,21 @@
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       if (pointers.size >= 2) {
+        if (pinchStartDist <= 0) return;
         const [a, b] = [...pointers.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (pinchStartDist > 0) z.scale = clampScale(pinchStartScale * (d / pinchStartDist));
+        const raw = pinchStartScale * (d / pinchStartDist);
+        // Below fit the zoom resists (rubber band) instead of deforming or
+        // sticking at an arbitrary floor; release snaps it back to fit.
+        const s = Math.min(MAX_SCALE, raw < fit ? fit * Math.pow(raw / fit, RUBBER) : raw);
+        // Keep the image point grabbed at pinch start under the CURRENT finger
+        // midpoint: focal-point zoom and two-finger pan in one motion.
+        const m = framePoint({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 });
+        z.scale = s;
+        centerOn(pinchAnchor, m.x, m.y, s);
         return;
       }
-      // One finger, zoomed: pan. Not zoomed: nothing live (swipe decided on up).
+      // One finger, zoomed: pan. Not zoomed: nothing live (tap/swipe on up).
       if (z.zoomed && dragging) {
         panBy(e.clientX - lastX, e.clientY - lastY);
         lastX = e.clientX;
@@ -297,14 +418,33 @@
   function onPointerUp(e: PointerEvent) {
     if (e.pointerType === "touch") {
       const wasSingle = pointers.size === 1;
+      const wasPinching = pinchStartDist > 0;
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinchStartDist = 0;
 
-      // A single-finger horizontal flick in fit view navigates photos.
-      if (wasSingle && !z.zoomed) {
+      // Pinch ended below (or at) fit: spring back and leave zoom mode.
+      if (wasPinching && pointers.size < 2 && z.zoomed && z.scale <= fit + 1e-6) {
+        settleToFit();
+      }
+
+      if (wasSingle && !pinchedThisGesture) {
         const dx = e.clientX - swipeStartX;
         const dy = e.clientY - swipeStartY;
-        if (Math.abs(dx) > SWIPE_NAV_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
+        if (Math.hypot(dx, dy) <= TAP_SLOP) {
+          // A quick second tap in place toggles fit <-> 100% (double-tap).
+          const now = performance.now();
+          const nearLast = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 40;
+          if (now - lastTapTime <= DOUBLE_TAP_MS && nearLast) {
+            lastTapTime = 0;
+            const p = framePoint(e);
+            toggleZoom(p.x, p.y);
+          } else {
+            lastTapTime = now;
+            lastTapX = e.clientX;
+            lastTapY = e.clientY;
+          }
+        } else if (!z.zoomed && Math.abs(dx) > SWIPE_NAV_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
+          // A single-finger horizontal flick in fit view navigates photos.
           session.moveFocus(dx < 0 ? 1 : -1);
         }
       }
@@ -346,19 +486,23 @@
   role="img"
 >
   {#if z.zoomed}
+    <!-- Only the WIDTH is set: height follows the image's intrinsic ratio, so
+         the single uniform scale factor can never deform the photo, even when
+         stored metadata disagrees with the rendered orientation. -->
     <img
       src={fullSrc}
       alt={item.name}
-      style="transform: translate({offset.x}px, {offset.y}px); width: {dispW}px; height: {dispH}px;"
+      style="transform: translate({offset.x}px, {offset.y}px); width: {dispW}px;"
       class="full"
+      class:settling
       draggable="false"
-      onload={onImageLoad}
+      onload={onFullLoad}
     />
     <div class="zoom-ctl">
       <input
         type="range"
-        min="10"
-        max="400"
+        min={sliderMin}
+        max={sliderMax}
         step="1"
         value={Math.round(z.scale * 100)}
         aria-label="Zoom level"
@@ -377,7 +521,7 @@
       class="fit"
       class:soft={softPreview}
       draggable="false"
-      onload={onImageLoad}
+      onload={onFitLoad}
     />
   {/if}
 </div>
@@ -424,7 +568,15 @@
     left: 0;
     max-width: none;
     max-height: none;
+    height: auto; /* aspect ratio always follows the source pixels */
     user-select: none;
+  }
+
+  /* Rubber-band spring back to fit after an over-pinch release. */
+  img.full.settling {
+    transition:
+      width 160ms ease-out,
+      transform 160ms ease-out;
   }
 
   .zoom-ctl {
