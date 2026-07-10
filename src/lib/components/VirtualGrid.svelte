@@ -416,9 +416,6 @@
     align-items: center;
     justify-content: center;
     border-bottom: 3px solid var(--label-color);
-    /* Portrait images are height-constrained and would sit flush on the
-       frame's bottom edge; keep a small constant gap below any image. */
-    padding-bottom: 4px;
   }
 
   .marquee {
@@ -433,9 +430,12 @@
 
   img,
   video {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
+    /* Fill the square cell edge-to-edge (cropping the overflow) so the grid
+       reads as a tidy, uniform gallery with no letterbox band under each
+       thumbnail. The loupe (double-click) shows the full uncropped frame. */
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
     user-select: none;
   }
 
