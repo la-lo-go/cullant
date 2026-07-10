@@ -1,6 +1,12 @@
 <script lang="ts">
   import { catalog } from "../stores/catalog.svelte";
-  import { session, LABELS, type FlagFilter } from "../stores/session.svelte";
+  import {
+    session,
+    LABELS,
+    type FlagFilter,
+    type TypeFilter,
+    type OrientationFilter,
+  } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
@@ -27,6 +33,20 @@
       (t) => t.scope === 2 || (catalog.media === "photos" ? t.scope === 0 : t.scope === 1),
     ),
   );
+
+  const typeOptions: { value: TypeFilter; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "raw", label: "RAW" },
+    { value: "jpeg", label: "JPEG" },
+    { value: "rawjpeg", label: "RAW+JPEG" },
+  ];
+
+  const orientationOptions: { value: OrientationFilter; label: string }[] = [
+    { value: "all", label: "All" },
+    { value: "portrait", label: "Portrait" },
+    { value: "landscape", label: "Landscape" },
+    { value: "square", label: "Square" },
+  ];
 
   // Hover-preview state for the minimum-rating star row (0 = not hovering).
   let hovered = $state(0);
@@ -143,6 +163,44 @@
       </div>
     </section>
   {/if}
+
+  {#if catalog.media === "photos"}
+    <section>
+      <span class="lbl">File type</span>
+      <div class="row">
+        {#each typeOptions as opt (opt.value)}
+          <button
+            class="seg"
+            class:active={session.typeFilter === opt.value}
+            onclick={() => {
+              session.typeFilter = opt.value;
+              session.clampFocus();
+            }}
+          >
+            <span>{opt.label}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  <section>
+    <span class="lbl">Orientation</span>
+    <div class="row">
+      {#each orientationOptions as opt (opt.value)}
+        <button
+          class="seg"
+          class:active={session.orientationFilter === opt.value}
+          onclick={() => {
+            session.orientationFilter = opt.value;
+            session.clampFocus();
+          }}
+        >
+          <span>{opt.label}</span>
+        </button>
+      {/each}
+    </div>
+  </section>
 
   <footer>{session.filtered.length} shown</footer>
 </div>

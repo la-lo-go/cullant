@@ -20,6 +20,11 @@ pub struct ItemLite {
     pub label: Option<String>,
     pub width: Option<i64>,
     pub height: Option<i64>,
+    /// Raw EXIF orientation (1-8) as stored in the DB, or None. Values 5-8 mean
+    /// the displayed image is rotated 90°, so displayed width/height are the
+    /// swap of the raw `width`/`height` fields (which are never swapped). The
+    /// frontend applies this to classify portrait/landscape.
+    pub orientation: Option<i64>,
     pub is_primary: bool,
     pub group_size: i64,
     pub decoupled: bool,
@@ -124,7 +129,8 @@ pub fn query_items(
                       WHERE t.file_id = f.id) AS tag_ids,
                     EXISTS(SELECT 1 FROM thumbnails th
                       WHERE th.file_id = f.id AND th.kind = 0
-                        AND th.failed = 1 AND th.source_mtime = f.mtime) AS thumb_failed
+                        AND th.failed = 1 AND th.source_mtime = f.mtime) AS thumb_failed,
+                    f.orientation AS orientation
              FROM files f
              JOIN groups g ON g.id = f.group_id
              WHERE f.status = 0 AND {kind_filter}
@@ -146,6 +152,7 @@ pub fn query_items(
                 label: r.get(10)?,
                 width: r.get(11)?,
                 height: r.get(12)?,
+                orientation: r.get(18)?,
                 is_primary: r.get::<_, Option<bool>>(13)?.unwrap_or(true),
                 group_size: r.get(14)?,
                 decoupled: r.get(15)?,

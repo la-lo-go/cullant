@@ -27,6 +27,10 @@ export interface ItemLite {
   label: string | null;
   width: number | null;
   height: number | null;
+  /** Raw EXIF orientation (1-8) or null. Values 5-8 mean the displayed image is
+   *  rotated 90°, so displayed dims are the swap of `width`/`height` (which are
+   *  the un-rotated sensor dims and are never swapped by the backend). */
+  orientation: number | null;
   isPrimary: boolean;
   groupSize: number;
   decoupled: boolean;

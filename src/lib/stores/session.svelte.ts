@@ -11,6 +11,10 @@ import { catalog } from "./catalog.svelte";
 import { tags } from "./tags.svelte";
 
 export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
+/** Photo file-type composition filter (photos tab only). */
+export type TypeFilter = "all" | "raw" | "jpeg" | "rawjpeg";
+/** Displayed-aspect orientation filter (applies to photos and videos). */
+export type OrientationFilter = "all" | "portrait" | "landscape" | "square";
 
 const SHOW_NAMES_KEY = "cullant.showNames";
 const SHOW_FILMSTRIP_KEY = "cullant.showFilmstrip";
@@ -65,15 +69,23 @@ class SessionStore {
   minRating = $state(0);
   labelFilter = $state<string | null>(null);
   tagFilter = $state<number | null>(null);
+  /** Photo file-type composition filter; inert on the videos tab. */
+  typeFilter = $state<TypeFilter>("all");
+  /** Displayed-aspect orientation filter. */
+  orientationFilter = $state<OrientationFilter>("all");
   /** Whether the Filters dropdown panel is open. */
   filtersPanelOpen = $state(false);
 
-  /** True when any filter narrows the grid (used to badge the Filters button). */
+  /** True when any filter narrows the grid (used to badge the Filters button).
+   *  The type filter only counts while on the photos tab (it is inert on
+   *  videos), so switching tabs never leaves a phantom "active" badge. */
   hasActiveFilters = $derived(
     this.flagFilter !== "all" ||
       this.minRating > 0 ||
       this.labelFilter !== null ||
-      this.tagFilter !== null,
+      this.tagFilter !== null ||
+      (this.typeFilter !== "all" && catalog.media === "photos") ||
+      this.orientationFilter !== "all",
   );
 
   /** Reset every filter to its neutral value. */
@@ -82,6 +94,8 @@ class SessionStore {
     this.minRating = 0;
     this.labelFilter = null;
     this.tagFilter = null;
+    this.typeFilter = "all";
+    this.orientationFilter = "all";
     this.clampFocus();
   }
   /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
@@ -190,6 +204,46 @@ class SessionStore {
     }
     if (this.tagFilter !== null) {
       out = out.filter((i) => i.tagIds.includes(this.tagFilter!));
+    }
+    // File-type composition (photos only; a video has no RAW/JPEG notion). In
+    // mirror mode `out` already holds one entry per group, so groupSize/decoupled
+    // read straight off it: a raw+jpeg pair is groupSize > 1 and not decoupled,
+    // and a decoupled pair member counts as a lone file of its own kind.
+    if (this.typeFilter !== "all" && catalog.media === "photos") {
+      out = out.filter((i) => {
+        const isPair = i.groupSize > 1 && !i.decoupled;
+        switch (this.typeFilter) {
+          case "raw":
+            return i.kind === 0 && !isPair;
+          case "jpeg":
+            return i.kind === 1 && !isPair;
+          case "rawjpeg":
+            return isPair;
+          default:
+            return true;
+        }
+      });
+    }
+    // Orientation by *displayed* aspect. width/height are un-rotated sensor
+    // dims; EXIF orientation 5-8 means the shown image is turned 90°, so the
+    // displayed dims are swapped. Items with unknown dims are excluded.
+    if (this.orientationFilter !== "all") {
+      out = out.filter((i) => {
+        if (i.width == null || i.height == null) return false;
+        const rotated = i.orientation != null && i.orientation >= 5 && i.orientation <= 8;
+        const w = rotated ? i.height : i.width;
+        const h = rotated ? i.width : i.height;
+        switch (this.orientationFilter) {
+          case "portrait":
+            return h > w;
+          case "landscape":
+            return w > h;
+          case "square":
+            return w === h; // exact; sensor dims are integers
+          default:
+            return true;
+        }
+      });
     }
     if (this.folderFilter !== null) {
       out = out.filter((i) => isInFolder(i.relPath, this.folderFilter!));
