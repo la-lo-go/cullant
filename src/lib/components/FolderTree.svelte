@@ -2,6 +2,7 @@
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import FolderTreeNode from "./FolderTreeNode.svelte";
+  import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import { buildFolderTree, collectFolderPaths } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
 
@@ -26,6 +27,13 @@
 
   let aside = $state<HTMLElement | null>(null);
   let resizing = $state(false);
+
+  // Scroll metrics feeding the overlay scrollbar (the native bar is hidden so
+  // it doesn't steal 8px of panel width from the folder labels).
+  let scroller = $state<HTMLDivElement | null>(null);
+  let scrollTop = $state(0);
+  let viewportH = $state(0);
+  let contentH = $state(0);
 
   function startResize(e: PointerEvent) {
     e.preventDefault();
@@ -59,15 +67,35 @@
 
 {#if children.length > 0}
   <aside class="tree" bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
-    <div class="header">Folders</div>
-    <button class="node root" class:active={session.folderFilter === null} onclick={() => (session.folderFilter = null)}>
-      <Images size={13} />
-      <span class="name">All</span>
-      <span class="count">{tree.count}</span>
-    </button>
-    {#each children as child (child.path)}
-      <FolderTreeNode node={child} depth={0} />
-    {/each}
+    <div
+      class="scroll"
+      id="folder-tree-scroll"
+      bind:this={scroller}
+      bind:clientHeight={viewportH}
+      onscroll={() => scroller && (scrollTop = scroller.scrollTop)}
+    >
+      <div class="inner" bind:clientHeight={contentH}>
+        <div class="header">Folders</div>
+        <button class="node root" class:active={session.folderFilter === null} onclick={() => (session.folderFilter = null)}>
+          <Images size={13} />
+          <span class="name">All</span>
+          <span class="count">{tree.count}</span>
+        </button>
+        {#each children as child (child.path)}
+          <FolderTreeNode node={child} depth={0} />
+        {/each}
+      </div>
+    </div>
+    <OverlayScrollbar
+      orientation="vertical"
+      viewport={viewportH}
+      content={contentH}
+      position={scrollTop}
+      controls="folder-tree-scroll"
+      onSeek={(pos) => {
+        if (scroller) scroller.scrollTop = pos;
+      }}
+    />
     <!-- Right-edge resize handle (hidden on narrow screens where the tree floats). -->
     <div
       class="resize-handle"
@@ -86,15 +114,29 @@
 <style>
   .tree {
     position: relative;
+    display: flex;
+    flex-direction: column;
     flex: none;
     width: var(--tree-w, 210px);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+  }
+
+  .scroll {
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     /* overflow-y: auto forces overflow-x to compute to auto (spec), so long
        folder names would produce a horizontal scrollbar. Clip instead — node
        labels already ellipsize. */
     overflow-x: hidden;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
+    /* Native bar hidden: a classic scrollbar would carve 8px out of the panel
+       width. OverlayScrollbar floats over the content instead. */
+    scrollbar-width: none;
+  }
+
+  .scroll::-webkit-scrollbar {
+    display: none;
   }
 
   /* Grabbable strip straddling the right edge; widens the hit area without a

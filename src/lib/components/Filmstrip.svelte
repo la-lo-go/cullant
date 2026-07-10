@@ -1,6 +1,7 @@
 <script lang="ts">
   import { thumbUrl, videoUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
+  import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import Scissors from "@lucide/svelte/icons/scissors";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
 
@@ -121,6 +122,7 @@
     ></div>
     <div
       class="strip"
+      id="filmstrip-scroll"
       bind:this={strip}
       bind:clientWidth={width}
       onscroll={() => strip && (scrollLeft = strip.scrollLeft)}
@@ -154,6 +156,18 @@
         {/each}
       </div>
     </div>
+    <!-- Overlay scrollbar floating over the bottom edge of the cells, aligned
+         with the strip's safe-area box. -->
+    <div class="strip-overlay">
+      <OverlayScrollbar
+        orientation="horizontal"
+        viewport={width}
+        content={items.length * CELL}
+        position={scrollLeft}
+        controls="filmstrip-scroll"
+        onSeek={(pos) => strip?.scrollTo({ left: pos })}
+      />
+    </div>
   </div>
 {:else}
   <button
@@ -182,6 +196,24 @@
     height: 100%;
     overflow-x: auto;
     overflow-y: hidden;
+    /* Native bar hidden: a classic scrollbar would carve 8px out of the cell
+       height. OverlayScrollbar floats over the thumbnails instead. */
+    scrollbar-width: none;
+  }
+
+  .strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Positioning context for the overlay scrollbar, matching the strip's
+     safe-area-inset box so the thumb tracks the visible cells. */
+  .strip-overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--safe-left);
+    right: var(--safe-right);
+    pointer-events: none;
   }
 
   /* Grabbable strip straddling the top edge; a hairline reveals on hover/drag. */
