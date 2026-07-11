@@ -67,6 +67,17 @@
     }
   });
 
+  // Returning to the grid (via Escape/back or the Grid button) can leave a
+  // toolbar control focused — on mobile that shows a lingering focus ring and
+  // the focused control can swallow keys. Drop DOM focus once we're in the grid.
+  // Safe on desktop: grid navigation is driven by the global window keydown, so
+  // nothing in the grid needs to hold focus.
+  $effect(() => {
+    if (view.mode === "grid") {
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
+  });
+
   /**
    * Unified "back" action shared by desktop and Android. Hierarchy:
    *   1. If any modal/overlay is open, close the top-most one (and stop).
@@ -207,7 +218,6 @@
 <main class="app" class:edge={settings.edgeToEdge}>
   {#if catalog.project}
     <header class="toolbar">
-      <span class="title">Cullant</span>
       <span class="path" title={catalog.project.rootPath}>
         {catalog.project.rootPath.startsWith("content://")
           ? catalog.project.displayName
@@ -340,7 +350,9 @@
       <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject(settings.previewMode))}><RefreshCw size={14} /></button>
       <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
       <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
-      <button onclick={blurring(() => (showCloseConfirm = true))}>Close project</button>
+      {#if view.mode === "grid"}
+        <button onclick={blurring(() => (showCloseConfirm = true))}>Close project</button>
+      {/if}
     </header>
 
     {#if catalog.preloading}
@@ -593,11 +605,6 @@
     .toolbar .spacer {
       display: none;
     }
-  }
-
-  .title {
-    font-weight: 700;
-    font-size: 13px;
   }
 
   .path {
