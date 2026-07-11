@@ -298,8 +298,15 @@
       touchTap = null;
       cancelLongPress();
       if (e.type !== "pointercancel" && !tap.moved && tap.onCell) {
-        session.selectOnly(tap.index);
-        view.mode = "viewer";
+        if (session.selectedIds.size > 0) {
+          // A selection is already active (started via long-press): taps toggle
+          // membership instead of opening, so you can build a multi-selection one
+          // tap at a time.
+          session.toggleSelect(tap.index);
+        } else {
+          session.selectOnly(tap.index);
+          view.mode = "viewer";
+        }
       }
       return;
     }
