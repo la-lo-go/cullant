@@ -1,5 +1,7 @@
 <script lang="ts">
   import { session } from "$lib/stores/session.svelte";
+  import { catalog } from "$lib/stores/catalog.svelte";
+  import { tags } from "$lib/stores/tags.svelte";
   import { runCommand } from "$lib/keyboard/dispatcher.svelte";
   import type { CommandId } from "$lib/keyboard/keymap";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -9,16 +11,58 @@
   import Star from "@lucide/svelte/icons/star";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import CheckCheck from "@lucide/svelte/icons/check-check";
+  import X from "@lucide/svelte/icons/x";
 
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
-  // opt-in: the parent flips `forceShow` from a toolbar toggle.
-  let { forceShow = false }: { forceShow?: boolean } = $props();
+  // opt-in: the parent flips `forceShow` from a toolbar toggle. `hidden` lets
+  // the parent suppress the bar in the grid until there's a selection.
+  let { forceShow = false, hidden = false }: { forceShow?: boolean; hidden?: boolean } =
+    $props();
 
   // The item the actions apply to (mirrors the keyboard path, which acts on the
   // focused item / current selection).
   const focused = $derived(session.focused);
   const rating = $derived(focused?.rating ?? 0);
   const flag = $derived(focused?.flag ?? 0);
+  const hasSelection = $derived(session.selectedIds.size > 0);
+
+  const labelColors: Record<string, string> = {
+    Red: "#e05555",
+    Yellow: "#e0c34f",
+    Green: "#59b85e",
+    Blue: "#5588e0",
+    Purple: "#9a66d6",
+  };
+  const labelCommands: Record<string, CommandId> = {
+    Red: "label.red",
+    Yellow: "label.yellow",
+    Green: "label.green",
+    Blue: "label.blue",
+    Purple: "label.purple",
+  };
+
+  // Tags applicable to the current media type (same derivation as SelectionBar/FiltersPanel).
+  const scopedTags = $derived(
+    tags.all.filter(
+      (t) => t.scope === 2 || (catalog.media === "photos" ? t.scope === 0 : t.scope === 1),
+    ),
+  );
+
+  // "Active" must reflect what's ACTUALLY applied — the current selection (when
+  // one exists) or the single focused item otherwise — never a generic "this is
+  // an action button" look. Only true when EVERY relevant item already carries
+  // it, so partial/no application never falsely reads as active.
+  const selectedItems = $derived(
+    hasSelection ? session.filtered.filter((i) => session.selectedIds.has(i.id)) : [],
+  );
+  function labelActive(name: string): boolean {
+    if (hasSelection) return selectedItems.length > 0 && selectedItems.every((i) => i.label === name);
+    return focused?.label === name;
+  }
+  function tagActive(tagId: number): boolean {
+    if (hasSelection) return selectedItems.length > 0 && selectedItems.every((i) => i.tagIds.includes(tagId));
+    return focused?.tagIds.includes(tagId) ?? false;
+  }
 
   // Run a command, then release focus so a clicked button never swallows the
   // arrow keys used for grid navigation (mirrors the `blurring()` toolbar
@@ -36,7 +80,14 @@
   }
 </script>
 
-<div class="touchbar" class:forced={forceShow} class:disabled={!focused}>
+<div class="touchbar" class:forced={forceShow} class:disabled={!focused} class:hidden>
+  {#if hasSelection}
+    <div class="group select">
+      <button class="btn" aria-label="Clear selection" onclick={act(() => session.clearSelection())}>
+        <X size={20} />
+      </button>
+    </div>
+  {/if}
   <div class="group nav">
     <button class="btn" aria-label="Previous" onclick={act(() => runCommand("nav.prev"))}>
       <ChevronLeft size={22} />
@@ -78,6 +129,36 @@
     {/each}
   </div>
 
+  <div class="group labels">
+    {#each Object.entries(labelColors) as [name, color] (name)}
+      <button
+        class="btn swatchbtn"
+        class:active={labelActive(name)}
+        aria-label={`${name} label`}
+        style="--c: {color}"
+        onclick={act(() => runCommand(labelCommands[name]))}
+      >
+        <span class="swatch"></span>
+      </button>
+    {/each}
+  </div>
+
+  {#if scopedTags.length > 0}
+    <div class="group tags">
+      {#each scopedTags as tag (tag.id)}
+        <button
+          class="btn tagbtn"
+          class:active={tagActive(tag.id)}
+          style="--c: {tag.color ?? '#888'}"
+          onclick={act(() => session.toggleTag(tag.id))}
+        >
+          <span class="tagdot"></span>
+          <span class="taglabel">{tag.name}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="group actions">
     <button class="btn danger" aria-label="Queue delete" onclick={act(() => runCommand("delete.pair"))}>
       <Trash2 size={20} />
@@ -117,6 +198,10 @@
   /* Desktop opt-in via the toolbar toggle. */
   .touchbar.forced {
     display: flex;
+  }
+
+  .touchbar.hidden {
+    display: none;
   }
 
   .touchbar::-webkit-scrollbar {
@@ -187,5 +272,45 @@
   .btn.commit {
     color: var(--accent);
     border-color: var(--border-strong);
+  }
+
+  .swatch {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--c);
+    opacity: 0.75;
+  }
+
+  .swatchbtn.active .swatch {
+    opacity: 1;
+    outline: 2px solid #fff;
+    outline-offset: 1px;
+  }
+
+  .tagbtn {
+    min-width: auto;
+    gap: 5px;
+    padding: 0 10px;
+    color: #bbb;
+  }
+
+  .tagbtn.active {
+    background: var(--accent-fill);
+    color: #fff;
+    border-color: transparent;
+  }
+
+  .tagdot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--c);
+    flex: none;
+  }
+
+  .taglabel {
+    font-size: 12px;
+    white-space: nowrap;
   }
 </style>
