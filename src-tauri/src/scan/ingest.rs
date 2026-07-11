@@ -37,16 +37,17 @@ use crate::thumbs::{self, SourceMeta, ThumbKind, PREVIEW_LONG_EDGE, THUMB_LONG_E
 const CHUNK: usize = if cfg!(target_os = "android") { 8 } else { 32 };
 
 /// How 2560px previews are pregenerated. Chosen in the frontend settings and
-/// passed with open/rescan; `All` is the default (matches CULLANT_OPEN_PROJECT).
+/// passed with open/rescan; `Background` is the default (matches the frontend
+/// default and the CULLANT_OPEN_PROJECT hook).
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum PreviewMode {
     /// Previews are generated together with thumbnails during the gated
     /// import: slowest to open, but the loupe is warm from the first photo.
-    #[default]
     All,
     /// The gate releases after thumbnails; previews fill in afterwards in the
     /// background while `previews:progress` drives an indicator.
+    #[default]
     Background,
     /// No bulk previews: the frontend warms a window around the focused photo
     /// and the protocol generates on demand.

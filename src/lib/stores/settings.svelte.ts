@@ -11,11 +11,11 @@ const ONBOARDED_PREVIEW_KEY = "cullant.onboardedPreview";
 function loadPreviewMode(): PreviewMode {
   try {
     const raw = localStorage.getItem(PREVIEW_MODE_KEY);
-    if (raw === null) return "all";
+    if (raw === null) return "background";
     const v = JSON.parse(raw);
-    return v === "background" || v === "window" ? v : "all";
+    return v === "all" || v === "window" ? v : "background";
   } catch {
-    return "all";
+    return "background";
   }
 }
 
