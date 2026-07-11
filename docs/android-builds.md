@@ -119,11 +119,17 @@ keytool -genkeypair -v \
 Then create `src-tauri/gen/android/keystore.properties`:
 
 ```properties
-storeFile=C:\\Users\\<user>\\.android\\cullant-release.jks
+storeFile=C:/Users/<user>/.android/cullant-release.jks
 storePassword=<password>
 keyAlias=cullant
 keyPassword=<password>
 ```
+
+**Use forward slashes in `storeFile`.** A `.properties` file treats `\` as an
+escape character, so a Windows path with single backslashes
+(`C:\Users\…`) is mangled (the separators vanish) and Gradle then resolves it
+relative to `app/` and fails with "Keystore file … not found". Forward slashes
+are left untouched by the parser and are still absolute on Windows.
 
 Once that file exists, `npx tauri android build --apk --target aarch64`
 signs automatically — no manual signing step needed. (The very first signed
