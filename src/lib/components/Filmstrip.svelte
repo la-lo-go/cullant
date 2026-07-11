@@ -36,13 +36,16 @@
   // we fall back to instant so recentring never lags behind the selection.
   const RAPID_STEP_MS = 180;
   let lastRecentre = 0;
+  let hasCentered = false;
   $effect(() => {
-    if (!strip) return;
+    if (!strip || width === 0) return;
     const target = Math.max(0, session.focusedIndex * CELL - width / 2 + CELL / 2);
     const now = performance.now();
     const rapid = now - lastRecentre < RAPID_STEP_MS;
     lastRecentre = now;
-    strip.scrollTo({ left: target, behavior: rapid ? "auto" : "smooth" });
+    const instant = !hasCentered || rapid;
+    strip.scrollTo({ left: target, behavior: instant ? "auto" : "smooth" });
+    hasCentered = true;
   });
 
   // Drag the top edge to resize; dragging it below COLLAPSE_AT hides the strip
