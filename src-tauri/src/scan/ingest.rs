@@ -111,6 +111,24 @@ impl Extracted {
     }
 }
 
+/// What one file's parallel ingest produced: the optional metadata update and
+/// the 0–2 rendered-thumbnail rows (thumb and/or preview). Both are flushed in
+/// per-chunk batched transactions by the caller instead of one commit each.
+struct IngestOutput {
+    extracted: Option<Extracted>,
+    thumb_rows: Vec<thumbs::ThumbRow>,
+}
+
+impl IngestOutput {
+    /// Metadata only, no rendered thumbnails (early-out and skip paths).
+    fn meta_only(extracted: Option<Extracted>) -> Self {
+        IngestOutput {
+            extracted,
+            thumb_rows: Vec::new(),
+        }
+    }
+}
+
 /// Event-emitting entry point used by the scanner thread.
 pub fn run_ingest_pass(
     app: &AppHandle,
@@ -220,12 +238,24 @@ pub fn run_ingest_inner(
     let mut meta_updated = 0usize;
     let mut done = 0usize;
     for chunk in tier1.chunks(CHUNK) {
-        let extracted: Vec<Extracted> = chunk
+        // Decode + render in parallel, then flush this chunk's metadata and
+        // thumbnail rows each in a single transaction (instead of one commit
+        // per file per artifact).
+        let outputs: Vec<IngestOutput> = chunk
             .par_iter()
-            .filter_map(|p| ingest_file(db, store, root, p, previews_inline))
+            .map(|p| ingest_file(db, store, root, p, previews_inline))
             .collect();
+        let mut extracted = Vec::with_capacity(outputs.len());
+        let mut rows = Vec::with_capacity(outputs.len());
+        for out in outputs {
+            if let Some(e) = out.extracted {
+                extracted.push(e);
+            }
+            rows.extend(out.thumb_rows);
+        }
         meta_updated += extracted.len();
         write_metadata_batch(db, extracted)?;
+        thumbs::write_thumb_rows(db, rows)?;
         done += chunk.len();
         thumb_progress(done, total);
     }
@@ -281,7 +311,7 @@ fn ingest_file(
     root: &Path,
     p: &Pending,
     previews_inline: bool,
-) -> Option<Extracted> {
+) -> IngestOutput {
     // Videos take a wholly separate path: ffmpeg poster extraction, no EXIF,
     // no preview, and no `RawSource` (which would read the whole clip).
     if p.kind == 2 {
@@ -296,7 +326,8 @@ fn ingest_file(
         Ok(s) => s,
         Err(e) => {
             tracing::debug!("ingest could not open {}: {e}", p.rel_path);
-            return extracted; // mtime fallback still applies when metadata was due
+            // mtime fallback still applies when metadata was due
+            return IngestOutput::meta_only(extracted);
         }
     };
 
@@ -362,6 +393,7 @@ fn ingest_file(
         }
     }
 
+    let mut thumb_rows = Vec::new();
     if let Some(img) = decoded {
         // Orientation extracted just now beats the (possibly NULL) DB column.
         let orientation = extracted
@@ -376,20 +408,25 @@ fn ingest_file(
             orientation,
             src_dims,
         };
+        // Render + cache in parallel here; the row writes are batched by the
+        // caller (one transaction per chunk) instead of one commit per file.
         if render_thumb {
-            if let Err(e) = thumbs::render_and_store(db, root, &meta, &img, ThumbKind::Thumb) {
-                tracing::debug!("thumb render skipped {}: {e}", p.rel_path);
+            match thumbs::render_to_cache(root, &meta, &img, ThumbKind::Thumb) {
+                Ok((_, row)) => thumb_rows.push(row),
+                Err(e) => tracing::debug!("thumb render skipped {}: {e}", p.rel_path),
             }
         }
         if render_preview {
-            if let Err(e) = thumbs::render_and_store(db, root, &meta, &img, ThumbKind::Preview) {
-                tracing::debug!("preview render skipped {}: {e}", p.rel_path);
+            match thumbs::render_to_cache(root, &meta, &img, ThumbKind::Preview) {
+                Ok((_, row)) => thumb_rows.push(row),
+                Err(e) => tracing::debug!("preview render skipped {}: {e}", p.rel_path),
             }
         }
     } else if render_thumb || render_preview {
         // The source could not be decoded (unsupported/corrupt). Tombstone the
         // due artifacts so later scans don't retry until the file changes, and
-        // the grid can flag it instead of requesting a thumb that 404s.
+        // the grid can flag it instead of requesting a thumb that 404s. Rare, so
+        // left as immediate per-file writes rather than batched.
         if render_thumb {
             let _ = thumbs::record_decode_failure(db, p.id, p.mtime, ThumbKind::Thumb);
         }
@@ -398,7 +435,10 @@ fn ingest_file(
         }
     }
 
-    extracted
+    IngestOutput {
+        extracted,
+        thumb_rows,
+    }
 }
 
 /// Ingest one video: fall capture_time back to mtime (videos carry no
@@ -410,30 +450,26 @@ fn ingest_file(
 /// - a genuinely undecodable/corrupt video → tombstone the thumbnail so the
 ///   pass and the on-demand pool stop grinding on it, exactly like a broken
 ///   image.
-fn ingest_video(
-    db: &Arc<Db>,
-    store: &dyn ProjectStore,
-    root: &Path,
-    p: &Pending,
-) -> Option<Extracted> {
+fn ingest_video(db: &Arc<Db>, store: &dyn ProjectStore, root: &Path, p: &Pending) -> IngestOutput {
     // capture_time = COALESCE(NULL, mtime) via the batched update.
     let extracted = p.needs_meta.then(|| Extracted::empty(p.id));
 
     if !p.needs_thumb {
-        return extracted;
+        return IngestOutput::meta_only(extracted);
     }
     if !thumbs::video_poster_possible(store, &p.rel_path) {
         tracing::debug!(
             "video thumbnail skipped {} (ffmpeg unavailable)",
             p.rel_path
         );
-        return extracted;
+        return IngestOutput::meta_only(extracted);
     }
 
     // Guaranteed Some by video_poster_possible.
     let Some(path) = store.local_path(&p.rel_path) else {
-        return extracted;
+        return IngestOutput::meta_only(extracted);
     };
+    let mut thumb_rows = Vec::new();
     match decode::video::extract_poster(&path) {
         Ok(img) => {
             let meta = SourceMeta {
@@ -443,8 +479,9 @@ fn ingest_video(
                 orientation: 1,
                 src_dims: Some((img.width(), img.height())),
             };
-            if let Err(e) = thumbs::render_and_store(db, root, &meta, &img, ThumbKind::Thumb) {
-                tracing::debug!("video thumb render skipped {}: {e}", p.rel_path);
+            match thumbs::render_to_cache(root, &meta, &img, ThumbKind::Thumb) {
+                Ok((_, row)) => thumb_rows.push(row),
+                Err(e) => tracing::debug!("video thumb render skipped {}: {e}", p.rel_path),
             }
         }
         Err(e) => {
@@ -452,7 +489,10 @@ fn ingest_video(
             let _ = thumbs::record_decode_failure(db, p.id, p.mtime, ThumbKind::Thumb);
         }
     }
-    extracted
+    IngestOutput {
+        extracted,
+        thumb_rows,
+    }
 }
 
 /// Batched, transactional metadata update on the writer thread. Files whose

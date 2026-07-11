@@ -4,7 +4,7 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use image::DynamicImage;
-use rusqlite::params;
+use rusqlite::{params, Connection};
 
 use crate::db::Db;
 use crate::decode;
@@ -244,17 +244,33 @@ pub(crate) struct SourceMeta {
     pub src_dims: Option<(u32, u32)>,
 }
 
+/// The DB write a rendered thumbnail produces: the `thumbnails` upsert plus the
+/// optional `files.width/height` backfill. Kept separate from rendering so the
+/// ingest pass can batch many of these into one transaction (like metadata),
+/// while the on-demand path writes one immediately.
+pub(crate) struct ThumbRow {
+    file_id: i64,
+    kind_i: i64,
+    cache_rel: String,
+    out_w: u32,
+    out_h: u32,
+    mtime: i64,
+    /// ORIGINAL dims to backfill into `files`, when the decode was full-size.
+    src_dims: Option<(u32, u32)>,
+}
+
 /// Resize `decoded` for `kind`, apply orientation (on the small image — 90°
-/// rotations and flips commute with resizing), JPEG-encode, write to the disk
-/// cache and record the row. Borrows `decoded` so several kinds can be
+/// rotations and flips commute with resizing), JPEG-encode, and write to the
+/// disk cache. Returns the encoded bytes and the DB-row payload but does NOT
+/// touch the database — callers either batch the rows (ingest) or write one
+/// immediately (`render_and_store`). Borrows `decoded` so several kinds can be
 /// rendered from one decode.
-pub(crate) fn render_and_store(
-    db: &Arc<Db>,
+pub(crate) fn render_to_cache(
     root: &Path,
     meta: &SourceMeta,
     decoded: &DynamicImage,
     kind: ThumbKind,
-) -> AppResult<Vec<u8>> {
+) -> AppResult<(Vec<u8>, ThumbRow)> {
     let SourceMeta {
         file_id,
         mtime,
@@ -284,30 +300,73 @@ pub(crate) fn render_and_store(
         std::fs::remove_file(&tmp)
     })?;
 
-    let kind_i = kind as i64;
-    let (out_w, out_h) = (oriented.width(), oriented.height());
-    db.call(move |conn| {
-        conn.execute(
-            "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at, failed)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
-             ON CONFLICT(file_id, kind) DO UPDATE SET
-               cache_path = excluded.cache_path, width = excluded.width,
-               height = excluded.height, source_mtime = excluded.source_mtime,
-               generated_at = excluded.generated_at, failed = 0",
-            params![file_id, kind_i, cache_rel, out_w, out_h, mtime, now_secs()],
-        )?;
-        // Original dimensions come for free when the decode was full-size;
-        // keep existing values, and never record a scaled decode's dims.
-        if let Some((src_w, src_h)) = src_dims {
-            conn.execute(
-                "UPDATE files SET width = COALESCE(width, ?2), height = COALESCE(height, ?3)
-                 WHERE id = ?1",
-                params![file_id, src_w, src_h],
-            )?;
-        }
-        Ok(())
-    })?;
+    let row = ThumbRow {
+        file_id,
+        kind_i: kind as i64,
+        cache_rel,
+        out_w: oriented.width(),
+        out_h: oriented.height(),
+        mtime,
+        src_dims,
+    };
+    Ok((jpeg, row))
+}
 
+/// Apply one rendered thumbnail's row writes on the DB thread's connection.
+fn write_thumb_row(conn: &Connection, row: &ThumbRow) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at, failed)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
+         ON CONFLICT(file_id, kind) DO UPDATE SET
+           cache_path = excluded.cache_path, width = excluded.width,
+           height = excluded.height, source_mtime = excluded.source_mtime,
+           generated_at = excluded.generated_at, failed = 0",
+        params![
+            row.file_id, row.kind_i, row.cache_rel, row.out_w, row.out_h, row.mtime, now_secs()
+        ],
+    )?;
+    // Original dimensions come for free when the decode was full-size;
+    // keep existing values, and never record a scaled decode's dims.
+    if let Some((src_w, src_h)) = row.src_dims {
+        conn.execute(
+            "UPDATE files SET width = COALESCE(width, ?2), height = COALESCE(height, ?3)
+             WHERE id = ?1",
+            params![row.file_id, src_w, src_h],
+        )?;
+    }
+    Ok(())
+}
+
+/// Flush a batch of rendered-thumbnail rows in a single transaction — the
+/// ingest counterpart to per-file writes, cutting one commit + IPC round-trip
+/// per thumbnail down to one per chunk.
+pub(crate) fn write_thumb_rows(db: &Arc<Db>, rows: Vec<ThumbRow>) -> AppResult<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
+    db.call(move |conn| {
+        let tx = conn.transaction()?;
+        for row in &rows {
+            write_thumb_row(&tx, row)?;
+        }
+        tx.commit()?;
+        Ok(())
+    })
+}
+
+/// Resize/orient/encode/cache one thumbnail AND record its row immediately (a
+/// batch of one). The on-demand path (`produce`) uses this; the ingest pass
+/// instead collects `ThumbRow`s via [`render_to_cache`] and flushes them with
+/// [`write_thumb_rows`].
+pub(crate) fn render_and_store(
+    db: &Arc<Db>,
+    root: &Path,
+    meta: &SourceMeta,
+    decoded: &DynamicImage,
+    kind: ThumbKind,
+) -> AppResult<Vec<u8>> {
+    let (jpeg, row) = render_to_cache(root, meta, decoded, kind)?;
+    db.call(move |conn| Ok(write_thumb_row(conn, &row)?))?;
     Ok(jpeg)
 }
 
@@ -570,7 +629,8 @@ mod tests {
             .unwrap();
 
         // Generate + cache the thumb.
-        let bytes = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime)).unwrap();
+        let bytes =
+            produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime)).unwrap();
 
         // Fast path with the correct mtime returns the cached bytes.
         let hit = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime)).unwrap();
