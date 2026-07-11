@@ -23,27 +23,30 @@
     if (e.key === "Escape") onclose();
   }
 
+  // description may contain <strong> (rendered via {@html}); these are static,
+  // trusted constants. Kept identical to PreviewModeIntro so the two match.
   const previewModes: { value: PreviewMode; label: string; description: string }[] = [
     {
       value: "all",
       label: "All during import",
       description:
         "Previews are generated together with thumbnails while the project opens. " +
-        "Slowest open, biggest cache — but browsing is instant from the first photo.",
+        "<strong>Slowest opening</strong>, biggest cache, but <strong>instant browsing</strong> " +
+        "from the first photo.",
     },
     {
       value: "background",
       label: "In background after opening",
       description:
         "The project opens as soon as thumbnails are ready; previews keep generating " +
-        "behind a small progress chip. Photos you open jump the queue.",
+        "in the background. Photos you open jump the queue.",
     },
     {
       value: "window",
       label: "Around the focused photo",
       description:
         "No bulk generation: only photos near the one you are viewing are prepared. " +
-        "Smallest cache — jumping far into an unvisited part may wait a moment.",
+        "<strong>Fastest opening</strong>, smallest cache.",
     },
   ];
 </script>
@@ -80,8 +83,8 @@
             onchange={() => settings.setPreviewMode(m.value)}
           />
           <span class="text">
-            <span class="label">{m.label}{m.value === "all" ? " (default)" : ""}</span>
-            <span class="description">{m.description}</span>
+            <span class="label">{m.label}{m.value === "background" ? " (default)" : ""}</span>
+            <span class="description">{@html m.description}</span>
           </span>
         </label>
       {/each}

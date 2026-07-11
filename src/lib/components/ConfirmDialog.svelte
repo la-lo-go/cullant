@@ -23,6 +23,9 @@
   function onKeydown(e: KeyboardEvent) {
     e.stopPropagation();
     if (e.key === "Escape") oncancel();
+    // Enter confirms the default action — unless a specific button has focus,
+    // in which case let its own activation handle it (e.g. Cancel).
+    else if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) onconfirm();
   }
 </script>
 
@@ -105,11 +108,16 @@
     border-color: var(--accent);
   }
 
+  /* Default action, filled (no colored border). Red: closing is a mild,
+     back-out action. */
   button.confirm {
-    border-color: #a04040;
+    border-color: transparent;
+    background: #a04040;
+    color: #fff;
   }
 
   button.confirm:hover {
-    border-color: #ff6b6b;
+    border-color: transparent;
+    background: #b84a4a;
   }
 </style>

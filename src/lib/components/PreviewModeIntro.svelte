@@ -11,7 +11,7 @@
     oncancel: () => void;
   } = $props();
 
-  // Default the selection to the current setting (defaults to "all").
+  // Default the selection to the current setting (defaults to "background").
   let selected = $state<PreviewMode>(settings.previewMode);
 
   let panel = $state<HTMLDivElement | null>(null);
@@ -24,30 +24,35 @@
   function onKeydown(e: KeyboardEvent) {
     e.stopPropagation();
     if (e.key === "Escape") oncancel();
+    // Enter opens with the selected mode — unless a specific button has focus,
+    // in which case let its own activation handle it (e.g. Cancel).
+    else if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) onstart(selected);
   }
 
   // Same wording as SettingsDialog so the two descriptions stay consistent.
+  // description may contain <strong> (rendered via {@html}); static, trusted text.
   const previewModes: { value: PreviewMode; label: string; description: string }[] = [
     {
       value: "all",
       label: "All during import",
       description:
         "Previews are generated together with thumbnails while the project opens. " +
-        "Slowest open, biggest cache — but browsing is instant from the first photo.",
+        "<strong>Slowest opening</strong>, biggest cache, but <strong>instant browsing</strong> " +
+        "from the first photo.",
     },
     {
       value: "background",
       label: "In background after opening",
       description:
         "The project opens as soon as thumbnails are ready; previews keep generating " +
-        "behind a small progress chip. Photos you open jump the queue.",
+        "in the background. Photos you open jump the queue.",
     },
     {
       value: "window",
       label: "Around the focused photo",
       description:
         "No bulk generation: only photos near the one you are viewing are prepared. " +
-        "Smallest cache — jumping far into an unvisited part may wait a moment.",
+        "<strong>Fastest opening</strong>, smallest cache.",
     },
   ];
 </script>
@@ -66,10 +71,12 @@
     role="dialog"
     tabindex="-1"
   >
-    <h2>Welcome to Cullant</h2>
+    <h2>Welcome to Cullant!</h2>
     <p class="hint">
-      Previews are the sharp 2560px images the loupe and compare views show. Choose how
-      they are generated when a project opens. You can change this anytime in Settings.
+      Previews are sharp 2560px images that the loupe and compare views show. Choose how they are generated when a project opens. 
+    </p>
+    <p class="hint">
+      <strong>You can change this anytime in Settings.</strong>
     </p>
 
     {#each previewModes as m (m.value)}
@@ -82,8 +89,8 @@
           onchange={() => (selected = m.value)}
         />
         <span class="text">
-          <span class="label">{m.label}{m.value === "all" ? " (default)" : ""}</span>
-          <span class="description">{m.description}</span>
+          <span class="label">{m.label}{m.value === "background" ? " (default)" : ""}</span>
+          <span class="description">{@html m.description}</span>
         </span>
       </label>
     {/each}
@@ -190,7 +197,16 @@
     border-color: var(--accent);
   }
 
+  /* Default action, filled (no colored border) so Enter-to-open reads primary. */
   button.confirm {
-    border-color: var(--accent);
+    border-color: transparent;
+    background: var(--accent-fill);
+    color: #fff;
+  }
+
+  button.confirm:hover {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--bg);
   }
 </style>
