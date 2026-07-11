@@ -220,4 +220,10 @@
     border-radius: 50%;
     background: var(--c);
   }
+
+  @media (pointer: coarse) {
+    .selbar {
+      display: none;
+    }
+  }
 </style>
