@@ -130,14 +130,18 @@
   let edgeRaf = 0;
   // Touch: a pending long-press (before it turns into a marquee).
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
-  let touchStart: { x: number; y: number } | null = null;
+  // Touch tap-vs-scroll, recorded on touchstart. A release under TAP_SLOP with
+  // `moved` still false is a tap (select + open the loupe); any larger movement
+  // is a scroll and leaves focus/selection untouched. Cleared when a marquee begins.
+  const TAP_SLOP = 10;
+  let touchTap: { index: number; onCell: boolean; x: number; y: number; moved: boolean } | null =
+    null;
 
   function cancelLongPress() {
     if (longPressTimer) {
       clearTimeout(longPressTimer);
       longPressTimer = null;
     }
-    touchStart = null;
   }
 
   /** Cells are a uniform grid — geometry replaces DOM hit-testing. Returns
@@ -161,12 +165,6 @@
     if (!hit) return;
     const { x, y, index, onCell } = hit;
     const viewY = y - viewport.scrollTop;
-    if (onCell) {
-      if (e.shiftKey) session.rangeSelect(index, e.ctrlKey);
-      else if (e.ctrlKey) session.toggleSelect(index);
-      else session.selectOnly(index);
-    }
-    if (e.shiftKey) return; // Shift is range-select; never starts a marquee
 
     const beginMarquee = (active: boolean) => {
       drag = {
@@ -183,31 +181,44 @@
     };
 
     if (e.pointerType === "touch") {
-      // A plain touch drag scrolls the grid; only a long-press (finger held
-      // still) starts a marquee. The cell tap above already set the selection.
+      // Defer to pointerup: a tap selects + opens the loupe, a swipe scrolls and
+      // must not disturb focus/selection. A long-press (finger held still past
+      // LONG_PRESS_MS without scrolling) starts a marquee instead. Selection is
+      // NOT set here, so the initial press of a scroll never jumps the focus.
       cancelLongPress();
-      touchStart = { x: e.clientX, y: e.clientY };
+      touchTap = { index, onCell, x: e.clientX, y: e.clientY, moved: false };
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
-        touchStart = null;
+        touchTap = null; // became a marquee, not a tap
         beginMarquee(true);
       }, LONG_PRESS_MS);
       return;
     }
 
-    // Mouse/pen: empty space starts the marquee at once (a plain click there
-    // clears the selection); dragging off a cell needs the movement threshold.
+    // Mouse/pen: select immediately, then arm the marquee.
+    if (onCell) {
+      if (e.shiftKey) session.rangeSelect(index, e.ctrlKey);
+      else if (e.ctrlKey) session.toggleSelect(index);
+      else session.selectOnly(index);
+    }
+    if (e.shiftKey) return; // Shift is range-select; never starts a marquee
+
+    // Empty space starts the marquee at once (a plain click there clears the
+    // selection); dragging off a cell needs the movement threshold.
     beginMarquee(!onCell);
   }
 
   function onPointerMove(e: PointerEvent) {
-    // Still deciding tap-vs-long-press: any real movement means a scroll, so
-    // drop the pending marquee and let the browser scroll.
-    if (longPressTimer && touchStart) {
+    // Touch, before any marquee: decide tap-vs-scroll. Movement past TAP_SLOP
+    // marks a scroll — the pending long-press is dropped and the release will
+    // neither select nor open; the browser keeps scrolling.
+    if (touchTap && !drag) {
       if (
-        Math.abs(e.clientX - touchStart.x) > DRAG_THRESHOLD ||
-        Math.abs(e.clientY - touchStart.y) > DRAG_THRESHOLD
+        !touchTap.moved &&
+        (Math.abs(e.clientX - touchTap.x) > TAP_SLOP ||
+          Math.abs(e.clientY - touchTap.y) > TAP_SLOP)
       ) {
+        touchTap.moved = true;
         cancelLongPress();
       }
       return;
@@ -278,6 +289,20 @@
   }
 
   function endDrag(e: PointerEvent) {
+    // Touch tap: finger lifted (pointerup, not a cancelled/scrolled gesture)
+    // without crossing TAP_SLOP → select the cell and open the loupe. A single
+    // tap opens the preview. Scrolls arrive as pointercancel or with `moved`
+    // set and are ignored here.
+    if (touchTap) {
+      const tap = touchTap;
+      touchTap = null;
+      cancelLongPress();
+      if (e.type !== "pointercancel" && !tap.moved && tap.onCell) {
+        session.selectOnly(tap.index);
+        view.mode = "viewer";
+      }
+      return;
+    }
     cancelLongPress(); // clear a pending touch long-press (this was a tap/scroll)
     if (!drag || e.pointerId !== drag.pointerId) return;
     if (viewport?.hasPointerCapture(e.pointerId)) viewport.releasePointerCapture(e.pointerId);
