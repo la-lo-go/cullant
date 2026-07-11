@@ -93,7 +93,7 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       else session.clearSelection();
       return;
     case "zoom.toggle":
-      if (view.mode !== "grid") view.toggleZoom();
+      if (view.mode !== "grid") view.requestZoomToggle();
       return;
     case "pair.toggleShown":
       return session.togglePairHalf();

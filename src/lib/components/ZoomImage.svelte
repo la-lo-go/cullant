@@ -48,6 +48,8 @@
   // never completes (the old bug: double-tap could only ever zoom in). Real
   // pans move far more than this, so they're still never mistaken for taps.
   const TAP_SLOP = 18;
+  /** Magnification (× fit) the double-tap / Z-key toggle jumps to from fit. */
+  const DOUBLE_TAP_MAG = 1.5;
   const DOUBLE_TAP_MS = 300;
   /** Max spacing between the two taps of a double-tap (finger-down to down). */
   const DOUBLE_TAP_DIST = 44;
@@ -105,14 +107,30 @@
     fullNaturalH = 0;
   });
 
-  // Standalone zoom is non-persistent: reset to fit whenever the item changes.
+  // Reset to the fit view whenever the item changes — both the compare pane's
+  // local state and the shared loupe zoom, so stepping to another photo always
+  // starts unzoomed.
   $effect(() => {
     void item.id;
-    if (!standalone) return;
-    sZoomed = false;
-    sScale = 1;
-    sCx = 0.5;
-    sCy = 0.5;
+    if (standalone) {
+      sZoomed = false;
+      sScale = 1;
+      sCx = 0.5;
+      sCy = 0.5;
+    } else {
+      view.resetZoom();
+    }
+  });
+
+  // Keyboard zoom toggle (Z / Space) routes through the view store, which can't
+  // know the per-photo `fit`; it bumps a nonce and we run the same centered
+  // toggle the double-tap uses. Loupe only — compare panes keep local zoom.
+  let lastKbNonce = 0;
+  $effect(() => {
+    const n = view.zoomToggleNonce;
+    if (standalone || n === lastKbNonce) return;
+    lastKbNonce = n;
+    untrack(() => toggleZoom(frameW / 2, frameH / 2));
   });
 
   // Fit view uses the 2560px preview; zoomed view swaps in the full-res source
@@ -283,9 +301,9 @@
    * true at fit during a pinch entry/settle), so it always matches what's on
    * screen:
    *   - zoomed in at all (scale > fit)  -> return to the whole-image fit view;
-   *   - at fit                          -> 2x fit on the tapped point (~half the
-   *                                        image visible), capped at 1:1 pixels.
-   * A photo whose 2x is still not above fit stays put (the least-surprising
+   *   - at fit                          -> DOUBLE_TAP_MAG × fit on the tapped
+   *                                        point, capped at 1:1 pixels.
+   * A photo whose target is still not above fit stays put (the least-surprising
    * no-op).
    */
   function toggleZoom(px: number, py: number) {
@@ -307,9 +325,9 @@
       z.cy = 0.5;
       return;
     }
-    // At fit -> 2x fit (see ~half the image). clampToRange caps it at 1:1 for
-    // large photos, or at the modest detail zoom for small ones.
-    const target = clampToRange(fit * 2);
+    // At fit -> DOUBLE_TAP_MAG × fit. clampToRange caps it at 1:1 for large
+    // photos, or at the modest detail zoom for small ones.
+    const target = clampToRange(fit * DOUBLE_TAP_MAG);
     if (target <= fit + ZOOM_EPS) return; // nothing beyond fit to reveal
     zoomAt(px, py, target);
   }

@@ -22,15 +22,15 @@ class ViewStore {
   /** Camera-metadata panel open in the loupe. */
   infoOpen = $state(false);
 
-  toggleZoom(atX?: number, atY?: number) {
-    if (!this.zoomed) {
-      if (atX !== undefined && atY !== undefined) {
-        this.cx = atX;
-        this.cy = atY;
-      }
-      this.scale = 1;
-    }
-    this.zoomed = !this.zoomed;
+  /**
+   * Bumped by the keyboard zoom shortcut. The loupe's ZoomImage watches this
+   * and runs its own fit-aware toggle (the store can't compute the per-photo
+   * fit scale), so Z/Space match the double-tap behaviour exactly.
+   */
+  zoomToggleNonce = $state(0);
+
+  requestZoomToggle() {
+    this.zoomToggleNonce++;
   }
 
   resetZoom() {

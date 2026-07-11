@@ -76,7 +76,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "view.viewer", title: "Loupe view" },
   { id: "view.compare", title: "Compare view" },
   { id: "view.back", title: "Back to grid" },
-  { id: "zoom.toggle", title: "Toggle 100% zoom" },
+  { id: "zoom.toggle", title: "Toggle zoom" },
   { id: "pair.toggleShown", title: "Show RAW ↔ JPEG half of pair" },
   { id: "pair.toggleCoupling", title: "Decouple / recouple pair" },
   { id: "tag.chord", title: "Task tag chord (then 1-9)", classify: true },
