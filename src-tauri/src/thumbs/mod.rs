@@ -491,10 +491,19 @@ fn resize_long_edge(img: &DynamicImage, long_edge: u32) -> AppResult<DynamicImag
 }
 
 fn encode_jpeg(img: &DynamicImage, quality: u8) -> AppResult<Vec<u8>> {
-    let rgb = img.to_rgb8();
+    use std::borrow::Cow;
+
+    // After resize_long_edge the buffer is already RGB8 in the common path, so
+    // borrow it — to_rgb8() would allocate and copy the whole image (~20 MB for
+    // a 2560px preview). Only exotic formats hit the owned conversion.
+    let rgb: Cow<'_, image::RgbImage> = match img.as_rgb8() {
+        Some(rgb) => Cow::Borrowed(rgb),
+        None => Cow::Owned(img.to_rgb8()),
+    };
     let mut out = Vec::new();
     let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality);
-    rgb.write_with_encoder(encoder)
+    rgb.as_ref()
+        .write_with_encoder(encoder)
         .map_err(|e| AppError::Decode(format!("jpeg encode: {e}")))?;
     Ok(out)
 }
