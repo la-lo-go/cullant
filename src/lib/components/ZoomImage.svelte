@@ -112,6 +112,10 @@
   // starts unzoomed.
   $effect(() => {
     void item.id;
+    // Any pending margin-page or toggle-zoom animation belongs to the outgoing
+    // photo; drop it so it can't fire against the new one (or after unmount).
+    clearPageTimer();
+    cancelSettle();
     if (standalone) {
       sZoomed = false;
       sScale = 1;
@@ -120,6 +124,10 @@
     } else {
       view.resetZoom();
     }
+    return () => {
+      clearPageTimer();
+      cancelSettle();
+    };
   });
 
   // Keyboard zoom toggle (Z / Space) routes through the view store, which can't
@@ -130,7 +138,7 @@
     const n = view.zoomToggleNonce;
     if (standalone || n === lastKbNonce) return;
     lastKbNonce = n;
-    untrack(() => toggleZoom(frameW / 2, frameH / 2));
+    untrack(() => toggleZoom());
   });
 
   // Fit view uses the 2560px preview; zoomed view swaps in the full-res source
@@ -210,15 +218,12 @@
     return Math.min(1, frameW / refW, frameH / refH);
   });
 
-  // Fit-anchored zoom: the slider and readout are magnification RELATIVE to fit
-  // (1x = the whole image = "Fit"), so a big photo's minimum reads "Fit" instead
-  // of an ugly ~13%. Max magnification reaches 1:1 actual pixels for large
-  // photos (for focus checks), or a 2x detail peek for photos already at/under
-  // fit — never an arbitrary huge factor.
+  // Fit-anchored zoom: magnification is measured RELATIVE to fit (1× = the whole
+  // image = "Fit"). Max magnification reaches 1:1 actual pixels for large photos
+  // (for focus checks), or a 2× detail peek for photos already at/under fit —
+  // never an arbitrary huge factor.
   const maxMag = $derived(Math.max(2, 1 / (fit || 1)));
   const maxScale = $derived(Math.min(MAX_SCALE, fit * maxMag));
-  /** Current magnification relative to fit (1 = whole image). */
-  const magNow = $derived(z.scale / (fit || 1));
 
   const clampToRange = (s: number) => Math.min(maxScale, Math.max(fit, s));
 
@@ -296,17 +301,17 @@
   }
 
   /**
-   * Double-tap / double-click zoom toggle — identical for mouse and touch. The
-   * decision keys off the ACTUAL scale, not the `zoomed` mode flag (which can be
-   * true at fit during a pinch entry/settle), so it always matches what's on
-   * screen:
-   *   - zoomed in at all (scale > fit)  -> return to the whole-image fit view;
-   *   - at fit                          -> DOUBLE_TAP_MAG × fit on the tapped
-   *                                        point, capped at 1:1 pixels.
-   * A photo whose target is still not above fit stays put (the least-surprising
-   * no-op).
+   * Double-tap / double-click / Z-key zoom toggle — identical for mouse and
+   * touch. The decision keys off the ACTUAL scale, not the `zoomed` mode flag
+   * (which can be true at fit during a pinch entry/settle), so it always matches
+   * what's on screen:
+   *   - zoomed in at all (scale > fit)  -> animate back to the whole-image fit;
+   *   - at fit                          -> DOUBLE_TAP_MAG × fit, centered
+   *                                        (Twitter-style), capped at 1:1 pixels.
+   * Both directions animate briefly. A photo whose target is still not above
+   * fit stays put (the least-surprising no-op).
    */
-  function toggleZoom(px: number, py: number) {
+  function toggleZoom() {
     // Swallow a duplicate toggle (e.g. our manual touch double-tap plus a
     // browser-synthesized dblclick) so the two don't cancel each other out.
     const now = performance.now();
@@ -317,24 +322,46 @@
     cancelSettle();
 
     if (z.zoomed && z.scale > fit + ZOOM_EPS) {
-      // Currently zoomed in -> back to fit. Keep scale synced to fit so the
-      // slider and a subsequent pinch start from the visible state.
-      z.zoomed = false;
-      z.scale = fit;
-      z.cx = 0.5;
-      z.cy = 0.5;
+      // Currently zoomed in -> animate back to the fit view (settleToFit keeps
+      // the full image mounted through the transition, then drops zoom mode).
+      settleToFit();
       return;
     }
-    // At fit -> DOUBLE_TAP_MAG × fit. clampToRange caps it at 1:1 for large
-    // photos, or at the modest detail zoom for small ones.
+    // At fit -> DOUBLE_TAP_MAG × fit, centered. clampToRange caps it at 1:1 for
+    // large photos, or at the modest detail zoom for small ones.
     const target = clampToRange(fit * DOUBLE_TAP_MAG);
     if (target <= fit + ZOOM_EPS) return; // nothing beyond fit to reveal
-    zoomAt(px, py, target);
+    animateZoomIn(target);
   }
 
-  function onDblClick(e: MouseEvent) {
-    const p = framePoint(e);
-    toggleZoom(p.x, p.y);
+  // Centered (Twitter-style) zoom-in with a brief transition. The full image is
+  // first mounted at the fit scale (matching what's on screen), then bumped to
+  // `target` on a later frame so the `.settling` CSS transition animates from
+  // fit -> target instead of snapping. cx = cy = 0.5 keeps equal image on the
+  // left and right, regardless of where the tap/click landed.
+  function animateZoomIn(target: number) {
+    z.zoomed = true;
+    z.scale = fit;
+    z.cx = 0.5;
+    z.cy = 0.5;
+    settling = true;
+    if (toggleRaf) cancelAnimationFrame(toggleRaf);
+    toggleRaf = requestAnimationFrame(() => {
+      toggleRaf = requestAnimationFrame(() => {
+        toggleRaf = 0;
+        z.scale = target;
+        z.cx = 0.5;
+        z.cy = 0.5;
+        settleTimer = setTimeout(() => {
+          settleTimer = undefined;
+          settling = false;
+        }, 180);
+      });
+    });
+  }
+
+  function onDblClick() {
+    toggleZoom();
   }
 
   function onWheel(e: WheelEvent) {
@@ -367,41 +394,40 @@
     }
   }
 
-  // The slider runs in magnification (× fit), so 100 = Fit and the right end is
-  // the per-photo max (1:1 for large photos, 2× for small). Values are ×100 for
-  // integer steps.
-  const sliderMin = 100;
-  const sliderMax = $derived(Math.round(maxMag * 100));
-  /** Human readout: "Fit" at the whole-image scale, else "1.5×", "2×", … */
-  const magLabel = $derived(
-    magNow < 1.02 ? "Fit" : `${magNow.toFixed(1).replace(/\.0$/, "")}×`,
-  );
-
-  function onSliderInput(e: Event) {
-    const input = e.currentTarget as HTMLInputElement;
-    z.scale = clampToRange(fit * (Number(input.value) / 100));
-  }
-
-  // The slider must never keep keyboard focus — arrows navigate photos.
-  function blurSlider(e: Event) {
-    (e.currentTarget as HTMLElement).blur();
-  }
-
   function panBy(dx: number, dy: number) {
     if (!dispW || !dispH) return;
     z.cx = clampCenter(z.cx - dx / dispW, frameW, dispW);
     z.cy = clampCenter(z.cy - dy / dispH, frameH, dispH);
   }
 
-  // Rubber-band release: briefly animate back to fit, then drop out of zoom
-  // mode (the fit view renders identically, so the swap is invisible).
+  // Rubber-band release / toggle zoom: briefly animate width+transform, then
+  // drop out of zoom mode when back at fit (the fit view renders identically,
+  // so the swap is invisible).
   let settling = $state(false);
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  // A discrete toggle zoom-IN mounts the full image at fit, then jumps to the
+  // target on a later frame so the CSS transition has a "from" state; this
+  // holds that pending frame request.
+  let toggleRaf = 0;
+  // Deferred e-reader page: a margin tap waits out the double-tap window before
+  // paging, so a double-tap in the margin zooms instead of paging twice.
+  let pageTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function clearPageTimer() {
+    if (pageTimer !== undefined) {
+      clearTimeout(pageTimer);
+      pageTimer = undefined;
+    }
+  }
 
   function cancelSettle() {
     if (settleTimer !== undefined) {
       clearTimeout(settleTimer);
       settleTimer = undefined;
+    }
+    if (toggleRaf) {
+      cancelAnimationFrame(toggleRaf);
+      toggleRaf = 0;
     }
     settling = false;
   }
@@ -510,27 +536,37 @@
         const dy = e.clientY - swipeStartY;
         if (Math.hypot(dx, dy) <= TAP_SLOP) {
           const p = framePoint(e);
-          const edge = frameW * EDGE_TAP_FRAC;
-          if (!z.zoomed && frameW && (p.x < edge || p.x > frameW - edge)) {
-            // E-reader paging: a tap in the left/right margin of the fit view
-            // steps to the previous/next photo. The center is left for the
-            // double-tap zoom, so the two never fight.
-            session.moveFocus(p.x < edge ? -1 : 1);
+          // Double-tap detection runs FIRST, for margin and center taps alike.
+          // Match the two taps on their finger-DOWN points (swipeStartX/Y):
+          // stable even if a tap incidentally nudged the pan while zoomed, so
+          // the zoom-OUT double-tap is as reliable as the zoom-IN one.
+          const now = performance.now();
+          const nearLast = Math.hypot(swipeStartX - lastTapX, swipeStartY - lastTapY) < DOUBLE_TAP_DIST;
+          if (now - lastTapTime <= DOUBLE_TAP_MS && nearLast) {
+            // A quick second tap in place toggles fit <-> zoom, and cancels any
+            // margin page still waiting out the double-tap window — so a
+            // double-tap in the margin zooms once and never pages.
             lastTapTime = 0;
+            clearPageTimer();
+            toggleZoom();
           } else {
-            // A quick second tap in place toggles fit <-> zoom (double-tap).
-            // Match the two taps on their finger-DOWN points (swipeStartX/Y):
-            // stable even if a tap incidentally nudged the pan while zoomed, so
-            // the zoom-OUT double-tap is as reliable as the zoom-IN one.
-            const now = performance.now();
-            const nearLast = Math.hypot(swipeStartX - lastTapX, swipeStartY - lastTapY) < DOUBLE_TAP_DIST;
-            if (now - lastTapTime <= DOUBLE_TAP_MS && nearLast) {
-              lastTapTime = 0;
-              toggleZoom(p.x, p.y);
-            } else {
-              lastTapTime = now;
-              lastTapX = swipeStartX;
-              lastTapY = swipeStartY;
+            // First tap: remember it. If it landed in the left/right margin of
+            // the fit view, schedule an e-reader page to the prev/next photo —
+            // but DEFER it by the double-tap window so a second tap can cancel
+            // it and zoom instead. A center tap just waits for a possible
+            // double-tap; a lone margin tap pages once the window lapses.
+            lastTapTime = now;
+            lastTapX = swipeStartX;
+            lastTapY = swipeStartY;
+            const edge = frameW * EDGE_TAP_FRAC;
+            if (!z.zoomed && frameW && (p.x < edge || p.x > frameW - edge)) {
+              const dir = p.x < edge ? -1 : 1;
+              clearPageTimer();
+              pageTimer = setTimeout(() => {
+                pageTimer = undefined;
+                lastTapTime = 0;
+                session.moveFocus(dir);
+              }, DOUBLE_TAP_MS);
             }
           }
         } else if (!z.zoomed && Math.abs(dx) > SWIPE_NAV_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
@@ -588,22 +624,6 @@
       draggable="false"
       onload={onFullLoad}
     />
-    <div class="zoom-ctl">
-      <input
-        type="range"
-        min={sliderMin}
-        max={sliderMax}
-        step="1"
-        value={Math.round(magNow * 100)}
-        aria-label="Zoom level"
-        oninput={onSliderInput}
-        onchange={blurSlider}
-        onpointerup={blurSlider}
-        onpointerdown={(e) => e.stopPropagation()}
-        ondblclick={(e) => e.stopPropagation()}
-      />
-      <span class="pct">{magLabel}</span>
-    </div>
   {:else}
     <img
       src={displayedSrc}
@@ -662,41 +682,12 @@
     user-select: none;
   }
 
-  /* Rubber-band spring back to fit after an over-pinch release. */
+  /* Brief transition for the discrete toggle zoom (double-tap / Z) and the
+     rubber-band spring back to fit after an over-pinch release. Live pinch,
+     pan and drag never carry this class, so they stay 1:1 with the finger. */
   img.full.settling {
     transition:
       width 160ms ease-out,
       transform 160ms ease-out;
-  }
-
-  .zoom-ctl {
-    position: absolute;
-    right: 10px;
-    bottom: 34px;
-    z-index: 4;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.45);
-    cursor: default;
-  }
-
-  .zoom-ctl input[type="range"] {
-    width: 90px;
-    height: 12px;
-    margin: 0;
-    accent-color: var(--accent);
-    cursor: pointer;
-  }
-
-  .zoom-ctl .pct {
-    min-width: 36px;
-    text-align: right;
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    color: rgba(255, 255, 255, 0.75);
-    user-select: none;
   }
 </style>
