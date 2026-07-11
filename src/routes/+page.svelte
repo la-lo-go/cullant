@@ -339,7 +339,9 @@
       <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject(settings.previewMode))}><RefreshCw size={14} /></button>
       <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
       <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
-      <button onclick={blurring(() => (showCloseConfirm = true))}>Close project</button>
+      {#if view.mode === "grid"}
+        <button onclick={blurring(() => (showCloseConfirm = true))}>Close project</button>
+      {/if}
     </header>
 
     {#if catalog.preloading}
