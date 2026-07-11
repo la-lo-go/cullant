@@ -323,11 +323,17 @@
   .panel {
     position: absolute;
     top: 100%;
-    left: 8px;
+    /* Right-align to the anchor so the panel opens leftward and never spills
+       off the right edge when the toolbar button sits near the window's edge. */
+    right: 0;
     z-index: 41;
     margin-top: 4px;
     width: 320px;
     max-width: calc(100vw - 16px);
+    /* Cap height to the viewport and scroll internally if the sections are
+       tall (e.g. many tags/extensions on a short phone screen). */
+    max-height: calc(100vh - 60px);
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 12px;
