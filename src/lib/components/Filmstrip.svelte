@@ -293,7 +293,11 @@
     position: absolute;
     top: 0;
     height: 100%;
-    padding: 6px 3px;
+    /* 8px (not 6px) vertical padding so the thumbnail bottom clears the overlay
+       scrollbar: its pill sits 2-6px above the panel edge, so 6px left the
+       image flush to the pill while the pill kept a 2px gap below it. 8px lifts
+       the image 2px off the pill, mirroring that 2px gap above and below. */
+    padding: 8px 3px;
     box-sizing: border-box;
     display: flex;
     align-items: center;
