@@ -69,7 +69,7 @@ pub fn media_counts(state: State<'_, AppState>) -> AppResult<MediaCounts> {
             .db
             .clone()
     };
-    db.call(|conn| {
+    db.call_read(|conn| {
         let photos: i64 = conn.query_row(
             "SELECT COUNT(*) FROM files WHERE status = 0 AND kind IN (0, 1)",
             [],
@@ -106,7 +106,7 @@ pub fn query_items(
     let sort = sort.unwrap_or_default();
     let media = media.unwrap_or_default();
     let desc = desc.unwrap_or(false);
-    db.call(move |conn| {
+    db.call_read(move |conn| {
         let kind_filter = match media {
             MediaTab::Photos => "kind IN (0, 1)",
             MediaTab::Videos => "kind = 2",

@@ -128,7 +128,7 @@ fn respond_video<R: Runtime>(
         (project.db.clone(), project.store.clone())
     };
 
-    let rel_path: Result<String, _> = db.call(move |conn| {
+    let rel_path: Result<String, _> = db.call_read(move |conn| {
         Ok(conn.query_row(
             "SELECT rel_path FROM files WHERE id = ?1 AND status = 0",
             [file_id],

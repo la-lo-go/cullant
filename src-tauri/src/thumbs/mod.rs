@@ -159,9 +159,10 @@ fn min_long_edge_for(kind: ThumbKind) -> u32 {
     }
 }
 
-/// The `files` row a thumbnail worker needs.
+/// The `files` row a thumbnail worker needs. A pure read, run on the pooled
+/// reader so a cache-miss lookup during ingest doesn't queue behind writes.
 fn file_row(db: &Arc<Db>, file_id: i64) -> AppResult<(String, i64, i64, Option<i64>)> {
-    db.call(move |conn| {
+    db.call_read(move |conn| {
         Ok(conn.query_row(
             "SELECT rel_path, kind, mtime, orientation FROM files WHERE id = ?1 AND status = 0",
             params![file_id],
@@ -478,7 +479,7 @@ pub(crate) fn record_decode_failure(
 /// Whether a decode-failure tombstone exists for this (file, kind) at `mtime`.
 fn is_tombstoned(db: &Arc<Db>, file_id: i64, kind: ThumbKind, mtime: i64) -> AppResult<bool> {
     let kind_i = kind as i64;
-    db.call(move |conn| {
+    db.call_read(move |conn| {
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM thumbnails
              WHERE file_id = ?1 AND kind = ?2 AND failed = 1 AND source_mtime = ?3",
