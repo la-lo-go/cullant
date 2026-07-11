@@ -37,6 +37,10 @@
   const WHEEL_ZOOM = 1.15;
   const WHEEL_NAV_THRESHOLD = 50;
   const SWIPE_NAV_THRESHOLD = 55;
+  /** Left/right margin width (as a fraction of the frame) that pages photos on
+   *  a tap in the fit view, e-reader style. Kept narrow so the center is free
+   *  for the double-tap zoom. */
+  const EDGE_TAP_FRAC = 0.18;
   // A tap must land within this radius of its own start to count. It's kept
   // generous (not pixel-tight) because the FIRST tap of a zoom-OUT double-tap
   // happens on a zoomed image where one-finger pan is armed, so the finger
@@ -188,7 +192,17 @@
     return Math.min(1, frameW / refW, frameH / refH);
   });
 
-  const clampToRange = (s: number) => Math.min(MAX_SCALE, Math.max(fit, s));
+  // Fit-anchored zoom: the slider and readout are magnification RELATIVE to fit
+  // (1x = the whole image = "Fit"), so a big photo's minimum reads "Fit" instead
+  // of an ugly ~13%. Max magnification reaches 1:1 actual pixels for large
+  // photos (for focus checks), or a 2x detail peek for photos already at/under
+  // fit — never an arbitrary huge factor.
+  const maxMag = $derived(Math.max(2, 1 / (fit || 1)));
+  const maxScale = $derived(Math.min(MAX_SCALE, fit * maxMag));
+  /** Current magnification relative to fit (1 = whole image). */
+  const magNow = $derived(z.scale / (fit || 1));
+
+  const clampToRange = (s: number) => Math.min(maxScale, Math.max(fit, s));
 
   const dispW = $derived(refW * z.scale);
   const dispH = $derived(refH * z.scale);
@@ -269,10 +283,10 @@
    * true at fit during a pinch entry/settle), so it always matches what's on
    * screen:
    *   - zoomed in at all (scale > fit)  -> return to the whole-image fit view;
-   *   - at fit                          -> jump to 100% (1:1) on the tapped point.
-   * A photo smaller than the viewport has fit >= 1, so there is no larger
-   * "100%": hop to a modest 2x detail view instead (capped at MAX_SCALE), or
-   * stay put if even that isn't above fit — the least-surprising no-op.
+   *   - at fit                          -> 2x fit on the tapped point (~half the
+   *                                        image visible), capped at 1:1 pixels.
+   * A photo whose 2x is still not above fit stays put (the least-surprising
+   * no-op).
    */
   function toggleZoom(px: number, py: number) {
     // Swallow a duplicate toggle (e.g. our manual touch double-tap plus a
@@ -293,10 +307,11 @@
       z.cy = 0.5;
       return;
     }
-    // At fit -> 100%; photos already >= fit at 1:1 (small photos) get 2x.
-    const target = fit < 1 ? 1 : Math.min(2, MAX_SCALE);
-    if (target <= fit + ZOOM_EPS) return; // nothing larger than fit to reveal
-    zoomAt(px, py, clampToRange(target));
+    // At fit -> 2x fit (see ~half the image). clampToRange caps it at 1:1 for
+    // large photos, or at the modest detail zoom for small ones.
+    const target = clampToRange(fit * 2);
+    if (target <= fit + ZOOM_EPS) return; // nothing beyond fit to reveal
+    zoomAt(px, py, target);
   }
 
   function onDblClick(e: MouseEvent) {
@@ -334,13 +349,19 @@
     }
   }
 
-  // The slider spans the same model as every other input: fit -> MAX_SCALE.
-  const sliderMin = $derived(Math.max(1, Math.round(fit * 100)));
-  const sliderMax = MAX_SCALE * 100;
+  // The slider runs in magnification (× fit), so 100 = Fit and the right end is
+  // the per-photo max (1:1 for large photos, 2× for small). Values are ×100 for
+  // integer steps.
+  const sliderMin = 100;
+  const sliderMax = $derived(Math.round(maxMag * 100));
+  /** Human readout: "Fit" at the whole-image scale, else "1.5×", "2×", … */
+  const magLabel = $derived(
+    magNow < 1.02 ? "Fit" : `${magNow.toFixed(1).replace(/\.0$/, "")}×`,
+  );
 
   function onSliderInput(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
-    z.scale = clampToRange(Number(input.value) / 100);
+    z.scale = clampToRange(fit * (Number(input.value) / 100));
   }
 
   // The slider must never keep keyboard focus — arrows navigate photos.
@@ -431,7 +452,7 @@
         const raw = pinchStartScale * (d / pinchStartDist);
         // Below fit the zoom resists (rubber band) instead of deforming or
         // sticking at an arbitrary floor; release snaps it back to fit.
-        const s = Math.min(MAX_SCALE, raw < fit ? fit * Math.pow(raw / fit, RUBBER) : raw);
+        const s = Math.min(maxScale, raw < fit ? fit * Math.pow(raw / fit, RUBBER) : raw);
         // Keep the image point grabbed at pinch start under the CURRENT finger
         // midpoint: focal-point zoom and two-finger pan in one motion.
         const m = framePoint({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 });
@@ -470,20 +491,29 @@
         const dx = e.clientX - swipeStartX;
         const dy = e.clientY - swipeStartY;
         if (Math.hypot(dx, dy) <= TAP_SLOP) {
-          // A quick second tap in place toggles fit <-> 100% (double-tap).
-          // Match the two taps on their finger-DOWN points (swipeStartX/Y):
-          // stable even if a tap incidentally nudged the pan while zoomed, so
-          // the zoom-OUT double-tap is as reliable as the zoom-IN one.
-          const now = performance.now();
-          const nearLast = Math.hypot(swipeStartX - lastTapX, swipeStartY - lastTapY) < DOUBLE_TAP_DIST;
-          if (now - lastTapTime <= DOUBLE_TAP_MS && nearLast) {
+          const p = framePoint(e);
+          const edge = frameW * EDGE_TAP_FRAC;
+          if (!z.zoomed && frameW && (p.x < edge || p.x > frameW - edge)) {
+            // E-reader paging: a tap in the left/right margin of the fit view
+            // steps to the previous/next photo. The center is left for the
+            // double-tap zoom, so the two never fight.
+            session.moveFocus(p.x < edge ? -1 : 1);
             lastTapTime = 0;
-            const p = framePoint(e);
-            toggleZoom(p.x, p.y);
           } else {
-            lastTapTime = now;
-            lastTapX = swipeStartX;
-            lastTapY = swipeStartY;
+            // A quick second tap in place toggles fit <-> zoom (double-tap).
+            // Match the two taps on their finger-DOWN points (swipeStartX/Y):
+            // stable even if a tap incidentally nudged the pan while zoomed, so
+            // the zoom-OUT double-tap is as reliable as the zoom-IN one.
+            const now = performance.now();
+            const nearLast = Math.hypot(swipeStartX - lastTapX, swipeStartY - lastTapY) < DOUBLE_TAP_DIST;
+            if (now - lastTapTime <= DOUBLE_TAP_MS && nearLast) {
+              lastTapTime = 0;
+              toggleZoom(p.x, p.y);
+            } else {
+              lastTapTime = now;
+              lastTapX = swipeStartX;
+              lastTapY = swipeStartY;
+            }
           }
         } else if (!z.zoomed && Math.abs(dx) > SWIPE_NAV_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
           // A single-finger horizontal flick in fit view navigates photos.
@@ -546,7 +576,7 @@
         min={sliderMin}
         max={sliderMax}
         step="1"
-        value={Math.round(z.scale * 100)}
+        value={Math.round(magNow * 100)}
         aria-label="Zoom level"
         oninput={onSliderInput}
         onchange={blurSlider}
@@ -554,7 +584,7 @@
         onpointerdown={(e) => e.stopPropagation()}
         ondblclick={(e) => e.stopPropagation()}
       />
-      <span class="pct">{Math.round(z.scale * 100)}%</span>
+      <span class="pct">{magLabel}</span>
     </div>
   {:else}
     <img
