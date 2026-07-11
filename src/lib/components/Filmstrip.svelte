@@ -32,10 +32,17 @@
   });
 
   // Keep the focused frame centered as the user arrows through the shoot.
+  // A single step scrolls smoothly; while stepping fast (holding an arrow key)
+  // we fall back to instant so recentring never lags behind the selection.
+  const RAPID_STEP_MS = 180;
+  let lastRecentre = 0;
   $effect(() => {
     if (!strip) return;
-    const target = session.focusedIndex * CELL - width / 2 + CELL / 2;
-    strip.scrollTo({ left: Math.max(0, target) });
+    const target = Math.max(0, session.focusedIndex * CELL - width / 2 + CELL / 2);
+    const now = performance.now();
+    const rapid = now - lastRecentre < RAPID_STEP_MS;
+    lastRecentre = now;
+    strip.scrollTo({ left: target, behavior: rapid ? "auto" : "smooth" });
   });
 
   // Drag the top edge to resize; dragging it below COLLAPSE_AT hides the strip
