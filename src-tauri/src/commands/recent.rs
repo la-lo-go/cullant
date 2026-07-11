@@ -14,6 +14,9 @@ pub(crate) struct RecentEntry {
 #[serde(rename_all = "camelCase")]
 pub struct RecentProject {
     pub path: String,
+    /// Friendly, human-readable name derived from `path` — the leaf folder name
+    /// for desktop paths, a decoded label for Android SAF `content://` URIs.
+    pub display_name: String,
     pub last_opened: i64,
     pub available: bool,
 }
@@ -92,6 +95,7 @@ pub fn list_recent_projects(app: AppHandle) -> Vec<RecentProject> {
         .into_iter()
         .map(|e| RecentProject {
             available: is_available(&app, &e.path),
+            display_name: super::project::project_display_name(&e.path),
             path: e.path,
             last_opened: e.last_opened,
         })

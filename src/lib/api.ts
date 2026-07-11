@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 export interface ProjectInfo {
   rootPath: string;
+  /** Friendly, human-readable project name derived from `rootPath` (leaf
+   *  folder name on desktop, decoded label for Android SAF content:// URIs). */
+  displayName: string;
   dbPath: string;
   schemaVersion: number;
   fileCount: number;
@@ -9,6 +12,8 @@ export interface ProjectInfo {
 
 export interface RecentProject {
   path: string;
+  /** Friendly, human-readable name for display (see `ProjectInfo.displayName`). */
+  displayName: string;
   lastOpened: number;
   available: boolean;
 }
