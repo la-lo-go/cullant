@@ -96,10 +96,13 @@ class CatalogStore {
 
   async setMedia(media: MediaTab) {
     this.media = media;
+    // Load the new tab's items BEFORE switching to the grid, so the grid never
+    // flashes the previous tab's content for a frame (e.g. when switching media
+    // from inside the loupe/compare view).
+    await this.refresh();
     // Switching the media tab always returns to the grid with nothing focused,
     // even when invoked from inside the loupe/compare view.
     view.mode = "grid";
-    await this.refresh();
     session.clearFocus();
   }
 }
