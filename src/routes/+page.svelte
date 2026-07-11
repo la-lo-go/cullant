@@ -399,7 +399,10 @@
       {:else}
         <CompareView />
       {/if}
-      <TouchActionBar forceShow={touchBarVisible} />
+      <TouchActionBar
+        forceShow={touchBarVisible}
+        hidden={view.mode === "grid" && session.selectedIds.size === 0}
+      />
     {/if}
   {:else}
     <div class="home" class:centered={recent.list.length === 0}>

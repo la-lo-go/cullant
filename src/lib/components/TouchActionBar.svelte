@@ -11,8 +11,10 @@
   import CheckCheck from "@lucide/svelte/icons/check-check";
 
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
-  // opt-in: the parent flips `forceShow` from a toolbar toggle.
-  let { forceShow = false }: { forceShow?: boolean } = $props();
+  // opt-in: the parent flips `forceShow` from a toolbar toggle. `hidden` lets
+  // the parent suppress the bar in the grid until there's a selection.
+  let { forceShow = false, hidden = false }: { forceShow?: boolean; hidden?: boolean } =
+    $props();
 
   // The item the actions apply to (mirrors the keyboard path, which acts on the
   // focused item / current selection).
@@ -36,7 +38,7 @@
   }
 </script>
 
-<div class="touchbar" class:forced={forceShow} class:disabled={!focused}>
+<div class="touchbar" class:forced={forceShow} class:disabled={!focused} class:hidden>
   <div class="group nav">
     <button class="btn" aria-label="Previous" onclick={act(() => runCommand("nav.prev"))}>
       <ChevronLeft size={22} />
@@ -117,6 +119,10 @@
   /* Desktop opt-in via the toolbar toggle. */
   .touchbar.forced {
     display: flex;
+  }
+
+  .touchbar.hidden {
+    display: none;
   }
 
   .touchbar::-webkit-scrollbar {
