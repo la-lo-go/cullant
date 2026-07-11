@@ -136,6 +136,30 @@
         return c.total;
     }
   }
+
+  let panelEl = $state<HTMLDivElement | null>(null);
+
+  // Keeps the panel fully on-screen regardless of where the toolbar button
+  // sits (it can be anywhere horizontally once the toolbar wraps on mobile).
+  // First cancel any previous offset, then push left if overflowing the
+  // right edge, then push right if that pushed it past the left edge. The
+  // panel's max-width already guarantees it fits within the margins.
+  function clampToViewport() {
+    if (!panelEl) return;
+    panelEl.style.transform = "";
+    const rect = panelEl.getBoundingClientRect();
+    const margin = 8;
+    let dx = 0;
+    if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
+    if (rect.left + dx < margin) dx = margin - rect.left;
+    if (dx) panelEl.style.transform = `translateX(${dx}px)`;
+  }
+
+  $effect(() => {
+    clampToViewport();
+    window.addEventListener("resize", clampToViewport);
+    return () => window.removeEventListener("resize", clampToViewport);
+  });
 </script>
 
 <!-- Backdrop closes the panel on an outside click. -->
@@ -145,7 +169,7 @@
   onclick={() => (session.filtersPanelOpen = false)}
 ></div>
 
-<div class="panel" role="dialog" aria-label="Filters">
+<div class="panel" bind:this={panelEl} role="dialog" aria-label="Filters">
   <header>
     <span class="title">Filters</span>
     <button
@@ -323,9 +347,11 @@
   .panel {
     position: absolute;
     top: 100%;
-    /* Right-align to the anchor so the panel opens leftward and never spills
-       off the right edge when the toolbar button sits near the window's edge. */
-    right: 0;
+    /* Baseline anchor; JS (clampToViewport) shifts the panel via transform
+       when it would overflow either edge, since the toolbar button's
+       horizontal position varies (it can wrap anywhere on mobile). */
+    left: 0;
+    right: auto;
     z-index: 41;
     margin-top: 4px;
     width: 320px;
