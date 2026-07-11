@@ -208,7 +208,11 @@
   {#if catalog.project}
     <header class="toolbar">
       <span class="title">Cullant</span>
-      <span class="path" title={catalog.project.rootPath}>{truncatePath(catalog.project.rootPath)}</span>
+      <span class="path" title={catalog.project.rootPath}>
+        {catalog.project.rootPath.startsWith("content://")
+          ? catalog.project.displayName
+          : truncatePath(catalog.project.rootPath)}
+      </span>
       <div class="media-toggle">
         <button
           class="media-btn"
@@ -260,13 +264,15 @@
           {#if session.mirrorMode}<Link size={14} /><span>Mirror</span>{:else}<Unlink size={14} /><span>Separate</span>{/if}
         </button>
       {/if}
-      <button
-        class:active={session.showNames}
-        title="Show/hide file names"
-        onclick={blurring(() => session.toggleShowNames())}
-      >
-        <Type size={14} />
-      </button>
+      {#if view.mode === "grid"}
+        <button
+          class:active={session.showNames}
+          title="Show/hide file names"
+          onclick={blurring(() => session.toggleShowNames())}
+        >
+          <Type size={14} />
+        </button>
+      {/if}
       <button
         class="touchbar-toggle"
         class:active={touchBarVisible}
@@ -276,7 +282,7 @@
       >
         <PanelBottom size={14} />
       </button>
-      {#if hasSubfolders}
+      {#if hasSubfolders && view.mode === "grid"}
         <button
           class:active={session.folderTreeVisible}
           title="Show/hide folder tree (D)"
@@ -299,28 +305,30 @@
           <FiltersPanel />
         {/if}
       </div>
-      <div class="segmented sortseg">
-        <button
-          class:active={catalog.sort === "capture"}
-          title="Sort by capture time (click again to reverse)"
-          onclick={blurring(() => void catalog.setSort("capture"))}
-        >
-          <span>Capture</span>
-          {#if catalog.sort === "capture"}
-            {#if catalog.sortDesc}<ArrowDown size={13} />{:else}<ArrowUp size={13} />{/if}
-          {/if}
-        </button>
-        <button
-          class:active={catalog.sort === "name"}
-          title="Sort by name (click again to reverse)"
-          onclick={blurring(() => void catalog.setSort("name"))}
-        >
-          <span>Name</span>
-          {#if catalog.sort === "name"}
-            {#if catalog.sortDesc}<ArrowDown size={13} />{:else}<ArrowUp size={13} />{/if}
-          {/if}
-        </button>
-      </div>
+      {#if view.mode === "grid"}
+        <div class="segmented sortseg">
+          <button
+            class:active={catalog.sort === "capture"}
+            title="Sort by capture time (click again to reverse)"
+            onclick={blurring(() => void catalog.setSort("capture"))}
+          >
+            <span>Capture</span>
+            {#if catalog.sort === "capture"}
+              {#if catalog.sortDesc}<ArrowDown size={13} />{:else}<ArrowUp size={13} />{/if}
+            {/if}
+          </button>
+          <button
+            class:active={catalog.sort === "name"}
+            title="Sort by name (click again to reverse)"
+            onclick={blurring(() => void catalog.setSort("name"))}
+          >
+            <span>Name</span>
+            {#if catalog.sort === "name"}
+              {#if catalog.sortDesc}<ArrowDown size={13} />{:else}<ArrowUp size={13} />{/if}
+            {/if}
+          </button>
+        </div>
+      {/if}
       <button
         class="commit"
         class:haswork={session.pendingCount > 0}
