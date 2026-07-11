@@ -88,9 +88,12 @@
     }
   });
 
-  // Only the visible window is materialized. The #each below is deliberately
-  // unkeyed: Svelte reuses DOM nodes positionally, which recycles <img>
-  // elements as the user scrolls instead of churning the DOM.
+  // Only the visible window is materialized. The #each below is keyed by file
+  // id so each thumbnail owns a stable <img>: scrolling adds/removes cells
+  // instead of reassigning `src` on reused nodes. (Positional reuse recycled
+  // fewer nodes but reassigned `src` mid-scroll, so a node briefly kept showing
+  // its previous image until the new one decoded — a rapid flicker on fast
+  // scroll, worst travelling toward index 0.)
   const visible = $derived.by(() => {
     const out: { item: ItemLite; index: number; x: number; y: number }[] = [];
     for (let row = firstRow; row < lastRow; row++) {
@@ -303,7 +306,7 @@
   ondblclick={onDblClick}
 >
   <div class="canvas" bind:this={canvasEl} style="height:{totalRows * CELL + MARGIN_Y * 2}px">
-    {#each visible as v}
+    {#each visible as v (v.item.id)}
       <div
         class="cell"
         class:focused={v.index === session.focusedIndex}
