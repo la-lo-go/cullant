@@ -126,8 +126,14 @@
     border: 1px solid var(--border-strong);
     border-radius: 10px;
     padding: 16px 20px;
+    /* border-box so the horizontal padding is included in max-width — otherwise
+       the padding sits outside the cap and the panel overflows the viewport
+       (clipped laterally) on narrow phones. */
+    box-sizing: border-box;
     width: 480px;
-    max-width: calc(100vw - 24px);
+    /* Honor the safe-area insets the backdrop pads with, so the cap matches the
+       space actually available between the system bars/cutout. */
+    max-width: calc(100vw - 24px - var(--inset-left) - var(--inset-right));
     max-height: 80vh;
     display: flex;
     flex-direction: column;
@@ -153,7 +159,7 @@
 
   .list {
     display: grid;
-    grid-template-columns: auto 1fr auto auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
     gap: 6px 10px;
     align-items: center;
     overflow-y: auto;
@@ -167,6 +173,11 @@
 
   .name {
     font-size: 13px;
+    /* Truncate long tag names instead of forcing the row wider than the panel. */
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .key {
@@ -182,6 +193,7 @@
 
   .create {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     align-items: center;
     border-top: 1px solid var(--border);
@@ -190,6 +202,9 @@
 
   .create input:not([type="color"]) {
     flex: 1;
+    /* Allow the text field to shrink below its content width so the row can
+       fit (or wrap cleanly) on a narrow phone rather than overflowing. */
+    min-width: 0;
   }
 
   input,
