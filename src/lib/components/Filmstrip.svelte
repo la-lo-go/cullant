@@ -32,10 +32,17 @@
   });
 
   // Keep the focused frame centered as the user arrows through the shoot.
+  // A single step scrolls smoothly; while stepping fast (holding an arrow key)
+  // we fall back to instant so recentring never lags behind the selection.
+  const RAPID_STEP_MS = 180;
+  let lastRecentre = 0;
   $effect(() => {
     if (!strip) return;
-    const target = session.focusedIndex * CELL - width / 2 + CELL / 2;
-    strip.scrollTo({ left: Math.max(0, target) });
+    const target = Math.max(0, session.focusedIndex * CELL - width / 2 + CELL / 2);
+    const now = performance.now();
+    const rapid = now - lastRecentre < RAPID_STEP_MS;
+    lastRecentre = now;
+    strip.scrollTo({ left: target, behavior: rapid ? "auto" : "smooth" });
   });
 
   // Drag the top edge to resize; dragging it below COLLAPSE_AT hides the strip
@@ -286,7 +293,11 @@
     position: absolute;
     top: 0;
     height: 100%;
-    padding: 6px 3px;
+    /* 8px (not 6px) vertical padding so the thumbnail bottom clears the overlay
+       scrollbar: its pill sits 2-6px above the panel edge, so 6px left the
+       image flush to the pill while the pill kept a 2px gap below it. 8px lifts
+       the image 2px off the pill, mirroring that 2px gap above and below. */
+    padding: 8px 3px;
     box-sizing: border-box;
     display: flex;
     align-items: center;
