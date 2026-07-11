@@ -193,19 +193,20 @@ pub fn run_ingest_inner(
         .into_iter()
         .partition(|p| p.needs_meta || p.needs_thumb);
 
-    // Previews that will still be missing once tier 1 finishes.
-    let tier2_ids: Vec<i64> = match mode {
+    // Previews that will still be missing once tier 1 finishes. Carry mtime so
+    // the tier-2 loop can use the cache fast path without a DB round-trip.
+    let tier2: Vec<(i64, i64)> = match mode {
         PreviewMode::Window => Vec::new(),
         PreviewMode::All => rest
             .iter()
             .filter(|p| p.needs_preview)
-            .map(|p| p.id)
+            .map(|p| (p.id, p.mtime))
             .collect(),
         PreviewMode::Background => tier1
             .iter()
             .chain(rest.iter())
             .filter(|p| p.needs_preview)
-            .map(|p| p.id)
+            .map(|p| (p.id, p.mtime))
             .collect(),
     };
 
@@ -235,16 +236,24 @@ pub fn run_ingest_inner(
     tier1_done(meta_updated, total);
 
     // --- Tier 2: leftover previews, background (gate already open) ---
-    let total2 = tier2_ids.len();
+    let total2 = tier2.len();
     if total2 > 0 {
         let started2 = Instant::now();
         preview_progress(0, total2);
         let mut done2 = 0usize;
-        for chunk in tier2_ids.chunks(CHUNK) {
-            chunk.par_iter().for_each(|&file_id| {
-                // produce() short-circuits on the disk cache, so previews the
-                // user already pulled interactively cost one file stat here.
-                if let Err(e) = thumbs::produce(db, store, root, file_id, ThumbKind::Preview) {
+        for chunk in tier2.chunks(CHUNK) {
+            chunk.par_iter().for_each(|(file_id, mtime)| {
+                // produce_with_mtime() short-circuits on the disk cache without a
+                // DB round-trip, so previews the user already pulled
+                // interactively cost one file stat here.
+                if let Err(e) = thumbs::produce_with_mtime(
+                    db,
+                    store,
+                    root,
+                    *file_id,
+                    ThumbKind::Preview,
+                    Some(*mtime),
+                ) {
                     tracing::debug!("preview pregeneration skipped file {file_id}: {e}");
                 }
             });

@@ -26,6 +26,11 @@ pub enum ThumbKind {
 pub struct ThumbRequest {
     pub file_id: i64,
     pub kind: ThumbKind,
+    /// mtime carried by the request URL (`?v=`), when present. Lets the worker
+    /// build the cache path and serve a cache hit without a DB round-trip for
+    /// `mtime`. `None` (param absent/unparseable on some platform) falls back to
+    /// the authoritative `file_row` lookup — no behavior change, just no speedup.
+    pub known_mtime: Option<i64>,
     pub respond: Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>,
 }
 
@@ -113,7 +118,14 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             }
         };
 
-        let result = produce(&db, store.as_ref(), &root, request.file_id, request.kind);
+        let result = produce_with_mtime(
+            &db,
+            store.as_ref(),
+            &root,
+            request.file_id,
+            request.kind,
+            request.known_mtime,
+        );
         (request.respond)(result);
     }
 }
@@ -304,13 +316,33 @@ pub(crate) fn render_and_store(
 /// filesystem under `root/.cullant/thumbs` (private app storage on Android).
 /// Also used by the ingest pass's background preview tier — the disk-cache
 /// short-circuit and temp+rename writes make it race-safe with the pool.
-pub(crate) fn produce(
+/// With an optional `known_mtime` supplied by the caller (from the request
+/// URL's `?v=`). When present, the disk-cache path is built
+/// from it and read FIRST — a cache hit returns with zero DB access, keeping the
+/// single writer thread out of the hot scroll path. On a miss (or when `None`),
+/// the authoritative `file_row` lookup runs and the full generate path proceeds
+/// exactly as before. `known_mtime` always equals `files.mtime` (the frontend
+/// sources `?v=` from the same column), so the cache path is identical to the
+/// one `render_and_store` wrote — correct even when mtime is 0 (SAF providers).
+pub(crate) fn produce_with_mtime(
     db: &Arc<Db>,
     store: &dyn ProjectStore,
     root: &Path,
     file_id: i64,
     kind: ThumbKind,
+    known_mtime: Option<i64>,
 ) -> AppResult<Vec<u8>> {
+    // Fast path: a trusted mtime lets us try the cache before touching the DB.
+    // Full-of-plain-image has no cache file, so it's left to the miss path
+    // below (it needs rel_path anyway); every other kind can hit here.
+    if let Some(mtime) = known_mtime {
+        let cache_rel = cache_rel_path(file_id, mtime, kind);
+        let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
+        if let Ok(bytes) = std::fs::read(&cache_abs) {
+            return Ok(bytes);
+        }
+    }
+
     let (rel_path, file_kind, mtime, orientation) = file_row(db, file_id)?;
 
     // Full view of a plain image: stream the original, no transcode, no cache.
@@ -320,6 +352,9 @@ pub(crate) fn produce(
 
     let cache_rel = cache_rel_path(file_id, mtime, kind);
     let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
+    // Re-check the cache under the authoritative mtime. Skipped work only when
+    // known_mtime was present AND equal to mtime AND already missed above; the
+    // redundant read is a cheap stat on the cold/miss path.
     if let Ok(bytes) = std::fs::read(&cache_abs) {
         return Ok(bytes);
     }
@@ -493,18 +528,50 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        let bytes = produce(&db, &store, root, id, ThumbKind::Thumb).unwrap();
+        let bytes = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap();
         assert_eq!(thumb.width(), 384);
         assert_eq!(thumb.height(), 288);
 
         // Second call must hit the disk cache (row exists + same bytes).
-        let again = produce(&db, &store, root, id, ThumbKind::Thumb).unwrap();
+        let again = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
         assert_eq!(bytes, again);
         let rows: i64 = db
             .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM thumbnails", [], |r| r.get(0))?))
             .unwrap();
         assert_eq!(rows, 1);
+    }
+
+    #[test]
+    fn known_mtime_serves_cache_fast_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let img = image::RgbImage::from_fn(800, 600, |x, _| image::Rgb([(x % 255) as u8, 70, 30]));
+        img.save(root.join("photo.jpg")).unwrap();
+
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let (id, mtime): (i64, i64) = db
+            .call(|c| {
+                Ok(c.query_row("SELECT id, mtime FROM files", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?)
+            })
+            .unwrap();
+
+        // Generate + cache the thumb.
+        let bytes = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime)).unwrap();
+
+        // Fast path with the correct mtime returns the cached bytes.
+        let hit = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime)).unwrap();
+        assert_eq!(bytes, hit);
+
+        // A wrong mtime misses the fast path and falls back to the authoritative
+        // lookup, which regenerates against the real mtime — still succeeds.
+        let fallback =
+            produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime + 999)).unwrap();
+        assert_eq!(bytes, fallback);
     }
 
     #[test]
@@ -533,7 +600,7 @@ mod tests {
         })
         .unwrap();
 
-        let bytes = produce(&db, &store, root, id, ThumbKind::Thumb).unwrap();
+        let bytes = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap().to_rgb8();
         // Rotated: landscape 800x600 -> portrait thumb 288x384.
         assert_eq!((thumb.width(), thumb.height()), (288, 384));
@@ -564,7 +631,7 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        produce(&db, &store, root, id, ThumbKind::Thumb).unwrap();
+        produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
         let (w, h): (i64, i64) = db
             .call(move |c| {
                 Ok(c.query_row(

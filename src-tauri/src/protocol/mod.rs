@@ -19,17 +19,24 @@ pub fn handle<R: Runtime>(
     let path = request.uri().path().to_owned();
     let mut parts = path.trim_start_matches('/').splitn(2, '/');
     let route = parts.next().unwrap_or("");
+    // Hardening: if a platform folds the query into `.path()` (custom-scheme
+    // parsers vary), strip anything from `?` on so the id still parses.
     let rest = parts.next().unwrap_or("");
+    let rest = rest.split('?').next().unwrap_or(rest);
 
     if route == "recent-thumb" {
         respond_recent_thumb(app, responder, rest);
         return;
     }
 
+    // mtime carried by `?v=` (frontend cache-buster == files.mtime). Parsed
+    // defensively: absent/garbled on any platform → None → authoritative lookup.
+    let known_mtime = query_mtime(request.uri().query());
+
     match (route, rest.parse::<i64>()) {
-        ("thumb", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Thumb),
-        ("preview", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Preview),
-        ("full", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Full),
+        ("thumb", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Thumb, known_mtime),
+        ("preview", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Preview, known_mtime),
+        ("full", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Full, known_mtime),
         ("video", Ok(id)) => respond_video(app, responder, id, &request),
         ("test", _) => responder.respond(
             Response::builder()
@@ -46,11 +53,22 @@ pub fn handle<R: Runtime>(
     }
 }
 
+/// Extract the `v=<i64>` mtime from a raw query string (`"v=123&x=y"`), if any.
+/// Returns `None` when the query is absent or `v` is missing/unparseable — the
+/// caller then falls back to the authoritative DB lookup.
+fn query_mtime(query: Option<&str>) -> Option<i64> {
+    query?
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("v="))
+        .and_then(|v| v.parse::<i64>().ok())
+}
+
 fn respond_thumb<R: Runtime>(
     app: &AppHandle<R>,
     responder: UriSchemeResponder,
     file_id: i64,
     kind: ThumbKind,
+    known_mtime: Option<i64>,
 ) {
     let state = app.state::<AppState>();
     let guard = state.project.lock().unwrap();
@@ -65,6 +83,7 @@ fn respond_thumb<R: Runtime>(
     project.thumbs.enqueue(ThumbRequest {
         file_id,
         kind,
+        known_mtime,
         respond: Box::new(move |result: AppResult<Vec<u8>>| match result {
             Ok(bytes) => responder.respond(
                 Response::builder()
@@ -274,4 +293,25 @@ fn plain(status: StatusCode, message: String) -> Response<Vec<u8>> {
         .header(header::CONTENT_TYPE, "text/plain")
         .body(message.into_bytes())
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::query_mtime;
+
+    #[test]
+    fn parses_v_param_defensively() {
+        // Present and well-formed.
+        assert_eq!(query_mtime(Some("v=123")), Some(123));
+        assert_eq!(query_mtime(Some("v=0")), Some(0));
+        // Among other params, any order.
+        assert_eq!(query_mtime(Some("x=1&v=456")), Some(456));
+        assert_eq!(query_mtime(Some("v=789&x=1")), Some(789));
+        // Absent query, missing/garbled v, or empty → None (fallback path).
+        assert_eq!(query_mtime(None), None);
+        assert_eq!(query_mtime(Some("")), None);
+        assert_eq!(query_mtime(Some("x=1")), None);
+        assert_eq!(query_mtime(Some("v=")), None);
+        assert_eq!(query_mtime(Some("v=abc")), None);
+    }
 }
