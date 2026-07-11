@@ -32,6 +32,18 @@
   const flag = (f: number) => void session.flag(f);
   const label = (l: string) => void session.label(l);
   const toggleTag = (id: number) => void session.toggleTag(id);
+
+  // Selected items' own data (flag/tagIds), so a button can honestly reflect
+  // "does the WHOLE selection already have this" rather than always looking
+  // pre-applied regardless of actual state.
+  const selectedItems = $derived(session.filtered.filter((i) => session.selectedIds.has(i.id)));
+
+  function allHaveFlag(f: number): boolean {
+    return selectedItems.length > 0 && selectedItems.every((i) => i.flag === f);
+  }
+  function allHaveTag(tagId: number): boolean {
+    return selectedItems.length > 0 && selectedItems.every((i) => i.tagIds.includes(tagId));
+  }
 </script>
 
 <div class="selbar">
@@ -44,9 +56,9 @@
   <span class="apply">Apply:</span>
 
   <div class="group">
-    <button class="btn" title="Reject" onclick={() => flag(-1)}><Ban size={15} /></button>
-    <button class="btn" title="Pick" onclick={() => flag(1)}><Flag size={15} /></button>
-    <button class="btn" title="Unflag" onclick={() => flag(0)}><FlagOff size={15} /></button>
+    <button class="btn" class:active={allHaveFlag(-1)} title="Reject" onclick={() => flag(-1)}><Ban size={15} /></button>
+    <button class="btn" class:active={allHaveFlag(1)} title="Pick" onclick={() => flag(1)}><Flag size={15} /></button>
+    <button class="btn" class:active={allHaveFlag(0)} title="Unflag" onclick={() => flag(0)}><FlagOff size={15} /></button>
   </div>
 
   <div class="group stars">
@@ -79,6 +91,7 @@
       {#each scopedTags as tag (tag.id)}
         <button
           class="tagseg"
+          class:active={allHaveTag(tag.id)}
           style="--c: {tag.color ?? '#888'}"
           onclick={() => toggleTag(tag.id)}
         >
@@ -150,15 +163,21 @@
     width: 28px;
     height: 24px;
     border: 1px solid var(--border-strong);
-    background: var(--accent-fill);
-    color: var(--accent);
+    background: var(--control);
+    color: #bbb;
     border-radius: 5px;
     cursor: pointer;
   }
 
-  .btn:hover {
+  .btn:hover:not(.active) {
     border-color: var(--accent);
     color: #fff;
+  }
+
+  .btn.active {
+    background: var(--accent-fill);
+    color: #fff;
+    border-color: transparent;
   }
 
   .star {
@@ -200,8 +219,8 @@
     align-items: center;
     gap: 5px;
     border: 1px solid var(--border-strong);
-    background: var(--accent-fill);
-    color: var(--accent);
+    background: var(--control);
+    color: #bbb;
     padding: 3px 8px;
     border-radius: 5px;
     cursor: pointer;
@@ -209,9 +228,15 @@
     font-family: inherit;
   }
 
-  .tagseg:hover {
+  .tagseg:hover:not(.active) {
     border-color: var(--c);
     color: #fff;
+  }
+
+  .tagseg.active {
+    background: var(--accent-fill);
+    color: #fff;
+    border-color: transparent;
   }
 
   .tagdot {
