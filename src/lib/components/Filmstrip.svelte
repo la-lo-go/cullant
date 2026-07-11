@@ -19,6 +19,10 @@
     Math.min(items.length, Math.ceil((scrollLeft + width) / CELL) + OVERSCAN)
   );
 
+  // Keyed by file id in the template so each frame keeps a stable <img>:
+  // scrolling adds/removes cells instead of reassigning `src` on reused nodes,
+  // which previously left a node showing its old thumbnail until the new one
+  // decoded — a rapid flicker on fast (right-to-left) scroll.
   const visible = $derived.by(() => {
     const out: { item: ItemLite; index: number; x: number }[] = [];
     for (let i = first; i < last; i++) {
@@ -128,7 +132,7 @@
       onscroll={() => strip && (scrollLeft = strip.scrollLeft)}
     >
       <div class="canvas" style="width:{items.length * CELL}px">
-        {#each visible as v}
+        {#each visible as v (v.item.id)}
           <div
             class="cell"
             class:focused={v.index === session.focusedIndex}
