@@ -71,6 +71,9 @@ class SessionStore {
   tagFilter = $state<number | null>(null);
   /** Photo file-type composition filter; inert on the videos tab. */
   typeFilter = $state<TypeFilter>("all");
+  /** Single file-extension filter (lowercased, e.g. "cr3"); null = any. In
+   *  mirror mode a pair matches when *any* of its members has the extension. */
+  extFilter = $state<string | null>(null);
   /** Displayed-aspect orientation filter. */
   orientationFilter = $state<OrientationFilter>("all");
   /** Whether the Filters dropdown panel is open. */
@@ -85,6 +88,7 @@ class SessionStore {
       this.labelFilter !== null ||
       this.tagFilter !== null ||
       (this.typeFilter !== "all" && catalog.media === "photos") ||
+      this.extFilter !== null ||
       this.orientationFilter !== "all",
   );
 
@@ -95,6 +99,7 @@ class SessionStore {
     this.labelFilter = null;
     this.tagFilter = null;
     this.typeFilter = "all";
+    this.extFilter = null;
     this.orientationFilter = "all";
     this.clampFocus();
   }
@@ -222,6 +227,18 @@ class SessionStore {
           default:
             return true;
         }
+      });
+    }
+    // Single file-extension filter. In mirror mode `out` holds one entry per
+    // group, so a pair matches when any of its members carries the extension
+    // (a RAW+JPEG pair thus shows under both its RAW and its JPEG extension).
+    if (this.extFilter !== null) {
+      const want = this.extFilter;
+      out = out.filter((i) => {
+        if (i.ext.toLowerCase() === want) return true;
+        if (!this.mirrorMode) return false;
+        const members = this.groupIndex.get(i.groupId);
+        return members?.some((m) => m.ext.toLowerCase() === want) ?? false;
       });
     }
     // Orientation by *displayed* aspect. width/height are un-rotated sensor

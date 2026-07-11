@@ -34,19 +34,91 @@
     ),
   );
 
-  const typeOptions: { value: TypeFilter; label: string }[] = [
-    { value: "all", label: "All" },
-    { value: "raw", label: "RAW" },
-    { value: "jpeg", label: "JPEG" },
-    { value: "rawjpeg", label: "RAW+JPEG" },
-  ];
+  // --- Present-value facets, derived from the loaded catalog. Filtering is
+  // entirely client-side over catalog.items, so the same in-memory rows tell us
+  // which values the project actually contains: each section offers only those,
+  // and hides completely when every present file shares one value (nothing to
+  // discriminate). No backend facet query is needed. ---
 
-  const orientationOptions: { value: OrientationFilter; label: string }[] = [
-    { value: "all", label: "All" },
-    { value: "portrait", label: "Portrait" },
-    { value: "landscape", label: "Landscape" },
-    { value: "square", label: "Square" },
-  ];
+  // Which RAW/JPEG composition categories occur among the current photos.
+  const typePresence = $derived.by(() => {
+    let raw = false;
+    let jpeg = false;
+    let pair = false;
+    for (const i of catalog.items) {
+      const isPair = i.groupSize > 1 && !i.decoupled;
+      if (isPair) pair = true;
+      else if (i.kind === 0) raw = true;
+      else if (i.kind === 1) jpeg = true;
+    }
+    return { raw, jpeg, pair };
+  });
+
+  const typeOptions = $derived(
+    (
+      [
+        { value: "all", label: "All", show: true },
+        { value: "raw", label: "RAW", show: typePresence.raw },
+        { value: "jpeg", label: "JPEG", show: typePresence.jpeg },
+        { value: "rawjpeg", label: "RAW+JPEG", show: typePresence.pair },
+      ] as { value: TypeFilter; label: string; show: boolean }[]
+    ).filter((o) => o.show),
+  );
+
+  // File type only discriminates when at least two composition categories exist.
+  const showTypeSection = $derived(
+    catalog.media === "photos" &&
+      [typePresence.raw, typePresence.jpeg, typePresence.pair].filter(Boolean).length >= 2,
+  );
+
+  // Distinct extensions present in the current media tab (lowercased, sorted).
+  const presentExts = $derived.by(() => {
+    const s = new Set<string>();
+    for (const i of catalog.items) if (i.ext) s.add(i.ext.toLowerCase());
+    return [...s].sort();
+  });
+
+  // Displayed-aspect orientations that occur (mirrors the filter's rotation
+  // handling: EXIF orientation 5-8 means the shown image is turned 90°).
+  const presentOrientations = $derived.by(() => {
+    const s = new Set<OrientationFilter>();
+    for (const i of catalog.items) {
+      if (i.width == null || i.height == null) continue;
+      const rotated = i.orientation != null && i.orientation >= 5 && i.orientation <= 8;
+      const w = rotated ? i.height : i.width;
+      const h = rotated ? i.width : i.height;
+      if (h > w) s.add("portrait");
+      else if (w > h) s.add("landscape");
+      else s.add("square");
+    }
+    return s;
+  });
+
+  const orientationOptions = $derived(
+    (
+      [
+        { value: "all", label: "All" },
+        { value: "portrait", label: "Portrait" },
+        { value: "landscape", label: "Landscape" },
+        { value: "square", label: "Square" },
+      ] as { value: OrientationFilter; label: string }[]
+    ).filter((o) => o.value === "all" || presentOrientations.has(o.value)),
+  );
+
+  // Highest rating any present file carries; caps the star row (0 = none rated).
+  const maxRating = $derived.by(() => {
+    let m = 0;
+    for (const i of catalog.items) if (i.rating > m) m = i.rating;
+    return m;
+  });
+  const ratingStars = $derived(Array.from({ length: maxRating }, (_, k) => k + 1));
+
+  // Color labels actually applied somewhere in the project.
+  const presentLabels = $derived.by(() => {
+    const s = new Set<string>();
+    for (const i of catalog.items) if (i.label) s.add(i.label);
+    return LABELS.filter((l) => s.has(l));
+  });
 
   // Hover-preview state for the minimum-rating star row (0 = not hovering).
   let hovered = $state(0);
@@ -105,43 +177,47 @@
     </div>
   </section>
 
-  <section>
-    <span class="lbl">Minimum rating</span>
-    <div class="row stars">
-      {#each [1, 2, 3, 4, 5] as star (star)}
-        <button
-          class="star"
-          class:lit={hovered === 0 && session.minRating >= star}
-          class:preview={hovered >= star}
-          aria-label={`At least ${star} stars`}
-          onmouseenter={() => (hovered = star)}
-          onmouseleave={() => (hovered = 0)}
-          onclick={() => {
-            session.minRating = session.minRating === star ? 0 : star;
-            session.clampFocus();
-          }}>★</button
-        >
-      {/each}
-    </div>
-  </section>
+  {#if maxRating > 0}
+    <section>
+      <span class="lbl">Minimum rating</span>
+      <div class="row stars">
+        {#each ratingStars as star (star)}
+          <button
+            class="star"
+            class:lit={hovered === 0 && session.minRating >= star}
+            class:preview={hovered >= star}
+            aria-label={`At least ${star} stars`}
+            onmouseenter={() => (hovered = star)}
+            onmouseleave={() => (hovered = 0)}
+            onclick={() => {
+              session.minRating = session.minRating === star ? 0 : star;
+              session.clampFocus();
+            }}>★</button
+          >
+        {/each}
+      </div>
+    </section>
+  {/if}
 
-  <section>
-    <span class="lbl">Color label</span>
-    <div class="row">
-      {#each LABELS as label (label)}
-        <button
-          class="dot"
-          class:active={session.labelFilter === label}
-          style="--c: {labelColors[label]}"
-          aria-label={label}
-          onclick={() => {
-            session.labelFilter = session.labelFilter === label ? null : label;
-            session.clampFocus();
-          }}
-        ></button>
-      {/each}
-    </div>
-  </section>
+  {#if presentLabels.length > 0}
+    <section>
+      <span class="lbl">Color label</span>
+      <div class="row">
+        {#each presentLabels as label (label)}
+          <button
+            class="dot"
+            class:active={session.labelFilter === label}
+            style="--c: {labelColors[label]}"
+            aria-label={label}
+            onclick={() => {
+              session.labelFilter = session.labelFilter === label ? null : label;
+              session.clampFocus();
+            }}
+          ></button>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   {#if scopedTags.length > 0}
     <section>
@@ -164,7 +240,7 @@
     </section>
   {/if}
 
-  {#if catalog.media === "photos"}
+  {#if showTypeSection}
     <section>
       <span class="lbl">File type</span>
       <div class="row">
@@ -184,23 +260,55 @@
     </section>
   {/if}
 
-  <section>
-    <span class="lbl">Orientation</span>
-    <div class="row">
-      {#each orientationOptions as opt (opt.value)}
+  {#if presentExts.length > 1}
+    <section>
+      <span class="lbl">Extension</span>
+      <div class="row wrap">
         <button
           class="seg"
-          class:active={session.orientationFilter === opt.value}
+          class:active={session.extFilter === null}
           onclick={() => {
-            session.orientationFilter = opt.value;
+            session.extFilter = null;
             session.clampFocus();
           }}
         >
-          <span>{opt.label}</span>
+          <span>All</span>
         </button>
-      {/each}
-    </div>
-  </section>
+        {#each presentExts as ext (ext)}
+          <button
+            class="seg"
+            class:active={session.extFilter === ext}
+            onclick={() => {
+              session.extFilter = session.extFilter === ext ? null : ext;
+              session.clampFocus();
+            }}
+          >
+            <span>{ext.toUpperCase()}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if orientationOptions.length > 1}
+    <section>
+      <span class="lbl">Orientation</span>
+      <div class="row">
+        {#each orientationOptions as opt (opt.value)}
+          <button
+            class="seg"
+            class:active={session.orientationFilter === opt.value}
+            onclick={() => {
+              session.orientationFilter = opt.value;
+              session.clampFocus();
+            }}
+          >
+            <span>{opt.label}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   <footer>{session.filtered.length} shown</footer>
 </div>
@@ -297,20 +405,20 @@
     background: var(--control);
     color: #bbb;
     padding: 4px 9px;
-    border-radius: 6px;
+    border-radius: 3px;
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
   }
 
-  .seg:hover {
-    background: var(--control);
+  .seg:hover:not(.active) {
+    border-color: var(--accent);
   }
 
   .seg.active {
-    background: var(--hover);
+    background: var(--accent-fill);
     color: #fff;
-    border-color: var(--accent);
+    border-color: transparent;
   }
 
   .count {
@@ -366,20 +474,20 @@
     background: var(--control);
     color: #bbb;
     padding: 4px 9px;
-    border-radius: 6px;
+    border-radius: 3px;
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
   }
 
-  .tagseg:hover {
-    background: var(--control);
+  .tagseg:hover:not(.active) {
+    border-color: var(--c);
   }
 
   .tagseg.active {
-    background: var(--hover);
+    background: var(--accent-fill);
     color: #fff;
-    border-color: var(--c);
+    border-color: transparent;
   }
 
   .tagdot {
