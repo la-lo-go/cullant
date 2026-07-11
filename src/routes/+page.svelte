@@ -67,6 +67,17 @@
     }
   });
 
+  // Returning to the grid (via Escape/back or the Grid button) can leave a
+  // toolbar control focused — on mobile that shows a lingering focus ring and
+  // the focused control can swallow keys. Drop DOM focus once we're in the grid.
+  // Safe on desktop: grid navigation is driven by the global window keydown, so
+  // nothing in the grid needs to hold focus.
+  $effect(() => {
+    if (view.mode === "grid") {
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
+  });
+
   /**
    * Unified "back" action shared by desktop and Android. Hierarchy:
    *   1. If any modal/overlay is open, close the top-most one (and stop).
