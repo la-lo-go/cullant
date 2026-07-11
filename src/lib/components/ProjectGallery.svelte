@@ -12,11 +12,6 @@
     void recent.refresh();
   });
 
-  function folderName(path: string): string {
-    const segments = path.split(/[\\/]+/).filter(Boolean);
-    return segments[segments.length - 1] ?? path;
-  }
-
   function relativeTime(unixSeconds: number): string {
     const diffMs = Date.now() - unixSeconds * 1000;
     const mins = Math.round(diffMs / 60000);
@@ -65,7 +60,7 @@
               <ImageOff size={40} strokeWidth={1.25} />
             {/if}
           </div>
-          <span class="name">{folderName(project.path)}</span>
+          <span class="name">{project.displayName}</span>
           <span class="meta">
             {#if project.available}
               Opened {relativeTime(project.lastOpened)}

@@ -17,9 +17,66 @@ use crate::{scan, AppState, ProjectState};
 #[serde(rename_all = "camelCase")]
 pub struct ProjectInfo {
     pub root_path: String,
+    /// Friendly, human-readable project name derived from `root_path`
+    /// (see [`project_display_name`]).
+    pub display_name: String,
     pub db_path: String,
     pub schema_version: i64,
     pub file_count: i64,
+}
+
+/// Decode a percent-encoded string (`%20` -> space, `%3A` -> `:`), tolerating
+/// malformed escapes by leaving them untouched. Never panics.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A friendly, human-readable name for a project given its stored identifier.
+///
+/// Desktop identifiers are filesystem paths — the leaf folder name is shown.
+/// Android identifiers are SAF `content://` tree URIs whose last path segment
+/// is a percent-encoded document id like `primary%3AFUJIFILM%20XT-4`; we decode
+/// it, drop the volume prefix (`primary:`, `1A2B-3C4D:`, …) and show the last
+/// segment of the remaining document path. Any malformed input falls back to a
+/// reasonable string rather than panicking.
+pub(crate) fn project_display_name(id: &str) -> String {
+    if id.starts_with("content://") {
+        // The SAF document id is the URI's last '/'-separated segment.
+        let doc_id = id.rsplit('/').next().unwrap_or(id);
+        let decoded = percent_decode(doc_id);
+        // Strip the volume prefix ("primary:", storage-uuid, …), keeping the
+        // relative document path.
+        let doc = decoded.split_once(':').map_or(decoded.as_str(), |(_, p)| p);
+        let name = doc.rsplit('/').find(|s| !s.is_empty()).unwrap_or(doc);
+        return if name.is_empty() {
+            id.to_string()
+        } else {
+            name.to_string()
+        };
+    }
+    // Desktop filesystem path — the leaf folder name (handles both separators).
+    let name = id.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or(id);
+    if name.is_empty() {
+        id.to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 fn unix_now() -> i64 {
@@ -140,6 +197,7 @@ pub fn do_open_project(
     spawn_scan(app.clone(), db, store, root, mode);
 
     Ok(ProjectInfo {
+        display_name: project_display_name(&root_str),
         root_path: root_str,
         db_path,
         schema_version,
@@ -227,6 +285,7 @@ fn open_saf_project(
     spawn_scan(app.clone(), db, store, base, mode);
 
     Ok(ProjectInfo {
+        display_name: project_display_name(tree_uri),
         root_path: tree_uri.to_string(),
         db_path,
         schema_version,
@@ -254,8 +313,10 @@ pub fn current_project(state: State<'_, AppState>) -> AppResult<Option<ProjectIn
             })?;
         Ok((version, count))
     })?;
+    let root_path = root.to_string_lossy().into_owned();
     Ok(Some(ProjectInfo {
-        root_path: root.to_string_lossy().into_owned(),
+        display_name: project_display_name(&root_path),
+        root_path,
         db_path,
         schema_version,
         file_count,
@@ -284,4 +345,56 @@ pub fn rescan_project(
 #[tauri::command]
 pub fn close_project(state: State<'_, AppState>) {
     *state.project.lock().unwrap() = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{percent_decode, project_display_name};
+
+    #[test]
+    fn saf_uri_yields_friendly_name() {
+        assert_eq!(
+            project_display_name(
+                "content://com.android.externalstorage.documents/tree/primary%3AFUJIFILM%20XT-4"
+            ),
+            "FUJIFILM XT-4"
+        );
+        // A subfolder document path shows its last segment.
+        assert_eq!(
+            project_display_name(
+                "content://com.android.externalstorage.documents/tree/primary%3ADCIM%2FCamera"
+            ),
+            "Camera"
+        );
+        // Non-primary storage volume (SD card uuid) prefix is stripped too.
+        assert_eq!(
+            project_display_name(
+                "content://com.android.externalstorage.documents/tree/1A2B-3C4D%3APhotos"
+            ),
+            "Photos"
+        );
+    }
+
+    #[test]
+    fn desktop_path_yields_leaf_folder() {
+        assert_eq!(project_display_name(r"C:\Users\lalo\Pictures\Trip"), "Trip");
+        assert_eq!(project_display_name("/home/lalo/Pictures/Trip"), "Trip");
+        // A trailing separator does not blank out the name.
+        assert_eq!(project_display_name(r"D:\Shoots\Wedding\"), "Wedding");
+    }
+
+    #[test]
+    fn malformed_input_falls_back_gracefully() {
+        // Dangling / invalid percent escapes are left intact, no panic.
+        assert_eq!(
+            project_display_name("content://x/tree/primary%3ABad%2"),
+            "Bad%2"
+        );
+        // Empty document path -> fall back to the raw id rather than "".
+        assert_eq!(
+            project_display_name("content://x/tree/primary%3A"),
+            "content://x/tree/primary%3A"
+        );
+        assert_eq!(percent_decode("%ZZbad"), "%ZZbad");
+    }
 }
