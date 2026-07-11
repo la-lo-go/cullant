@@ -207,7 +207,6 @@
 <main class="app" class:edge={settings.edgeToEdge}>
   {#if catalog.project}
     <header class="toolbar">
-      <span class="title">Cullant</span>
       <span class="path" title={catalog.project.rootPath}>
         {catalog.project.rootPath.startsWith("content://")
           ? catalog.project.displayName
@@ -593,11 +592,6 @@
     .toolbar .spacer {
       display: none;
     }
-  }
-
-  .title {
-    font-weight: 700;
-    font-size: 13px;
   }
 
   .path {
