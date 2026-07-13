@@ -358,18 +358,33 @@
     {#if catalog.preloading}
       <div class="preload">
         {#if catalog.scanning}
-          <p class="phase">Scanning… {catalog.scanFound || ""}</p>
-          <progress></progress>
+          <p class="phase">Scanning…{catalog.scanFound ? ` ${catalog.scanFound} found` : ""}</p>
+          <div class="pbar indeterminate" role="progressbar" aria-label="Scanning project folder">
+            <div class="pbar-fill"></div>
+          </div>
         {:else}
+          {@const pdone = catalog.thumbProgress.done}
+          {@const ptotal = catalog.thumbProgress.total}
+          {@const ppct = ptotal > 0 ? Math.round((pdone / ptotal) * 100) : 0}
           <p class="phase">
-            Generating thumbnails… {catalog.thumbProgress.done} / {catalog.thumbProgress.total > 0
-              ? catalog.thumbProgress.total
-              : "?"}
+            Generating thumbnails… <span class="count">{pdone} / {ptotal > 0 ? ptotal : "?"}</span>
           </p>
-          {#if catalog.thumbProgress.total > 0}
-            <progress max={catalog.thumbProgress.total} value={catalog.thumbProgress.done}></progress>
+          {#if ptotal > 0}
+            <div
+              class="pbar"
+              role="progressbar"
+              aria-label="Generating thumbnails"
+              aria-valuemin="0"
+              aria-valuemax={ptotal}
+              aria-valuenow={pdone}
+            >
+              <div class="pbar-fill" style="width:{ppct}%"></div>
+            </div>
+            <p class="pct">{ppct}%</p>
           {:else}
-            <progress></progress>
+            <div class="pbar indeterminate" role="progressbar" aria-label="Generating thumbnails">
+              <div class="pbar-fill"></div>
+            </div>
           {/if}
         {/if}
       </div>
@@ -676,8 +691,51 @@
     opacity: 0.8;
   }
 
-  .preload progress {
+  .preload .count {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.95;
+  }
+
+  /* Custom progress bar: a track + an accent fill, replacing the native
+     <progress> element (which ignored the theme and looked out of place). */
+  .preload .pbar {
+    position: relative;
     width: 320px;
+    max-width: 80vw;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .preload .pbar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: inherit;
+    transition: width 120ms linear;
+  }
+
+  /* Indeterminate (scanning / unknown total): a sliver sweeps the track. */
+  .preload .pbar.indeterminate .pbar-fill {
+    width: 40%;
+    animation: preload-slide 1.1s ease-in-out infinite;
+  }
+
+  @keyframes preload-slide {
+    0% {
+      transform: translateX(-120%);
+    }
+    100% {
+      transform: translateX(320%);
+    }
+  }
+
+  .preload .pct {
+    margin: 0;
+    font-size: 12px;
+    opacity: 0.6;
+    font-variant-numeric: tabular-nums;
   }
 
 
