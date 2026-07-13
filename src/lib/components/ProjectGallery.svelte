@@ -13,8 +13,33 @@
   // Project queued for full data deletion, awaiting confirmation (null = none).
   let deleteTarget = $state<RecentProject | null>(null);
 
+  // Initial load when the gallery mounts (i.e. whenever we're on the homepage —
+  // this component only renders while no project is open, so mounting already
+  // covers "catalog.project became null").
   $effect(() => {
     void recent.refresh();
+  });
+
+  // Re-check folder/volume availability live: when the app window regains focus
+  // or the tab becomes visible again (e.g. after unplugging/replugging a drive),
+  // refresh the list so unavailable cards update without a manual reload.
+  // Debounced so a burst of focus/visibility events triggers a single refresh.
+  $effect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refreshSoon = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void recent.refresh(), 150);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refreshSoon();
+    };
+    window.addEventListener("focus", refreshSoon);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("focus", refreshSoon);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   });
 
   function relativeTime(unixSeconds: number): string {
