@@ -176,6 +176,19 @@ pub fn run() {
             protocol::handle(ctx.app_handle(), request, responder);
         })
         .setup(|app| {
+            // The main window ships with `decorations: false` so Windows gets a
+            // custom app-styled titlebar (see TitleBar.svelte). Custom chrome is
+            // undesirable on macOS and uncertain on Linux, so restore the native
+            // OS decorations there; the frontend likewise only renders the
+            // custom bar on desktop Windows.
+            #[cfg(not(target_os = "windows"))]
+            {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_decorations(true);
+                }
+            }
+
             // Dev/test hook: auto-open a project folder at startup.
             if let Ok(path) = std::env::var("CULLANT_OPEN_PROJECT") {
                 use tauri::Manager;
