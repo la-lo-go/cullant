@@ -5,4 +5,5 @@ pub mod groups;
 pub mod metadata;
 pub mod project;
 pub mod recent;
+pub mod session;
 pub mod tags;

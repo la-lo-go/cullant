@@ -110,6 +110,25 @@
     </section>
 
     <section>
+      <h3>Session</h3>
+      <label class="option">
+        <input
+          type="checkbox"
+          checked={settings.rememberSession}
+          onchange={(e) => settings.setRememberSession(e.currentTarget.checked)}
+        />
+        <span class="text">
+          <span class="label">Remember per project</span>
+          <span class="description">
+            Reopen each project where you left off: restore the last sort order,
+            media tab, active filters and focused photo. Off: every project opens
+            with the defaults.
+          </span>
+        </span>
+      </label>
+    </section>
+
+    <section>
       <h3>Keyboard</h3>
       <button class="shortcuts" onclick={onshowkeybindings}>
         <Keyboard size={14} />

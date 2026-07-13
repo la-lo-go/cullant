@@ -143,6 +143,16 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE thumbnails ADD COLUMN failed INTEGER NOT NULL DEFAULT 0;
     "#,
+    // v4 — per-project UI session state. A single-row table holding one opaque
+    // JSON blob (last sort field/direction, media tab, active filters, focused
+    // item) so a project reopens where the user left off. The shape is owned by
+    // the frontend; the backend stores and returns the blob verbatim.
+    r#"
+    CREATE TABLE session_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      state TEXT NOT NULL DEFAULT '{}'
+    );
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {
