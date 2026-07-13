@@ -48,6 +48,21 @@ function saveNumPref(key: string, value: number) {
   }
 }
 
+/** Whether the folder tree should start visible. On a touch device held in
+ *  portrait (narrow) the tree would squeeze the grid, so it starts hidden
+ *  there; a toolbar/keyboard toggle brings it back. Everywhere else it starts
+ *  visible. */
+function initialFolderTreeVisible(): boolean {
+  try {
+    if (typeof window === "undefined") return true;
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const portrait = window.innerHeight > window.innerWidth;
+    return !(coarse && portrait);
+  } catch {
+    return true;
+  }
+}
+
 /** Directory portion of a relPath, using forward slashes, "" for the root. */
 export function dirOf(relPath: string): string {
   const idx = Math.max(relPath.lastIndexOf("/"), relPath.lastIndexOf("\\"));
@@ -105,7 +120,7 @@ class SessionStore {
   }
   /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
   folderFilter = $state<string | null>(null);
-  folderTreeVisible = $state(true);
+  folderTreeVisible = $state(initialFolderTreeVisible());
   /** Width of the folder-tree panel in px (persisted, drag-resizable). */
   folderTreeWidth = $state<number>(loadNumPref(FOLDER_TREE_WIDTH_KEY, 210));
 
