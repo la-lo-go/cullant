@@ -21,6 +21,8 @@ class ViewStore {
   cy = $state(0.5);
   /** Camera-metadata panel open in the loupe. */
   infoOpen = $state(false);
+  /** Read-only keyboard cheat-sheet overlay open (toggled by `?`). */
+  shortcutsOpen = $state(false);
 
   /**
    * Bumped by the keyboard zoom shortcut. The loupe's ZoomImage watches this
@@ -29,8 +31,23 @@ class ViewStore {
    */
   zoomToggleNonce = $state(0);
 
+  /**
+   * Bumped by the Ctrl+= / Ctrl+- zoom step shortcuts. Like the toggle nonce,
+   * the loupe's ZoomImage watches it and applies a centred zoom step, because
+   * only the component knows the per-photo fit scale. `zoomStepDir` carries the
+   * direction of the pending step (+1 in, -1 out) and is a plain field: it is
+   * always set before the nonce is bumped, so the watcher reads it consistently.
+   */
+  zoomStepNonce = $state(0);
+  zoomStepDir = 0;
+
   requestZoomToggle() {
     this.zoomToggleNonce++;
+  }
+
+  requestZoomStep(dir: number) {
+    this.zoomStepDir = dir;
+    this.zoomStepNonce++;
   }
 
   resetZoom() {
