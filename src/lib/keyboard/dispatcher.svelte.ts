@@ -95,6 +95,12 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     case "zoom.toggle":
       if (view.mode !== "grid") view.requestZoomToggle();
       return;
+    case "zoom.in":
+      if (view.mode !== "grid") view.requestZoomStep(1);
+      return;
+    case "zoom.out":
+      if (view.mode !== "grid") view.requestZoomStep(-1);
+      return;
     case "pair.toggleShown":
       return session.togglePairHalf();
     case "pair.toggleCoupling":
@@ -120,6 +126,9 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       return;
     case "ui.toggleFilmstrip":
       session.toggleShowFilmstrip();
+      return;
+    case "ui.toggleShortcuts":
+      view.shortcutsOpen = !view.shortcutsOpen;
       return;
   }
 }
@@ -164,6 +173,17 @@ export function handleKeydown(e: KeyboardEvent) {
     if (normalized !== "escape") keymap.rebind(keymap.rebinding, normalized);
     keymap.rebinding = null;
     e.preventDefault();
+    return;
+  }
+
+  // The shortcuts cheat-sheet is a read-only modal: while it's open swallow all
+  // keys so nothing behind it fires, honouring only the toggle key (`?`) and
+  // the back/close key (Esc) to dismiss it.
+  if (view.shortcutsOpen) {
+    e.preventDefault();
+    const cmd =
+      keymap.bindings.get(normalized) ?? keymap.bindings.get(normalizeKey(e, false));
+    if (cmd === "ui.toggleShortcuts" || cmd === "view.back") view.shortcutsOpen = false;
     return;
   }
 

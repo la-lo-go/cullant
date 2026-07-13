@@ -16,6 +16,7 @@
   import TouchActionBar from "$lib/components/TouchActionBar.svelte";
   import { buildFolderTree } from "$lib/components/folderTree";
   import KeybindingsDialog from "$lib/components/KeybindingsDialog.svelte";
+  import ShortcutsOverlay from "$lib/components/ShortcutsOverlay.svelte";
   import PairSyncDialog from "$lib/components/PairSyncDialog.svelte";
   import TagEditor from "$lib/components/TagEditor.svelte";
   import CommitDialog from "$lib/components/CommitDialog.svelte";
@@ -88,6 +89,11 @@
    */
   function goBack() {
     // Top-most first, matching the visual stacking order of the dialogs below.
+    // The read-only shortcuts cheat-sheet sits above everything else.
+    if (view.shortcutsOpen) {
+      view.shortcutsOpen = false;
+      return;
+    }
     if (showKeybindings) {
       showKeybindings = false;
       return;
@@ -469,6 +475,10 @@
 
   {#if introPath !== null}
     <PreviewModeIntro onstart={(mode) => void confirmIntro(mode)} oncancel={cancelIntro} />
+  {/if}
+
+  {#if view.shortcutsOpen}
+    <ShortcutsOverlay onclose={() => (view.shortcutsOpen = false)} />
   {/if}
 
   {#if showKeybindings}

@@ -35,6 +35,8 @@
   let lastToggleTime = 0;
 
   const WHEEL_ZOOM = 1.15;
+  /** Per-press magnification factor for the Ctrl+= / Ctrl+- keyboard zoom. */
+  const KEY_ZOOM_STEP = 1.25;
   const WHEEL_NAV_THRESHOLD = 50;
   const SWIPE_NAV_THRESHOLD = 55;
   /** Left/right margin width (as a fraction of the frame) that pages photos on
@@ -139,6 +141,16 @@
     if (standalone || n === lastKbNonce) return;
     lastKbNonce = n;
     untrack(() => toggleZoom());
+  });
+
+  // Ctrl+= / Ctrl+- zoom step. Same store-nonce channel as the toggle: the loupe
+  // component owns the per-photo fit scale, so the keymap only signals direction.
+  let lastStepNonce = 0;
+  $effect(() => {
+    const n = view.zoomStepNonce;
+    if (standalone || n === lastStepNonce) return;
+    lastStepNonce = n;
+    untrack(() => stepZoom(view.zoomStepDir));
   });
 
   // Fit view uses the 2560px preview; zoomed view swaps in the full-res source
@@ -360,8 +372,66 @@
     });
   }
 
-  function onDblClick() {
-    toggleZoom();
+  // Ctrl+= / Ctrl+- step zoom, centred on the frame (image) centre. Reuses the
+  // shared scale/clamp model: one factor step from the current scale (or fit,
+  // when unzoomed), clamped to [fit, maxScale]. Stepping out to fit leaves zoom
+  // mode cleanly via the same settle animation the toggle uses.
+  function stepZoom(dir: number) {
+    if (!refW || !refH || !frameW || !frameH) return;
+    cancelSettle();
+    const current = z.zoomed ? z.scale : fit;
+    const factor = dir > 0 ? KEY_ZOOM_STEP : 1 / KEY_ZOOM_STEP;
+    const next = clampToRange(current * factor);
+    if (next <= fit + ZOOM_EPS) {
+      // Reached (or already at) fit: drop back to the clean fit view.
+      if (dir < 0 && z.zoomed) settleToFit();
+      return;
+    }
+    zoomAt(frameW / 2, frameH / 2, next);
+  }
+
+  // Double-click quick-zoom, focused on the clicked point (unlike the Z-key /
+  // double-tap toggle, which is image-centred). Zoomed in -> settle back to fit;
+  // at fit -> jump to DOUBLE_TAP_MAG × fit keeping the click point in place. The
+  // toggle guard dedupes against any browser-synthesized dblclick on touch.
+  function onDblClick(e: MouseEvent) {
+    const now = performance.now();
+    if (now - lastToggleTime < TOGGLE_GUARD_MS) return;
+    lastToggleTime = now;
+    if (!refW || !refH) return;
+    cancelSettle();
+    if (z.zoomed && z.scale > fit + ZOOM_EPS) {
+      settleToFit();
+      return;
+    }
+    const target = clampToRange(fit * DOUBLE_TAP_MAG);
+    if (target <= fit + ZOOM_EPS) return; // nothing beyond fit to reveal
+    const p = framePoint(e);
+    animateZoomInAt(p.x, p.y, target);
+  }
+
+  // Focal variant of animateZoomIn: mount the full image at fit (matching the
+  // fit view), then on a later frame jump to `target` while keeping the image
+  // point under (px, py) fixed, so the CSS transition animates fit -> target
+  // zoomed on the clicked spot.
+  function animateZoomInAt(px: number, py: number, target: number) {
+    const u = anchorUnder(px, py);
+    z.zoomed = true;
+    z.scale = fit;
+    centerOn(u, px, py, fit);
+    settling = true;
+    if (toggleRaf) cancelAnimationFrame(toggleRaf);
+    toggleRaf = requestAnimationFrame(() => {
+      toggleRaf = requestAnimationFrame(() => {
+        toggleRaf = 0;
+        z.scale = target;
+        centerOn(u, px, py, target);
+        settleTimer = setTimeout(() => {
+          settleTimer = undefined;
+          settling = false;
+        }, 180);
+      });
+    });
   }
 
   function onWheel(e: WheelEvent) {
