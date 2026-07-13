@@ -178,6 +178,14 @@
    * confirms the choice and then opens. Afterwards, open directly.
    */
   async function openProject(path: string) {
+    // Reject Cullant's own sidecar dir up front (the backend guards it too, so
+    // the CULLANT_OPEN_PROJECT auto-open hook is covered regardless).
+    if (/(^|[\\/])\.cullant([\\/]|$)/i.test(path)) {
+      catalog.error =
+        "This is Cullant's own data folder (.cullant), not a photo folder. " +
+        "Pick the folder that contains your photos instead.";
+      return;
+    }
     if (!settings.onboardedPreview) {
       introPath = path;
       return;
@@ -435,7 +443,10 @@
         </button>
         <button class="ghlink" onclick={() => openUrl(REPO_URL)}>
           <FolderGit2 size={15} />
-          <span>Cullant is free &amp; open source. Say hi or contribute on GitHub!</span>
+          <span class="ghlink-full"
+            >Cullant is free &amp; open source. Say hi or contribute on GitHub!</span
+          >
+          <span class="ghlink-short">Free &amp; open source · GitHub</span>
         </button>
       </footer>
     </div>
@@ -924,5 +935,26 @@
 
   button.ghlink:hover {
     color: var(--accent);
+  }
+
+  /* Full label on desktop; a compact label on narrow screens so it never
+     overflows or wraps awkwardly. */
+  button.ghlink .ghlink-short {
+    display: none;
+  }
+
+  @media (max-width: 600px) {
+    button.ghlink {
+      text-align: center;
+      text-wrap: balance;
+    }
+
+    button.ghlink .ghlink-full {
+      display: none;
+    }
+
+    button.ghlink .ghlink-short {
+      display: inline;
+    }
   }
 </style>

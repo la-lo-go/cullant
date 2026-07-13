@@ -4,6 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, Runtime};
 
+use crate::error::{AppError, AppResult};
+
 #[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct RecentEntry {
     pub(crate) path: String,
@@ -109,4 +111,54 @@ pub fn remove_recent_project(app: AppHandle, path: String) {
     let mut list = load_recent(&app);
     list.retain(|e| e.path != path);
     save_recent(&app, &list);
+}
+
+/// Fully forget a project: drop it from the recent list AND delete Cullant's
+/// own data (the SQLite DB + thumbnail cache). The user's photos are NEVER
+/// touched — only Cullant's sidecar is removed.
+///
+/// Desktop: the sidecar is `<project>/.cullant`; it goes to the OS recycle bin
+/// (reversible) when possible, falling back to a permanent remove otherwise.
+/// Android: the data lives in a private app dir (`project_data_base`) outside
+/// the picked SAF tree, so it is removed directly.
+#[tauri::command]
+pub fn delete_project_data(app: AppHandle, path: String) -> AppResult<()> {
+    // Forget it from the recent list regardless of what happens to the data.
+    let mut list = load_recent(&app);
+    list.retain(|e| e.path != path);
+    save_recent(&app, &list);
+
+    #[cfg(target_os = "android")]
+    if path.starts_with("content://") {
+        let base = super::project::project_data_base(&app, &path)?;
+        if base.is_dir() {
+            std::fs::remove_dir_all(&base)
+                .map_err(|e| AppError::Other(format!("delete project data: {e}")))?;
+        }
+        return Ok(());
+    }
+
+    // Desktop (and any non-SAF path): the sidecar is `<project>/.cullant`.
+    let data_dir = PathBuf::from(&path).join(".cullant");
+    if data_dir.is_dir() {
+        delete_sidecar(&data_dir)?;
+    }
+    Ok(())
+}
+
+/// Remove Cullant's `.cullant` sidecar directory. Prefers the OS recycle bin so
+/// the deletion is reversible; falls back to a permanent recursive remove if the
+/// platform can't trash a directory.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn delete_sidecar(dir: &std::path::Path) -> AppResult<()> {
+    if trash::delete(dir).is_ok() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(dir).map_err(|e| AppError::Other(format!("delete project data: {e}")))
+}
+
+/// Mobile fallback: no OS recycle bin, so remove the sidecar permanently.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn delete_sidecar(dir: &std::path::Path) -> AppResult<()> {
+    std::fs::remove_dir_all(dir).map_err(|e| AppError::Other(format!("delete project data: {e}")))
 }

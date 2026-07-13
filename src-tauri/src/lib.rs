@@ -213,6 +213,7 @@ pub fn run() {
             commands::project::close_project,
             commands::recent::list_recent_projects,
             commands::recent::remove_recent_project,
+            commands::recent::delete_project_data,
             commands::catalog::query_items,
             commands::catalog::media_counts,
             commands::culling::set_rating,

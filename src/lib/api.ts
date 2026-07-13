@@ -155,6 +155,9 @@ export const api = {
     invoke("rescan_project", { previewMode }),
   listRecentProjects: () => invoke<RecentProject[]>("list_recent_projects"),
   removeRecentProject: (path: string) => invoke("remove_recent_project", { path }),
+  // Forget a project AND delete Cullant's own data (DB + thumb cache). The
+  // user's photos are never touched.
+  deleteProjectData: (path: string) => invoke("delete_project_data", { path }),
   queryItems: (sort: SortKey, media: MediaTab, desc: boolean) =>
     invoke<ItemLite[]>("query_items", { sort, media, desc }),
   mediaCounts: () => invoke<MediaCounts>("media_counts"),
