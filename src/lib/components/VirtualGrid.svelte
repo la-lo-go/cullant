@@ -16,6 +16,10 @@
   const OVERSCAN_ROWS = 2;
   const LONG_PRESS_MS = 400; // touch: hold this long to start a marquee
   const MARGIN_Y = 14; // breathing room above the first row and below the last
+  // Inter-cell gap: the pitch (CELL) still tiles edge-to-edge for all hit-test
+  // and marquee math, but each cell's visual box is inset by GAP so adjacent
+  // focus/selection outlines never touch. Kept out of the pitch math on purpose.
+  const GAP = 10;
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -343,7 +347,7 @@
         class="cell"
         class:focused={v.index === session.focusedIndex}
         class:selected={session.selectedIds.has(v.item.id)}
-        style="transform: translate({v.x}px, {v.y}px); width:{CELL}px; height:{CELL}px"
+        style="transform: translate({v.x + GAP / 2}px, {v.y + GAP / 2}px); width:{CELL - GAP}px; height:{CELL - GAP}px"
         role="button"
         tabindex="-1"
       >
