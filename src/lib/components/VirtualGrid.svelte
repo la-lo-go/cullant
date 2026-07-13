@@ -1,5 +1,6 @@
 <script lang="ts">
   import { thumbUrl, videoUrl, type ItemLite } from "../api";
+  import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
@@ -9,6 +10,7 @@
   import Scissors from "@lucide/svelte/icons/scissors";
   import Play from "@lucide/svelte/icons/play";
   import FileWarning from "@lucide/svelte/icons/file-warning";
+  import Loader from "@lucide/svelte/icons/loader";
   import { edgeBounce } from "../anim";
 
   let { items }: { items: ItemLite[] } = $props();
@@ -20,6 +22,10 @@
   // and marquee math, but each cell's visual box is inset by GAP so adjacent
   // focus/selection outlines never touch. Kept out of the pitch math on purpose.
   const GAP = 10;
+
+  // A small pill (bottom-right, over the cells) while background previews are
+  // still generating for the current view.
+  const loadingPreviews = $derived(catalog.previewProgress.total > 0);
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -326,21 +332,22 @@
   }
 </script>
 
-<div
-  class="viewport"
-  role="grid"
-  aria-label="Photo grid"
-  tabindex="-1"
-  bind:this={viewport}
-  bind:clientWidth={width}
-  bind:clientHeight={height}
-  onscroll={onScroll}
-  onpointerdown={onPointerDown}
-  onpointermove={onPointerMove}
-  onpointerup={endDrag}
-  onpointercancel={endDrag}
-  ondblclick={onDblClick}
->
+<div class="grid-root">
+  <div
+    class="viewport"
+    role="grid"
+    aria-label="Photo grid"
+    tabindex="-1"
+    bind:this={viewport}
+    bind:clientWidth={width}
+    bind:clientHeight={height}
+    onscroll={onScroll}
+    onpointerdown={onPointerDown}
+    onpointermove={onPointerMove}
+    onpointerup={endDrag}
+    onpointercancel={endDrag}
+    ondblclick={onDblClick}
+  >
   <div class="canvas" bind:this={canvasEl} style="height:{totalRows * CELL + MARGIN_Y * 2}px">
     {#each visible as v (v.item.id)}
       <div
@@ -423,9 +430,26 @@
       ></div>
     {/if}
   </div>
+  </div>
+  {#if loadingPreviews}
+    <div class="loading-pill" role="status" aria-live="polite">
+      <span class="spin"><Loader size={13} /></span>
+      <span>Loading previews… {catalog.previewProgress.done} / {catalog.previewProgress.total}</span>
+    </div>
+  {/if}
 </div>
 
 <style>
+  /* Positioned wrapper so the loading pill can float over the scrolling grid
+     without scrolling away with the cells. */
+  .grid-root {
+    position: relative;
+    flex: 1;
+    display: flex;
+    min-height: 0;
+    min-width: 0;
+  }
+
   .viewport {
     flex: 1;
     overflow-y: auto;
@@ -434,6 +458,36 @@
     /* Let the browser handle vertical scroll; a long-press marquee takes over
        via pointer capture. */
     touch-action: pan-y;
+  }
+
+  .loading-pill {
+    position: absolute;
+    right: 12px;
+    bottom: 12px;
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    font-size: 11px;
+    line-height: 1;
+    color: inherit;
+    pointer-events: none;
+  }
+
+  .loading-pill .spin {
+    display: inline-flex;
+    animation: pill-spin 1s linear infinite;
+  }
+
+  @keyframes pill-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .canvas {
