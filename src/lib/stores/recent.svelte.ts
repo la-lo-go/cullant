@@ -13,6 +13,13 @@ class RecentStore {
     await api.removeRecentProject(path);
     this.list = this.list.filter((p) => p.path !== path);
   }
+
+  /** Forget the project and delete Cullant's data (DB + thumb cache) for it.
+   *  The user's photos are never touched. */
+  async deleteProject(path: string) {
+    await api.deleteProjectData(path);
+    this.list = this.list.filter((p) => p.path !== path);
+  }
 }
 
 export const recent = new RecentStore();

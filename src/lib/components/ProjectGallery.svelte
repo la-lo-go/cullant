@@ -1,12 +1,17 @@
 <script lang="ts">
   import { recentThumbUrl, type RecentProject } from "../api";
   import { recent } from "../stores/recent.svelte";
+  import ConfirmDialog from "./ConfirmDialog.svelte";
   import ImageOff from "@lucide/svelte/icons/image-off";
   import X from "@lucide/svelte/icons/x";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
 
   let { onopen }: { onopen: (path: string) => void } = $props();
 
   const PREVIEW_SLOTS = [0, 1, 2];
+
+  // Project queued for full data deletion, awaiting confirmation (null = none).
+  let deleteTarget = $state<RecentProject | null>(null);
 
   $effect(() => {
     void recent.refresh();
@@ -31,6 +36,17 @@
   function removeCard(e: Event, path: string) {
     e.stopPropagation();
     void recent.remove(path);
+  }
+
+  function askDeleteCard(e: Event, project: RecentProject) {
+    e.stopPropagation();
+    deleteTarget = project;
+  }
+
+  function confirmDelete() {
+    const path = deleteTarget?.path;
+    deleteTarget = null;
+    if (path) void recent.deleteProject(path);
   }
 </script>
 
@@ -82,10 +98,34 @@
           >
             <X size={13} />
           </span>
+          <span
+            class="delete"
+            role="button"
+            tabindex="-1"
+            title="Delete Cullant data for this project (your photos are kept)"
+            onclick={(e) => askDeleteCard(e, project)}
+            onkeydown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              askDeleteCard(e, project);
+            }}
+          >
+            <Trash2 size={13} />
+          </span>
         </button>
       {/each}
     </div>
   </div>
+{/if}
+
+{#if deleteTarget}
+  <ConfirmDialog
+    title="Delete Cullant data?"
+    message={`This deletes Cullant's culling database and thumbnail cache for “${deleteTarget.displayName}” and removes it from recents. Your photos are NOT touched — only Cullant's own data is removed.`}
+    confirmLabel="Delete Cullant data"
+    onconfirm={confirmDelete}
+    oncancel={() => (deleteTarget = null)}
+  />
 {/if}
 
 <style>
@@ -217,6 +257,31 @@
 
   .remove:hover {
     background: var(--border-strong);
+    color: #fff;
+  }
+
+  /* Distinct from "remove from recents" (top-right X): sits top-left and turns
+     red on hover to signal it deletes Cullant's data, not just the list entry. */
+  .delete {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    color: #999;
+    opacity: 0;
+  }
+
+  .card:hover .delete {
+    opacity: 1;
+  }
+
+  .delete:hover {
+    background: #a04040;
     color: #fff;
   }
 </style>
