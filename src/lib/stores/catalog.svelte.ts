@@ -57,8 +57,12 @@ class CatalogStore {
   }
 
   /// Refresh after opening a project: always land in the grid on the Photos
-  /// tab, falling back to Videos for a video-only project.
+  /// tab, falling back to Videos for a video-only project. Then restore the
+  /// remembered per-project session (sort/media/filters/focus) over the top.
   private async refreshForOpen() {
+    // Guard the session-persist effect until the restore below has run, so the
+    // defaults set here can never overwrite the saved blob before it loads.
+    session.restoring = true;
     view.mode = "grid";
     this.media = "photos";
     await this.refresh();
@@ -67,6 +71,20 @@ class CatalogStore {
     }
     // A freshly opened project lands in the grid with nothing focused.
     session.clearFocus();
+    // Always clears the `restoring` guard, even when the setting is off or no
+    // saved state exists.
+    await session.restoreSessionState();
+  }
+
+  /// Apply a sort/media view remembered from a saved session, without the
+  /// focus-clearing side effects of setSort/setMedia. A saved media tab is only
+  /// honoured when it actually has items (else the current tab is kept).
+  async applyRestoredView(sort?: SortKey, sortDesc?: boolean, media?: MediaTab) {
+    if (sort) this.sort = sort;
+    if (typeof sortDesc === "boolean") this.sortDesc = sortDesc;
+    if (media === "videos" && this.mediaCounts.videos > 0) this.media = "videos";
+    else if (media === "photos" && this.mediaCounts.photos > 0) this.media = "photos";
+    await this.refresh();
   }
 
   async close() {

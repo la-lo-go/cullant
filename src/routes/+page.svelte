@@ -45,6 +45,7 @@
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
   import Filter from "@lucide/svelte/icons/filter";
   import SettingsIcon from "@lucide/svelte/icons/settings";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -52,6 +53,39 @@
 
   // Desktop opt-in for the touch action bar (always shown on touch devices).
   let touchBarVisible = $state(false);
+
+  // Screen-orientation lock (a mobile-only affordance). Available only where the
+  // Screen Orientation API exposes lock() — which the TS DOM lib doesn't declare,
+  // so we narrow it locally. The button is hidden where it's unavailable, and any
+  // rejection (desktop, non-fullscreen, unsupported) is swallowed so a failed
+  // lock never surfaces an error. `orientationLocked` tracks the last lock we
+  // applied so the button can reflect and toggle the current axis.
+  function lockableOrientation(): { lock(o: string): Promise<void>; type: string } | null {
+    if (typeof screen === "undefined") return null;
+    const o = screen.orientation as unknown as
+      | { lock?: (o: string) => Promise<void>; type?: string }
+      | undefined;
+    return o && typeof o.lock === "function"
+      ? (o as { lock(o: string): Promise<void>; type: string })
+      : null;
+  }
+
+  const canRotate = lockableOrientation() !== null;
+  let orientationLocked = $state<"portrait" | "landscape" | null>(null);
+
+  async function toggleOrientation() {
+    const o = lockableOrientation();
+    if (!o) return;
+    // Flip relative to whichever axis is currently shown (locked or natural).
+    const current = orientationLocked ?? (o.type ?? "").split("-")[0];
+    const next = current === "landscape" ? "portrait" : "landscape";
+    try {
+      await o.lock(next);
+      orientationLocked = next;
+    } catch {
+      // Platform rejected the lock — leave the tracked state untouched.
+    }
+  }
   let showKeybindings = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
@@ -239,7 +273,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<main class="app" class:edge={settings.edgeToEdge}>
+<main class="app">
   {#if showTitleBar}
     <TitleBar />
   {/if}
@@ -319,6 +353,17 @@
       >
         <PanelBottom size={14} />
       </button>
+      {#if canRotate}
+        <button
+          class="rotate-toggle"
+          class:active={orientationLocked === "landscape"}
+          title="Rotate screen (lock landscape/portrait)"
+          aria-label="Rotate screen"
+          onclick={blurring(() => void toggleOrientation())}
+        >
+          <RotateCw size={14} />
+        </button>
+      {/if}
       {#if hasSubfolders && view.mode === "grid"}
         <button
           class:active={session.folderTreeVisible}
@@ -560,7 +605,7 @@
        landscape rotation moves the cutout inset to the left or right side.
        Always 0 on desktop. Fixed-position overlays (dialog backdrops) consume
        these directly; everything in normal flow consumes the --safe-* set that
-       .app derives from them based on the edge-to-edge setting. */
+       .app derives from them (all 0 — the app is always fully inset). */
     --inset-top: env(safe-area-inset-top, 0px);
     --inset-right: env(safe-area-inset-right, 0px);
     --inset-bottom: env(safe-area-inset-bottom, 0px);
@@ -607,42 +652,47 @@
     height: 100vh;
     height: 100dvh; /* track the real viewport across Android rotations */
     box-sizing: border-box;
-    /* Edge-to-edge OFF (default): inset the whole app so nothing ever sits
-       under the system bars or cutout, and zero out the --safe-* vars that
-       edge-hugging children (toolbar, touch bar, filmstrip…) consume. */
-    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+    /* Inset the whole app so nothing ever sits under the system bars or cutout,
+       and zero out the --safe-* vars that edge-hugging children (touch bar,
+       filmstrip…) consume. The TOP inset is deliberately left off here: the
+       toolbar (or the home screen) pads itself by --inset-top instead, so the
+       toolbar's surface colour bleeds up into the status-bar strip. */
+    padding: 0 var(--inset-right) var(--inset-bottom) var(--inset-left);
     --safe-top: 0px;
     --safe-right: 0px;
     --safe-bottom: 0px;
     --safe-left: 0px;
   }
 
-  /* Edge-to-edge ON: backgrounds bleed under the system bars; each control
-     that touches a screen edge pads itself by --safe-* to stay reachable. */
-  .app.edge {
-    padding: 0;
-    --safe-top: var(--inset-top);
-    --safe-right: var(--inset-right);
-    --safe-bottom: var(--inset-bottom);
-    --safe-left: var(--inset-left);
-  }
-
   .toolbar {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: calc(4px + var(--safe-top)) calc(10px + var(--safe-right)) 4px
+    /* The toolbar paints the top status-bar strip: its --surface-2 background
+       bleeds up under the system status bar (the top inset is not applied on
+       .app), so the strip reads as one continuous colour with the toolbar. */
+    padding: calc(4px + var(--inset-top)) calc(10px + var(--safe-right)) 4px
       calc(10px + var(--safe-left));
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
     flex: none;
   }
 
+  /* The rotate-screen button is a touch-only affordance: hidden on precise
+     pointers (desktop), shown only on coarse pointers. */
+  .toolbar .rotate-toggle {
+    display: none;
+  }
+
   /* On touch devices the action bar is always visible, so its toggle is
-     redundant — hide it there. */
+     redundant — hide it there. The rotate button, conversely, only makes sense
+     on touch, so it appears here. */
   @media (pointer: coarse) {
     .toolbar .touchbar-toggle {
       display: none;
+    }
+    .toolbar .rotate-toggle {
+      display: inline-flex;
     }
   }
 
@@ -891,7 +941,9 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+    /* No toolbar on the welcome screen, so the home pane itself pads the top
+       inset (the toolbar does this everywhere else — see .toolbar). */
+    padding: var(--inset-top) var(--safe-right) 0 var(--safe-left);
   }
 
   .home.centered {
@@ -912,10 +964,16 @@
     flex: 1;
   }
 
-  /* Peek tab shown at the left edge when the folder tree is collapsed. */
+  /* Peek tab shown at the left edge when the folder tree is collapsed. It
+     floats over the grid (absolute) instead of sitting in the flex row, so on
+     narrow screens it never steals a thumbnail column. Its hit area is tiny, so
+     the grid underneath still scrolls everywhere else. */
   .tree-peek {
-    flex: none;
-    align-self: center;
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    z-index: 15;
     display: inline-flex;
     align-items: center;
     justify-content: center;

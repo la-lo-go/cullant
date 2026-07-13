@@ -3,11 +3,14 @@ import {
   api,
   type CullState,
   type ItemLite,
+  type MediaTab,
   type PairScope,
+  type SortKey,
   type SyncFrom,
   type Targets,
 } from "../api";
 import { catalog } from "./catalog.svelte";
+import { settings } from "./settings.svelte";
 import { tags } from "./tags.svelte";
 
 export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
@@ -15,6 +18,27 @@ export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
 export type TypeFilter = "all" | "raw" | "jpeg" | "rawjpeg";
 /** Displayed-aspect orientation filter (applies to photos and videos). */
 export type OrientationFilter = "all" | "portrait" | "landscape" | "square";
+
+/** Shape of the per-project session blob persisted in the DB (migration v4).
+ *  Every field is optional so blobs written by an older or newer build degrade
+ *  gracefully rather than throwing. `focusKey` is a file's relPath (a stable
+ *  identity across reopens and rescans). */
+interface SavedSession {
+  sort?: SortKey;
+  sortDesc?: boolean;
+  media?: MediaTab;
+  filters?: {
+    flagFilter?: FlagFilter;
+    minRating?: number;
+    labelFilter?: string | null;
+    tagFilter?: number | null;
+    typeFilter?: TypeFilter;
+    extFilter?: string | null;
+    orientationFilter?: OrientationFilter;
+    folderFilter?: string | null;
+  };
+  focusKey?: string | null;
+}
 
 const SHOW_NAMES_KEY = "cullant.showNames";
 const SHOW_FILMSTRIP_KEY = "cullant.showFilmstrip";
@@ -45,6 +69,21 @@ function saveNumPref(key: string, value: number) {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
     // persistence is best-effort
+  }
+}
+
+/** Whether the folder tree should start visible. On a touch device held in
+ *  portrait (narrow) the tree would squeeze the grid, so it starts hidden
+ *  there; a toolbar/keyboard toggle brings it back. Everywhere else it starts
+ *  visible. */
+function initialFolderTreeVisible(): boolean {
+  try {
+    if (typeof window === "undefined") return true;
+    const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+    const portrait = window.innerHeight > window.innerWidth;
+    return !(coarse && portrait);
+  } catch {
+    return true;
   }
 }
 
@@ -105,7 +144,7 @@ class SessionStore {
   }
   /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
   folderFilter = $state<string | null>(null);
-  folderTreeVisible = $state(true);
+  folderTreeVisible = $state(initialFolderTreeVisible());
   /** Width of the folder-tree panel in px (persisted, drag-resizable). */
   folderTreeWidth = $state<number>(loadNumPref(FOLDER_TREE_WIDTH_KEY, 210));
 
@@ -123,6 +162,17 @@ class SessionStore {
   focusedIndex = $state(-1);
   /** Column count reported by the grid so ↑/↓ move one visual row. */
   gridCols = $state(1);
+
+  /** Focus key (a file's relPath) awaiting restore from a saved session. It is
+   *  applied once a matching item appears in `filtered` — items load
+   *  asynchronously after a project opens — and cleared once the user moves
+   *  focus themselves (see the restore effect below). */
+  pendingFocusKey = $state<string | null>(null);
+
+  /** True while a project is opening and its saved session is being restored.
+   *  The persist effect skips writes during this window so the transient
+   *  defaults set at open time never clobber the saved blob before it loads. */
+  restoring = $state(false);
 
   /** Multi-selection: file ids of selected items (reassigned on every change). */
   selectedIds = $state<Set<number>>(new Set());
@@ -294,6 +344,70 @@ class SessionStore {
     }
     return { pick, reject, unflagged, total: catalog.items.length };
   });
+
+  // --- per-project session persistence (migration v4) ---
+
+  /** Serialise the current view + filters + focus for persistence. */
+  sessionSnapshot(): SavedSession {
+    return {
+      sort: catalog.sort,
+      sortDesc: catalog.sortDesc,
+      media: catalog.media,
+      filters: {
+        flagFilter: this.flagFilter,
+        minRating: this.minRating,
+        labelFilter: this.labelFilter,
+        tagFilter: this.tagFilter,
+        typeFilter: this.typeFilter,
+        extFilter: this.extFilter,
+        orientationFilter: this.orientationFilter,
+        folderFilter: this.folderFilter,
+      },
+      focusKey: this.focused?.relPath ?? null,
+    };
+  }
+
+  /** Load the saved per-project session (if the setting is on) and apply the
+   *  sort/media/filters. Focus is deferred to `pendingFocusKey`, applied once a
+   *  matching item loads. Best-effort: any error or missing/invalid blob leaves
+   *  the defaults chosen at open time untouched. */
+  async restoreSessionState() {
+    try {
+      if (!settings.rememberSession) return;
+      let raw: string | null;
+      try {
+        raw = await api.getSessionState();
+      } catch {
+        return;
+      }
+      if (!raw) return;
+      let s: SavedSession;
+      try {
+        s = JSON.parse(raw) as SavedSession;
+      } catch {
+        return;
+      }
+      const f = s.filters;
+      if (f) {
+        if (f.flagFilter) this.flagFilter = f.flagFilter;
+        if (typeof f.minRating === "number") this.minRating = f.minRating;
+        this.labelFilter = f.labelFilter ?? null;
+        this.tagFilter = f.tagFilter ?? null;
+        if (f.typeFilter) this.typeFilter = f.typeFilter;
+        this.extFilter = f.extFilter ?? null;
+        if (f.orientationFilter) this.orientationFilter = f.orientationFilter;
+        this.folderFilter = f.folderFilter ?? null;
+      }
+      this.pendingFocusKey = s.focusKey ?? null;
+      // Sort/media re-query the catalog to reorder/reselect the visible items.
+      if (s.sort || s.media || typeof s.sortDesc === "boolean") {
+        await catalog.applyRestoredView(s.sort, s.sortDesc, s.media);
+      }
+      this.clampFocus();
+    } finally {
+      this.restoring = false;
+    }
+  }
 
   clampFocus() {
     const max = Math.max(0, this.filtered.length - 1);
@@ -569,6 +683,40 @@ $effect.root(() => {
   $effect(() => {
     void catalog.project;
     session.folderFilter = null;
+  });
+
+  // Apply a pending focus restored from a saved session, once the matching item
+  // has loaded into `filtered`. If the user moves focus first, abandon it.
+  $effect(() => {
+    const key = session.pendingFocusKey;
+    if (key === null) return;
+    if (session.focusedIndex !== -1) {
+      session.pendingFocusKey = null;
+      return;
+    }
+    const idx = session.filtered.findIndex((i) => i.relPath === key);
+    if (idx >= 0) {
+      session.focusedIndex = idx;
+      session.selectionAnchor = idx;
+      session.pendingFocusKey = null;
+    }
+  });
+
+  // Persist the per-project session (sort/media/filters/focus) on any change,
+  // debounced. Skipped while no project is open, the setting is off, or a
+  // restore is in flight (so open-time defaults never clobber the saved blob).
+  let saveTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    // Read the snapshot first so every persisted value is a tracked dependency.
+    const json = JSON.stringify(session.sessionSnapshot());
+    if (!catalog.project || !settings.rememberSession || session.restoring) return;
+    if (saveTimer !== null) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      void api.setSessionState(json).catch(() => {
+        // persistence is best-effort
+      });
+    }, 400);
   });
 });
 

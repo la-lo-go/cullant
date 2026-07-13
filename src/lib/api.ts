@@ -191,6 +191,9 @@ export const api = {
   getProjectSetting: (key: string) => invoke<string | null>("get_project_setting", { key }),
   setProjectSetting: (key: string, value: string) =>
     invoke("set_project_setting", { key, value }),
+  // Per-project UI session state (opaque JSON blob; shape owned by the frontend).
+  getSessionState: () => invoke<string | null>("get_session_state"),
+  setSessionState: (value: string) => invoke("set_session_state", { value }),
   getFileMetadata: (fileId: number) =>
     invoke<FileMetadata>("get_file_metadata", { fileId }),
 };

@@ -234,6 +234,8 @@ pub fn run() {
             commands::actions::commit_execute,
             commands::actions::get_project_setting,
             commands::actions::set_project_setting,
+            commands::session::get_session_state,
+            commands::session::set_session_state,
             commands::metadata::get_file_metadata,
         ])
         .run(tauri::generate_context!())

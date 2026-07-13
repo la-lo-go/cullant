@@ -110,19 +110,19 @@
     </section>
 
     <section>
-      <h3>Display</h3>
+      <h3>Session</h3>
       <label class="option">
         <input
           type="checkbox"
-          checked={settings.edgeToEdge}
-          onchange={(e) => settings.setEdgeToEdge(e.currentTarget.checked)}
+          checked={settings.rememberSession}
+          onchange={(e) => settings.setRememberSession(e.currentTarget.checked)}
         />
         <span class="text">
-          <span class="label">Edge-to-edge fullscreen</span>
+          <span class="label">Remember per project</span>
           <span class="description">
-            Draw under the status bar, navigation bar and display cutout (mainly on
-            Android); toolbars keep a safe margin so every control stays reachable.
-            Off: the whole app stays clear of the system bars.
+            Reopen each project where you left off: restore the last sort order,
+            media tab, active filters and focused photo. Off: every project opens
+            with the defaults.
           </span>
         </span>
       </label>
