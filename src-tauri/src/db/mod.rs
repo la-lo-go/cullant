@@ -204,18 +204,17 @@ mod tests {
         // A write via the writer thread, then a read via the pool must observe
         // it (call returns only once the write has committed to the WAL).
         db.call(|conn| {
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('k', 'v1')",
-                [],
-            )?;
+            conn.execute("INSERT INTO settings (key, value) VALUES ('k', 'v1')", [])?;
             Ok(())
         })
         .unwrap();
         let v: String = db
             .call_read(|conn| {
-                Ok(conn.query_row("SELECT value FROM settings WHERE key = 'k'", [], |r| {
-                    r.get(0)
-                })?)
+                Ok(
+                    conn.query_row("SELECT value FROM settings WHERE key = 'k'", [], |r| {
+                        r.get(0)
+                    })?,
+                )
             })
             .unwrap();
         assert_eq!(v, "v1");
@@ -233,9 +232,11 @@ mod tests {
         // Value is unchanged.
         let still: String = db
             .call_read(|conn| {
-                Ok(conn.query_row("SELECT value FROM settings WHERE key = 'k'", [], |r| {
-                    r.get(0)
-                })?)
+                Ok(
+                    conn.query_row("SELECT value FROM settings WHERE key = 'k'", [], |r| {
+                        r.get(0)
+                    })?,
+                )
             })
             .unwrap();
         assert_eq!(still, "v1");
