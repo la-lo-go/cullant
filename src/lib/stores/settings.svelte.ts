@@ -5,7 +5,6 @@ export type { PreviewMode };
 
 const PREVIEW_MODE_KEY = "cullant.previewMode";
 const PROGRESSIVE_LOUPE_KEY = "cullant.progressiveLoupe";
-const EDGE_TO_EDGE_KEY = "cullant.edgeToEdge";
 const ONBOARDED_PREVIEW_KEY = "cullant.onboardedPreview";
 
 function loadPreviewMode(): PreviewMode {
@@ -44,14 +43,6 @@ class SettingsStore {
   progressiveLoupe = $state<boolean>(loadBool(PROGRESSIVE_LOUPE_KEY, true));
 
   /**
-   * Edge-to-edge fullscreen (mainly Android). On: the app draws under the
-   * status/navigation bars and display cutout, and only the controls that
-   * touch a screen edge are padded by the safe-area insets. Off: the whole
-   * app is inset so nothing ever sits under the system bars.
-   */
-  edgeToEdge = $state<boolean>(loadBool(EDGE_TO_EDGE_KEY, false));
-
-  /**
    * Whether the one-time preview-mode intro has been shown and confirmed.
    * Gates the first interactive project open so the welcome dialog appears
    * exactly once, ever.
@@ -66,11 +57,6 @@ class SettingsStore {
   setProgressiveLoupe(on: boolean) {
     this.progressiveLoupe = on;
     save(PROGRESSIVE_LOUPE_KEY, on);
-  }
-
-  setEdgeToEdge(on: boolean) {
-    this.edgeToEdge = on;
-    save(EDGE_TO_EDGE_KEY, on);
   }
 
   setOnboardedPreview(on: boolean) {

@@ -215,7 +215,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<main class="app" class:edge={settings.edgeToEdge}>
+<main class="app">
   {#if catalog.project}
     <header class="toolbar">
       <span class="path" title={catalog.project.rootPath}>
@@ -511,7 +511,7 @@
        landscape rotation moves the cutout inset to the left or right side.
        Always 0 on desktop. Fixed-position overlays (dialog backdrops) consume
        these directly; everything in normal flow consumes the --safe-* set that
-       .app derives from them based on the edge-to-edge setting. */
+       .app derives from them (all 0 — the app is always fully inset). */
     --inset-top: env(safe-area-inset-top, 0px);
     --inset-right: env(safe-area-inset-right, 0px);
     --inset-bottom: env(safe-area-inset-bottom, 0px);
@@ -558,24 +558,14 @@
     height: 100vh;
     height: 100dvh; /* track the real viewport across Android rotations */
     box-sizing: border-box;
-    /* Edge-to-edge OFF (default): inset the whole app so nothing ever sits
-       under the system bars or cutout, and zero out the --safe-* vars that
-       edge-hugging children (toolbar, touch bar, filmstrip…) consume. */
+    /* Inset the whole app so nothing ever sits under the system bars or cutout,
+       and zero out the --safe-* vars that edge-hugging children (toolbar, touch
+       bar, filmstrip…) consume. */
     padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
     --safe-top: 0px;
     --safe-right: 0px;
     --safe-bottom: 0px;
     --safe-left: 0px;
-  }
-
-  /* Edge-to-edge ON: backgrounds bleed under the system bars; each control
-     that touches a screen edge pads itself by --safe-* to stay reachable. */
-  .app.edge {
-    padding: 0;
-    --safe-top: var(--inset-top);
-    --safe-right: var(--inset-right);
-    --safe-bottom: var(--inset-bottom);
-    --safe-left: var(--inset-left);
   }
 
   .toolbar {
