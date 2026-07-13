@@ -430,7 +430,10 @@
         </button>
         <button class="ghlink" onclick={() => openUrl(REPO_URL)}>
           <FolderGit2 size={15} />
-          <span>Cullant is free &amp; open source. Say hi or contribute on GitHub!</span>
+          <span class="ghlink-full"
+            >Cullant is free &amp; open source. Say hi or contribute on GitHub!</span
+          >
+          <span class="ghlink-short">Free &amp; open source · GitHub</span>
         </button>
       </footer>
     </div>
@@ -919,5 +922,26 @@
 
   button.ghlink:hover {
     color: var(--accent);
+  }
+
+  /* Full label on desktop; a compact label on narrow screens so it never
+     overflows or wraps awkwardly. */
+  button.ghlink .ghlink-short {
+    display: none;
+  }
+
+  @media (max-width: 600px) {
+    button.ghlink {
+      text-align: center;
+      text-wrap: balance;
+    }
+
+    button.ghlink .ghlink-full {
+      display: none;
+    }
+
+    button.ghlink .ghlink-short {
+      display: inline;
+    }
   }
 </style>
