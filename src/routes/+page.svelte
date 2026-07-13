@@ -24,6 +24,7 @@
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import PreviewModeIntro from "$lib/components/PreviewModeIntro.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
+  import TitleBar from "$lib/components/TitleBar.svelte";
   import type { PreviewMode } from "$lib/api";
   import { api } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
@@ -145,6 +146,15 @@
     return () => window.removeEventListener("popstate", onPopState);
   });
 
+  // Custom window chrome is Windows-only: macOS/Linux keep native decorations
+  // (restored in the Rust setup hook), and touch/mobile never gets a titlebar.
+  // Detected via userAgent (consistent with the rest of the app) plus a
+  // coarse-pointer check so Windows tablets in touch mode stay native.
+  const showTitleBar =
+    navigator.userAgent.includes("Windows") &&
+    !navigator.userAgent.includes("Android") &&
+    !window.matchMedia("(pointer: coarse)").matches;
+
   // Whether the open project has any subfolders — used to hide the folder
   // tree toggle when there's nothing to scope by.
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
@@ -216,6 +226,9 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <main class="app" class:edge={settings.edgeToEdge}>
+  {#if showTitleBar}
+    <TitleBar />
+  {/if}
   {#if catalog.project}
     <header class="toolbar">
       <span class="path" title={catalog.project.rootPath}>
