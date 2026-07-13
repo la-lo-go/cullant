@@ -7,6 +7,9 @@
          display cutouts, which is what makes env(safe-area-inset-*) report real
          values instead of 0. The app then pads itself via those insets. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- Tint the system status/navigation bars to match the toolbar (--surface-2)
+         so the top inset strip reads as one continuous colour with the toolbar. -->
+    <meta name="theme-color" content="#2c3334" />
     <title>Tauri + SvelteKit + Typescript App</title>
     %sveltekit.head%
   </head>

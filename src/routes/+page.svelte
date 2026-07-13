@@ -559,9 +559,11 @@
     height: 100dvh; /* track the real viewport across Android rotations */
     box-sizing: border-box;
     /* Inset the whole app so nothing ever sits under the system bars or cutout,
-       and zero out the --safe-* vars that edge-hugging children (toolbar, touch
-       bar, filmstrip…) consume. */
-    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+       and zero out the --safe-* vars that edge-hugging children (touch bar,
+       filmstrip…) consume. The TOP inset is deliberately left off here: the
+       toolbar (or the home screen) pads itself by --inset-top instead, so the
+       toolbar's surface colour bleeds up into the status-bar strip. */
+    padding: 0 var(--inset-right) var(--inset-bottom) var(--inset-left);
     --safe-top: 0px;
     --safe-right: 0px;
     --safe-bottom: 0px;
@@ -572,7 +574,10 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: calc(4px + var(--safe-top)) calc(10px + var(--safe-right)) 4px
+    /* The toolbar paints the top status-bar strip: its --surface-2 background
+       bleeds up under the system status bar (the top inset is not applied on
+       .app), so the strip reads as one continuous colour with the toolbar. */
+    padding: calc(4px + var(--inset-top)) calc(10px + var(--safe-right)) 4px
       calc(10px + var(--safe-left));
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
@@ -789,7 +794,9 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+    /* No toolbar on the welcome screen, so the home pane itself pads the top
+       inset (the toolbar does this everywhere else — see .toolbar). */
+    padding: var(--inset-top) var(--safe-right) 0 var(--safe-left);
   }
 
   .home.centered {
