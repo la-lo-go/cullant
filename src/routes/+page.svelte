@@ -43,6 +43,7 @@
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
   import Filter from "@lucide/svelte/icons/filter";
   import SettingsIcon from "@lucide/svelte/icons/settings";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -50,6 +51,39 @@
 
   // Desktop opt-in for the touch action bar (always shown on touch devices).
   let touchBarVisible = $state(false);
+
+  // Screen-orientation lock (a mobile-only affordance). Available only where the
+  // Screen Orientation API exposes lock() — which the TS DOM lib doesn't declare,
+  // so we narrow it locally. The button is hidden where it's unavailable, and any
+  // rejection (desktop, non-fullscreen, unsupported) is swallowed so a failed
+  // lock never surfaces an error. `orientationLocked` tracks the last lock we
+  // applied so the button can reflect and toggle the current axis.
+  function lockableOrientation(): { lock(o: string): Promise<void>; type: string } | null {
+    if (typeof screen === "undefined") return null;
+    const o = screen.orientation as unknown as
+      | { lock?: (o: string) => Promise<void>; type?: string }
+      | undefined;
+    return o && typeof o.lock === "function"
+      ? (o as { lock(o: string): Promise<void>; type: string })
+      : null;
+  }
+
+  const canRotate = lockableOrientation() !== null;
+  let orientationLocked = $state<"portrait" | "landscape" | null>(null);
+
+  async function toggleOrientation() {
+    const o = lockableOrientation();
+    if (!o) return;
+    // Flip relative to whichever axis is currently shown (locked or natural).
+    const current = orientationLocked ?? (o.type ?? "").split("-")[0];
+    const next = current === "landscape" ? "portrait" : "landscape";
+    try {
+      await o.lock(next);
+      orientationLocked = next;
+    } catch {
+      // Platform rejected the lock — leave the tracked state untouched.
+    }
+  }
   let showKeybindings = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
@@ -292,6 +326,17 @@
       >
         <PanelBottom size={14} />
       </button>
+      {#if canRotate}
+        <button
+          class="rotate-toggle"
+          class:active={orientationLocked === "landscape"}
+          title="Rotate screen (lock landscape/portrait)"
+          aria-label="Rotate screen"
+          onclick={blurring(() => void toggleOrientation())}
+        >
+          <RotateCw size={14} />
+        </button>
+      {/if}
       {#if hasSubfolders && view.mode === "grid"}
         <button
           class:active={session.folderTreeVisible}
@@ -584,11 +629,21 @@
     flex: none;
   }
 
+  /* The rotate-screen button is a touch-only affordance: hidden on precise
+     pointers (desktop), shown only on coarse pointers. */
+  .toolbar .rotate-toggle {
+    display: none;
+  }
+
   /* On touch devices the action bar is always visible, so its toggle is
-     redundant — hide it there. */
+     redundant — hide it there. The rotate button, conversely, only makes sense
+     on touch, so it appears here. */
   @media (pointer: coarse) {
     .toolbar .touchbar-toggle {
       display: none;
+    }
+    .toolbar .rotate-toggle {
+      display: inline-flex;
     }
   }
 
