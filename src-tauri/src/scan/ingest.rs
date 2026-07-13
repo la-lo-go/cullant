@@ -18,6 +18,7 @@
 //!   (temp-file+rename writes, idempotent upserts).
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -35,6 +36,12 @@ use crate::thumbs::{self, SourceMeta, ThumbKind, PREVIEW_LONG_EDGE, THUMB_LONG_E
 /// Files handled per parallel burst; also the metadata write-batch size.
 /// Smaller on Android to bound the number of in-flight decode buffers.
 const CHUNK: usize = if cfg!(target_os = "android") { 8 } else { 32 };
+
+/// Minimum gap between tier-1 progress emits. Progress is now counted per file
+/// (inside the parallel burst) instead of once per chunk, so the bar advances
+/// one-by-one; this throttle coalesces the emits so a fast decode can't flood
+/// IPC. The final item always emits regardless.
+const PROGRESS_THROTTLE_MS: u64 = 30;
 
 /// How 2560px previews are pregenerated. Chosen in the frontend settings and
 /// passed with open/rescan; `Background` is the default (matches the frontend
@@ -143,7 +150,9 @@ pub fn run_ingest_pass(
         store,
         root,
         mode,
-        &mut |done, total| {
+        // Called from the parallel ingest burst, so it must be Sync; `app.emit`
+        // already is.
+        &|done, total| {
             let _ = app.emit("thumbs:progress", Progress { done, total });
         },
         &mut |meta_updated, thumb_total| {
@@ -169,7 +178,9 @@ pub fn run_ingest_inner(
     store: &dyn ProjectStore,
     root: &Path,
     mode: PreviewMode,
-    thumb_progress: &mut dyn FnMut(usize, usize),
+    // Sync (not FnMut): tier-1 progress is now reported per file from inside the
+    // parallel burst, so this may be called concurrently from rayon workers.
+    thumb_progress: &(dyn Fn(usize, usize) + Sync),
     tier1_done: &mut dyn FnMut(usize, usize),
     preview_progress: &mut dyn FnMut(usize, usize),
 ) -> AppResult<()> {
@@ -237,14 +248,36 @@ pub fn run_ingest_inner(
     thumb_progress(0, total);
 
     let mut meta_updated = 0usize;
-    let mut done = 0usize;
+    // Per-file progress counter, shared across the parallel burst. Emitting one
+    // event per file (throttled) makes the preload bar advance one-by-one
+    // instead of jumping a whole chunk at a time.
+    let done = AtomicUsize::new(0);
+    let last_emit_ms = AtomicU64::new(0);
     for chunk in tier1.chunks(CHUNK) {
         // Decode + render in parallel, then flush this chunk's metadata and
         // thumbnail rows each in a single transaction (instead of one commit
         // per file per artifact).
         let outputs: Vec<IngestOutput> = chunk
             .par_iter()
-            .map(|p| ingest_file(db, store, root, p, previews_inline))
+            .map(|p| {
+                let out = ingest_file(db, store, root, p, previews_inline);
+                // Advance the shared counter and emit — throttled so a fast
+                // decode can't flood IPC, but the last file always reports so
+                // the bar reaches `total / total`.
+                let d = done.fetch_add(1, Ordering::Relaxed) + 1;
+                let now = started.elapsed().as_millis() as u64;
+                let emit = d == total || {
+                    let prev = last_emit_ms.load(Ordering::Relaxed);
+                    now.saturating_sub(prev) >= PROGRESS_THROTTLE_MS
+                        && last_emit_ms
+                            .compare_exchange(prev, now, Ordering::Relaxed, Ordering::Relaxed)
+                            .is_ok()
+                };
+                if emit {
+                    thumb_progress(done.load(Ordering::Relaxed), total);
+                }
+                out
+            })
             .collect();
         let mut extracted = Vec::with_capacity(outputs.len());
         let mut rows = Vec::with_capacity(outputs.len());
@@ -257,8 +290,6 @@ pub fn run_ingest_inner(
         meta_updated += extracted.len();
         write_metadata_batch(db, extracted)?;
         thumbs::write_thumb_rows(db, rows)?;
-        done += chunk.len();
-        thumb_progress(done, total);
     }
     tracing::info!(
         "ingest tier 1: {total} files (meta for {meta_updated}) in {:.1?}",
@@ -578,7 +609,7 @@ mod tests {
         let db = project_with_jpegs(root, 3);
         let store = LocalFsStore::new(root);
 
-        let mut thumb_last = (9, 9);
+        let thumb_last = std::sync::Mutex::new((9, 9));
         let mut gate = None;
         let mut preview_last = None;
         run_ingest_inner(
@@ -586,13 +617,13 @@ mod tests {
             &store,
             root,
             PreviewMode::All,
-            &mut |d, t| thumb_last = (d, t),
+            &|d, t| *thumb_last.lock().unwrap() = (d, t),
             &mut |meta, total| gate = Some((meta, total)),
             &mut |d, t| preview_last = Some((d, t)),
         )
         .unwrap();
 
-        assert_eq!(thumb_last, (3, 3));
+        assert_eq!(*thumb_last.lock().unwrap(), (3, 3));
         assert_eq!(gate, Some((3, 3)));
         // Fresh import: previews were rendered inline, so no tier 2.
         assert_eq!(preview_last, None);
@@ -612,18 +643,18 @@ mod tests {
         assert_eq!(missing, 0);
 
         // Everything fresh: a second pass finds nothing to do.
-        let mut thumb_last2 = (9, 9);
+        let thumb_last2 = std::sync::Mutex::new((9, 9));
         run_ingest_inner(
             &db,
             &store,
             root,
             PreviewMode::All,
-            &mut |d, t| thumb_last2 = (d, t),
+            &|d, t| *thumb_last2.lock().unwrap() = (d, t),
             &mut |_, _| {},
             &mut |_, _| {},
         )
         .unwrap();
-        assert_eq!(thumb_last2, (0, 0));
+        assert_eq!(*thumb_last2.lock().unwrap(), (0, 0));
     }
 
     #[test]
@@ -639,7 +670,7 @@ mod tests {
             &store,
             root,
             PreviewMode::Window,
-            &mut |_, _| {},
+            &|_, _| {},
             &mut |_, _| {},
             &mut |_, _| {},
         )
@@ -656,7 +687,7 @@ mod tests {
             &store,
             root,
             PreviewMode::All,
-            &mut |_, _| {},
+            &|_, _| {},
             &mut |meta, total| gate = Some((meta, total)),
             &mut |d, t| preview_last = Some((d, t)),
         )
@@ -695,7 +726,7 @@ mod tests {
             &store,
             root,
             PreviewMode::All,
-            &mut |_, _| {},
+            &|_, _| {},
             &mut |_, _| {},
             &mut |_, _| {},
         )
@@ -751,7 +782,7 @@ mod tests {
             &store,
             root,
             PreviewMode::All,
-            &mut |_, _| {},
+            &|_, _| {},
             &mut |_, total| gate = Some(total),
             &mut |_, _| {},
         )
@@ -776,7 +807,7 @@ mod tests {
             &store,
             root,
             PreviewMode::All,
-            &mut |_, _| {},
+            &|_, _| {},
             &mut |_, total| gate2 = Some(total),
             &mut |_, _| {},
         )
@@ -807,7 +838,7 @@ mod tests {
             &store,
             root,
             PreviewMode::All,
-            &mut |_, _| {},
+            &|_, _| {},
             &mut |_, total| gate = Some(total),
             &mut |d, t| preview_last = Some((d, t)),
         )
@@ -846,7 +877,7 @@ mod tests {
             &store,
             root,
             PreviewMode::Background,
-            &mut |_, _| {},
+            &|_, _| {},
             &mut |meta, total| {
                 // At gate time the previews must NOT exist yet.
                 gate = Some((meta, total, thumb_count(&db, 1)));
