@@ -70,8 +70,8 @@ pub mod bench {
             store,
             root,
             mode,
+            &|_, _| {},
             &mut |_, total| tier1 = total,
-            &mut |_, _| {},
             &mut |done, _| previews = done,
         )
         .expect("ingest failed");
