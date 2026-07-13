@@ -817,10 +817,16 @@
     flex: 1;
   }
 
-  /* Peek tab shown at the left edge when the folder tree is collapsed. */
+  /* Peek tab shown at the left edge when the folder tree is collapsed. It
+     floats over the grid (absolute) instead of sitting in the flex row, so on
+     narrow screens it never steals a thumbnail column. Its hit area is tiny, so
+     the grid underneath still scrolls everywhere else. */
   .tree-peek {
-    flex: none;
-    align-self: center;
+    position: absolute;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+    z-index: 15;
     display: inline-flex;
     align-items: center;
     justify-content: center;
