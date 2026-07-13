@@ -163,6 +163,19 @@ pub fn do_open_project(
     if !root.is_dir() {
         return Err(AppError::Other(format!("not a directory: {path}")));
     }
+    // Reject Cullant's own sidecar dir: opening `<project>/.cullant` (or anything
+    // nested inside it) as a project is nonsense — that folder holds the DB and
+    // thumbnail cache, not the user's photos.
+    if root
+        .components()
+        .any(|c| c.as_os_str().eq_ignore_ascii_case(".cullant"))
+    {
+        return Err(AppError::Other(
+            "This is Cullant's own data folder (.cullant), not a photo folder. \
+             Pick the folder that contains your photos instead."
+                .to_string(),
+        ));
+    }
 
     let db = Arc::new(Db::open(&root)?);
     let db_path = db.path().to_string_lossy().into_owned();

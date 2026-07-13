@@ -168,6 +168,14 @@
    * confirms the choice and then opens. Afterwards, open directly.
    */
   async function openProject(path: string) {
+    // Reject Cullant's own sidecar dir up front (the backend guards it too, so
+    // the CULLANT_OPEN_PROJECT auto-open hook is covered regardless).
+    if (/(^|[\\/])\.cullant([\\/]|$)/i.test(path)) {
+      catalog.error =
+        "This is Cullant's own data folder (.cullant), not a photo folder. " +
+        "Pick the folder that contains your photos instead.";
+      return;
+    }
     if (!settings.onboardedPreview) {
       introPath = path;
       return;
