@@ -21,11 +21,31 @@
   // Inter-cell gap: the pitch (CELL) still tiles edge-to-edge for all hit-test
   // and marquee math, but each cell's visual box is inset by GAP so adjacent
   // focus/selection outlines never touch. Kept out of the pitch math on purpose.
-  const GAP = 10;
+  const GAP = 6;
+  // Selected cells shrink a touch further — extra breathing room so a block of
+  // adjacent selections never reads as one solid blue mass. Computed as a
+  // plain extra inset (added to the existing GAP/2 offset, subtracted twice
+  // from the width/height) rather than a CSS `scale`: composing `scale` with
+  // the cell's own `transform: translate(...)` positioning read as selected
+  // cells overlapping their neighbors instead of shrinking cleanly in place.
+  const SELECTED_INSET = 5;
 
   // A small pill (bottom-right, over the cells) while background previews are
   // still generating for the current view.
   const loadingPreviews = $derived(catalog.previewProgress.total > 0);
+
+  /** Whether an item's DISPLAYED aspect (after EXIF rotation) is portrait. Same
+   *  swap logic as the orientation filter in session.svelte.ts: width/height
+   *  are un-rotated sensor dims, and EXIF orientation 5-8 means the shown image
+   *  is turned 90°. Portrait cells skip the cover-crop (see .frame.portrait)
+   *  so a vertical photo isn't cropped to fill the square cell. */
+  function isPortrait(item: ItemLite): boolean {
+    if (item.width == null || item.height == null) return false;
+    const rotated = item.orientation != null && item.orientation >= 5 && item.orientation <= 8;
+    const w = rotated ? item.height : item.width;
+    const h = rotated ? item.width : item.height;
+    return h > w;
+  }
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -62,7 +82,7 @@
 
   // Cell pitch (thumbnail + label + gap). Smaller on narrow viewports so phones
   // show several columns instead of one huge cell.
-  const BASE_CELL = $derived(width > 0 && width < 520 ? 120 : 200);
+  const BASE_CELL = $derived(width > 0 && width < 520 ? 116 : 188);
   // Never collapse below two columns: on very narrow viewports keep 2 columns
   // and shrink the cells to fit instead. Wider viewports keep the base pitch.
   const MIN_COLS = 2;
@@ -85,10 +105,18 @@
     session.gridCols = cols;
   });
 
-  // Keep the focused cell in view when keyboard navigation moves it.
+  // Keep the focused cell in view: on keyboard navigation, and once on mount
+  // (e.g. returning from the loupe/compare, so the grid lands back on the row
+  // of whatever was shown there). Skipped when nothing is focused (-1) — a
+  // selection in progress deliberately drops focus (see beginMarquee), and
+  // scrolling to a stale/negative row here would yank the view away from the
+  // selection the user is mid-drag on. Also skipped until `height` reports a
+  // real measurement (bind:clientHeight arrives via ResizeObserver, a tick
+  // after mount) — computing against the stale 0 would scroll to the wrong
+  // spot on the very first run, right after VirtualGrid remounts.
   $effect(() => {
+    if (!viewport || session.focusedIndex === -1 || height === 0) return;
     const row = Math.floor(session.focusedIndex / cols);
-    if (!viewport) return;
     const top = MARGIN_Y + row * CELL;
     const bottom = top + CELL;
     if (top < viewport.scrollTop) {
@@ -187,7 +215,14 @@
         lastViewY: viewY,
       };
       viewport!.setPointerCapture(e.pointerId);
-      if (drag.active) applyMarquee(x, y);
+      if (drag.active) {
+        // A genuine multi-select drag starting: drop any single focused cell
+        // (it may be scrolled off-screen, and the scroll-into-view effect
+        // would otherwise yank the view there mid-drag) rather than tracking
+        // a "focus" concept that no longer applies to a marquee.
+        session.focusedIndex = -1;
+        applyMarquee(x, y);
+      }
     };
 
     if (e.pointerType === "touch") {
@@ -246,6 +281,9 @@
         return;
       }
       drag.active = true;
+      // Same reasoning as beginMarquee: a click-then-drag past the threshold
+      // just became a genuine marquee, so drop the single focused cell.
+      session.focusedIndex = -1;
     }
     drag.lastX = x;
     drag.lastViewY = viewY;
@@ -353,15 +391,17 @@
   >
   <div class="canvas" bind:this={canvasEl} style="height:{totalRows * CELL + MARGIN_Y * 2}px">
     {#each visible as v (v.item.id)}
+      {@const selected = session.selectedIds.has(v.item.id)}
+      {@const inset = selected ? SELECTED_INSET : 0}
       <div
         class="cell"
         class:focused={v.index === session.focusedIndex}
-        class:selected={session.selectedIds.has(v.item.id)}
-        style="transform: translate({v.x + GAP / 2}px, {v.y + GAP / 2}px); width:{CELL - GAP}px; height:{CELL - GAP}px"
+        class:selected
+        style="transform: translate({v.x + GAP / 2 + inset}px, {v.y + GAP / 2 + inset}px); width:{CELL - GAP - inset * 2}px; height:{CELL - GAP - inset * 2}px"
         role="button"
         tabindex="-1"
       >
-        <div class="frame" class:labeled={v.item.label} style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}>
+        <div class="frame" class:labeled={v.item.label} class:portrait={isPortrait(v.item)} style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}>
           {#if v.item.kind === 2}
             {#if posterFailed.has(v.item.id)}
               <!-- No pregenerated poster (ffmpeg absent / undecodable): fall
@@ -508,6 +548,15 @@
     gap: 4px;
     border-radius: 8px;
     user-select: none; /* marquee drags must not select label text */
+    /* Animates the selection shrink (width/height/position all move together
+       by SELECTED_INSET). Harmless elsewhere: a mounted cell's own x/y is
+       invariant under scrolling (only which cells are visible changes), so
+       this never fires on scroll — only on selection toggling, or a column
+       count change (screen rotation), where the slide is a nice touch too. */
+    transition:
+      transform 100ms ease-out,
+      width 100ms ease-out,
+      height 100ms ease-out;
   }
 
   .cell.focused {
@@ -525,7 +574,10 @@
     position: relative;
     flex: 1;
     min-height: 0;
-    background: var(--hover);
+    /* No fill: a portrait photo's letterbox bars (object-fit: contain) and the
+       gap while a thumbnail is still decoding just show the grid's own dark
+       background instead of a distinct gray box. */
+    background: transparent;
     border-radius: 6px;
     overflow: hidden;
     display: flex;
@@ -560,6 +612,14 @@
     height: 100%;
     object-fit: cover;
     user-select: none;
+  }
+
+  /* Portrait photos: cropping to fill the square cell hides most of the frame
+     (a tall photo squeezed into a square loses its top/bottom). Show the whole
+     photo letterboxed instead, pillarboxed against the cell's own background. */
+  .frame.portrait img,
+  .frame.portrait video {
+    object-fit: contain;
   }
 
   /* Shown instead of a thumbnail when the source couldn't be decoded. */

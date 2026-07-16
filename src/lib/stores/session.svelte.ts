@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { untrack } from "svelte";
 import {
   api,
   type CullState,
@@ -12,6 +13,7 @@ import {
 import { catalog } from "./catalog.svelte";
 import { settings } from "./settings.svelte";
 import { tags } from "./tags.svelte";
+import { view } from "./view.svelte";
 
 export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
 /** Photo file-type composition filter (photos tab only). */
@@ -464,6 +466,17 @@ class SessionStore {
     this.selectionAnchor = this.focusedIndex;
   }
 
+  /** Entering the loupe/compare view with nothing focused would otherwise show
+   *  an empty pane — default to the first item (compare then naturally shows
+   *  the first two: `right` derives as `focusedIndex + 1` when unpinned). A
+   *  no-op when something is already focused. */
+  ensureFocus() {
+    if (this.focusedIndex === -1 && this.filtered.length > 0) {
+      this.focusedIndex = 0;
+      this.selectionAnchor = 0;
+    }
+  }
+
   // --- multi-selection (Windows-style) ---
 
   /** Plain click: focus only, drop any selection. */
@@ -683,6 +696,16 @@ $effect.root(() => {
   $effect(() => {
     void catalog.project;
     session.folderFilter = null;
+  });
+
+  // Any view-mode transition (grid <-> loupe/compare, either direction) drops
+  // the multi-selection — a marquee selection is a grid-only concept, and
+  // stale ids left selected while in the loupe served no purpose. Focus is
+  // deliberately left untouched, so returning to the grid still scrolls back
+  // to the row of whatever was shown in the loupe/compare.
+  $effect(() => {
+    void view.mode;
+    untrack(() => session.clearSelection());
   });
 
   // Apply a pending focus restored from a saved session, once the matching item

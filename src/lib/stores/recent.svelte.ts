@@ -9,11 +9,6 @@ class RecentStore {
     this.loaded = true;
   }
 
-  async remove(path: string) {
-    await api.removeRecentProject(path);
-    this.list = this.list.filter((p) => p.path !== path);
-  }
-
   /** Forget the project and delete Cullant's data (DB + thumb cache) for it.
    *  The user's photos are never touched. */
   async deleteProject(path: string) {

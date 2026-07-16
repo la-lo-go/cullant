@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::params;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db::{migrations, Db};
 use crate::error::{AppError, AppResult};
@@ -88,22 +88,51 @@ fn unix_now() -> i64 {
 
 /// Kick off scan + the fused ingest pass (metadata + thumbnails + previews)
 /// on a background thread; the UI is notified through scan:progress /
-/// scan:done / metadata:done / thumbs:progress / thumbs:done /
+/// scan:done / scan:empty / metadata:done / thumbs:progress / thumbs:done /
 /// previews:progress events.
+///
+/// `initial_open_id` is `Some(identifier)` (the desktop path or Android SAF
+/// tree URI used by the recent-projects list) only when this scan is the
+/// first one right after opening a project — never on a plain rescan. When
+/// set and the scan finds zero recognized photos/videos, the just-opened
+/// project is rolled back entirely (closed, forgotten from recents, its
+/// freshly-created `.cullant` sidecar removed) rather than left open on an
+/// empty grid, and `scan:empty` fires instead of running the ingest pass.
 fn spawn_scan(
     app: AppHandle,
     db: Arc<Db>,
     store: Arc<dyn ProjectStore>,
     root: PathBuf,
     mode: PreviewMode,
+    initial_open_id: Option<String>,
 ) {
     std::thread::Builder::new()
         .name("scanner".into())
         .spawn(move || {
-            if let Err(e) = scan::scan_project(&app, &db, store.as_ref()) {
-                tracing::error!("scan failed: {e}");
-                let _ = app.emit("scan:error", e.to_string());
-                return;
+            let done = match scan::scan_project(&app, &db, store.as_ref()) {
+                Ok(done) => done,
+                Err(e) => {
+                    tracing::error!("scan failed: {e}");
+                    let _ = app.emit("scan:error", e.to_string());
+                    return;
+                }
+            };
+            if let Some(id) = initial_open_id {
+                if done.file_count == 0 {
+                    tracing::info!("opened folder has no recognized photos/videos: {id}");
+                    // Only close if this scan's project is still the active one
+                    // (guards a race with the user closing/opening something
+                    // else while an empty folder's near-instant scan ran).
+                    let state = app.state::<AppState>();
+                    let mut guard = state.project.lock().unwrap();
+                    if guard.as_ref().is_some_and(|p| p.root == root) {
+                        *guard = None;
+                    }
+                    drop(guard);
+                    let _ = crate::commands::recent::delete_project_data(app.clone(), id);
+                    let _ = app.emit("scan:empty", ());
+                    return;
+                }
             }
             if let Err(e) = scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &root, mode) {
                 tracing::error!("ingest pass failed: {e}");
@@ -171,8 +200,8 @@ pub fn do_open_project(
         .any(|c| c.as_os_str().eq_ignore_ascii_case(".cullant"))
     {
         return Err(AppError::Other(
-            "This is Cullant's own data folder (.cullant), not a photo folder. \
-             Pick the folder that contains your photos instead."
+            "This is Cullant's own data folder (.cullant), not a photo or video folder. \
+             Pick the folder that contains your photos or videos instead."
                 .to_string(),
         ));
     }
@@ -207,7 +236,7 @@ pub fn do_open_project(
     tracing::info!("opened project at {root_str}");
     crate::commands::recent::record_opened(app, &root_str);
 
-    spawn_scan(app.clone(), db, store, root, mode);
+    spawn_scan(app.clone(), db, store, root, mode, Some(root_str.clone()));
 
     Ok(ProjectInfo {
         display_name: project_display_name(&root_str),
@@ -295,7 +324,14 @@ fn open_saf_project(
     tracing::info!("opened SAF project {tree_uri}");
     crate::commands::recent::record_opened(app, tree_uri);
 
-    spawn_scan(app.clone(), db, store, base, mode);
+    spawn_scan(
+        app.clone(),
+        db,
+        store,
+        base,
+        mode,
+        Some(tree_uri.to_string()),
+    );
 
     Ok(ProjectInfo {
         display_name: project_display_name(tree_uri),
@@ -351,7 +387,7 @@ pub fn rescan_project(
             project.root.clone(),
         )
     };
-    spawn_scan(app, db, store, root, preview_mode.unwrap_or_default());
+    spawn_scan(app, db, store, root, preview_mode.unwrap_or_default(), None);
     Ok(())
 }
 

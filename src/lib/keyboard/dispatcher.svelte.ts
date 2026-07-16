@@ -82,9 +82,11 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       view.mode = "grid";
       return;
     case "view.viewer":
+      session.ensureFocus();
       view.mode = "viewer";
       return;
     case "view.compare":
+      session.ensureFocus();
       view.mode = "compare";
       return;
     case "view.back":

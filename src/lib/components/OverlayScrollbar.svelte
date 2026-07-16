@@ -13,6 +13,7 @@
     position,
     controls,
     onSeek,
+    alwaysVisible = false,
   }: {
     orientation: "vertical" | "horizontal";
     /** Visible size of the scroll container along the scroll axis (px). */
@@ -25,10 +26,16 @@
     controls: string;
     /** Scroll the container to the given offset (px, may be un-clamped). */
     onSeek: (position: number) => void;
+    /** Skip the auto-hide-while-idle behavior below — stays visible the whole
+     *  time it's scrollable. The filmstrip/carousel opts into this; every
+     *  other host (folder tree) gets the default auto-hide. */
+    alwaysVisible?: boolean;
   } = $props();
 
   const MIN_THUMB = 24;
   const INSET = 2; // gap between the thumb's ends and the container corners
+  // How long the thumb lingers after the last scroll before fading out.
+  const HIDE_DELAY_MS = 900;
 
   const track = $derived(Math.max(0, viewport - INSET * 2));
   const scrollable = $derived(content > viewport + 1 && track > 0);
@@ -43,6 +50,21 @@
   let dragPointer = -1;
   let dragStart = 0;
   let dragStartScroll = 0;
+
+  // Show the thumb only while actively scrolling (plus a short linger), fading
+  // in/out quickly — a scrollbar sitting on screen at rest reads as clutter.
+  // Always-visible hosts (the filmstrip) skip this and just stay shown.
+  let idleVisible = $state(false);
+  const shown = $derived(alwaysVisible || idleVisible || dragging);
+  $effect(() => {
+    void position;
+    if (alwaysVisible) return;
+    idleVisible = true;
+    const t = setTimeout(() => {
+      idleVisible = false;
+    }, HIDE_DELAY_MS);
+    return () => clearTimeout(t);
+  });
 
   function coord(e: PointerEvent) {
     return orientation === "vertical" ? e.clientY : e.clientX;
@@ -81,6 +103,7 @@
     <div
       class="thumb"
       class:dragging
+      class:shown
       style={orientation === "vertical"
         ? `top:${thumbPos}px; height:${thumbSize}px`
         : `left:${thumbPos}px; width:${thumbSize}px`}
@@ -125,10 +148,17 @@
 
   .thumb {
     position: absolute;
-    pointer-events: auto;
+    pointer-events: none;
     background: rgba(var(--accent-rgb), 0.5);
     border-radius: 8px;
     touch-action: none;
+    opacity: 0;
+    transition: opacity 140ms ease;
+  }
+
+  .thumb.shown {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .vertical .thumb {

@@ -5,7 +5,20 @@
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
 
-  let { item, standalone = false }: { item: ItemLite; standalone?: boolean } = $props();
+  let {
+    item,
+    standalone = false,
+    onPage,
+  }: {
+    item: ItemLite;
+    standalone?: boolean;
+    /** Step to the prev/next photo (swipe / margin-tap paging). Defaults to
+     *  the shared session focus; a standalone (compare) pane that's pinned to
+     *  a fixed photo overrides this to page that pinned photo instead, since
+     *  moving the shared focus wouldn't change what a pinned pane shows. */
+    onPage?: (dir: number) => void;
+  } = $props();
+  const page = $derived(onPage ?? ((dir: number) => session.moveFocus(dir)));
 
   let frame = $state<HTMLDivElement | null>(null);
   let frameW = $state(0);
@@ -237,11 +250,11 @@
   });
 
   // Fit-anchored zoom: magnification is measured RELATIVE to fit (1× = the whole
-  // image = "Fit"). Max magnification reaches 1:1 actual pixels for large photos
-  // (for focus checks), or a 2× detail peek for photos already at/under fit —
-  // never an arbitrary huge factor.
-  const maxMag = $derived(Math.max(2, 1 / (fit || 1)));
-  const maxScale = $derived(Math.min(MAX_SCALE, fit * maxMag));
+  // image = "Fit"). Max zoom always reaches the shared MAX_SCALE ceiling (deep
+  // pixel-peeping well past 1:1 actual pixels for focus checks), with a floor
+  // of 2x fit so a photo too small to ever reach MAX_SCALE naturally still
+  // gets a meaningful detail peek.
+  const maxScale = $derived(Math.max(fit * 2, MAX_SCALE));
 
   const clampToRange = (s: number) => Math.min(maxScale, Math.max(fit, s));
 
@@ -477,7 +490,7 @@
     if (Math.sign(delta) !== Math.sign(wheelAccum)) wheelAccum = 0;
     wheelAccum += delta;
     if (Math.abs(wheelAccum) >= WHEEL_NAV_THRESHOLD) {
-      session.moveFocus(wheelAccum > 0 ? 1 : -1);
+      page(wheelAccum > 0 ? 1 : -1);
       wheelAccum = 0;
     }
   }
@@ -655,13 +668,13 @@
               pageTimer = setTimeout(() => {
                 pageTimer = undefined;
                 lastTapTime = 0;
-                session.moveFocus(dir);
+                page(dir);
               }, DOUBLE_TAP_MS);
             }
           }
         } else if (!z.zoomed && Math.abs(dx) > SWIPE_NAV_THRESHOLD && Math.abs(dx) > Math.abs(dy) * 1.3) {
           // A single-finger horizontal flick in fit view navigates photos.
-          session.moveFocus(dx < 0 ? 1 : -1);
+          page(dx < 0 ? 1 : -1);
         }
       }
 

@@ -2,6 +2,7 @@
   import { session } from "$lib/stores/session.svelte";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { tags } from "$lib/stores/tags.svelte";
+  import { view } from "$lib/stores/view.svelte";
   import { runCommand } from "$lib/keyboard/dispatcher.svelte";
   import type { CommandId } from "$lib/keyboard/keymap";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -80,35 +81,33 @@
   }
 </script>
 
-<div class="touchbar" class:forced={forceShow} class:disabled={!focused} class:hidden>
+<div class="touchbar" class:forced={forceShow} class:disabled={!focused && !hasSelection} class:hidden>
   {#if hasSelection}
     <div class="group select">
-      <button class="btn" aria-label="Clear selection" onclick={act(() => session.clearSelection())}>
+      <button class="btn" title="Clear selection" aria-label="Clear selection" onclick={act(() => session.clearSelection())}>
         <X size={20} />
       </button>
     </div>
   {/if}
-  <div class="group nav">
-    <button class="btn" aria-label="Previous" onclick={act(() => runCommand("nav.prev"))}>
-      <ChevronLeft size={22} />
-    </button>
-    <button class="btn" aria-label="Next" onclick={act(() => runCommand("nav.next"))}>
-      <ChevronRight size={22} />
-    </button>
-  </div>
+  {#if view.mode !== "grid"}
+    <div class="group nav">
+      <button class="btn" title="Previous" aria-label="Previous" onclick={act(() => runCommand("nav.prev"))}>
+        <ChevronLeft size={22} />
+      </button>
+      <button class="btn" title="Next" aria-label="Next" onclick={act(() => runCommand("nav.next"))}>
+        <ChevronRight size={22} />
+      </button>
+    </div>
+  {/if}
 
   <div class="group flags">
-    <button
-      class="btn"
-      class:active-reject={flag === -1}
-      aria-label="Reject"
-      onclick={act(() => runCommand(flag === -1 ? "flag.unflag" : "flag.reject"))}
-    >
-      <Ban size={20} />
+    <button class="btn danger" title="Queue delete" aria-label="Queue delete" onclick={act(() => runCommand("delete.pair"))}>
+      <Trash2 size={20} />
     </button>
     <button
       class="btn"
       class:active-pick={flag === 1}
+      title="Pick"
       aria-label="Pick"
       onclick={act(() => runCommand(flag === 1 ? "flag.unflag" : "flag.pick"))}
     >
@@ -121,6 +120,7 @@
       <button
         class="btn star"
         class:on={rating >= n}
+        title={`Rate ${n}`}
         aria-label={`Rate ${n}`}
         onclick={act(() => rate(n))}
       >
@@ -134,6 +134,7 @@
       <button
         class="btn swatchbtn"
         class:active={labelActive(name)}
+        title={`${name} label`}
         aria-label={`${name} label`}
         style="--c: {color}"
         onclick={act(() => runCommand(labelCommands[name]))}
@@ -149,6 +150,7 @@
         <button
           class="btn tagbtn"
           class:active={tagActive(tag.id)}
+          title={tag.name}
           style="--c: {tag.color ?? '#888'}"
           onclick={act(() => session.toggleTag(tag.id))}
         >
@@ -160,10 +162,16 @@
   {/if}
 
   <div class="group actions">
-    <button class="btn danger" aria-label="Queue delete" onclick={act(() => runCommand("delete.pair"))}>
-      <Trash2 size={20} />
+    <button
+      class="btn"
+      class:active-reject={flag === -1}
+      title="Reject"
+      aria-label="Reject"
+      onclick={act(() => runCommand(flag === -1 ? "flag.unflag" : "flag.reject"))}
+    >
+      <Ban size={20} />
     </button>
-    <button class="btn commit" aria-label="Review & commit" onclick={act(() => runCommand("commit.open"))}>
+    <button class="btn commit" title="Review & commit" aria-label="Review & commit" onclick={act(() => runCommand("commit.open"))}>
       <CheckCheck size={20} />
     </button>
   </div>
@@ -236,7 +244,6 @@
     background: var(--control);
     color: #e8e8e8;
     padding: 0;
-    -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
   }
 

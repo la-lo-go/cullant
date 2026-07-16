@@ -159,3 +159,14 @@ listen<string>("scan:error", (e) => {
   catalog.preloading = false;
   catalog.error = e.payload;
 });
+// The just-opened folder had no recognized photos/videos. The backend already
+// rolled the whole open back (closed the project, forgot it from recents,
+// removed its freshly-created .cullant sidecar) — mirror that here so the app
+// lands back on the welcome screen instead of an empty, confusing grid.
+listen("scan:empty", () => {
+  catalog.scanning = false;
+  catalog.preloading = false;
+  catalog.project = null;
+  catalog.error =
+    "This folder doesn't contain any photos or videos Cullant recognizes. Pick a different folder.";
+});

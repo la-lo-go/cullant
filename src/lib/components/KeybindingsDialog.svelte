@@ -1,11 +1,28 @@
 <script lang="ts">
   import { keymap } from "../keyboard/dispatcher.svelte";
-  import { COMMANDS, DEFAULT_BINDINGS } from "../keyboard/keymap";
+  import { COMMANDS, DEFAULT_BINDINGS, normalizeKey } from "../keyboard/keymap";
 
   let { onclose }: { onclose: () => void } = $props();
 
   function currentKeys(id: (typeof COMMANDS)[number]["id"]): string {
     return (keymap.overrides[id] ?? DEFAULT_BINDINGS[id]).join(", ");
+  }
+
+  // This dialog stops all keydowns from bubbling to the global window
+  // dispatcher (so grid/loupe shortcuts never fire behind it) — which also
+  // means it must capture the rebind key itself instead of relying on
+  // dispatcher.svelte.ts's handleKeydown, which never sees it.
+  function onKeydown(e: KeyboardEvent) {
+    if (keymap.rebinding) {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = normalizeKey(e);
+      if (key !== "escape") keymap.rebind(keymap.rebinding, key);
+      keymap.rebinding = null;
+      return;
+    }
+    e.stopPropagation();
+    if (e.key === "Escape") onclose();
   }
 </script>
 
@@ -18,7 +35,7 @@
   <div
     class="dialog"
     onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
+    onkeydown={onKeydown}
     role="dialog"
     tabindex="-1"
   >

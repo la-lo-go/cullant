@@ -1,11 +1,12 @@
 export type ViewMode = "grid" | "viewer" | "compare";
 
 /**
- * Hard zoom ceiling: 4x of 1:1 pixel scale. The effective MINIMUM is the
- * per-photo "fit" scale (whole image visible), which depends on the viewport
- * and is therefore computed inside ZoomImage, not here.
+ * Hard zoom ceiling: 6x of 1:1 pixel scale (deep pixel-peeping past actual
+ * size). The effective MINIMUM is the per-photo "fit" scale (whole image
+ * visible), which depends on the viewport and is therefore computed inside
+ * ZoomImage, not here.
  */
-export const MAX_SCALE = 4;
+export const MAX_SCALE = 6;
 
 /**
  * Zoom/pan state shared across photos and across viewer/compare: expressed in
@@ -33,6 +34,14 @@ class ViewStore {
   openedFromGridAt = $state(0);
   /** Read-only keyboard cheat-sheet overlay open (toggled by `?`). */
   shortcutsOpen = $state(false);
+  /** Loupe/compare only: hides the top toolbar and the touch action bar so the
+   *  photo gets the whole screen. Reset to false whenever the grid comes back
+   *  (see the effect below) — it has no meaning there and must never linger. */
+  fullscreen = $state(false);
+
+  toggleFullscreen() {
+    this.fullscreen = !this.fullscreen;
+  }
 
   /**
    * Bumped by the keyboard zoom shortcut. The loupe's ZoomImage watches this
@@ -74,3 +83,12 @@ class ViewStore {
 }
 
 export const view = new ViewStore();
+
+$effect.root(() => {
+  // Fullscreen is a loupe/compare-only affordance; back to the grid always
+  // drops it, so the toolbar is never left hidden there and re-entering the
+  // loupe next time starts un-fullscreened by default.
+  $effect(() => {
+    if (view.mode === "grid" && view.fullscreen) view.fullscreen = false;
+  });
+});
