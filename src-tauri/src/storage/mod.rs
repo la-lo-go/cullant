@@ -15,7 +15,7 @@
 //!   - Android: `StorageManager.getStorageVolumes()` (JNI) for mounted state,
 //!     `getDescription()` (friendly name) and `isRemovable()`.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 
 /// Whether a remembered project's folder is reachable, and if not, why.
@@ -31,7 +31,7 @@ pub enum StorageState {
 }
 
 /// Coarse classification of where a project lives, for a UI badge.
-#[derive(Serialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)] // Some variants are only produced once per-OS detail lands.
 pub enum StorageKind {

@@ -10,6 +10,14 @@ use crate::error::{AppError, AppResult};
 pub(crate) struct RecentEntry {
     pub(crate) path: String,
     last_opened: i64,
+    /// Storage kind captured while the volume was connected, so the gallery can
+    /// still show the right badge once it's disconnected — a probe of an absent
+    /// device can't classify it. Absent in older files (defaults to `None`).
+    #[serde(default)]
+    kind: Option<crate::storage::StorageKind>,
+    /// Friendly volume name captured while connected (same rationale).
+    #[serde(default)]
+    volume_name: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -68,6 +76,9 @@ fn save_recent<R: Runtime>(app: &AppHandle<R>, list: &[RecentEntry]) {
 /// CULLANT_OPEN_PROJECT startup hook — best-effort, errors are swallowed so a
 /// broken app-data dir never blocks opening a project.
 pub fn record_opened<R: Runtime>(app: &AppHandle<R>, path: &str) {
+    // The project is connected right now, so capture its storage kind + friendly
+    // name to fall back on when it's later disconnected.
+    let info = crate::storage::probe(app, path);
     let mut list = load_recent(app);
     list.retain(|e| e.path != path);
     list.insert(
@@ -75,6 +86,8 @@ pub fn record_opened<R: Runtime>(app: &AppHandle<R>, path: &str) {
         RecentEntry {
             path: path.to_string(),
             last_opened: unix_now(),
+            kind: Some(info.kind),
+            volume_name: info.volume_name,
         },
     );
     list.truncate(MAX_RECENT);
@@ -88,7 +101,18 @@ pub fn list_recent_projects(app: AppHandle) -> Vec<RecentProject> {
     load_recent(&app)
         .into_iter()
         .map(|e| {
-            let storage = crate::storage::probe(&app, &e.path);
+            let mut storage = crate::storage::probe(&app, &e.path);
+            // When the live probe can't classify the volume (typically because
+            // it's disconnected), fall back to the kind/name captured while it
+            // was connected.
+            if storage.kind == crate::storage::StorageKind::Unknown {
+                if let Some(k) = e.kind {
+                    storage.kind = k;
+                }
+            }
+            if storage.state != crate::storage::StorageState::Ok && e.volume_name.is_some() {
+                storage.volume_name = e.volume_name.clone();
+            }
             RecentProject {
                 available: storage.available(),
                 storage,
