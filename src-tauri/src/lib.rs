@@ -5,6 +5,7 @@ mod engine;
 mod error;
 mod protocol;
 mod scan;
+mod storage;
 mod store;
 mod thumbs;
 
@@ -180,8 +181,10 @@ pub fn run() {
             // custom app-styled titlebar (see TitleBar.svelte). Custom chrome is
             // undesirable on macOS and uncertain on Linux, so restore the native
             // OS decorations there; the frontend likewise only renders the
-            // custom bar on desktop Windows.
-            #[cfg(not(target_os = "windows"))]
+            // custom bar on desktop Windows. Mobile has no window-decorations
+            // concept at all (`set_decorations` isn't in WebviewWindow's API on
+            // Android/iOS), so this is desktop-only, not just "not Windows".
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
             {
                 use tauri::Manager;
                 if let Some(window) = app.get_webview_window("main") {
@@ -212,7 +215,6 @@ pub fn run() {
             commands::project::rescan_project,
             commands::project::close_project,
             commands::recent::list_recent_projects,
-            commands::recent::remove_recent_project,
             commands::recent::delete_project_data,
             commands::catalog::query_items,
             commands::catalog::media_counts,

@@ -4,9 +4,11 @@
 package app.tauri.saf
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import androidx.activity.result.ActivityResult
@@ -141,6 +143,38 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         val res = JSObject()
         res.put("ok", ok)
         invoke.resolve(res)
+    }
+
+    // Report whether the tree URI's backing storage volume is currently present
+    // (mounted), plus its user-visible name and removable flag, via
+    // StorageManager. A volume that has been removed (ejected SD card / unplugged
+    // USB) is absent from getStorageVolumes(), which we report as not mounted.
+    @Command
+    fun volumeInfo(invoke: Invoke) {
+        val args = invoke.parseArgs(TreeArgs::class.java)
+        try {
+            val treeDocId = DocumentsContract.getTreeDocumentId(Uri.parse(args.treeUri))
+            val volId = treeDocId.substringBefore(':')
+            val sm = activity.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+            val match = sm.storageVolumes.firstOrNull { sv ->
+                if (volId.equals("primary", ignoreCase = true)) sv.isPrimary
+                else sv.uuid?.equals(volId, ignoreCase = true) == true
+            }
+            val res = JSObject()
+            if (match != null) {
+                res.put("mounted", true)
+                res.put("removable", match.isRemovable)
+                match.getDescription(activity)?.let { res.put("description", it) }
+            } else {
+                // Not in the volume list → physically absent. Only removable /
+                // ejectable volumes disappear, so assume removable.
+                res.put("mounted", false)
+                res.put("removable", true)
+            }
+            invoke.resolve(res)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "failed to read volume info")
+        }
     }
 
     // ---- listing ----

@@ -49,6 +49,19 @@ impl<R: Runtime> Saf<R> {
         Ok(res.ok)
     }
 
+    /// Query the tree URI's backing volume via Android `StorageManager`:
+    /// whether it's currently mounted (present), its user-visible description,
+    /// and whether it's removable.
+    pub fn volume_info(&self, tree_uri: &str) -> Result<VolumeInfo> {
+        let res: VolumeInfo = self.0.run_mobile_plugin(
+            "volumeInfo",
+            TreePayload {
+                tree_uri: tree_uri.to_string(),
+            },
+        )?;
+        Ok(res)
+    }
+
     /// List the direct children of `parent_document_id` within `tree_uri`.
     pub fn list_children(
         &self,

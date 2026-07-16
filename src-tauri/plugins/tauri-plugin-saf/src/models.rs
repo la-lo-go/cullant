@@ -41,6 +41,19 @@ pub(crate) struct AccessResponse {
     pub ok: bool,
 }
 
+/// Status of the tree URI's backing storage volume (Android `StorageManager`).
+/// `mounted` is false when the volume is currently absent (a removed SD card or
+/// unplugged USB drive); `description` is the user-visible volume name.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeInfo {
+    pub mounted: bool,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub removable: bool,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ListChildrenPayload {

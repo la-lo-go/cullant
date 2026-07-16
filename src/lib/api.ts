@@ -10,12 +10,26 @@ export interface ProjectInfo {
   fileCount: number;
 }
 
+/** Whether a remembered project's folder is reachable, and if not, why. */
+export type StorageState = "ok" | "disconnected" | "notFound";
+/** Coarse storage classification, for the gallery badge. */
+export type StorageKind = "internal" | "removable" | "network" | "unknown";
+
+export interface StorageInfo {
+  state: StorageState;
+  kind: StorageKind;
+  /** Friendly volume name (drive letter/label, "SD card", …), if known. */
+  volumeName: string | null;
+}
+
 export interface RecentProject {
   path: string;
   /** Friendly, human-readable name for display (see `ProjectInfo.displayName`). */
   displayName: string;
   lastOpened: number;
+  /** Back-compat: true iff `storage.state === "ok"`. */
   available: boolean;
+  storage: StorageInfo;
 }
 
 export interface ItemLite {
@@ -154,7 +168,6 @@ export const api = {
   rescanProject: (previewMode?: PreviewMode) =>
     invoke("rescan_project", { previewMode }),
   listRecentProjects: () => invoke<RecentProject[]>("list_recent_projects"),
-  removeRecentProject: (path: string) => invoke("remove_recent_project", { path }),
   // Forget a project AND delete Cullant's own data (DB + thumb cache). The
   // user's photos are never touched.
   deleteProjectData: (path: string) => invoke("delete_project_data", { path }),

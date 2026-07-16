@@ -20,7 +20,11 @@ pub struct RecentProject {
     /// for desktop paths, a decoded label for Android SAF `content://` URIs.
     pub display_name: String,
     pub last_opened: i64,
+    /// Back-compat flag: true iff `storage.state` is `ok`.
     pub available: bool,
+    /// Probed storage status (present / disconnected volume / folder gone) plus
+    /// storage kind and a friendly volume name, for the gallery badge.
+    pub storage: crate::storage::StorageInfo,
 }
 
 const MAX_RECENT: usize = 24;
@@ -77,40 +81,23 @@ pub fn record_opened<R: Runtime>(app: &AppHandle<R>, path: &str) {
     save_recent(app, &list);
 }
 
-/// Whether a remembered project is still reachable: a real directory on
-/// desktop, or a still-granted SAF tree permission on Android.
-fn is_available<R: Runtime>(app: &AppHandle<R>, path: &str) -> bool {
-    #[cfg(target_os = "android")]
-    if path.starts_with("content://") {
-        use tauri_plugin_saf::SafExt;
-        return app.saf().check_tree_access(path).unwrap_or(false);
-    }
-    let _ = app;
-    PathBuf::from(path).is_dir()
-}
-
-/// List recently-opened projects, most recent first, each flagged with
-/// whether its folder is still present on disk.
+/// List recently-opened projects, most recent first, each with its probed
+/// storage status (present / disconnected volume / folder not found).
 #[tauri::command]
 pub fn list_recent_projects(app: AppHandle) -> Vec<RecentProject> {
     load_recent(&app)
         .into_iter()
-        .map(|e| RecentProject {
-            available: is_available(&app, &e.path),
-            display_name: super::project::project_display_name(&e.path),
-            path: e.path,
-            last_opened: e.last_opened,
+        .map(|e| {
+            let storage = crate::storage::probe(&app, &e.path);
+            RecentProject {
+                available: storage.available(),
+                storage,
+                display_name: super::project::project_display_name(&e.path),
+                path: e.path,
+                last_opened: e.last_opened,
+            }
         })
         .collect()
-}
-
-/// Remove a project from the recent list only — never touches the folder or
-/// its `.cullant` data on disk.
-#[tauri::command]
-pub fn remove_recent_project(app: AppHandle, path: String) {
-    let mut list = load_recent(&app);
-    list.retain(|e| e.path != path);
-    save_recent(&app, &list);
 }
 
 /// Fully forget a project: drop it from the recent list AND delete Cullant's

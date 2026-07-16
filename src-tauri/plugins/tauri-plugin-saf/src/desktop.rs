@@ -2,7 +2,7 @@ use serde::de::DeserializeOwned;
 use tauri::{plugin::PluginApi, AppHandle, Runtime};
 
 use crate::error::{Error, Result};
-use crate::models::SafEntry;
+use crate::models::{SafEntry, VolumeInfo};
 
 /// Desktop stub. SAF is Android-only; every method returns
 /// [`Error::Unsupported`]. Desktop builds use the real filesystem instead and
@@ -25,6 +25,9 @@ impl<R: Runtime> Saf<R> {
         Err(Error::Unsupported)
     }
     pub fn check_tree_access(&self, _tree_uri: &str) -> Result<bool> {
+        Err(Error::Unsupported)
+    }
+    pub fn volume_info(&self, _tree_uri: &str) -> Result<VolumeInfo> {
         Err(Error::Unsupported)
     }
     pub fn list_children(&self, _tree_uri: &str, _parent: &str) -> Result<Vec<SafEntry>> {

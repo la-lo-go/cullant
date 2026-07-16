@@ -18,7 +18,7 @@ mod error;
 mod models;
 
 pub use error::{Error, Result};
-pub use models::SafEntry;
+pub use models::{SafEntry, VolumeInfo};
 
 #[cfg(target_os = "android")]
 mod mobile;

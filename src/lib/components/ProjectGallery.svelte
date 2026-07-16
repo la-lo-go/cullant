@@ -1,14 +1,38 @@
 <script lang="ts">
-  import { recentThumbUrl, type RecentProject } from "../api";
+  import { recentThumbUrl, type RecentProject, type StorageKind } from "../api";
   import { recent } from "../stores/recent.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import ImageOff from "@lucide/svelte/icons/image-off";
-  import X from "@lucide/svelte/icons/x";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Unplug from "@lucide/svelte/icons/unplug";
+  import HardDrive from "@lucide/svelte/icons/hard-drive";
+  import Usb from "@lucide/svelte/icons/usb";
+  import Network from "@lucide/svelte/icons/network";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
 
   let { onopen }: { onopen: (path: string) => void } = $props();
 
   const PREVIEW_SLOTS = [0, 1, 2];
+
+  // Storage-kind badge icon per classification.
+  const kindIcon: Record<StorageKind, typeof HardDrive> = {
+    internal: HardDrive,
+    removable: Usb,
+    network: Network,
+    unknown: HardDrive,
+  };
+
+  // Manual re-check of storage availability (on top of the automatic refresh on
+  // window focus / visibility change).
+  let rescanning = $state(false);
+  async function rescan() {
+    rescanning = true;
+    try {
+      await recent.refresh();
+    } finally {
+      rescanning = false;
+    }
+  }
 
   // Project queued for full data deletion, awaiting confirmation (null = none).
   let deleteTarget = $state<RecentProject | null>(null);
@@ -55,12 +79,9 @@
   }
 
   function openCard(project: RecentProject) {
-    if (project.available) onopen(project.path);
-  }
-
-  function removeCard(e: Event, path: string) {
-    e.stopPropagation();
-    void recent.remove(path);
+    // A present project opens; a disconnected volume retries (it may be back
+    // now, or Android re-prompts for SAF access). A truly-missing folder no-ops.
+    if (project.storage.state !== "notFound") onopen(project.path);
   }
 
   function askDeleteCard(e: Event, project: RecentProject) {
@@ -77,17 +98,33 @@
 
 {#if recent.loaded && recent.list.length > 0}
   <div class="gallery">
+    <div class="gallery-head">
+      <button
+        class="rescan"
+        onclick={() => void rescan()}
+        disabled={rescanning}
+        title="Re-check whether project folders and volumes are connected"
+      >
+        <RefreshCw size={13} />
+        <span>{rescanning ? "Rescanning…" : "Rescan"}</span>
+      </button>
+    </div>
     <div class="grid">
       {#each recent.list as project, index (project.path)}
+        {@const st = project.storage}
+        {@const KindIcon = kindIcon[st.kind]}
         <button
           class="card"
-          class:unavailable={!project.available}
+          class:unavailable={st.state === "notFound"}
+          class:disconnected={st.state === "disconnected"}
           title={project.path}
           onclick={() => openCard(project)}
-          disabled={!project.available}
         >
+          <span class="kind-badge" title={st.volumeName ?? st.kind}>
+            <KindIcon size={13} />
+          </span>
           <div class="preview">
-            {#if project.available}
+            {#if st.state === "ok"}
               {#each PREVIEW_SLOTS as slot, i}
                 <img
                   class="peek peek-{i}"
@@ -97,31 +134,21 @@
                   onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
                 />
               {/each}
+            {:else if st.state === "disconnected"}
+              <Unplug size={38} strokeWidth={1.25} />
             {:else}
               <ImageOff size={40} strokeWidth={1.25} />
             {/if}
           </div>
           <span class="name">{project.displayName}</span>
           <span class="meta">
-            {#if project.available}
+            {#if st.state === "ok"}
               Opened {relativeTime(project.lastOpened)}
+            {:else if st.state === "disconnected"}
+              Not connected{st.volumeName ? ` — ${st.volumeName}` : ""}
             {:else}
               Folder not found
             {/if}
-          </span>
-          <span
-            class="remove"
-            role="button"
-            tabindex="-1"
-            title="Remove from recent projects"
-            onclick={(e) => removeCard(e, project.path)}
-            onkeydown={(e) => {
-              if (e.key !== "Enter" && e.key !== " ") return;
-              e.preventDefault();
-              removeCard(e, project.path);
-            }}
-          >
-            <X size={13} />
           </span>
           <span
             class="delete"
@@ -168,6 +195,37 @@
     margin: 0 auto;
   }
 
+  .gallery-head {
+    max-width: 960px;
+    margin: 0 auto 12px;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .rescan {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--control);
+    color: #cdcdd3;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .rescan:hover:not(:disabled) {
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  .rescan:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
   .card {
     position: relative;
     display: flex;
@@ -183,12 +241,16 @@
     cursor: pointer;
   }
 
-  .card:hover:not(:disabled) {
+  .card:hover:not(.unavailable) {
     background: var(--hover);
     border-color: var(--border-strong);
   }
 
-  .card:disabled {
+  /* Not a real `disabled` button: the card body no-ops on an unavailable
+     project (openCard checks availability), but the delete action must stay
+     clickable — a native `disabled` attribute would block all descendant
+     click handlers too, not just the card's own. */
+  .card.unavailable {
     cursor: default;
     opacity: 0.55;
   }
@@ -262,7 +324,32 @@
     opacity: 0.85;
   }
 
-  .remove {
+  /* Disconnected volume: still tappable (tapping retries / reconnects), but
+     visibly not-ready, and amber rather than the red of a truly-missing folder. */
+  .card.disconnected {
+    opacity: 0.78;
+  }
+
+  .card.disconnected .meta {
+    color: #ffcf8f;
+    opacity: 0.9;
+  }
+
+  /* Always-on storage-kind badge (internal / removable / network), kept subtle
+     and in the opposite corner from the delete action. */
+  .kind-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    display: inline-flex;
+    color: #8a8a93;
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  /* The only per-card action: deletes Cullant's own data (DB + thumb cache)
+     for this project. Turns red on hover since it's destructive. */
+  .delete {
     position: absolute;
     top: 4px;
     right: 4px;
@@ -276,33 +363,16 @@
     opacity: 0;
   }
 
-  .card:hover .remove {
-    opacity: 1;
-  }
-
-  .remove:hover {
-    background: var(--border-strong);
-    color: #fff;
-  }
-
-  /* Distinct from "remove from recents" (top-right X): sits top-left and turns
-     red on hover to signal it deletes Cullant's data, not just the list entry. */
-  .delete {
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    border-radius: 5px;
-    color: #999;
-    opacity: 0;
-  }
-
   .card:hover .delete {
     opacity: 1;
+  }
+
+  /* Touch has no hover: leave the button always visible there instead of
+     requiring a tap-and-hold just to reveal it. */
+  @media (pointer: coarse) {
+    .delete {
+      opacity: 1;
+    }
   }
 
   .delete:hover {

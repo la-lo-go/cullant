@@ -8,8 +8,21 @@
   import X from "@lucide/svelte/icons/x";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
-  import Folder from "@lucide/svelte/icons/folder";
   import LogOut from "@lucide/svelte/icons/log-out";
+  import Images from "@lucide/svelte/icons/images";
+  import HardDrive from "@lucide/svelte/icons/hard-drive";
+  import Usb from "@lucide/svelte/icons/usb";
+  import Network from "@lucide/svelte/icons/network";
+  import Unplug from "@lucide/svelte/icons/unplug";
+  import type { StorageKind } from "../api";
+
+  // Storage-kind icon per classification (mirrors the recent-projects gallery).
+  const kindIcon: Record<StorageKind, typeof HardDrive> = {
+    internal: HardDrive,
+    removable: Usb,
+    network: Network,
+    unknown: HardDrive,
+  };
 
   // Project-management actions live in +page (which owns the open/close flow);
   // this bar just renders the menu and calls back.
@@ -49,7 +62,7 @@
   // Up to three most-recently-opened projects other than the current one, for
   // quick switching. Refreshed each time the menu opens.
   const otherRecent = $derived(
-    recent.list.filter((p) => p.path !== catalog.project?.rootPath).slice(0, 3),
+    recent.list.filter((p) => p.path !== catalog.project?.rootPath).slice(0, 5),
   );
 
   function toggleMenu() {
@@ -64,9 +77,15 @@
 </script>
 
 <div class="titlebar" data-tauri-drag-region>
-  <div class="brand" data-tauri-drag-region title={catalog.project?.rootPath}>
+  <div class="brand" data-tauri-drag-region>
     {#if catalog.project}
-      <button class="project-btn" class:open={menuOpen} onclick={toggleMenu} title="Project menu">
+      <button
+        class="project-btn"
+        class:open={menuOpen}
+        onclick={toggleMenu}
+        title={catalog.project.rootPath}
+      >
+        <Images size={14} class="project-icon" />
         <span class="name">{catalog.project.displayName}</span>
         <ChevronDown size={13} />
       </button>
@@ -82,20 +101,29 @@
             <div class="sep"></div>
             <div class="menu-label">Recent</div>
             {#each otherRecent as p (p.path)}
+              {@const RecentIcon =
+                p.storage.state === "disconnected" ? Unplug : kindIcon[p.storage.kind]}
               <button
                 class="item recent"
                 role="menuitem"
-                title={p.path}
-                disabled={!p.available}
+                title={p.storage.state === "disconnected" && p.storage.volumeName
+                  ? `Not connected — ${p.storage.volumeName}`
+                  : p.path}
+                disabled={p.storage.state === "notFound"}
                 onclick={() => choose(() => onOpenRecent(p.path))}
               >
-                <Folder size={15} />
+                <RecentIcon size={15} />
                 <span class="recent-name">{p.displayName}</span>
               </button>
             {/each}
           {/if}
           <div class="sep"></div>
-          <button class="item danger" role="menuitem" onclick={() => choose(onCloseProject)}>
+          <button
+            class="item danger"
+            role="menuitem"
+            title="Close the current project"
+            onclick={() => choose(onCloseProject)}
+          >
             <LogOut size={15} />
             <span>Close project</span>
           </button>
@@ -197,6 +225,12 @@
   .project-btn > :global(svg) {
     flex: none;
     opacity: 0.6;
+  }
+
+  /* The leading project icon reads as an identity mark, so keep it clearer than
+     the trailing dropdown chevron. */
+  .project-btn > :global(.project-icon) {
+    opacity: 0.85;
   }
 
   .project-btn:hover,
