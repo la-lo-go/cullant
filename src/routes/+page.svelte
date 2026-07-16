@@ -54,6 +54,8 @@
   let showKeybindings = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
+  // Set when the open project's folder/volume becomes unreachable while working.
+  let folderLostMsg = $state("");
 
   // First-run onboarding: the very first interactive open shows a one-time
   // welcome dialog to pick the preview loading mode. `introPath` stashes the
@@ -174,6 +176,38 @@
   // Whether the active tab has any RAW files — used to hide the Mirror/Separate
   // toggle when there are no RAWs to fan actions out to.
   const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
+
+  // Watch the open project's storage while working: if its folder/volume goes
+  // away (drive unplugged, folder moved/deleted) warn once, and clear the
+  // warning if it comes back. Desktop is reliable; on Android this depends on
+  // the id form (SAF tree URI vs a restored app-dir path).
+  $effect(() => {
+    const proj = catalog.project;
+    if (!proj) {
+      folderLostMsg = "";
+      return;
+    }
+    let wasOk = true;
+    const check = async () => {
+      try {
+        const info = await api.probeStorage(proj.rootPath);
+        if (info.state === "ok") {
+          wasOk = true;
+        } else if (wasOk) {
+          wasOk = false;
+          folderLostMsg =
+            info.state === "disconnected"
+              ? "The drive or volume holding this project is no longer connected. Reconnect it to keep working, or close the project."
+              : "This project's folder can no longer be found — it may have been moved or deleted. Restore it, or close the project.";
+        }
+      } catch {
+        // Ignore transient IPC errors; the next tick retries.
+      }
+    };
+    void check();
+    const id = setInterval(() => void check(), 4000);
+    return () => clearInterval(id);
+  });
 
   async function pickProject() {
     // Android has no filesystem folder dialog; use the SAF tree picker, which
@@ -466,6 +500,10 @@
 
   {#if catalog.error}
     <AlertDialog title="Couldn't open project" message={catalog.error} onclose={() => (catalog.error = "")} />
+  {/if}
+
+  {#if folderLostMsg}
+    <AlertDialog title="Project folder unavailable" message={folderLostMsg} onclose={() => (folderLostMsg = "")} />
   {/if}
 
   {#if introPath !== null}

@@ -215,6 +215,7 @@ pub fn run() {
             commands::project::rescan_project,
             commands::project::close_project,
             commands::recent::list_recent_projects,
+            commands::recent::probe_storage,
             commands::recent::delete_project_data,
             commands::catalog::query_items,
             commands::catalog::media_counts,

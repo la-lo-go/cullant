@@ -168,6 +168,9 @@ export const api = {
   rescanProject: (previewMode?: PreviewMode) =>
     invoke("rescan_project", { previewMode }),
   listRecentProjects: () => invoke<RecentProject[]>("list_recent_projects"),
+  // Probe the storage backing a project id (used to watch the open project's
+  // folder/volume for disconnection while working).
+  probeStorage: (id: string) => invoke<StorageInfo>("probe_storage", { id }),
   // Forget a project AND delete Cullant's own data (DB + thumb cache). The
   // user's photos are never touched.
   deleteProjectData: (path: string) => invoke("delete_project_data", { path }),

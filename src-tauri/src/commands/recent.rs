@@ -124,6 +124,14 @@ pub fn list_recent_projects(app: AppHandle) -> Vec<RecentProject> {
         .collect()
 }
 
+/// Probe the storage backing an arbitrary project identifier — used to watch the
+/// currently-open project's folder/volume while it's in use, so the UI can warn
+/// when it's disconnected or removed.
+#[tauri::command]
+pub fn probe_storage(app: AppHandle, id: String) -> crate::storage::StorageInfo {
+    crate::storage::probe(&app, &id)
+}
+
 /// Fully forget a project: drop it from the recent list AND delete Cullant's
 /// own data (the SQLite DB + thumbnail cache). The user's photos are NEVER
 /// touched — only Cullant's sidecar is removed.
