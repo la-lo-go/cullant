@@ -9,7 +9,7 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import LogOut from "@lucide/svelte/icons/log-out";
-  import Images from "@lucide/svelte/icons/images";
+  import Album from "@lucide/svelte/icons/album";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Usb from "@lucide/svelte/icons/usb";
   import Network from "@lucide/svelte/icons/network";
@@ -85,7 +85,7 @@
         onclick={toggleMenu}
         title={catalog.project.rootPath}
       >
-        <Images size={14} class="project-icon" />
+        <Album size={14} class="project-icon" />
         <span class="name">{catalog.project.displayName}</span>
         <ChevronDown size={13} />
       </button>
