@@ -11,3 +11,6 @@ vite.config.ts.timestamp-*
 
 # Affinity Designer lock files
 *~lock~
+
+# JetBrains IDE project files
+.idea/
