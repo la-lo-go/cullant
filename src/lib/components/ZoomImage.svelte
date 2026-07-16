@@ -60,6 +60,12 @@
   /** Collapse two zoom toggles fired within this window into one, so a manual
    *  touch double-tap and any browser-synthesized dblclick can't both fire. */
   const TOGGLE_GUARD_MS = 250;
+  /** Ignore tap/dblclick zoom-toggles for this long after the loupe opened from
+   *  a grid tap. On touch, users habitually double-tap to open: the first tap
+   *  opens the loupe, the second lands here and would zoom on arrival. A little
+   *  wider than DOUBLE_TAP_MS to cover the mount + hit-test after the first tap.
+   *  Keyboard Z and pinch bypass this; only the tap/dblclick gestures check it. */
+  const OPEN_GUARD_MS = 400;
   /** Damping exponent for pinching below fit — rubber-band resistance. */
   const RUBBER = 0.4;
 
@@ -323,6 +329,13 @@
    * Both directions animate briefly. A photo whose target is still not above
    * fit stays put (the least-surprising no-op).
    */
+  /** True just after the loupe opened from a grid tap: the second tap of a
+   *  habitual double-tap-to-open lands here and must NOT zoom on arrival. Loupe
+   *  only (compare panes never open from the grid). */
+  function openedFromGridRecently() {
+    return !standalone && performance.now() - view.openedFromGridAt < OPEN_GUARD_MS;
+  }
+
   function toggleZoom() {
     // Swallow a duplicate toggle (e.g. our manual touch double-tap plus a
     // browser-synthesized dblclick) so the two don't cancel each other out.
@@ -395,6 +408,11 @@
   // at fit -> jump to DOUBLE_TAP_MAG × fit keeping the click point in place. The
   // toggle guard dedupes against any browser-synthesized dblclick on touch.
   function onDblClick(e: MouseEvent) {
+    // A double-tap-to-open on touch fires a synthesized dblclick on this
+    // freshly mounted frame; ignore it during the open guard window so opening
+    // never zooms. Real desktop double-clicks (opened via grid dbl-click, which
+    // sets no timestamp) and later double-taps are unaffected.
+    if (openedFromGridRecently()) return;
     const now = performance.now();
     if (now - lastToggleTime < TOGGLE_GUARD_MS) return;
     lastToggleTime = now;
@@ -618,7 +636,9 @@
             // double-tap in the margin zooms once and never pages.
             lastTapTime = 0;
             clearPageTimer();
-            toggleZoom();
+            // Suppress the zoom if this double-tap is really the user's habitual
+            // double-tap-to-open completing on the just-mounted loupe.
+            if (!openedFromGridRecently()) toggleZoom();
           } else {
             // First tap: remember it. If it landed in the left/right margin of
             // the fit view, schedule an e-reader page to the prev/next photo —

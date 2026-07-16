@@ -315,6 +315,9 @@
           session.toggleSelect(tap.index);
         } else {
           session.selectOnly(tap.index);
+          // Note the tap-open so ZoomImage can ignore the second tap of a
+          // habitual double-tap-to-open (which would otherwise zoom on arrival).
+          view.markOpenedFromGrid();
           view.mode = "viewer";
         }
       }

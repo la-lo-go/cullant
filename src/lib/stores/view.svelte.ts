@@ -21,6 +21,16 @@ class ViewStore {
   cy = $state(0.5);
   /** Camera-metadata panel open in the loupe. */
   infoOpen = $state(false);
+
+  /**
+   * `performance.now()` of the last time the loupe was opened by a TAP in the
+   * grid. On touch, users habitually double-tap to open a photo: the first tap
+   * opens the loupe, the second lands on the freshly mounted ZoomImage and would
+   * otherwise be read as a double-tap-to-zoom. ZoomImage swallows its zoom-toggle
+   * gestures for a brief window after this timestamp, so opening always lands at
+   * fit; a deliberate double-tap-to-zoom still works once the window lapses.
+   */
+  openedFromGridAt = $state(0);
   /** Read-only keyboard cheat-sheet overlay open (toggled by `?`). */
   shortcutsOpen = $state(false);
 
@@ -40,6 +50,11 @@ class ViewStore {
    */
   zoomStepNonce = $state(0);
   zoomStepDir = 0;
+
+  /** Mark that the loupe is being opened by a tap in the grid (touch). */
+  markOpenedFromGrid() {
+    this.openedFromGridAt = performance.now();
+  }
 
   requestZoomToggle() {
     this.zoomToggleNonce++;
