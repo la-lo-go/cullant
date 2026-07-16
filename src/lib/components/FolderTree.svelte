@@ -28,6 +28,10 @@
 
   let aside = $state<HTMLElement | null>(null);
   let resizing = $state(false);
+  // True while the drag is past the collapse threshold: the tree clamps to its
+  // minimum and dims, but the hide only commits on pointer release — dragging
+  // back out cancels it (standard resize-to-hide behavior).
+  let pendingCollapse = $state(false);
 
   // Scroll metrics feeding the overlay scrollbar (the native bar is hidden so
   // it doesn't steal 8px of panel width from the folder labels).
@@ -45,19 +49,21 @@
   function onResizeMove(e: PointerEvent) {
     if (!resizing || !aside) return;
     const w = e.clientX - aside.getBoundingClientRect().left;
-    if (w < COLLAPSE_AT) {
-      // Collapse but keep the last usable width for when it reopens.
-      resizing = false;
-      session.folderTreeVisible = false;
-      return;
-    }
+    // Past the threshold only flags a pending collapse (tree stays at MIN_W,
+    // dimmed) instead of committing it, so dragging back out cancels the hide.
+    pendingCollapse = w < COLLAPSE_AT;
     session.folderTreeWidth = Math.min(MAX_W, Math.max(MIN_W, w));
   }
 
   function endResize(e: PointerEvent) {
     if (!resizing) return;
     resizing = false;
-    session.setFolderTreeWidth(session.folderTreeWidth);
+    if (pendingCollapse) {
+      pendingCollapse = false;
+      session.folderTreeVisible = false;
+    } else {
+      session.setFolderTreeWidth(session.folderTreeWidth);
+    }
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
@@ -67,7 +73,7 @@
 </script>
 
 {#if children.length > 0}
-  <aside class="tree" bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
+  <aside class="tree" class:pending-collapse={pendingCollapse} bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
     <div
       class="scroll"
       id="folder-tree-scroll"
@@ -132,6 +138,13 @@
     width: var(--tree-w, 210px);
     background: var(--surface);
     border-right: 1px solid var(--border);
+  }
+
+  /* Dragged past the collapse threshold: a subtle dim signals that releasing
+     now will hide the tree (dragging back out cancels). */
+  .tree.pending-collapse {
+    opacity: 0.6;
+    transition: opacity 0.1s;
   }
 
   .scroll {

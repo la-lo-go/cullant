@@ -4,6 +4,7 @@
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import Scissors from "@lucide/svelte/icons/scissors";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
   let { items }: { items: ItemLite[] } = $props();
 
@@ -37,8 +38,17 @@
   const RAPID_STEP_MS = 180;
   let lastRecentre = 0;
   let hasCentered = false;
+  // The strip div is destroyed/recreated every time the filmstrip is hidden
+  // and shown again (the {#if} above swaps it for the peek button), so track
+  // its identity: a freshly (re)mounted strip must always center instantly,
+  // never replaying a leftover "smooth" from before it was last hidden.
+  let lastStripEl: HTMLDivElement | null = null;
   $effect(() => {
     if (!strip || width === 0) return;
+    if (strip !== lastStripEl) {
+      lastStripEl = strip;
+      hasCentered = false;
+    }
     const target = Math.max(0, session.focusedIndex * CELL - width / 2 + CELL / 2);
     const now = performance.now();
     const rapid = now - lastRecentre < RAPID_STEP_MS;
@@ -55,6 +65,10 @@
   const COLLAPSE_AT = 56;
 
   let resizing = $state(false);
+  // True while the drag is past the collapse threshold: the strip clamps to its
+  // minimum and dims, but the hide only commits on pointer release — dragging
+  // back out cancels it (standard resize-to-hide behavior).
+  let pendingCollapse = $state(false);
 
   function startResize(e: PointerEvent) {
     e.preventDefault();
@@ -65,18 +79,21 @@
   function onResizeMove(e: PointerEvent) {
     if (!resizing || !strip) return;
     const h = strip.getBoundingClientRect().bottom - e.clientY;
-    if (h < COLLAPSE_AT) {
-      resizing = false;
-      session.setShowFilmstrip(false);
-      return;
-    }
+    // Past the threshold only *flags* a pending collapse (strip stays at MIN_H,
+    // dimmed) instead of committing it, so dragging back out cancels the hide.
+    pendingCollapse = h < COLLAPSE_AT;
     session.filmstripHeight = Math.min(MAX_H, Math.max(MIN_H, h));
   }
 
   function endResize(e: PointerEvent) {
     if (!resizing) return;
     resizing = false;
-    session.setFilmstripHeight(session.filmstripHeight);
+    if (pendingCollapse) {
+      pendingCollapse = false;
+      session.setShowFilmstrip(false);
+    } else {
+      session.setFilmstripHeight(session.filmstripHeight);
+    }
     try {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {
@@ -121,7 +138,7 @@
 </script>
 
 {#if session.showFilmstrip}
-  <div class="filmstrip" style="height: {session.filmstripHeight}px">
+  <div class="filmstrip" class:pending-collapse={pendingCollapse} style="height: {session.filmstripHeight}px">
     <!-- Top-edge resize handle. -->
     <div
       class="resize-handle"
@@ -134,6 +151,18 @@
       onpointerup={endResize}
       onpointercancel={endResize}
     ></div>
+    <!-- Hide arrow: same size/style as the collapsed peek below, pointing the
+         opposite way, overlaid above the thumbnail row (high z-index) instead
+         of taking layout space — the same overlay pattern as the folder tree's
+         peek arrow. -->
+    <button
+      class="strip-hide"
+      title="Hide filmstrip (F)"
+      aria-label="Hide filmstrip"
+      onclick={() => session.setShowFilmstrip(false)}
+    >
+      <ChevronDown size={16} />
+    </button>
     <div
       class="strip"
       id="filmstrip-scroll"
@@ -180,6 +209,7 @@
         position={scrollLeft}
         controls="filmstrip-scroll"
         onSeek={(pos) => strip?.scrollTo({ left: pos })}
+        alwaysVisible
       />
     </div>
   </div>
@@ -204,6 +234,13 @@
        cutout while the cells stay inside the safe area. */
     padding-left: var(--safe-left);
     padding-right: var(--safe-right);
+  }
+
+  /* Dragged past the collapse threshold: a subtle dim signals that releasing
+     now will hide the strip (dragging back out cancels). */
+  .filmstrip.pending-collapse {
+    opacity: 0.6;
+    transition: opacity 0.1s;
   }
 
   .strip {
@@ -283,6 +320,34 @@
   }
 
   .strip-peek:hover {
+    background: var(--hover);
+    border-color: var(--accent);
+  }
+
+  /* Hide arrow: the mirror of .strip-peek above — same size, hanging from the
+     TOP edge instead (pointing down), overlaid above the thumbnails with a
+     z-index higher than the resize handle so it stays clickable. */
+  .strip-hide {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    transform: translateX(-50%);
+    z-index: 30;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    background: var(--surface);
+    color: var(--accent);
+    cursor: pointer;
+  }
+
+  .strip-hide:hover {
     background: var(--hover);
     border-color: var(--accent);
   }

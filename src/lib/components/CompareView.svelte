@@ -7,7 +7,8 @@
   import X from "@lucide/svelte/icons/x";
   import Pin from "@lucide/svelte/icons/pin";
   import PinOff from "@lucide/svelte/icons/pin-off";
-  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
+  import Maximize from "@lucide/svelte/icons/maximize";
+  import Minimize from "@lucide/svelte/icons/minimize";
   import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
@@ -60,6 +61,17 @@
     }
   }
 
+  /** Swipe/margin-tap paging on a PINNED pane: moving the shared focus
+   *  wouldn't change what a pinned pane shows, so page the pinned photo
+   *  itself instead, through the same filtered order. */
+  function pageWhilePinned(dir: number) {
+    if (!pinnedItem) return;
+    const idx = session.filtered.findIndex((i) => i.id === pinnedItem!.id);
+    if (idx < 0) return;
+    const next = session.filtered[idx + dir];
+    if (next) pinnedItem = next;
+  }
+
   // Warm the cache one photo ahead of the focus, so arrowing quickly
   // through a burst always finds the next preview already decoded.
   $effect(() => {
@@ -72,18 +84,28 @@
 
 <div class="compare">
   <div class="panes" bind:this={panes}>
-    <button class="back" title="Back to grid (Esc)" onclick={() => (view.mode = "grid")}><X size={16} /></button>
     <button
-      class="back filmstrip-btn"
-      class:active={session.showFilmstrip}
-      title="Show/hide filmstrip (F)"
-      onclick={() => session.toggleShowFilmstrip()}
+      class="back"
+      title="Back to grid (Esc)"
+      onclick={(e) => {
+        view.mode = "grid";
+        (e.currentTarget as HTMLElement).blur();
+      }}><X size={16} /></button
     >
-      <PanelBottom size={16} />
+    <button
+      class="back fullscreen-btn"
+      class:active={view.fullscreen}
+      title={view.fullscreen ? "Exit full screen" : "Full screen"}
+      onclick={(e) => {
+        view.toggleFullscreen();
+        (e.currentTarget as HTMLElement).blur();
+      }}
+    >
+      {#if view.fullscreen}<Minimize size={16} />{:else}<Maximize size={16} />{/if}
     </button>
     {#if left}
       <div class="pane" class:pinned={pinnedSide === "left"}>
-        <ZoomImage item={left} standalone />
+        <ZoomImage item={left} standalone onPage={pinnedSide === "left" ? pageWhilePinned : undefined} />
         <button
           class="pin-btn"
           class:active={pinnedSide === "left"}
@@ -95,12 +117,14 @@
         >
           {#if pinnedSide === "left"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
-        <span class="caption" class:focused-caption={focusedSide === "left"}>{left.name}.{left.ext}</span>
+        {#if !view.fullscreen}
+          <span class="caption" class:focused-caption={focusedSide === "left"}>{left.name}.{left.ext}</span>
+        {/if}
       </div>
     {/if}
     {#if right}
       <div class="pane" class:pinned={pinnedSide === "right"}>
-        <ZoomImage item={right} standalone />
+        <ZoomImage item={right} standalone onPage={pinnedSide === "right" ? pageWhilePinned : undefined} />
         <button
           class="pin-btn"
           class:active={pinnedSide === "right"}
@@ -112,13 +136,17 @@
         >
           {#if pinnedSide === "right"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
-        <span class="caption" class:focused-caption={focusedSide === "right"}>{right.name}.{right.ext}</span>
+        {#if !view.fullscreen}
+          <span class="caption" class:focused-caption={focusedSide === "right"}>{right.name}.{right.ext}</span>
+        {/if}
       </div>
     {:else}
       <div class="pane empty">End of set</div>
     {/if}
   </div>
-  <Filmstrip items={session.filtered} />
+  {#if !view.fullscreen}
+    <Filmstrip items={session.filtered} />
+  {/if}
 </div>
 
 <style>
@@ -171,11 +199,11 @@
     color: #fff;
   }
 
-  .filmstrip-btn {
+  .fullscreen-btn {
     top: 46px;
   }
 
-  .filmstrip-btn.active {
+  .fullscreen-btn.active {
     background: rgba(var(--accent-rgb), 0.5);
     color: #fff;
   }
@@ -183,6 +211,11 @@
   .pane {
     flex: 1;
     min-width: 0;
+    /* Flex items default min-height to `auto` (their content's intrinsic
+       size), not 0 — without this, stacking the panes vertically (narrow /
+       portrait) let each pane's content push it past its 1/2 share of the
+       column, spilling the second pane below the viewport uncontained. */
+    min-height: 0;
     display: flex;
     flex-direction: column;
     position: relative;

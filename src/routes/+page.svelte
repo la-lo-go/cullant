@@ -25,12 +25,11 @@
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import PreviewModeIntro from "$lib/components/PreviewModeIntro.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
+  import AlertDialog from "$lib/components/AlertDialog.svelte";
   import TitleBar from "$lib/components/TitleBar.svelte";
   import type { PreviewMode } from "$lib/api";
   import { api } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
-  import ArrowUp from "@lucide/svelte/icons/arrow-up";
-  import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Search from "@lucide/svelte/icons/search";
   import Columns2 from "@lucide/svelte/icons/columns-2";
@@ -39,13 +38,12 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Tag from "@lucide/svelte/icons/tag";
   import Type from "@lucide/svelte/icons/type";
-  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
-  import Filter from "@lucide/svelte/icons/filter";
+  import ListFilter from "@lucide/svelte/icons/list-filter";
   import SettingsIcon from "@lucide/svelte/icons/settings";
-  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -53,39 +51,6 @@
 
   // Desktop opt-in for the touch action bar (always shown on touch devices).
   let touchBarVisible = $state(false);
-
-  // Screen-orientation lock (a mobile-only affordance). Available only where the
-  // Screen Orientation API exposes lock() — which the TS DOM lib doesn't declare,
-  // so we narrow it locally. The button is hidden where it's unavailable, and any
-  // rejection (desktop, non-fullscreen, unsupported) is swallowed so a failed
-  // lock never surfaces an error. `orientationLocked` tracks the last lock we
-  // applied so the button can reflect and toggle the current axis.
-  function lockableOrientation(): { lock(o: string): Promise<void>; type: string } | null {
-    if (typeof screen === "undefined") return null;
-    const o = screen.orientation as unknown as
-      | { lock?: (o: string) => Promise<void>; type?: string }
-      | undefined;
-    return o && typeof o.lock === "function"
-      ? (o as { lock(o: string): Promise<void>; type: string })
-      : null;
-  }
-
-  const canRotate = lockableOrientation() !== null;
-  let orientationLocked = $state<"portrait" | "landscape" | null>(null);
-
-  async function toggleOrientation() {
-    const o = lockableOrientation();
-    if (!o) return;
-    // Flip relative to whichever axis is currently shown (locked or natural).
-    const current = orientationLocked ?? (o.type ?? "").split("-")[0];
-    const next = current === "landscape" ? "portrait" : "landscape";
-    try {
-      await o.lock(next);
-      orientationLocked = next;
-    } catch {
-      // Platform rejected the lock — leave the tracked state untouched.
-    }
-  }
   let showKeybindings = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
@@ -195,6 +160,13 @@
     !navigator.userAgent.includes("Android") &&
     !window.matchMedia("(pointer: coarse)").matches;
 
+  // The project name lives in the window title (OS taskbar/Alt-Tab, and the
+  // custom TitleBar below) rather than the toolbar — kept out of the way
+  // there, still one glance/hover away from anyone who needs the full path.
+  $effect(() => {
+    document.title = catalog.project ? `${catalog.project.displayName} — Cullant` : "Cullant";
+  });
+
   // Whether the open project has any subfolders — used to hide the folder
   // tree toggle when there's nothing to scope by.
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
@@ -222,8 +194,8 @@
     // the CULLANT_OPEN_PROJECT auto-open hook is covered regardless).
     if (/(^|[\\/])\.cullant([\\/]|$)/i.test(path)) {
       catalog.error =
-        "This is Cullant's own data folder (.cullant), not a photo folder. " +
-        "Pick the folder that contains your photos instead.";
+        "This is Cullant's own data folder (.cullant), not a photo or video folder. " +
+        "Pick the folder that contains your photos or videos instead.";
       return;
     }
     if (!settings.onboardedPreview) {
@@ -263,169 +235,133 @@
     };
   }
 
-  /** Show only the last `maxSegments` path segments, with a leading ellipsis. */
-  function truncatePath(path: string, maxSegments = 3): string {
-    const segments = path.split(/[\\/]+/).filter(Boolean);
-    if (segments.length <= maxSegments) return path;
-    return "…" + "\\" + segments.slice(-maxSegments).join("\\");
-  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
-<main class="app">
+<main class="app" class:fullscreen={view.fullscreen}>
   {#if showTitleBar}
-    <TitleBar />
+    <TitleBar
+      onOpenNew={() => void pickProject()}
+      onOpenRecent={(path) => void openProject(path)}
+      onCloseProject={() => (showCloseConfirm = true)}
+    />
   {/if}
   {#if catalog.project}
+    {#if !view.fullscreen}
     <header class="toolbar">
-      <span class="path" title={catalog.project.rootPath}>
-        {catalog.project.rootPath.startsWith("content://")
-          ? catalog.project.displayName
-          : truncatePath(catalog.project.rootPath)}
-      </span>
-      <div class="media-toggle">
-        <button
-          class="media-btn"
-          class:active={catalog.media === "photos"}
-          disabled={catalog.mediaCounts.photos === 0}
-          title={catalog.mediaCounts.photos === 0 ? "No photos in this project" : "Show photos"}
-          onclick={blurring(() => void catalog.setMedia("photos").then(() => session.clampFocus()))}
-        >
-          <ImageIcon size={14} />
-          <span>Photos</span>
-          <span class="count">{catalog.mediaCounts.photos}</span>
-        </button>
-        <button
-          class="media-btn"
-          class:active={catalog.media === "videos"}
-          disabled={catalog.mediaCounts.videos === 0}
-          title={catalog.mediaCounts.videos === 0 ? "No videos in this project" : "Show videos"}
-          onclick={blurring(() => void catalog.setMedia("videos").then(() => session.clampFocus()))}
-        >
-          <VideoIcon size={14} />
-          <span>Videos</span>
-          <span class="count">{catalog.mediaCounts.videos}</span>
-        </button>
-      </div>
-      <span class="spacer"></span>
-      {#if catalog.scanning}
-        <span class="status scanning">Scanning… {catalog.scanFound || ""}</span>
-      {:else if catalog.previewProgress.total > 0}
-        <span
-          class="status scanning"
-          title="Generating previews in the background — photos you open jump the queue"
-        >
-          Previews… {catalog.previewProgress.done} / {catalog.previewProgress.total}
-        </span>
-      {/if}
-      <div class="segmented">
-        <button class:active={view.mode === "grid"} title="Grid (G)" onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
-        <button class:active={view.mode === "viewer"} title="Loupe (E)" onclick={blurring(() => (view.mode = "viewer"))}><Search size={14} /></button>
-        <button class:active={view.mode === "compare"} title="Compare (C)" onclick={blurring(() => (view.mode = "compare"))}><Columns2 size={14} /></button>
-      </div>
-      {#if hasRaws}
-        <button
-          class:active={session.mirrorMode}
-          title={session.mirrorMode
-            ? "Mirror mode: RAW+JPEG pairs act as one photo — click to separate (M)"
-            : "Separate mode: RAW and JPEG act independently — click to mirror (M)"}
-          onclick={blurring(() => session.setMirrorMode(!session.mirrorMode))}
-        >
-          {#if session.mirrorMode}<Link size={14} /><span>Mirror</span>{:else}<Unlink size={14} /><span>Separate</span>{/if}
-        </button>
-      {/if}
-      {#if view.mode === "grid"}
-        <button
-          class:active={session.showNames}
-          title="Show/hide file names"
-          onclick={blurring(() => session.toggleShowNames())}
-        >
-          <Type size={14} />
-        </button>
-      {/if}
-      <button
-        class="touchbar-toggle"
-        class:active={touchBarVisible}
-        title="Show/hide the action bar"
-        aria-label="Show/hide the action bar"
-        onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
-      >
-        <PanelBottom size={14} />
-      </button>
-      {#if canRotate}
-        <button
-          class="rotate-toggle"
-          class:active={orientationLocked === "landscape"}
-          title="Rotate screen (lock landscape/portrait)"
-          aria-label="Rotate screen"
-          onclick={blurring(() => void toggleOrientation())}
-        >
-          <RotateCw size={14} />
-        </button>
-      {/if}
-      {#if hasSubfolders && view.mode === "grid"}
-        <button
-          class:active={session.folderTreeVisible}
-          title="Show/hide folder tree (D)"
-          onclick={blurring(() => (session.folderTreeVisible = !session.folderTreeVisible))}
-        >
-          <FolderTreeIcon size={14} />
-        </button>
-      {/if}
-      <div class="filters-anchor">
-        <button
-          class:active={session.filtersPanelOpen}
-          class:haswork={session.hasActiveFilters}
-          title="Filters"
-          onclick={blurring(() => (session.filtersPanelOpen = !session.filtersPanelOpen))}
-        >
-          <Filter size={14} />
-          <span>Filters</span>
-        </button>
-        {#if session.filtersPanelOpen}
-          <FiltersPanel />
-        {/if}
-      </div>
-      {#if view.mode === "grid"}
-        <div class="segmented sortseg">
+      <div class="toolbar-left">
+        <div class="media-toggle">
           <button
-            class:active={catalog.sort === "capture"}
-            title="Sort by capture time (click again to reverse)"
-            onclick={blurring(() => void catalog.setSort("capture"))}
+            class="media-btn"
+            class:active={catalog.media === "photos"}
+            disabled={catalog.mediaCounts.photos === 0}
+            title={catalog.mediaCounts.photos === 0 ? "No photos in this project" : "Show photos"}
+            onclick={blurring(() => void catalog.setMedia("photos").then(() => session.clampFocus()))}
           >
-            <span>Capture</span>
-            {#if catalog.sort === "capture"}
-              {#if catalog.sortDesc}<ArrowDown size={13} />{:else}<ArrowUp size={13} />{/if}
-            {/if}
+            <ImageIcon size={14} />
+            <span>Photos</span>
+            <span class="count">{catalog.mediaCounts.photos}</span>
           </button>
           <button
-            class:active={catalog.sort === "name"}
-            title="Sort by name (click again to reverse)"
-            onclick={blurring(() => void catalog.setSort("name"))}
+            class="media-btn"
+            class:active={catalog.media === "videos"}
+            disabled={catalog.mediaCounts.videos === 0}
+            title={catalog.mediaCounts.videos === 0 ? "No videos in this project" : "Show videos"}
+            onclick={blurring(() => void catalog.setMedia("videos").then(() => session.clampFocus()))}
           >
-            <span>Name</span>
-            {#if catalog.sort === "name"}
-              {#if catalog.sortDesc}<ArrowDown size={13} />{:else}<ArrowUp size={13} />{/if}
-            {/if}
+            <VideoIcon size={14} />
+            <span>Videos</span>
+            <span class="count">{catalog.mediaCounts.videos}</span>
           </button>
         </div>
-      {/if}
-      <button
-        class="commit"
-        class:haswork={session.pendingCount > 0}
-        title="Review & commit pending actions (Ctrl+Enter)"
-        onclick={blurring(() => (session.commitDialogOpen = true))}
-      >
-        Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}
-      </button>
-      <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject(settings.previewMode))}><RefreshCw size={14} /></button>
-      <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
-      <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
-      {#if view.mode === "grid"}
-        <button onclick={blurring(() => (showCloseConfirm = true))}>Close project</button>
-      {/if}
+        {#if catalog.scanning}
+          <span class="status scanning">Scanning… {catalog.scanFound || ""}</span>
+        {:else if catalog.previewProgress.total > 0}
+          <span
+            class="status scanning previews-status"
+            title="Generating previews in the background — photos you open jump the queue"
+          >
+            Previews… {catalog.previewProgress.done} / {catalog.previewProgress.total}
+          </span>
+        {/if}
+      </div>
+      <div class="toolbar-center">
+        <div class="segmented">
+          <button class:active={view.mode === "grid"} title="Grid (G)" onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
+          <button class:active={view.mode === "viewer"} title="Loupe (E)" onclick={blurring(() => { session.ensureFocus(); view.mode = "viewer"; })}><Search size={14} /></button>
+          <button class:active={view.mode === "compare"} title="Compare (C)" onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        {#if hasRaws}
+          <button
+            class:active={session.mirrorMode}
+            title={session.mirrorMode
+              ? "Mirror mode: RAW+JPEG pairs act as one photo — click to separate (M)"
+              : "Separate mode: RAW and JPEG act independently — click to mirror (M)"}
+            onclick={blurring(() => session.setMirrorMode(!session.mirrorMode))}
+          >
+            {#if session.mirrorMode}<Link size={14} /><span>Mirror</span>{:else}<Unlink size={14} /><span>Separate</span>{/if}
+          </button>
+        {/if}
+        {#if view.mode === "grid"}
+          <button
+            class:active={session.showNames}
+            title="Show/hide file names"
+            onclick={blurring(() => session.toggleShowNames())}
+          >
+            <Type size={14} />
+          </button>
+        {/if}
+        {#if view.mode !== "grid"}
+          <button
+            class="touchbar-toggle"
+            class:active={touchBarVisible}
+            title="Show/hide the action bar"
+            aria-label="Show/hide the action bar"
+            onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
+          >
+            <SlidersHorizontal size={14} />
+          </button>
+        {/if}
+        {#if hasSubfolders && view.mode === "grid"}
+          <button
+            class:active={session.folderTreeVisible}
+            title="Show/hide folder tree (D)"
+            onclick={blurring(() => (session.folderTreeVisible = !session.folderTreeVisible))}
+          >
+            <FolderTreeIcon size={14} />
+          </button>
+        {/if}
+        <div class="filters-anchor">
+          <button
+            class:active={session.filtersPanelOpen}
+            class:haswork={session.hasActiveFilters}
+            title="Sort & filter"
+            onclick={blurring(() => (session.filtersPanelOpen = !session.filtersPanelOpen))}
+          >
+            <ListFilter size={14} />
+            <span>Sort &amp; Filter</span>
+          </button>
+          {#if session.filtersPanelOpen}
+            <FiltersPanel />
+          {/if}
+        </div>
+        <button
+          class="commit"
+          class:haswork={session.pendingCount > 0}
+          title="Review & commit pending actions (Ctrl+Enter)"
+          onclick={blurring(() => (session.commitDialogOpen = true))}
+        >
+          Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}
+        </button>
+        <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject(settings.previewMode))}><RefreshCw size={14} /></button>
+        <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
+        <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
+      </div>
     </header>
+    {/if}
 
     {#if catalog.preloading}
       <div class="preload">
@@ -487,8 +423,8 @@
         <CompareView />
       {/if}
       <TouchActionBar
-        forceShow={touchBarVisible}
-        hidden={view.mode === "grid" && session.selectedIds.size === 0}
+        forceShow={touchBarVisible && view.mode !== "grid"}
+        hidden={(view.mode === "grid" && session.selectedIds.size === 0) || view.fullscreen}
       />
     {/if}
   {:else}
@@ -497,9 +433,6 @@
         <h1>Cullant</h1>
         <p>Fast, keyboard-first photo culling</p>
         <button class="primary" onclick={pickProject}>Open project…</button>
-        {#if catalog.error}
-          <p class="error">{catalog.error}</p>
-        {/if}
       </div>
       <ProjectGallery onopen={(path) => void openProject(path)} />
       <footer class="home-footer">
@@ -516,6 +449,10 @@
         </button>
       </footer>
     </div>
+  {/if}
+
+  {#if catalog.error}
+    <AlertDialog title="Couldn't open project" message={catalog.error} onclose={() => (catalog.error = "")} />
   {/if}
 
   {#if introPath !== null}
@@ -575,6 +512,14 @@
     margin: 0;
     height: 100%;
     overflow: hidden;
+  }
+
+  /* Kill the WebView's default tap-highlight flash (a blue overlay on every
+     tapped element) app-wide. TouchActionBar already set this on its own
+     buttons; every other button/toggle/icon (toolbar, dialogs, folder tree,
+     grid cells) is just as tappable and was still flashing it. */
+  :global(*) {
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* The single source of truth for the app's theme. Every component references
@@ -664,6 +609,13 @@
     --safe-left: 0px;
   }
 
+  /* Full-picture (fullscreen) hides the toolbar, which normally pads the top
+     status-bar inset — so pad it here instead, keeping the image and its
+     overlaid controls clear of the notch / status bar. Zero on desktop. */
+  .app.fullscreen {
+    padding-top: var(--inset-top);
+  }
+
   .toolbar {
     display: flex;
     align-items: center;
@@ -678,48 +630,56 @@
     flex: none;
   }
 
-  /* The rotate-screen button is a touch-only affordance: hidden on precise
-     pointers (desktop), shown only on coarse pointers. */
-  .toolbar .rotate-toggle {
-    display: none;
+  /* Three-zone layout so the view-mode selector can sit truly centered: left
+     and right zones share the remaining space equally, each wrapping its own
+     buttons internally on narrow screens instead of the whole toolbar
+     reflowing. The center zone never grows past its content. */
+  .toolbar-left,
+  .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 0;
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  .toolbar-right {
+    justify-content: flex-end;
+  }
+
+  .toolbar-center {
+    flex: 0 0 auto;
   }
 
   /* On touch devices the action bar is always visible, so its toggle is
-     redundant — hide it there. The rotate button, conversely, only makes sense
-     on touch, so it appears here. */
+     redundant — hide it there. */
   @media (pointer: coarse) {
+    /* Mobile shows preview-generation progress only in the grid's bottom-right
+       "Loading previews…" pill, not in the toolbar. */
+    .toolbar .previews-status {
+      display: none;
+    }
     .toolbar .touchbar-toggle {
       display: none;
     }
-    .toolbar .rotate-toggle {
-      display: inline-flex;
-    }
   }
 
-  /* Narrow screens: wrap the toolbar to a couple of rows and drop the least
-     useful bits so every control stays reachable instead of overflowing. */
+  /* Narrow screens: left + center share the first row (flex:1 still lets
+     center sit after left rather than truly mid-viewport, but there's no
+     third zone competing for that row's space); the right zone claims a full
+     row of its own (flex-basis 100% forces the wrap) and wraps its own
+     buttons across as many further rows as it needs. */
   @media (max-width: 720px) {
     .toolbar {
       flex-wrap: wrap;
       row-gap: 4px;
     }
-    .toolbar .path,
-    .toolbar .spacer {
-      display: none;
+    .toolbar-right {
+      flex: 1 1 100%;
+      justify-content: flex-start;
     }
-  }
-
-  .path {
-    opacity: 0.55;
-    font-size: 12px;
-    max-width: 30%;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .spacer {
-    flex: 1;
   }
 
   .status {
@@ -886,15 +846,6 @@
     }
   }
 
-  /* Sort buttons carry a label plus a direction arrow when active. */
-  .sortseg button {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
   .media-toggle {
     display: flex;
     gap: 3px;
@@ -960,6 +911,17 @@
     padding-right: var(--safe-right);
   }
 
+  /* Portrait mobile has no safe-area cutout to speak of, so the padding above
+     resolves to ~0 — the grid otherwise ran cells edge to edge. A modest fixed
+     margin (matching the toolbar's own 10px) reads far less cramped, and still
+     grows past that for an actual cutout via max(). */
+  @media (max-width: 720px) {
+    .grid-area {
+      padding-left: max(10px, var(--safe-left));
+      padding-right: max(10px, var(--safe-right));
+    }
+  }
+
   .grid-area :global(.viewport) {
     flex: 1;
   }
@@ -1015,10 +977,6 @@
   button.primary {
     padding: 10px 22px;
     font-size: 15px;
-  }
-
-  .error {
-    color: #ff6b6b;
   }
 
   button.opensource {

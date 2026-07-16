@@ -1,9 +1,27 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { catalog } from "../stores/catalog.svelte";
+  import { recent } from "../stores/recent.svelte";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
   import Copy from "@lucide/svelte/icons/copy";
   import X from "@lucide/svelte/icons/x";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import Folder from "@lucide/svelte/icons/folder";
+  import LogOut from "@lucide/svelte/icons/log-out";
+
+  // Project-management actions live in +page (which owns the open/close flow);
+  // this bar just renders the menu and calls back.
+  let {
+    onOpenNew,
+    onOpenRecent,
+    onCloseProject,
+  }: {
+    onOpenNew: () => void;
+    onOpenRecent: (path: string) => void;
+    onCloseProject: () => void;
+  } = $props();
 
   // Frameless custom chrome. Only ever mounted on desktop Windows (the parent
   // gates on platform), so `getCurrentWindow()` always has a real OS window
@@ -23,11 +41,69 @@
       void unlisten.then((f) => f());
     };
   });
+
+  // Project switcher dropdown (JetBrains-style) — only shown while a project is
+  // open. The name doubles as the menu trigger.
+  let menuOpen = $state(false);
+
+  // Up to three most-recently-opened projects other than the current one, for
+  // quick switching. Refreshed each time the menu opens.
+  const otherRecent = $derived(
+    recent.list.filter((p) => p.path !== catalog.project?.rootPath).slice(0, 3),
+  );
+
+  function toggleMenu() {
+    menuOpen = !menuOpen;
+    if (menuOpen) void recent.refresh();
+  }
+
+  function choose(fn: () => void) {
+    menuOpen = false;
+    fn();
+  }
 </script>
 
 <div class="titlebar" data-tauri-drag-region>
-  <div class="brand" data-tauri-drag-region>
-    <span class="name" data-tauri-drag-region>Cullant</span>
+  <div class="brand" data-tauri-drag-region title={catalog.project?.rootPath}>
+    {#if catalog.project}
+      <button class="project-btn" class:open={menuOpen} onclick={toggleMenu} title="Project menu">
+        <span class="name">{catalog.project.displayName}</span>
+        <ChevronDown size={13} />
+      </button>
+      {#if menuOpen}
+        <!-- Full-window backdrop: an outside click closes the menu. -->
+        <button class="menu-backdrop" aria-label="Close menu" onclick={() => (menuOpen = false)}></button>
+        <div class="menu" role="menu">
+          <button class="item" role="menuitem" onclick={() => choose(onOpenNew)}>
+            <FolderOpen size={15} />
+            <span>Open project…</span>
+          </button>
+          {#if otherRecent.length > 0}
+            <div class="sep"></div>
+            <div class="menu-label">Recent</div>
+            {#each otherRecent as p (p.path)}
+              <button
+                class="item recent"
+                role="menuitem"
+                title={p.path}
+                disabled={!p.available}
+                onclick={() => choose(() => onOpenRecent(p.path))}
+              >
+                <Folder size={15} />
+                <span class="recent-name">{p.displayName}</span>
+              </button>
+            {/each}
+          {/if}
+          <div class="sep"></div>
+          <button class="item danger" role="menuitem" onclick={() => choose(onCloseProject)}>
+            <LogOut size={15} />
+            <span>Close project</span>
+          </button>
+        </div>
+      {/if}
+    {:else}
+      <span class="name idle" data-tauri-drag-region>Cullant</span>
+    {/if}
   </div>
   <div class="controls">
     <button
@@ -79,10 +155,11 @@
   }
 
   .brand {
+    position: relative;
     display: flex;
     align-items: center;
     height: 100%;
-    padding: 0 12px;
+    padding: 0 6px 0 8px;
     min-width: 0;
     flex: 1 1 auto;
   }
@@ -93,6 +170,119 @@
     letter-spacing: 0.02em;
     color: #e8e8e8;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .name.idle {
+    padding: 0 4px;
+  }
+
+  /* Project name doubles as the menu trigger. */
+  .project-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    max-width: 100%;
+    padding: 0 7px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #e8e8e8;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .project-btn > :global(svg) {
+    flex: none;
+    opacity: 0.6;
+  }
+
+  .project-btn:hover,
+  .project-btn.open {
+    background: var(--hover);
+  }
+
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    border: none;
+    background: transparent;
+    cursor: default;
+  }
+
+  .menu {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 6px;
+    z-index: 61;
+    min-width: 230px;
+    max-width: 340px;
+    display: flex;
+    flex-direction: column;
+    padding: 5px;
+    background: #232329;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 7px 9px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: #e8e8e8;
+    font-family: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .item > :global(svg) {
+    flex: none;
+    opacity: 0.7;
+  }
+
+  .item:hover:not(:disabled) {
+    background: var(--hover);
+  }
+
+  .item:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .item.danger:hover:not(:disabled) {
+    background: rgba(224, 67, 67, 0.18);
+    color: #ff9b9b;
+  }
+
+  .recent-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .menu-label {
+    padding: 4px 9px 2px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.45;
+  }
+
+  .sep {
+    height: 1px;
+    margin: 5px 4px;
+    background: var(--border);
   }
 
   .controls {

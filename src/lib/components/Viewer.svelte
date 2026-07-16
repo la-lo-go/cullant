@@ -9,7 +9,8 @@
   import X from "@lucide/svelte/icons/x";
   import Scissors from "@lucide/svelte/icons/scissors";
   import Info from "@lucide/svelte/icons/info";
-  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
+  import Maximize from "@lucide/svelte/icons/maximize";
+  import Minimize from "@lucide/svelte/icons/minimize";
   import { edgeBounce } from "../anim";
   import { previewUrl } from "../api";
   import { settings } from "../stores/settings.svelte";
@@ -54,42 +55,59 @@
       {:else}
         <ZoomImage {item} />
       {/if}
-      <button class="back" title="Back to grid (Esc)" onclick={() => (view.mode = "grid")}><X size={16} /></button>
+      <button
+        class="back"
+        title="Back to grid (Esc)"
+        onclick={(e) => {
+          view.mode = "grid";
+          (e.currentTarget as HTMLElement).blur();
+        }}><X size={16} /></button
+      >
       <button
         class="back info-btn"
         class:active={view.infoOpen}
         title="Camera metadata (I)"
         data-metadata-toggle
-        onclick={() => (view.infoOpen = !view.infoOpen)}
+        onclick={(e) => {
+          view.infoOpen = !view.infoOpen;
+          (e.currentTarget as HTMLElement).blur();
+        }}
       >
         <Info size={16} />
+      </button>
+      <button
+        class="back fullscreen-btn"
+        class:active={view.fullscreen}
+        title={view.fullscreen ? "Exit full screen" : "Full screen"}
+        onclick={(e) => {
+          view.toggleFullscreen();
+          (e.currentTarget as HTMLElement).blur();
+        }}
+      >
+        {#if view.fullscreen}<Minimize size={16} />{:else}<Maximize size={16} />{/if}
       </button>
       {#if view.infoOpen}
         <MetadataPanel {item} />
       {/if}
-      <button
-        class="back filmstrip-btn"
-        class:active={session.showFilmstrip}
-        title="Show/hide filmstrip (F)"
-        onclick={() => session.toggleShowFilmstrip()}
-      >
-        <PanelBottom size={16} />
-      </button>
-      <div class="info">
-        <span class="filename">{item.relPath}</span>
-        {#if session.mirrorMode && item.groupSize > 1}
-          <span class="chip" class:split={item.decoupled}>
-            {#if item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
-          </span>
-        {/if}
-        {#if item.rating > 0}<span class="stars">{"★".repeat(item.rating)}</span>{/if}
-        {#if item.flag === 1}<span class="pick"><Check size={14} /></span>{/if}
-        {#if item.flag === -1}<span class="reject"><X size={14} /></span>{/if}
-        {#if item.label}<span class="label">{item.label}</span>{/if}
-        <span class="pos">{session.focusedIndex + 1} / {session.filtered.length}</span>
-      </div>
+      {#if !view.fullscreen}
+        <div class="info">
+          <span class="filename">{item.relPath}</span>
+          {#if session.mirrorMode && item.groupSize > 1}
+            <span class="chip" class:split={item.decoupled}>
+              {#if item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
+            </span>
+          {/if}
+          {#if item.rating > 0}<span class="stars">{"★".repeat(item.rating)}</span>{/if}
+          {#if item.flag === 1}<span class="pick"><Check size={14} /></span>{/if}
+          {#if item.flag === -1}<span class="reject"><X size={14} /></span>{/if}
+          {#if item.label}<span class="label">{item.label}</span>{/if}
+          <span class="pos">{session.focusedIndex + 1} / {session.filtered.length}</span>
+        </div>
+      {/if}
     </div>
-    <Filmstrip items={session.filtered} />
+    {#if !view.fullscreen}
+      <Filmstrip items={session.filtered} />
+    {/if}
   {:else}
     <div class="empty">No photo selected</div>
   {/if}
@@ -181,11 +199,11 @@
     color: #fff;
   }
 
-  .filmstrip-btn {
+  .fullscreen-btn {
     top: 82px;
   }
 
-  .filmstrip-btn.active {
+  .fullscreen-btn.active {
     background: rgba(var(--accent-rgb), 0.5);
     color: #fff;
   }
