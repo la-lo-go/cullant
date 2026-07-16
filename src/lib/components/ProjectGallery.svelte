@@ -8,7 +8,6 @@
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Usb from "@lucide/svelte/icons/usb";
   import Network from "@lucide/svelte/icons/network";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
 
   let { onopen }: { onopen: (path: string) => void } = $props();
 
@@ -22,17 +21,14 @@
     unknown: HardDrive,
   };
 
-  // Manual re-check of storage availability (on top of the automatic refresh on
-  // window focus / visibility change).
-  let rescanning = $state(false);
-  async function rescan() {
-    rescanning = true;
-    try {
-      await recent.refresh();
-    } finally {
-      rescanning = false;
-    }
-  }
+  // Poll storage availability while the gallery is open. Desktop also reacts to
+  // window focus / visibility changes (below), but Android gets no such event
+  // when a volume is (un)plugged, so a short interval keeps the connected /
+  // disconnected badges live without a manual rescan.
+  $effect(() => {
+    const id = setInterval(() => void recent.refresh(), 3000);
+    return () => clearInterval(id);
+  });
 
   // Project queued for full data deletion, awaiting confirmation (null = none).
   let deleteTarget = $state<RecentProject | null>(null);
@@ -79,9 +75,9 @@
   }
 
   function openCard(project: RecentProject) {
-    // A present project opens; a disconnected volume retries (it may be back
-    // now, or Android re-prompts for SAF access). A truly-missing folder no-ops.
-    if (project.storage.state !== "notFound") onopen(project.path);
+    // Only a present project opens. Disconnected / not-found cards are inert
+    // (disabled) — reconnect the volume and hit Rescan to re-check.
+    if (project.storage.state === "ok") onopen(project.path);
   }
 
   function askDeleteCard(e: Event, project: RecentProject) {
@@ -98,24 +94,13 @@
 
 {#if recent.loaded && recent.list.length > 0}
   <div class="gallery">
-    <div class="gallery-head">
-      <button
-        class="rescan"
-        onclick={() => void rescan()}
-        disabled={rescanning}
-        title="Re-check whether project folders and volumes are connected"
-      >
-        <RefreshCw size={13} />
-        <span>{rescanning ? "Rescanning…" : "Rescan"}</span>
-      </button>
-    </div>
     <div class="grid">
       {#each recent.list as project, index (project.path)}
         {@const st = project.storage}
         {@const KindIcon = kindIcon[st.kind]}
         <button
           class="card"
-          class:unavailable={st.state === "notFound"}
+          class:unavailable={st.state !== "ok"}
           class:disconnected={st.state === "disconnected"}
           title={project.path}
           onclick={() => openCard(project)}
@@ -195,36 +180,6 @@
     margin: 0 auto;
   }
 
-  .gallery-head {
-    max-width: 960px;
-    margin: 0 auto 12px;
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .rescan {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 10px;
-    border: 1px solid var(--border-strong);
-    border-radius: 6px;
-    background: var(--control);
-    color: #cdcdd3;
-    font-family: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .rescan:hover:not(:disabled) {
-    color: #fff;
-    border-color: var(--accent);
-  }
-
-  .rescan:disabled {
-    opacity: 0.5;
-    cursor: default;
-  }
 
   .card {
     position: relative;
@@ -324,12 +279,8 @@
     opacity: 0.85;
   }
 
-  /* Disconnected volume: still tappable (tapping retries / reconnects), but
-     visibly not-ready, and amber rather than the red of a truly-missing folder. */
-  .card.disconnected {
-    opacity: 0.78;
-  }
-
+  /* Disconnected volume: disabled like a not-found one (via .unavailable), but
+     amber rather than red to distinguish "not connected" from "folder gone". */
   .card.disconnected .meta {
     color: #ffcf8f;
     opacity: 0.9;
