@@ -200,7 +200,10 @@
     align-items: center;
     gap: 5px;
     width: 100%;
-    padding: 5px 8px;
+    /* Extra right padding keeps the count clear of the overlay scrollbar
+       (an 8px band pinned to the panel's right edge) instead of sitting flush
+       under the thumb. The full-width row highlight is unaffected. */
+    padding: 5px 14px 5px 8px;
     border: none;
     background: transparent;
     color: inherit;

@@ -56,7 +56,10 @@
     align-items: center;
     gap: 5px;
     width: 100%;
-    padding: 5px 8px;
+    /* Right padding keeps the count clear of the overlay scrollbar (an 8px band
+       pinned to the panel's right edge); the inline padding-left below overrides
+       the left value per depth. */
+    padding: 5px 14px 5px 8px;
     border: none;
     background: transparent;
     color: inherit;
