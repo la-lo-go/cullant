@@ -8,9 +8,12 @@
     type OrientationFilter,
   } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
+  import { view } from "../stores/view.svelte";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import FilterX from "@lucide/svelte/icons/filter-x";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
 
   const flagOptions: { value: FlagFilter; label: string; icon?: typeof Check }[] = [
     { value: "all", label: "All" },
@@ -169,9 +172,9 @@
   onclick={() => (session.filtersPanelOpen = false)}
 ></div>
 
-<div class="panel" bind:this={panelEl} role="dialog" aria-label="Filters">
+<div class="panel" bind:this={panelEl} role="dialog" aria-label="Sort & filter">
   <header>
-    <span class="title">Filters</span>
+    <span class="title">Sort & Filter</span>
     <button
       class="clear"
       disabled={!session.hasActiveFilters}
@@ -180,6 +183,36 @@
       <FilterX size={13} /> Clear
     </button>
   </header>
+
+  {#if view.mode === "grid"}
+    <section>
+      <span class="lbl">Sort</span>
+      <div class="row">
+        <button
+          class="seg"
+          class:active={catalog.sort === "capture"}
+          title="Sort by capture time (click again to reverse)"
+          onclick={() => void catalog.setSort("capture")}
+        >
+          <span>Date</span>
+          {#if catalog.sort === "capture"}
+            {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
+          {/if}
+        </button>
+        <button
+          class="seg"
+          class:active={catalog.sort === "name"}
+          title="Sort by name (click again to reverse)"
+          onclick={() => void catalog.setSort("name")}
+        >
+          <span>Name</span>
+          {#if catalog.sort === "name"}
+            {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
+          {/if}
+        </button>
+      </div>
+    </section>
+  {/if}
 
   <section>
     <span class="lbl">Flag</span>
