@@ -5,6 +5,7 @@
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import { buildFolderTree, collectFolderPaths } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
+  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
 
   const tree = $derived(buildFolderTree(catalog.items));
   const children = $derived([...tree.children.values()]);
@@ -108,6 +109,17 @@
       onpointerup={endResize}
       onpointercancel={endResize}
     ></div>
+    <!-- Hide tab on the panel's inner (right) edge, pointing left to collapse.
+         Overlaid (absolute) so it costs no layout width; sits above the resize
+         handle and overlay scrollbar (higher z-index) so it stays clickable. -->
+    <button
+      class="tree-hide"
+      title="Hide folder tree (D)"
+      aria-label="Hide folder tree"
+      onclick={() => (session.folderTreeVisible = false)}
+    >
+      <ChevronLeft size={16} />
+    </button>
   </aside>
 {/if}
 
@@ -184,6 +196,35 @@
     .resize-handle {
       display: none;
     }
+  }
+
+  /* Right-edge hide tab (same 18x44 size, surface fill, accent chevron as
+     .tree-peek). Anchored to the panel's inner right edge and layered above the
+     resize handle (z-index 25) and overlay scrollbar (z-index 26) so its click
+     target wins. */
+  .tree-hide {
+    position: absolute;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    z-index: 27;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    background: var(--surface);
+    color: var(--accent);
+    cursor: pointer;
+  }
+
+  .tree-hide:hover {
+    background: var(--hover);
+    border-color: var(--accent);
   }
 
   .header {
