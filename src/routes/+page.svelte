@@ -731,6 +731,12 @@
       flex: 1 1 100%;
       justify-content: flex-start;
     }
+    /* The Photos/Videos pill's 1px border + 2px padding inset its content, so it
+       reads as ~3px right of the flush buttons that wrap onto the row below.
+       Pull it back so their left edges line up. */
+    .media-toggle {
+      margin-left: -3px;
+    }
   }
 
   .status {
@@ -767,7 +773,17 @@
     align-items: center;
     justify-content: center;
     gap: 5px;
-    min-height: 22px;
+    /* Match the bordered "pill" controls (Photos/Videos, view mode) so every
+       toolbar row is the same height and wrapped rows read evenly spaced. */
+    min-height: 30px;
+  }
+
+  /* The pills are containers (border + padding), so keep their inner buttons
+     shorter — the pill total (inner + 6px chrome) then equals a plain 30px
+     button instead of overshooting to ~36px. */
+  .media-toggle button,
+  .segmented button {
+    min-height: 24px;
   }
 
   .preload {
