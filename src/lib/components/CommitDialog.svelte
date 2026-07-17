@@ -62,10 +62,72 @@
     }
   }
 
-  async function unqueue(p: PendingAction) {
-    await api.removePending([p.id]);
+  async function unqueue(ids: number[]) {
+    await api.removePending(ids);
     await session.refreshPending();
     await refresh();
+  }
+
+  // A single line in an expanded action list. `ids` are the pending-action ids
+  // it stands for — two when a RAW+JPEG pair is collapsed into one line, so its
+  // unqueue button removes both halves at once.
+  interface PlanRow {
+    label: string;
+    ids: number[];
+    dest: string | null;
+  }
+
+  function isJpegExt(ext: string): boolean {
+    const e = ext.toLowerCase();
+    return e === "jpg" || e === "jpeg";
+  }
+
+  // Split a relPath into its directory+stem key and its extension (no dot).
+  function splitName(relPath: string): { key: string; ext: string } {
+    const slash = relPath.lastIndexOf("/");
+    const name = relPath.slice(slash + 1);
+    const dir = relPath.slice(0, slash + 1); // trailing slash, or "" at root
+    const dot = name.lastIndexOf(".");
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot + 1) : "";
+    return { key: dir + stem, ext };
+  }
+
+  // Collapse a RAW+JPEG pair queued for the SAME action into one line
+  // ("AJDJ8378.CR3+jpg"). Only collapses when exactly two items share a
+  // basename+dir (and destination) and one is a JPEG while the other is not;
+  // a lone RAW or lone JPEG stays a normal line.
+  function planRows(items: PendingAction[]): PlanRow[] {
+    const groups = new Map<string, PendingAction[]>();
+    const order: string[] = [];
+    for (const p of items) {
+      const gk = `${splitName(p.relPath).key}\u0000${p.dest ?? ""}`;
+      let g = groups.get(gk);
+      if (!g) {
+        g = [];
+        groups.set(gk, g);
+        order.push(gk);
+      }
+      g.push(p);
+    }
+    const rows: PlanRow[] = [];
+    for (const gk of order) {
+      const g = groups.get(gk)!;
+      if (g.length === 2) {
+        const jpeg = g.find((p) => isJpegExt(splitName(p.relPath).ext));
+        const raw = g.find((p) => !isJpegExt(splitName(p.relPath).ext));
+        if (jpeg && raw) {
+          rows.push({
+            label: `${raw.relPath}+${splitName(jpeg.relPath).ext.toLowerCase()}`,
+            ids: [raw.id, jpeg.id],
+            dest: raw.dest,
+          });
+          continue;
+        }
+      }
+      for (const p of g) rows.push({ label: p.relPath, ids: [p.id], dest: p.dest });
+    }
+    return rows;
   }
 
   function close() {
@@ -84,6 +146,10 @@
   const total = $derived(
     plan ? plan.deletes.length + plan.moves.length + plan.copies.length + plan.xmpCount : 0
   );
+
+  const deleteRows = $derived(plan ? planRows(plan.deletes) : []);
+  const moveRows = $derived(plan ? planRows(plan.moves) : []);
+  const copyRows = $derived(plan ? planRows(plan.copies) : []);
 </script>
 
 <div
@@ -123,10 +189,10 @@
         </button>
         {#if expanded === "deletes"}
           <ul class="detail">
-            {#each plan.deletes as p}
+            {#each deleteRows as row}
               <li>
-                {p.relPath}
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}><X size={12} /></button>
+                {row.label}
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row.ids)}><X size={12} /></button>
               </li>
             {/each}
           </ul>
@@ -138,10 +204,10 @@
         </button>
         {#if expanded === "moves"}
           <ul class="detail">
-            {#each plan.moves as p}
+            {#each moveRows as row}
               <li>
-                {p.relPath} → {p.dest}/
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}><X size={12} /></button>
+                {row.label} → {row.dest}/
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row.ids)}><X size={12} /></button>
               </li>
             {/each}
           </ul>
@@ -153,10 +219,10 @@
         </button>
         {#if expanded === "copies"}
           <ul class="detail">
-            {#each plan.copies as p}
+            {#each copyRows as row}
               <li>
-                {p.relPath} → {p.dest}/
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(p)}><X size={12} /></button>
+                {row.label} → {row.dest}/
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row.ids)}><X size={12} /></button>
               </li>
             {/each}
           </ul>
