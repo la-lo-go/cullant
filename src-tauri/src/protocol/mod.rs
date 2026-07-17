@@ -255,12 +255,31 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
     };
     let db_path = base.join(".cullant").join("cullant.db");
     let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY;
+    // One representative photo per logical group (a RAW+JPEG pair shares a
+    // group_id but is one photo), so slots 0/1/2 are three distinct photos.
+    // Within a group prefer the member with a valid cached thumbnail, then the
+    // lowest id; order groups by their newest member (most-recent-first, as the
+    // old `ORDER BY id DESC` did). Serving still never generates a thumbnail.
     let candidate = rusqlite::Connection::open_with_flags(&db_path, flags)
         .ok()
         .and_then(|conn| {
             conn.query_row(
-                "SELECT id, mtime FROM files WHERE status = 0 AND kind IN (0, 1)
-             ORDER BY id DESC LIMIT 1 OFFSET ?1",
+                "SELECT id, mtime FROM (
+                   SELECT f.id AS id, f.mtime AS mtime,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY f.group_id
+                       ORDER BY (t.file_id IS NOT NULL) DESC, f.id ASC
+                     ) AS rn,
+                     MAX(f.id) OVER (PARTITION BY f.group_id) AS group_newest
+                   FROM files f
+                   LEFT JOIN thumbnails t
+                     ON t.file_id = f.id AND t.kind = 0 AND t.failed = 0
+                        AND t.cache_path <> '' AND t.source_mtime = f.mtime
+                   WHERE f.status = 0 AND f.kind IN (0, 1)
+                 )
+                 WHERE rn = 1
+                 ORDER BY group_newest DESC
+                 LIMIT 1 OFFSET ?1",
                 [slot as i64],
                 |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
             )
