@@ -95,7 +95,7 @@
         <div class="menu" role="menu">
           <button class="item" role="menuitem" onclick={() => choose(onOpenNew)}>
             <FolderOpen size={15} />
-            <span>Open project…</span>
+            <span>Open new project…</span>
           </button>
           {#if otherRecent.length > 0}
             <div class="sep"></div>

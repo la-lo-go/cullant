@@ -97,7 +97,7 @@
 
     <div class="actions">
       <button onclick={oncancel}>Cancel</button>
-      <button class="confirm" onclick={() => onstart(selected)}>Open project</button>
+      <button class="confirm" onclick={() => onstart(selected)}>Open new project</button>
     </div>
   </div>
 </div>

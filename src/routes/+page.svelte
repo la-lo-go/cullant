@@ -7,6 +7,7 @@
   import { view } from "$lib/stores/view.svelte";
   import { settings } from "$lib/stores/settings.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
   import VirtualGrid from "$lib/components/VirtualGrid.svelte";
   import FolderTree from "$lib/components/FolderTree.svelte";
   import Viewer from "$lib/components/Viewer.svelte";
@@ -193,6 +194,7 @@
         const info = await api.probeStorage(proj.rootPath);
         if (info.state === "ok") {
           wasOk = true;
+          folderLostMsg = ""; // reconnected → let the user carry on
         } else if (wasOk) {
           wasOk = false;
           folderLostMsg =
@@ -271,7 +273,9 @@
 
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<!-- While the project's folder is unavailable, swallow all shortcuts so the user
+     can't keep culling a project whose files are gone. -->
+<svelte:window onkeydown={(e) => folderLostMsg || handleKeydown(e)} />
 
 <main class="app" class:fullscreen={view.fullscreen}>
   {#if showTitleBar}
@@ -479,7 +483,13 @@
         </svg>
         <h1>Cullant</h1>
         <p>Fast, keyboard-first photo culling</p>
-        <button class="primary" onclick={pickProject}>Open project…</button>
+        {#if recent.list.length === 0}
+          <p class="hint">Point Cullant at a folder of photos or videos to start.</p>
+        {/if}
+        <button class="primary" class:big={recent.list.length === 0} onclick={pickProject}>
+          <FolderOpen size={17} />
+          <span>Open new project…</span>
+        </button>
       </div>
       <ProjectGallery onopen={(path) => void openProject(path)} />
       <footer class="home-footer">
@@ -503,7 +513,25 @@
   {/if}
 
   {#if folderLostMsg}
-    <AlertDialog title="Project folder unavailable" message={folderLostMsg} onclose={() => (folderLostMsg = "")} />
+    <!-- Blocking: you can't keep working while the project's folder/volume is
+         gone. Reconnecting auto-dismisses this (the watcher clears the message);
+         otherwise the only way out is to close the project. -->
+    <div class="folder-lost" role="alertdialog" aria-modal="true" aria-label="Project folder unavailable">
+      <div class="fl-panel">
+        <h2>Project folder unavailable</h2>
+        <p>{folderLostMsg}</p>
+        <p class="fl-waiting">Waiting for it to reconnect…</p>
+        <div class="fl-actions">
+          <button
+            class="fl-close"
+            onclick={() => {
+              folderLostMsg = "";
+              void catalog.close();
+            }}>Close project</button
+          >
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if introPath !== null}
@@ -1049,6 +1077,81 @@
   button.primary {
     padding: 10px 22px;
     font-size: 15px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* On an empty homepage (no recents) the new-project button is the only thing
+     to do, so give it more weight. */
+  button.primary.big {
+    padding: 15px 32px;
+    font-size: 18px;
+  }
+
+  .welcome .hint {
+    margin: 0 0 4px;
+    font-size: 12.5px;
+    opacity: 0.6;
+  }
+
+  /* Blocking overlay while the open project's folder/volume is gone. */
+  .folder-lost {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0, 0, 0, 0.72);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+    box-sizing: border-box;
+  }
+
+  .fl-panel {
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 18px 22px;
+    width: 400px;
+    max-width: calc(100vw - 24px);
+  }
+
+  .fl-panel h2 {
+    margin: 0 0 8px;
+    font-size: 15px;
+  }
+
+  .fl-panel p {
+    font-size: 13px;
+    opacity: 0.8;
+    margin: 0 0 6px;
+  }
+
+  .fl-waiting {
+    opacity: 0.5 !important;
+    font-style: italic;
+  }
+
+  .fl-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 14px;
+  }
+
+  .fl-close {
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: #e04343;
+    color: #fff;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .fl-close:hover {
+    filter: brightness(1.1);
   }
 
   button.opensource {
