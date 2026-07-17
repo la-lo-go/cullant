@@ -238,7 +238,11 @@ export function videoUrl(item: ItemLite): string {
   return cullantUrl(`video/${item.id}?v=${item.mtime}`);
 }
 
-/** Preview thumbnail for a homepage recent-project card (0-based list index + preview slot). */
-export function recentThumbUrl(index: number, slot: number): string {
-  return cullantUrl(`recent-thumb/${index}/${slot}`);
+/** Preview thumbnail for a homepage recent-project card (0-based list index +
+ *  preview slot). `cacheKey` (the project's stable id/path) is appended so the
+ *  browser doesn't reuse a cached image when the recent list reorders and a
+ *  given index now points at a different project. */
+export function recentThumbUrl(index: number, slot: number, cacheKey?: string): string {
+  const base = cullantUrl(`recent-thumb/${index}/${slot}`);
+  return cacheKey ? `${base}?v=${encodeURIComponent(cacheKey)}` : base;
 }

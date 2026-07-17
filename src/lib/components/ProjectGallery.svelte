@@ -113,7 +113,7 @@
               {#each PREVIEW_SLOTS as slot, i}
                 <img
                   class="peek peek-{i}"
-                  src={recentThumbUrl(index, slot)}
+                  src={recentThumbUrl(index, slot, project.path)}
                   alt=""
                   loading="lazy"
                   onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
