@@ -702,7 +702,7 @@
     /* The toolbar paints the top status-bar strip: its --surface-2 background
        bleeds up under the system status bar (the top inset is not applied on
        .app), so the strip reads as one continuous colour with the toolbar. */
-    padding: calc(4px + var(--inset-top)) calc(10px + var(--safe-right)) 4px
+    padding: calc(6px + var(--inset-top)) calc(10px + var(--safe-right)) 8px
       calc(10px + var(--safe-left));
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
@@ -721,7 +721,7 @@
     flex: 1 1 0;
     min-width: 0;
     flex-wrap: wrap;
-    row-gap: 4px;
+    row-gap: 6px;
   }
 
   .toolbar-right {
@@ -753,7 +753,7 @@
   @media (max-width: 720px) {
     .toolbar {
       flex-wrap: wrap;
-      row-gap: 4px;
+      row-gap: 6px;
     }
     .toolbar-right {
       flex: 1 1 100%;
@@ -907,8 +907,9 @@
 
   /* Active-filters indicator on the Filters button. */
   .filters-anchor button.haswork {
-    border-color: var(--accent);
-    color: var(--accent);
+    background: var(--accent-fill);
+    border-color: transparent;
+    color: #fff;
   }
 
   .segmented button {
