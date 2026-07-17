@@ -136,8 +136,8 @@ pub fn probe_storage(app: AppHandle, id: String) -> crate::storage::StorageInfo 
 /// own data (the SQLite DB + thumbnail cache). The user's photos are NEVER
 /// touched — only Cullant's sidecar is removed.
 ///
-/// Desktop: the sidecar is `<project>/.cullant`; it goes to the OS recycle bin
-/// (reversible) when possible, falling back to a permanent remove otherwise.
+/// Desktop: the sidecar is `<project>/.cullant`; it is removed permanently
+/// (the DB + thumbnail cache regenerate on the next scan).
 /// Android: the data lives in a private app dir (`project_data_base`) outside
 /// the picked SAF tree, so it is removed directly.
 #[tauri::command]
@@ -165,19 +165,9 @@ pub fn delete_project_data(app: AppHandle, path: String) -> AppResult<()> {
     Ok(())
 }
 
-/// Remove Cullant's `.cullant` sidecar directory. Prefers the OS recycle bin so
-/// the deletion is reversible; falls back to a permanent recursive remove if the
-/// platform can't trash a directory.
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn delete_sidecar(dir: &std::path::Path) -> AppResult<()> {
-    if trash::delete(dir).is_ok() {
-        return Ok(());
-    }
-    std::fs::remove_dir_all(dir).map_err(|e| AppError::Other(format!("delete project data: {e}")))
-}
-
-/// Mobile fallback: no OS recycle bin, so remove the sidecar permanently.
-#[cfg(any(target_os = "android", target_os = "ios"))]
+/// Remove Cullant's `.cullant` sidecar directory (just the SQLite DB and
+/// thumbnail cache — the user's photos are never here). Removed permanently;
+/// it is fully regenerated on the next scan.
 fn delete_sidecar(dir: &std::path::Path) -> AppResult<()> {
     std::fs::remove_dir_all(dir).map_err(|e| AppError::Other(format!("delete project data: {e}")))
 }

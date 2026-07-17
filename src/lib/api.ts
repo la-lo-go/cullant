@@ -102,7 +102,7 @@ export interface TagChange {
 
 export type ActionKind = "delete" | "move" | "copy";
 export type PairScope = "both" | "rawonly" | "jpegonly";
-export type DeletionMode = "recycle" | "permanent" | "trash";
+export type DeletionMode = "permanent" | "trash";
 
 export interface PendingAction {
   id: number;

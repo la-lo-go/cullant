@@ -43,11 +43,6 @@ time = { version = "0.3.53", features = ["parsing", "macros"] }
 quick-xml = "0.41.0"
 xxhash-rust = { version = "0.8.16", features = ["xxh3"] }
 
-# `trash` has no Android/iOS backend (see engine::committer::delete_path, which
-# falls back to a project-local _trash folder on those targets instead).
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-trash = "5.2.6"
-
 [dev-dependencies]
 tempfile = "3.27.0"
 

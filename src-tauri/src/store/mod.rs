@@ -70,7 +70,7 @@ pub trait ProjectStore: Send + Sync {
 
     /// The real OS path for `rel`, if this backend has one. `Some` only for the
     /// local filesystem; `None` for SAF. Used by the few operations that must
-    /// hand a concrete path to an OS API (e.g. the desktop recycle bin).
+    /// hand a concrete path to an OS API (e.g. memory-mapping the file to decode).
     fn local_path(&self, _rel: &str) -> Option<std::path::PathBuf> {
         None
     }

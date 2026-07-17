@@ -25,7 +25,6 @@
   let expanded = $state<"deletes" | "moves" | "copies" | null>(null);
 
   const deletionModeNames: Record<DeletionMode, string> = {
-    recycle: "Recycle Bin (recoverable)",
     permanent: "Permanent delete",
     trash: "Project _trash folder",
   };
@@ -173,7 +172,6 @@
       <div class="mode">
         <label for="delmode">Deletion mode</label>
         <select id="delmode" value={plan.deletionMode} onchange={changeMode} disabled={running}>
-          <option value="recycle">Recycle Bin</option>
           <option value="trash">Project _trash folder</option>
           <option value="permanent">Permanent (no undo!)</option>
         </select>

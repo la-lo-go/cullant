@@ -15,18 +15,18 @@ use super::xmp::{self, XmpState};
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum DeletionMode {
-    #[default]
-    Recycle,
     Permanent,
-    Trash, // project-local _trash folder
+    #[default]
+    Trash, // project-local _trash folder (recoverable; same on desktop and mobile)
 }
 
 impl DeletionMode {
     pub fn from_setting(s: &str) -> DeletionMode {
         match s {
             "permanent" => DeletionMode::Permanent,
-            "trash" => DeletionMode::Trash,
-            _ => DeletionMode::Recycle,
+            // Unknown or removed values (e.g. a legacy "recycle") fall back to
+            // the default: the project-local _trash folder.
+            _ => DeletionMode::Trash,
         }
     }
 }
@@ -159,18 +159,6 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
 /// Returns undo info JSON (with a project-relative trash path when applicable).
 fn delete_via_store(store: &dyn ProjectStore, rel: &str, mode: DeletionMode) -> AppResult<String> {
     match mode {
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        DeletionMode::Recycle => match store.local_path(rel) {
-            Some(abs) => {
-                trash::delete(&abs).map_err(|e| AppError::Other(format!("recycle: {e}")))?;
-                Ok(r#"{"mode":"recycle"}"#.to_string())
-            }
-            // No real OS path (shouldn't happen on desktop): fall back to trash folder.
-            None => store_trash(store, rel),
-        },
-        // No OS recycle bin API on mobile — fall back to the project-local trash folder.
-        #[cfg(any(target_os = "android", target_os = "ios"))]
-        DeletionMode::Recycle => store_trash(store, rel),
         DeletionMode::Permanent => {
             store.remove_file(rel)?;
             Ok(r#"{"mode":"permanent"}"#.to_string())
