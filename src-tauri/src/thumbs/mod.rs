@@ -192,6 +192,28 @@ pub(crate) fn decode_for(
     match file_kind {
         0 => {
             let source = decode::open_source(store, rel_path)?;
+            // Fast path: many RAW containers embed a full-resolution JPEG
+            // (Fujifilm .RAF, etc.) that rawler only surfaces via a FULL-res
+            // decode. Extracting the bytes and running our IDCT-scaled JPEG
+            // decode is far cheaper for a thumbnail/preview. Its header carries
+            // the ORIGINAL dimensions (cheap, no decode), independent of the
+            // scaled decode below.
+            if let Some(jpeg) = decode::raw::embedded_jpeg(source.buf()) {
+                match decode::jpeg::decode_scaled(jpeg, min_long_edge, rel_path) {
+                    Ok(img) => {
+                        let dims = image::ImageReader::new(std::io::Cursor::new(jpeg))
+                            .with_guessed_format()
+                            .ok()
+                            .and_then(|r| r.into_dimensions().ok());
+                        return Ok((img, dims));
+                    }
+                    // A corrupt embedded JPEG is rare; fall back to rawler rather
+                    // than tombstoning a file rawler might still decode.
+                    Err(e) => tracing::debug!(
+                        "{rel_path}: embedded JPEG decode failed, falling back to rawler: {e}"
+                    ),
+                }
+            }
             let raw = decode::raw::embedded_preview_scaled(&source, min_long_edge, rel_path)?;
             let dims = raw.is_full.then(|| (raw.image.width(), raw.image.height()));
             Ok((raw.image, dims))
