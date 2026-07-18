@@ -172,8 +172,8 @@ mod win {
     pub fn volume_label(root: &str) -> Option<String> {
         let w = wide(root);
         let mut buf = [0u16; 261]; // MAX_PATH + 1
-        // Safety: `w` is NUL-terminated; `buf` is writable for `buf.len()` u16s;
-        // the unused out-params are passed as null, which the API permits.
+                                   // Safety: `w` is NUL-terminated; `buf` is writable for `buf.len()` u16s;
+                                   // the unused out-params are passed as null, which the API permits.
         let ok = unsafe {
             GetVolumeInformationW(
                 w.as_ptr(),
@@ -212,9 +212,7 @@ fn volume_present(id: &str) -> bool {
     if best.is_empty() || best == "/" {
         // Only the root fs covers it: under an external-mount root its dedicated
         // mount is gone (disconnected); anywhere else it's a deleted folder.
-        !(id.starts_with("/media/")
-            || id.starts_with("/mnt/")
-            || id.starts_with("/run/media/"))
+        !(id.starts_with("/media/") || id.starts_with("/mnt/") || id.starts_with("/run/media/"))
     } else {
         true
     }

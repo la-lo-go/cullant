@@ -8,7 +8,6 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db::{migrations, Db};
 use crate::error::{AppError, AppResult};
-use crate::scan::ingest::PreviewMode;
 use crate::store::ProjectStore;
 use crate::thumbs::ThumbPool;
 use crate::{scan, AppState, ProjectState};
@@ -86,10 +85,10 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Kick off scan + the fused ingest pass (metadata + thumbnails + previews)
-/// on a background thread; the UI is notified through scan:progress /
-/// scan:done / scan:empty / metadata:done / thumbs:progress / thumbs:done /
-/// previews:progress events.
+/// Kick off scan + the two-phase ingest pass (metadata gate, then background
+/// thumbnails + previews) on a background thread; the UI is notified through
+/// scan:progress / scan:done / scan:empty / metadata:progress / metadata:done /
+/// thumbs:progress / thumbs:done / previews:progress events.
 ///
 /// `initial_open_id` is `Some(identifier)` (the desktop path or Android SAF
 /// tree URI used by the recent-projects list) only when this scan is the
@@ -103,7 +102,7 @@ fn spawn_scan(
     db: Arc<Db>,
     store: Arc<dyn ProjectStore>,
     root: PathBuf,
-    mode: PreviewMode,
+    thumbs: Arc<ThumbPool>,
     initial_open_id: Option<String>,
 ) {
     std::thread::Builder::new()
@@ -134,7 +133,7 @@ fn spawn_scan(
                     return;
                 }
             }
-            if let Err(e) = scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &root, mode) {
+            if let Err(e) = scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &thumbs) {
                 tracing::error!("ingest pass failed: {e}");
             }
         })
@@ -144,11 +143,10 @@ fn spawn_scan(
 #[tauri::command]
 pub fn open_project(
     path: String,
-    preview_mode: Option<PreviewMode>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectInfo> {
-    do_open_project(&path, &app, &state, preview_mode.unwrap_or_default())
+    do_open_project(&path, &app, &state)
 }
 
 /// Launch the Android SAF folder picker and return the picked `content://` tree
@@ -176,16 +174,11 @@ pub fn pick_saf_tree(app: AppHandle) -> AppResult<Option<String>> {
 }
 
 /// Shared by the IPC command and the CULLANT_OPEN_PROJECT dev/startup hook.
-pub fn do_open_project(
-    path: &str,
-    app: &AppHandle,
-    state: &AppState,
-    mode: PreviewMode,
-) -> AppResult<ProjectInfo> {
+pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResult<ProjectInfo> {
     // On Android a project is a SAF `content://` tree, not a filesystem path.
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
-        return open_saf_project(path, app, state, mode);
+        return open_saf_project(path, app, state);
     }
 
     let root = PathBuf::from(path);
@@ -226,17 +219,25 @@ pub fn do_open_project(
         Ok((version, count))
     })?;
 
-    let thumbs = ThumbPool::start(db.clone(), store.clone(), root.clone());
-    *state.project.lock().unwrap() = Some(ProjectState {
-        root: root.clone(),
-        store: store.clone(),
-        db: db.clone(),
-        thumbs,
-    });
+    let thumbs = Arc::new(ThumbPool::start(db.clone(), store.clone(), root.clone()));
+    {
+        // Replacing an already-open project must stop its background generation
+        // too (same reason as close_project), or two pools grind at once.
+        let mut guard = state.project.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            prev.thumbs.shutdown();
+        }
+        *guard = Some(ProjectState {
+            root: root.clone(),
+            store: store.clone(),
+            db: db.clone(),
+            thumbs: thumbs.clone(),
+        });
+    }
     tracing::info!("opened project at {root_str}");
     crate::commands::recent::record_opened(app, &root_str);
 
-    spawn_scan(app.clone(), db, store, root, mode, Some(root_str.clone()));
+    spawn_scan(app.clone(), db, store, root, thumbs, Some(root_str.clone()));
 
     Ok(ProjectInfo {
         display_name: project_display_name(&root_str),
@@ -274,12 +275,7 @@ pub(crate) fn project_data_base<R: tauri::Runtime>(
 /// media; the DB and thumbnail cache live in private app storage keyed by a hash
 /// of the tree URI, because SQLite cannot run inside a SAF tree.
 #[cfg(target_os = "android")]
-fn open_saf_project(
-    tree_uri: &str,
-    app: &AppHandle,
-    state: &AppState,
-    mode: PreviewMode,
-) -> AppResult<ProjectInfo> {
+fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppResult<ProjectInfo> {
     use tauri_plugin_saf::SafExt;
 
     let root_doc = app
@@ -314,13 +310,20 @@ fn open_saf_project(
         Ok((version, count))
     })?;
 
-    let thumbs = ThumbPool::start(db.clone(), store.clone(), base.clone());
-    *state.project.lock().unwrap() = Some(ProjectState {
-        root: base.clone(),
-        store: store.clone(),
-        db: db.clone(),
-        thumbs,
-    });
+    let thumbs = Arc::new(ThumbPool::start(db.clone(), store.clone(), base.clone()));
+    {
+        // Stop a previously-open project's background generation before replacing.
+        let mut guard = state.project.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            prev.thumbs.shutdown();
+        }
+        *guard = Some(ProjectState {
+            root: base.clone(),
+            store: store.clone(),
+            db: db.clone(),
+            thumbs: thumbs.clone(),
+        });
+    }
     tracing::info!("opened SAF project {tree_uri}");
     crate::commands::recent::record_opened(app, tree_uri);
 
@@ -329,7 +332,7 @@ fn open_saf_project(
         db,
         store,
         base,
-        mode,
+        thumbs,
         Some(tree_uri.to_string()),
     );
 
@@ -372,28 +375,61 @@ pub fn current_project(state: State<'_, AppState>) -> AppResult<Option<ProjectIn
     }))
 }
 
+/// How many present files still lack metadata (Phase A work outstanding). Used
+/// by the frontend to recover from a missed `metadata:done` on the startup
+/// auto-open path: if the backend finished ingesting before the webview attached
+/// its event listeners, the gate would otherwise stay closed forever. Zero here
+/// (with files present) means the grid is safe to show.
 #[tauri::command]
-pub fn rescan_project(
-    preview_mode: Option<PreviewMode>,
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> AppResult<()> {
-    let (db, store, root) = {
+pub fn ingest_pending(state: State<'_, AppState>) -> AppResult<i64> {
+    let db = state.project.lock().unwrap().as_ref().map(|p| p.db.clone());
+    let Some(db) = db else { return Ok(0) };
+    db.call(|conn| {
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM files
+             WHERE status = 0 AND kind IN (0, 1, 2) AND capture_time IS NULL",
+            [],
+            |r| r.get(0),
+        )?)
+    })
+}
+
+#[tauri::command]
+pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    let (db, store, root, thumbs) = {
         let guard = state.project.lock().unwrap();
         let project = guard.as_ref().ok_or(AppError::NoProject)?;
         (
             project.db.clone(),
             project.store.clone(),
             project.root.clone(),
+            project.thumbs.clone(),
         )
     };
-    spawn_scan(app, db, store, root, preview_mode.unwrap_or_default(), None);
+    spawn_scan(app, db, store, root, thumbs, None);
     Ok(())
 }
 
 #[tauri::command]
 pub fn close_project(state: State<'_, AppState>) {
-    *state.project.lock().unwrap() = None;
+    // Take the project out AND shut its ThumbPool down. Clearing the state alone
+    // is not enough: the scanner thread running ingest Phase B holds its own
+    // `Arc<ThumbPool>` clone, so without an explicit shutdown the background
+    // thumbnail/preview/video generation keeps running after the user has
+    // returned to the home screen. shutdown() drains the pending queue (releasing
+    // the scanner's completion channel) and stops the workers.
+    if let Some(prev) = state.project.lock().unwrap().take() {
+        prev.thumbs.shutdown();
+    }
+}
+
+/// Frontend push of the "generate video thumbnails" preference (localStorage on
+/// the UI side). Read by the ingest pass before its final video-poster tier.
+#[tauri::command]
+pub fn set_generate_video_thumbs(on: bool, state: State<'_, AppState>) {
+    state
+        .generate_video_thumbs
+        .store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[cfg(test)]

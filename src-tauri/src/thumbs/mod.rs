@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -34,16 +35,29 @@ pub struct ThumbRequest {
     pub respond: Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>,
 }
 
+/// Two priority tiers sharing one worker pool, so interactive and background
+/// work never fight over separate thread pools (which oversubscribes the CPU and
+/// scatters completion order).
+struct Queues {
+    /// Interactive requests from the `cullant://` protocol (the cells/photo the
+    /// user is looking at). LIFO: the most recently requested is what's on screen
+    /// right now, so it goes first — a fast scroll never waits on stale cells.
+    interactive: Vec<ThumbRequest>,
+    /// Bulk pregeneration (ingest Phase B). FIFO, so thumbnails are produced in
+    /// the grid's display order (top first), and only ever served when no
+    /// interactive request is waiting.
+    background: VecDeque<ThumbRequest>,
+}
+
 struct Queue {
-    // LIFO: the most recently requested thumb is what the user is looking at
-    // right now, so it goes first.
-    items: Mutex<Option<Vec<ThumbRequest>>>,
+    items: Mutex<Option<Queues>>,
     signal: Condvar,
 }
 
-/// Worker pool that turns thumbnail requests (from the cullant:// protocol)
-/// into cached JPEG bytes. Owns nothing exclusive: DB access goes through the
-/// shared writer thread, files are read-only.
+/// Worker pool that turns thumbnail requests (from the cullant:// protocol AND
+/// the ingest pregeneration pass) into cached JPEG bytes. Owns nothing
+/// exclusive: DB access goes through the shared writer thread, files are
+/// read-only. Interactive requests always preempt background ones.
 pub struct ThumbPool {
     queue: Arc<Queue>,
 }
@@ -51,7 +65,10 @@ pub struct ThumbPool {
 impl ThumbPool {
     pub fn start(db: Arc<Db>, store: Arc<dyn ProjectStore>, root: PathBuf) -> ThumbPool {
         let queue = Arc::new(Queue {
-            items: Mutex::new(Some(Vec::new())),
+            items: Mutex::new(Some(Queues {
+                interactive: Vec::new(),
+                background: VecDeque::new(),
+            })),
             signal: Condvar::new(),
         });
 
@@ -72,22 +89,37 @@ impl ThumbPool {
         ThumbPool { queue }
     }
 
+    /// Enqueue an interactive request (served before any background work, LIFO).
     pub fn enqueue(&self, request: ThumbRequest) {
         let mut guard = self.queue.items.lock().unwrap();
-        if let Some(items) = guard.as_mut() {
-            items.push(request);
+        if let Some(q) = guard.as_mut() {
+            q.interactive.push(request);
             self.queue.signal.notify_one();
         } else {
             (request.respond)(Err(AppError::Other("thumb pool shut down".into())));
         }
     }
 
-    /// Stop accepting work and unblock all workers (they exit).
+    /// Enqueue a background pregeneration request (served only when no
+    /// interactive request is waiting, FIFO / in submission order).
+    pub fn enqueue_background(&self, request: ThumbRequest) {
+        let mut guard = self.queue.items.lock().unwrap();
+        if let Some(q) = guard.as_mut() {
+            q.background.push_back(request);
+            self.queue.signal.notify_one();
+        } else {
+            (request.respond)(Err(AppError::Other("thumb pool shut down".into())));
+        }
+    }
+
+    /// Stop accepting work and unblock all workers (they exit). Draining calls
+    /// every pending request's `respond` with an error, so a caller blocked on a
+    /// completion channel (ingest Phase B) is always released.
     pub fn shutdown(&self) {
         let mut guard = self.queue.items.lock().unwrap();
         if let Some(dropped) = guard.take() {
             drop(guard);
-            for req in dropped {
+            for req in dropped.interactive.into_iter().chain(dropped.background) {
                 (req.respond)(Err(AppError::Other("thumb pool shut down".into())));
             }
             self.queue.signal.notify_all();
@@ -108,8 +140,12 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             loop {
                 match guard.as_mut() {
                     None => return, // pool shut down
-                    Some(items) => {
-                        if let Some(req) = items.pop() {
+                    Some(q) => {
+                        // Interactive first (LIFO), then background (FIFO).
+                        if let Some(req) = q.interactive.pop() {
+                            break req;
+                        }
+                        if let Some(req) = q.background.pop_front() {
                             break req;
                         }
                         guard = queue.signal.wait(guard).unwrap();
@@ -360,27 +396,9 @@ fn write_thumb_row(conn: &Connection, row: &ThumbRow) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// Flush a batch of rendered-thumbnail rows in a single transaction — the
-/// ingest counterpart to per-file writes, cutting one commit + IPC round-trip
-/// per thumbnail down to one per chunk.
-pub(crate) fn write_thumb_rows(db: &Arc<Db>, rows: Vec<ThumbRow>) -> AppResult<()> {
-    if rows.is_empty() {
-        return Ok(());
-    }
-    db.call(move |conn| {
-        let tx = conn.transaction()?;
-        for row in &rows {
-            write_thumb_row(&tx, row)?;
-        }
-        tx.commit()?;
-        Ok(())
-    })
-}
-
-/// Resize/orient/encode/cache one thumbnail AND record its row immediately (a
-/// batch of one). The on-demand path (`produce`) uses this; the ingest pass
-/// instead collects `ThumbRow`s via [`render_to_cache`] and flushes them with
-/// [`write_thumb_rows`].
+/// Resize/orient/encode/cache one thumbnail AND record its row immediately.
+/// Both the on-demand path (`produce_with_mtime`) and the background ingest
+/// pass reach this through [`produce_with_mtime`].
 pub(crate) fn render_and_store(
     db: &Arc<Db>,
     root: &Path,

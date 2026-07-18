@@ -10,6 +10,7 @@ mod store;
 mod thumbs;
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use db::Db;
@@ -24,12 +25,29 @@ pub struct ProjectState {
     /// Backend for the project's media (real fs on desktop, SAF on Android).
     pub store: Arc<dyn ProjectStore>,
     pub db: Arc<Db>,
-    pub thumbs: ThumbPool,
+    /// Shared with the scanner thread so ingest Phase B routes its bulk
+    /// pregeneration through the same worker pool (background priority) instead
+    /// of a second pool that would oversubscribe the CPU.
+    pub thumbs: Arc<ThumbPool>,
 }
 
-#[derive(Default)]
 pub struct AppState {
     pub project: Mutex<Option<ProjectState>>,
+    /// Whether ingest pregenerates video poster thumbnails (they run last, after
+    /// every photo thumbnail and preview, because ffmpeg poster extraction is the
+    /// slowest tier). Pushed from the frontend setting; defaults to on. Only
+    /// gates *background* pregeneration — a video's poster is still made on demand
+    /// when its cell scrolls into view.
+    pub generate_video_thumbs: AtomicBool,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            project: Mutex::new(None),
+            generate_video_thumbs: AtomicBool::new(true),
+        }
+    }
 }
 
 /// Thin facade for the `bench_ingest` example. Not a stable API.
@@ -39,7 +57,6 @@ pub mod bench {
     use std::sync::Arc;
 
     pub use crate::db::Db;
-    pub use crate::scan::ingest::PreviewMode;
     pub use crate::store::ProjectStore;
 
     pub fn open_db(root: &Path) -> Db {
@@ -57,26 +74,30 @@ pub mod bench {
             .file_count
     }
 
-    /// Run the fused ingest; returns (tier-1 total, background previews done).
+    /// Run the two-phase ingest; returns
+    /// `(metadata updated, thumbnails done, previews done)`.
     pub fn ingest(
         db: &Arc<Db>,
-        store: &dyn ProjectStore,
+        store: &Arc<dyn ProjectStore>,
         root: &Path,
-        mode: PreviewMode,
-    ) -> (usize, usize) {
-        let mut tier1 = 0usize;
+    ) -> (usize, usize, usize) {
+        let thumbs = crate::thumbs::ThumbPool::start(db.clone(), store.clone(), root.to_path_buf());
+        let mut meta = 0usize;
+        let mut thumbs_done = 0usize;
         let mut previews = 0usize;
         crate::scan::ingest::run_ingest_inner(
             db,
-            store,
-            root,
-            mode,
+            store.as_ref(),
+            &thumbs,
             &|_, _| {},
-            &mut |_, total| tier1 = total,
+            &mut |updated| meta = updated,
+            &mut |done, _| thumbs_done = done,
             &mut |done, _| previews = done,
+            &mut |_, _| {},
+            true,
         )
         .expect("ingest failed");
-        (tier1, previews)
+        (meta, thumbs_done, previews)
     }
 
     /// Synthetic-photo EXIF payload for [`jpeg_with_exif`].
@@ -196,12 +217,7 @@ pub fn run() {
             if let Ok(path) = std::env::var("CULLANT_OPEN_PROJECT") {
                 use tauri::Manager;
                 let state = app.state::<AppState>();
-                match commands::project::do_open_project(
-                    &path,
-                    app.handle(),
-                    &state,
-                    Default::default(),
-                ) {
+                match commands::project::do_open_project(&path, app.handle(), &state) {
                     Ok(info) => tracing::info!("auto-opened project {}", info.root_path),
                     Err(e) => tracing::error!("CULLANT_OPEN_PROJECT failed: {e}"),
                 }
@@ -212,13 +228,16 @@ pub fn run() {
             commands::project::open_project,
             commands::project::pick_saf_tree,
             commands::project::current_project,
+            commands::project::ingest_pending,
             commands::project::rescan_project,
             commands::project::close_project,
+            commands::project::set_generate_video_thumbs,
             commands::recent::list_recent_projects,
             commands::recent::probe_storage,
             commands::recent::delete_project_data,
             commands::catalog::query_items,
             commands::catalog::media_counts,
+            commands::catalog::preview_ready_ids,
             commands::culling::set_rating,
             commands::culling::set_flag,
             commands::culling::set_label,

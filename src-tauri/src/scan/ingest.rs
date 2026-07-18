@@ -1,65 +1,53 @@
-//! Fused ingest pass.
+//! Two-phase ingest.
 //!
-//! One read/parse/decode per file produces everything the file needs: EXIF
-//! metadata, the 384px grid thumbnail and — mode permitting — the 2560px
-//! loupe preview. This replaces the old sequential metadata pass + thumbnail
-//! pregeneration, which read and parsed every file twice.
+//! Opening a project must feel instant, so ingest is split by *what gates the
+//! grid*:
 //!
-//! Two tiers keep the preload gate honest:
-//! - **Tier 1** (gated): files needing metadata or a thumbnail — the fresh
-//!   import set. Progress drives `thumbs:progress`, and the gate releases on
-//!   `thumbs:done`.
-//! - **Tier 2** (background, after the gate): previews still missing — the
-//!   whole project in `Background` mode, or only stale/legacy leftovers in
-//!   `All` mode (e.g. a project imported before previews were pregenerated).
-//!   Progress drives `previews:progress` for a small toolbar indicator.
-//!   Interactive requests for a not-yet-generated preview are served
-//!   immediately by the ThumbPool (LIFO) and are race-safe with this tier
-//!   (temp-file+rename writes, idempotent upserts).
+//! - **Phase A — metadata (gated).** EXIF/RAW metadata (capture_time,
+//!   orientation, camera, …) for every file that lacks it. This is the only
+//!   blocking phase: the grid is ordered by `COALESCE(capture_time, mtime)`, so
+//!   once metadata is in the grid can show, correctly sorted. Metadata is far
+//!   cheaper than decoding+resizing+encoding a thumbnail, so this gate is short.
+//!   Progress drives `metadata:progress`; the gate releases on `metadata:done`.
+//! - **Phase B — thumbnails then previews (background).** With the gate already
+//!   open, the 384px grid thumbnails and then the 2560px loupe previews are
+//!   generated for the whole project, in the grid's display order (top first) so
+//!   what the user is looking at fills in first. Interactive requests for a cell
+//!   not yet generated are served immediately by the ThumbPool (LIFO) and are
+//!   race-safe with this phase (temp-file+rename writes, idempotent upserts).
+//!   Progress drives `thumbs:progress`/`thumbs:done` and `previews:progress`,
+//!   all non-blocking indicators.
+//!
+//! Trade-off: exact ordering from the first frame means metadata is read before
+//! any pixels, so a RAW container is parsed once here for metadata and reopened
+//! in Phase B for its embedded preview — one extra cheap `get_decoder` per RAW,
+//! in the background, invisible to time-to-interactive. (The old fused pass did
+//! one read/parse per file but could not release the grid until every thumbnail
+//! was done.)
 
-use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
 use rayon::prelude::*;
-use rusqlite::params;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::db::Db;
 use crate::decode;
 use crate::error::AppResult;
 use crate::store::ProjectStore;
-use crate::thumbs::{self, SourceMeta, ThumbKind, PREVIEW_LONG_EDGE, THUMB_LONG_EDGE};
+use crate::thumbs::{ThumbKind, ThumbPool, ThumbRequest};
 
 /// Files handled per parallel burst; also the metadata write-batch size.
 /// Smaller on Android to bound the number of in-flight decode buffers.
 const CHUNK: usize = if cfg!(target_os = "android") { 8 } else { 32 };
 
-/// Minimum gap between tier-1 progress emits. Progress is now counted per file
-/// (inside the parallel burst) instead of once per chunk, so the bar advances
-/// one-by-one; this throttle coalesces the emits so a fast decode can't flood
-/// IPC. The final item always emits regardless.
+/// Minimum gap between metadata progress emits. Progress is counted per file
+/// (inside the parallel burst); this throttle coalesces the emits so a fast
+/// parse can't flood IPC. The final item always emits regardless.
 const PROGRESS_THROTTLE_MS: u64 = 30;
-
-/// How 2560px previews are pregenerated. Chosen in the frontend settings and
-/// passed with open/rescan; `Background` is the default (matches the frontend
-/// default and the CULLANT_OPEN_PROJECT hook).
-#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum PreviewMode {
-    /// Previews are generated together with thumbnails during the gated
-    /// import: slowest to open, but the loupe is warm from the first photo.
-    All,
-    /// The gate releases after thumbnails; previews fill in afterwards in the
-    /// background while `previews:progress` drives an indicator.
-    #[default]
-    Background,
-    /// No bulk previews: the frontend warms a window around the focused photo
-    /// and the protocol generates on demand.
-    Window,
-}
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -80,19 +68,14 @@ struct ThumbsDone {
     total: usize,
 }
 
-/// What the selection query says a file still needs.
-struct Pending {
+/// A file whose metadata still needs reading (Phase A).
+struct MetaPending {
     id: i64,
     rel_path: String,
     kind: i64,
-    mtime: i64,
-    orientation: Option<i64>,
-    needs_meta: bool,
-    needs_thumb: bool,
-    needs_preview: bool,
 }
 
-/// EXIF fields extracted during ingest, batched to the writer thread.
+/// EXIF fields extracted during Phase A, batched to the writer thread.
 struct Extracted {
     id: i64,
     capture_time: Option<i64>,
@@ -119,151 +102,100 @@ impl Extracted {
     }
 }
 
-/// What one file's parallel ingest produced: the optional metadata update and
-/// the 0–2 rendered-thumbnail rows (thumb and/or preview). Both are flushed in
-/// per-chunk batched transactions by the caller instead of one commit each.
-struct IngestOutput {
-    extracted: Option<Extracted>,
-    thumb_rows: Vec<thumbs::ThumbRow>,
-}
-
-impl IngestOutput {
-    /// Metadata only, no rendered thumbnails (early-out and skip paths).
-    fn meta_only(extracted: Option<Extracted>) -> Self {
-        IngestOutput {
-            extracted,
-            thumb_rows: Vec::new(),
-        }
-    }
-}
-
 /// Event-emitting entry point used by the scanner thread.
 pub fn run_ingest_pass(
     app: &AppHandle,
     db: &Arc<Db>,
     store: &dyn ProjectStore,
-    root: &Path,
-    mode: PreviewMode,
+    thumbs: &ThumbPool,
 ) -> AppResult<()> {
+    use tauri::Manager;
+    // Whether to pregenerate video posters at all (they always run last). The
+    // frontend pushes this from its localStorage setting; default on.
+    let generate_videos = app
+        .state::<crate::AppState>()
+        .generate_video_thumbs
+        .load(std::sync::atomic::Ordering::Relaxed);
+
     run_ingest_inner(
         db,
         store,
-        root,
-        mode,
-        // Called from the parallel ingest burst, so it must be Sync; `app.emit`
-        // already is.
+        thumbs,
+        // Metadata progress is reported per file from inside the parallel burst,
+        // so it must be Sync; `app.emit` already is.
         &|done, total| {
-            let _ = app.emit("thumbs:progress", Progress { done, total });
+            let _ = app.emit("metadata:progress", Progress { done, total });
         },
-        &mut |meta_updated, thumb_total| {
-            let _ = app.emit(
-                "metadata:done",
-                MetadataDone {
-                    updated: meta_updated,
-                },
-            );
-            let _ = app.emit("thumbs:done", ThumbsDone { total: thumb_total });
+        &mut |updated| {
+            let _ = app.emit("metadata:done", MetadataDone { updated });
+        },
+        &mut |done, total| {
+            let _ = app.emit("thumbs:progress", Progress { done, total });
+            if done >= total {
+                let _ = app.emit("thumbs:done", ThumbsDone { total });
+            }
         },
         &mut |done, total| {
             let _ = app.emit("previews:progress", Progress { done, total });
         },
+        &mut |done, total| {
+            let _ = app.emit("videos:progress", Progress { done, total });
+        },
+        generate_videos,
     )
 }
 
 /// Testable core: closures instead of an AppHandle.
-/// `tier1_done(meta_updated, thumb_total)` fires between the tiers — that is
-/// the moment the preload gate should release.
+///
+/// `meta_done(updated)` fires between the phases — that is the moment the
+/// preload gate should release and the grid should show.
+#[allow(clippy::too_many_arguments)]
 pub fn run_ingest_inner(
     db: &Arc<Db>,
     store: &dyn ProjectStore,
-    root: &Path,
-    mode: PreviewMode,
-    // Sync (not FnMut): tier-1 progress is now reported per file from inside the
+    thumbs: &ThumbPool,
+    // Sync (not FnMut): metadata progress is reported per file from inside the
     // parallel burst, so this may be called concurrently from rayon workers.
-    thumb_progress: &(dyn Fn(usize, usize) + Sync),
-    tier1_done: &mut dyn FnMut(usize, usize),
+    meta_progress: &(dyn Fn(usize, usize) + Sync),
+    meta_done: &mut dyn FnMut(usize),
+    thumb_progress: &mut dyn FnMut(usize, usize),
     preview_progress: &mut dyn FnMut(usize, usize),
+    video_progress: &mut dyn FnMut(usize, usize),
+    generate_videos: bool,
 ) -> AppResult<()> {
-    let pending: Vec<Pending> = db.call(|conn| {
+    // --- Phase A: metadata, gated ---
+    let pending: Vec<MetaPending> = db.call(|conn| {
         let mut stmt = conn.prepare(
-            // Previews (2560px loupe) are only ever generated for stills; a
-            // video's loupe plays the file itself, so `needs_preview` is forced
-            // false for kind 2 — videos need only the grid thumbnail.
-            "SELECT f.id, f.rel_path, f.kind, f.mtime, f.orientation,
-                    (f.capture_time IS NULL) AS needs_meta,
-                    (tt.file_id IS NULL OR tt.source_mtime <> f.mtime) AS needs_thumb,
-                    (f.kind IN (0, 1)
-                     AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime)) AS needs_preview
-             FROM files f
-             LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
-             LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
-             WHERE f.status = 0 AND f.kind IN (0, 1, 2)
-               AND (f.capture_time IS NULL
-                    OR tt.file_id IS NULL OR tt.source_mtime <> f.mtime
-                    OR (f.kind IN (0, 1)
-                        AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime)))",
+            "SELECT id, rel_path, kind FROM files
+             WHERE status = 0 AND kind IN (0, 1, 2) AND capture_time IS NULL",
         )?;
         let rows = stmt.query_map([], |r| {
-            Ok(Pending {
+            Ok(MetaPending {
                 id: r.get(0)?,
                 rel_path: r.get(1)?,
                 kind: r.get(2)?,
-                mtime: r.get(3)?,
-                orientation: r.get(4)?,
-                needs_meta: r.get(5)?,
-                needs_thumb: r.get(6)?,
-                needs_preview: r.get(7)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     })?;
 
-    let previews_inline = mode == PreviewMode::All;
-    let (tier1, rest): (Vec<Pending>, Vec<Pending>) = pending
-        .into_iter()
-        .partition(|p| p.needs_meta || p.needs_thumb);
-
-    // Previews that will still be missing once tier 1 finishes. Carry mtime so
-    // the tier-2 loop can use the cache fast path without a DB round-trip.
-    let tier2: Vec<(i64, i64)> = match mode {
-        PreviewMode::Window => Vec::new(),
-        PreviewMode::All => rest
-            .iter()
-            .filter(|p| p.needs_preview)
-            .map(|p| (p.id, p.mtime))
-            .collect(),
-        PreviewMode::Background => tier1
-            .iter()
-            .chain(rest.iter())
-            .filter(|p| p.needs_preview)
-            .map(|p| (p.id, p.mtime))
-            .collect(),
-    };
-
-    // --- Tier 1: metadata + thumbs (+ previews in All mode), gated ---
     let started = Instant::now();
-    let total = tier1.len();
-    // Announce the total up front so the preload panel shows `0 / N`
-    // immediately instead of `0 / ?` for the whole first-chunk window.
-    thumb_progress(0, total);
+    let total = pending.len();
+    // Announce the total up front so the preload panel shows `0 / N` immediately
+    // instead of `0 / ?` for the whole first-chunk window.
+    meta_progress(0, total);
 
     let mut meta_updated = 0usize;
-    // Per-file progress counter, shared across the parallel burst. Emitting one
-    // event per file (throttled) makes the preload bar advance one-by-one
-    // instead of jumping a whole chunk at a time.
     let done = AtomicUsize::new(0);
     let last_emit_ms = AtomicU64::new(0);
-    for chunk in tier1.chunks(CHUNK) {
-        // Decode + render in parallel, then flush this chunk's metadata and
-        // thumbnail rows each in a single transaction (instead of one commit
-        // per file per artifact).
-        let outputs: Vec<IngestOutput> = chunk
+    for chunk in pending.chunks(CHUNK) {
+        let extracted: Vec<Extracted> = chunk
             .par_iter()
             .map(|p| {
-                let out = ingest_file(db, store, root, p, previews_inline);
-                // Advance the shared counter and emit — throttled so a fast
-                // decode can't flood IPC, but the last file always reports so
-                // the bar reaches `total / total`.
+                let e = extract_metadata(store, p);
+                // Advance the shared counter and emit — throttled so a fast parse
+                // can't flood IPC, but the last file always reports so the bar
+                // reaches `total / total`.
                 let d = done.fetch_add(1, Ordering::Relaxed) + 1;
                 let now = started.elapsed().as_millis() as u64;
                 let emit = d == total || {
@@ -274,257 +206,185 @@ pub fn run_ingest_inner(
                             .is_ok()
                 };
                 if emit {
-                    thumb_progress(done.load(Ordering::Relaxed), total);
+                    meta_progress(done.load(Ordering::Relaxed), total);
                 }
-                out
+                e
             })
             .collect();
-        let mut extracted = Vec::with_capacity(outputs.len());
-        let mut rows = Vec::with_capacity(outputs.len());
-        for out in outputs {
-            if let Some(e) = out.extracted {
-                extracted.push(e);
-            }
-            rows.extend(out.thumb_rows);
-        }
         meta_updated += extracted.len();
         write_metadata_batch(db, extracted)?;
-        thumbs::write_thumb_rows(db, rows)?;
     }
     tracing::info!(
-        "ingest tier 1: {total} files (meta for {meta_updated}) in {:.1?}",
+        "ingest metadata: {total} files in {:.1?}",
         started.elapsed()
     );
-    tier1_done(meta_updated, total);
+    meta_done(meta_updated);
 
-    // --- Tier 2: leftover previews, background (gate already open) ---
-    let total2 = tier2.len();
-    if total2 > 0 {
-        let started2 = Instant::now();
-        preview_progress(0, total2);
-        let mut done2 = 0usize;
-        for chunk in tier2.chunks(CHUNK) {
-            chunk.par_iter().for_each(|(file_id, mtime)| {
-                // produce_with_mtime() short-circuits on the disk cache without a
-                // DB round-trip, so previews the user already pulled
-                // interactively cost one file stat here.
-                if let Err(e) = thumbs::produce_with_mtime(
-                    db,
-                    store,
-                    root,
-                    *file_id,
-                    ThumbKind::Preview,
-                    Some(*mtime),
-                ) {
-                    tracing::debug!("preview pregeneration skipped file {file_id}: {e}");
-                }
-            });
-            done2 += chunk.len();
-            preview_progress(done2, total2);
-        }
-        tracing::info!(
-            "ingest tier 2: {total2} previews in {:.1?}",
-            started2.elapsed()
-        );
+    // --- Phase B: photos first, videos last, all background (gate already open) ---
+    // Submitted to the shared ThumbPool as *background* work: interactive
+    // requests (the cells/photo the user is looking at) always preempt it, and
+    // there is no second thread pool to oversubscribe the CPU.
+    //
+    // Order matters: photo grid thumbnails, then photo loupe previews, and only
+    // THEN video poster thumbnails. Video posters go through ffmpeg (a separate
+    // process spawn + frame extraction per file) — much slower per item than a
+    // JPEG/RAW decode — so deferring them keeps the whole photo library sharp and
+    // browsable before the video tier starts competing for the pool.
+    generate_pass(
+        db,
+        thumbs,
+        ThumbKind::Thumb,
+        "SELECT f.id, f.mtime
+         FROM files f
+         LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
+         WHERE f.status = 0 AND f.kind IN (0, 1)
+           AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
+         ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
+        thumb_progress,
+    )?;
+
+    generate_pass(
+        db,
+        thumbs,
+        ThumbKind::Preview,
+        // Previews (2560px loupe) are only ever generated for stills; a video's
+        // loupe plays the file itself.
+        "SELECT f.id, f.mtime
+         FROM files f
+         LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
+         WHERE f.status = 0 AND f.kind IN (0, 1)
+           AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime)
+         ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
+        preview_progress,
+    )?;
+
+    // Video poster thumbnails last, and only when enabled (the ffmpeg tier is the
+    // slow one — see AppState::generate_video_thumbs). Skipping here only skips
+    // *pregeneration*; a poster is still produced on demand when a video's cell
+    // scrolls into view.
+    if generate_videos {
+        generate_pass(
+            db,
+            thumbs,
+            ThumbKind::Thumb,
+            "SELECT f.id, f.mtime
+             FROM files f
+             LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
+             WHERE f.status = 0 AND f.kind = 2
+               AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
+             ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
+            video_progress,
+        )?;
     }
 
     Ok(())
 }
 
-/// Ingest one tier-1 file: open the source once, parse the container once,
-/// extract metadata if missing, and render the thumbnail (and, when
-/// `previews_inline`, the preview) from a single decode. Failures are logged
-/// and never abort the pass; the returned `Extracted` (when the file needed
-/// metadata) always carries at least the mtime fallback via the batched
-/// COALESCE update, so unreadable files aren't retried forever.
-fn ingest_file(
+/// One background artifact tier: select the still-missing files (in grid order)
+/// and submit them to the ThumbPool as background work. The pool's worker calls
+/// `produce_with_mtime`, which short-circuits on the disk cache and is race-safe
+/// with interactive requests. Tombstoned/undecodable files are filtered out by
+/// the caller's query (a `failed = 1` row matches the same-mtime join), so they
+/// aren't retried.
+///
+/// Blocks on a completion channel until every submission finishes (or is drained
+/// by a pool shutdown), reporting progress one file at a time — throttled so a
+/// burst of disk-cache hits can't flood IPC, but the last file always reports.
+fn generate_pass(
     db: &Arc<Db>,
-    store: &dyn ProjectStore,
-    root: &Path,
-    p: &Pending,
-    previews_inline: bool,
-) -> IngestOutput {
-    // Videos take a wholly separate path: ffmpeg poster extraction, no EXIF,
-    // no preview, and no `RawSource` (which would read the whole clip).
-    if p.kind == 2 {
-        return ingest_video(db, store, root, p);
+    thumbs: &ThumbPool,
+    kind: ThumbKind,
+    select_sql: &str,
+    progress: &mut dyn FnMut(usize, usize),
+) -> AppResult<()> {
+    let select = select_sql.to_string();
+    let pending: Vec<(i64, i64)> = db.call(move |conn| {
+        let mut stmt = conn.prepare(&select)?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })?;
+
+    let total = pending.len();
+    progress(0, total);
+    if total == 0 {
+        return Ok(());
     }
 
-    let render_thumb = p.needs_thumb;
-    let render_preview = previews_inline && p.needs_preview;
-    let mut extracted = p.needs_meta.then(|| Extracted::empty(p.id));
+    let started = Instant::now();
+    let (tx, rx) = mpsc::channel::<()>();
+    for (file_id, mtime) in pending {
+        let tx = tx.clone();
+        thumbs.enqueue_background(ThumbRequest {
+            file_id,
+            kind,
+            known_mtime: Some(mtime),
+            // The disk cache is the point; the bytes are discarded here.
+            respond: Box::new(move |_| {
+                let _ = tx.send(());
+            }),
+        });
+    }
+    drop(tx);
+
+    let mut done = 0usize;
+    let mut last_emit_ms = 0u64;
+    while rx.recv().is_ok() {
+        done += 1;
+        let now = started.elapsed().as_millis() as u64;
+        if done == total || now.saturating_sub(last_emit_ms) >= PROGRESS_THROTTLE_MS {
+            last_emit_ms = now;
+            progress(done, total);
+        }
+    }
+    tracing::info!("ingest {total} artifacts in {:.1?}", started.elapsed());
+    Ok(())
+}
+
+/// Read one file's metadata (Phase A). Opens the source once and parses the
+/// container once. Failures are logged and never abort the pass; the returned
+/// [`Extracted`] always carries at least the id, so the batched COALESCE update
+/// falls capture_time back to mtime and unreadable files aren't retried forever.
+fn extract_metadata(store: &dyn ProjectStore, p: &MetaPending) -> Extracted {
+    let mut e = Extracted::empty(p.id);
+
+    // Videos carry no image-path EXIF; capture_time falls back to mtime via the
+    // batched COALESCE update, no file read needed.
+    if p.kind == 2 {
+        return e;
+    }
 
     let source = match decode::open_source(store, &p.rel_path) {
         Ok(s) => s,
-        Err(e) => {
-            tracing::debug!("ingest could not open {}: {e}", p.rel_path);
-            // mtime fallback still applies when metadata was due
-            return IngestOutput::meta_only(extracted);
+        Err(err) => {
+            tracing::debug!("metadata could not open {}: {err}", p.rel_path);
+            return e; // mtime fallback still applies
         }
     };
 
-    // Decode + render, sharing one parsed container per RAW.
-    let mut src_dims: Option<(u32, u32)> = None;
-    let mut decoded = None;
     if p.kind == 0 {
         match decode::raw::RawSession::open(&source) {
             Ok(session) => {
-                if let Some(out) = extracted.as_mut() {
-                    if let Ok(meta) = session.metadata(&p.rel_path) {
-                        out.capture_time = meta.capture_time;
-                        out.orientation = meta.orientation;
-                        out.camera = meta.camera;
-                        out.lens = meta.lens;
-                        out.iso = meta.iso;
-                    }
-                }
-                if render_thumb || render_preview {
-                    let min_edge = if render_preview {
-                        PREVIEW_LONG_EDGE
-                    } else {
-                        THUMB_LONG_EDGE
-                    };
-                    match session.decode_adequate(min_edge, &p.rel_path) {
-                        Ok(raw) => {
-                            src_dims = raw.is_full.then(|| (raw.image.width(), raw.image.height()));
-                            decoded = Some(raw.image);
-                        }
-                        Err(e) => tracing::debug!("ingest decode skipped {}: {e}", p.rel_path),
-                    }
+                if let Ok(meta) = session.metadata(&p.rel_path) {
+                    e.capture_time = meta.capture_time;
+                    e.orientation = meta.orientation;
+                    e.camera = meta.camera;
+                    e.lens = meta.lens;
+                    e.iso = meta.iso;
                 }
             }
-            Err(e) => tracing::debug!("ingest could not parse {}: {e}", p.rel_path),
+            Err(err) => tracing::debug!("metadata could not parse {}: {err}", p.rel_path),
         }
-    } else {
-        if let Some(out) = extracted.as_mut() {
-            if let Ok(meta) = decode::exif::read_metadata(source.buf()) {
-                out.capture_time = meta.capture_time;
-                out.orientation = meta.orientation;
-                out.camera = meta.camera;
-                out.lens = meta.lens;
-                out.iso = meta.iso;
-                out.width = meta.width;
-                out.height = meta.height;
-            }
-        }
-        if render_thumb || render_preview {
-            let min_edge = if render_preview {
-                PREVIEW_LONG_EDGE
-            } else {
-                THUMB_LONG_EDGE
-            };
-            // Header-only original dimensions (cheap, no decode).
-            src_dims = image::ImageReader::new(std::io::Cursor::new(source.buf()))
-                .with_guessed_format()
-                .ok()
-                .and_then(|r| r.into_dimensions().ok());
-            match decode::jpeg::decode_scaled(source.buf(), min_edge, &p.rel_path) {
-                Ok(img) => decoded = Some(img),
-                Err(e) => tracing::debug!("ingest decode skipped {}: {e}", p.rel_path),
-            }
-        }
+    } else if let Ok(meta) = decode::exif::read_metadata(source.buf()) {
+        e.capture_time = meta.capture_time;
+        e.orientation = meta.orientation;
+        e.camera = meta.camera;
+        e.lens = meta.lens;
+        e.iso = meta.iso;
+        e.width = meta.width;
+        e.height = meta.height;
     }
 
-    let mut thumb_rows = Vec::new();
-    if let Some(img) = decoded {
-        // Orientation extracted just now beats the (possibly NULL) DB column.
-        let orientation = extracted
-            .as_ref()
-            .and_then(|e| e.orientation)
-            .map(i64::from)
-            .or(p.orientation)
-            .unwrap_or(1);
-        let meta = SourceMeta {
-            file_id: p.id,
-            mtime: p.mtime,
-            orientation,
-            src_dims,
-        };
-        // Render + cache in parallel here; the row writes are batched by the
-        // caller (one transaction per chunk) instead of one commit per file.
-        if render_thumb {
-            match thumbs::render_to_cache(root, &meta, &img, ThumbKind::Thumb) {
-                Ok((_, row)) => thumb_rows.push(row),
-                Err(e) => tracing::debug!("thumb render skipped {}: {e}", p.rel_path),
-            }
-        }
-        if render_preview {
-            match thumbs::render_to_cache(root, &meta, &img, ThumbKind::Preview) {
-                Ok((_, row)) => thumb_rows.push(row),
-                Err(e) => tracing::debug!("preview render skipped {}: {e}", p.rel_path),
-            }
-        }
-    } else if render_thumb || render_preview {
-        // The source could not be decoded (unsupported/corrupt). Tombstone the
-        // due artifacts so later scans don't retry until the file changes, and
-        // the grid can flag it instead of requesting a thumb that 404s. Rare, so
-        // left as immediate per-file writes rather than batched.
-        if render_thumb {
-            let _ = thumbs::record_decode_failure(db, p.id, p.mtime, ThumbKind::Thumb);
-        }
-        if render_preview {
-            let _ = thumbs::record_decode_failure(db, p.id, p.mtime, ThumbKind::Preview);
-        }
-    }
-
-    IngestOutput {
-        extracted,
-        thumb_rows,
-    }
-}
-
-/// Ingest one video: fall capture_time back to mtime (videos carry no
-/// image-path EXIF) and, when a thumbnail is due, extract a poster frame via
-/// ffmpeg and render it through the identical resize/JPEG/cache path as image
-/// thumbnails. Poster extraction is best-effort:
-/// - ffmpeg missing or no local file → skip WITHOUT a tombstone, so installing
-///   ffmpeg later (no mtime change) still gets a retry on the next scan;
-/// - a genuinely undecodable/corrupt video → tombstone the thumbnail so the
-///   pass and the on-demand pool stop grinding on it, exactly like a broken
-///   image.
-fn ingest_video(db: &Arc<Db>, store: &dyn ProjectStore, root: &Path, p: &Pending) -> IngestOutput {
-    // capture_time = COALESCE(NULL, mtime) via the batched update.
-    let extracted = p.needs_meta.then(|| Extracted::empty(p.id));
-
-    if !p.needs_thumb {
-        return IngestOutput::meta_only(extracted);
-    }
-    if !thumbs::video_poster_possible(store, &p.rel_path) {
-        tracing::debug!(
-            "video thumbnail skipped {} (ffmpeg unavailable)",
-            p.rel_path
-        );
-        return IngestOutput::meta_only(extracted);
-    }
-
-    // Guaranteed Some by video_poster_possible.
-    let Some(path) = store.local_path(&p.rel_path) else {
-        return IngestOutput::meta_only(extracted);
-    };
-    let mut thumb_rows = Vec::new();
-    match decode::video::extract_poster(&path) {
-        Ok(img) => {
-            let meta = SourceMeta {
-                file_id: p.id,
-                mtime: p.mtime,
-                // ffmpeg auto-rotates on decode; the poster is already upright.
-                orientation: 1,
-                src_dims: Some((img.width(), img.height())),
-            };
-            match thumbs::render_to_cache(root, &meta, &img, ThumbKind::Thumb) {
-                Ok((_, row)) => thumb_rows.push(row),
-                Err(e) => tracing::debug!("video thumb render skipped {}: {e}", p.rel_path),
-            }
-        }
-        Err(e) => {
-            tracing::debug!("video poster extraction failed {}: {e}", p.rel_path);
-            let _ = thumbs::record_decode_failure(db, p.id, p.mtime, ThumbKind::Thumb);
-        }
-    }
-    IngestOutput {
-        extracted,
-        thumb_rows,
-    }
+    e
 }
 
 /// Batched, transactional metadata update on the writer thread. Files whose
@@ -564,7 +424,7 @@ fn write_metadata_batch(db: &Arc<Db>, extracted: Vec<Extracted>) -> AppResult<()
                  WHERE id = ?1",
             )?;
             for row in &batch {
-                stmt.execute(params![
+                stmt.execute(rusqlite::params![
                     row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7
                 ])?;
             }
@@ -578,6 +438,8 @@ fn write_metadata_batch(db: &Arc<Db>, extracted: Vec<Extracted>) -> AppResult<()
 mod tests {
     use super::*;
     use crate::store::LocalFsStore;
+    use rusqlite::params;
+    use std::path::Path;
 
     fn project_with_jpegs(root: &Path, n: u32) -> Arc<Db> {
         for i in 0..n {
@@ -602,31 +464,69 @@ mod tests {
         .unwrap()
     }
 
+    /// A shared store + its ThumbPool (Phase B routes background work through it).
+    fn store_and_pool(db: &Arc<Db>, root: &Path) -> (Arc<dyn ProjectStore>, ThumbPool) {
+        let store: Arc<dyn ProjectStore> = Arc::new(LocalFsStore::new(root));
+        let pool = ThumbPool::start(db.clone(), store.clone(), root.to_path_buf());
+        (store, pool)
+    }
+
+    /// Run the whole pass, returning `(meta_updated, thumbs_done, previews_done)`.
+    fn run_all(db: &Arc<Db>, root: &Path) -> (usize, usize, usize) {
+        let (store, pool) = store_and_pool(db, root);
+        let mut meta = 0usize;
+        let mut thumbs = 0usize;
+        let mut previews = 0usize;
+        run_ingest_inner(
+            db,
+            store.as_ref(),
+            &pool,
+            &|_, _| {},
+            &mut |u| meta = u,
+            &mut |d, _| thumbs = d,
+            &mut |d, _| previews = d,
+            &mut |_, _| {},
+            true,
+        )
+        .unwrap();
+        (meta, thumbs, previews)
+    }
+
     #[test]
-    fn all_mode_produces_thumbs_previews_and_metadata_in_one_pass() {
+    fn metadata_gate_fires_before_any_thumbnail() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let db = project_with_jpegs(root, 3);
-        let store = LocalFsStore::new(root);
+        let (store, pool) = store_and_pool(&db, root);
 
-        let thumb_last = std::sync::Mutex::new((9, 9));
+        // Capture the thumbnail count at the exact moment the gate releases.
         let mut gate = None;
-        let mut preview_last = None;
         run_ingest_inner(
             &db,
-            &store,
-            root,
-            PreviewMode::All,
-            &|d, t| *thumb_last.lock().unwrap() = (d, t),
-            &mut |meta, total| gate = Some((meta, total)),
-            &mut |d, t| preview_last = Some((d, t)),
+            store.as_ref(),
+            &pool,
+            &|_, _| {},
+            &mut |updated| gate = Some((updated, thumb_count(&db, 0))),
+            &mut |_, _| {},
+            &mut |_, _| {},
+            &mut |_, _| {},
+            false,
         )
         .unwrap();
+        // Metadata written for all three; no grid thumbnail exists yet.
+        assert_eq!(gate, Some((3, 0)));
+    }
 
-        assert_eq!(*thumb_last.lock().unwrap(), (3, 3));
-        assert_eq!(gate, Some((3, 3)));
-        // Fresh import: previews were rendered inline, so no tier 2.
-        assert_eq!(preview_last, None);
+    #[test]
+    fn background_phase_generates_thumbs_then_previews() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db = project_with_jpegs(root, 3);
+
+        let (meta, thumbs, previews) = run_all(&db, root);
+        assert_eq!(meta, 3);
+        assert_eq!(thumbs, 3);
+        assert_eq!(previews, 3);
         assert_eq!(thumb_count(&db, 0), 3);
         assert_eq!(thumb_count(&db, 1), 3);
 
@@ -641,60 +541,17 @@ mod tests {
             })
             .unwrap();
         assert_eq!(missing, 0);
-
-        // Everything fresh: a second pass finds nothing to do.
-        let thumb_last2 = std::sync::Mutex::new((9, 9));
-        run_ingest_inner(
-            &db,
-            &store,
-            root,
-            PreviewMode::All,
-            &|d, t| *thumb_last2.lock().unwrap() = (d, t),
-            &mut |_, _| {},
-            &mut |_, _| {},
-        )
-        .unwrap();
-        assert_eq!(*thumb_last2.lock().unwrap(), (0, 0));
     }
 
     #[test]
-    fn upgrade_previews_fill_in_tier_two_without_holding_the_gate() {
+    fn reopening_an_ingested_project_is_a_noop() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let db = project_with_jpegs(root, 3);
-        let store = LocalFsStore::new(root);
 
-        // Seed the "upgrade" state: thumbs + metadata exist, previews don't.
-        run_ingest_inner(
-            &db,
-            &store,
-            root,
-            PreviewMode::Window,
-            &|_, _| {},
-            &mut |_, _| {},
-            &mut |_, _| {},
-        )
-        .unwrap();
-        assert_eq!(thumb_count(&db, 0), 3);
-        assert_eq!(thumb_count(&db, 1), 0);
-
-        // Now an All-mode pass: the gate must see zero tier-1 work, and the
-        // previews must arrive via tier 2.
-        let mut gate = None;
-        let mut preview_last = None;
-        run_ingest_inner(
-            &db,
-            &store,
-            root,
-            PreviewMode::All,
-            &|_, _| {},
-            &mut |meta, total| gate = Some((meta, total)),
-            &mut |d, t| preview_last = Some((d, t)),
-        )
-        .unwrap();
-        assert_eq!(gate, Some((0, 0)));
-        assert_eq!(preview_last, Some((3, 3)));
-        assert_eq!(thumb_count(&db, 1), 3);
+        run_all(&db, root);
+        // Everything fresh: a second pass finds nothing to do.
+        assert_eq!(run_all(&db, root), (0, 0, 0));
     }
 
     #[test]
@@ -720,17 +577,7 @@ mod tests {
 
         let db = Arc::new(crate::db::Db::open(root).unwrap());
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
-        let store = LocalFsStore::new(root);
-        run_ingest_inner(
-            &db,
-            &store,
-            root,
-            PreviewMode::All,
-            &|_, _| {},
-            &mut |_, _| {},
-            &mut |_, _| {},
-        )
-        .unwrap();
+        run_all(&db, root);
 
         let (capture, orientation, camera, iso): (i64, i64, String, i64) = db
             .call(|c| {
@@ -749,8 +596,8 @@ mod tests {
         assert_eq!(camera, "Canon EOS R5");
         assert_eq!(iso, 400);
 
-        // The freshly-extracted orientation must reach the same-pass render:
-        // landscape 800x600 + rotation 6 = portrait 288x384 thumbnail.
+        // The metadata orientation (written in Phase A) must reach the Phase B
+        // render: landscape 800x600 + rotation 6 = portrait 288x384 thumbnail.
         let (w, h): (i64, i64) = db
             .call(|c| {
                 Ok(c.query_row(
@@ -773,22 +620,10 @@ mod tests {
 
         let db = Arc::new(crate::db::Db::open(root).unwrap());
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
-        let store = LocalFsStore::new(root);
 
-        // First pass: the file needs a thumb, fails to decode, gets tombstoned.
-        let mut gate = None;
-        run_ingest_inner(
-            &db,
-            &store,
-            root,
-            PreviewMode::All,
-            &|_, _| {},
-            &mut |_, total| gate = Some(total),
-            &mut |_, _| {},
-        )
-        .unwrap();
-        assert_eq!(gate, Some(1));
-
+        // First pass: metadata falls back to mtime, the thumbnail fails to decode
+        // in Phase B and gets tombstoned.
+        run_all(&db, root);
         let tombstones: i64 = db
             .call(|c| {
                 Ok(c.query_row(
@@ -801,18 +636,7 @@ mod tests {
         assert!(tombstones >= 1, "a decode failure must leave a tombstone");
 
         // Second pass at the same mtime: nothing to retry.
-        let mut gate2 = None;
-        run_ingest_inner(
-            &db,
-            &store,
-            root,
-            PreviewMode::All,
-            &|_, _| {},
-            &mut |_, total| gate2 = Some(total),
-            &mut |_, _| {},
-        )
-        .unwrap();
-        assert_eq!(gate2, Some(0), "tombstoned files must not be retried");
+        assert_eq!(run_all(&db, root), (0, 0, 0));
     }
 
     #[test]
@@ -821,33 +645,19 @@ mod tests {
         // video, so the outcome depends on whether ffmpeg is installed:
         //   - ffmpeg present: extraction fails -> thumbnail tombstoned;
         //   - ffmpeg absent:  extraction skipped -> no thumbnail, no tombstone.
-        // Either way the pass must complete, the video must be counted in
-        // tier 1, get capture_time from mtime, and never receive a preview.
+        // Either way the pass must complete, the video must get capture_time from
+        // mtime, and never receive a preview.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join("clip.mp4"), b"not a real mp4").unwrap();
 
         let db = Arc::new(crate::db::Db::open(root).unwrap());
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
-        let store = LocalFsStore::new(root);
 
-        let mut gate = None;
-        let mut preview_last = None;
-        run_ingest_inner(
-            &db,
-            &store,
-            root,
-            PreviewMode::All,
-            &|_, _| {},
-            &mut |_, total| gate = Some(total),
-            &mut |d, t| preview_last = Some((d, t)),
-        )
-        .unwrap();
-
-        // The video was tier-1 work (needs meta + thumb).
-        assert_eq!(gate, Some(1));
-        // Videos never get a 2560px preview, in any mode.
-        assert_eq!(preview_last, None);
+        let (meta, _thumbs, previews) = run_all(&db, root);
+        assert_eq!(meta, 1);
+        // Videos never get a 2560px preview, in any case.
+        assert_eq!(previews, 0);
         assert_eq!(thumb_count(&db, 1), 0);
 
         // capture_time falls back to mtime so the video isn't reprocessed forever.
@@ -861,32 +671,5 @@ mod tests {
             })
             .unwrap();
         assert_eq!(null_capture, 0);
-    }
-
-    #[test]
-    fn background_mode_defers_all_previews_to_tier_two() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        let db = project_with_jpegs(root, 2);
-        let store = LocalFsStore::new(root);
-
-        let mut gate = None;
-        let mut preview_last = None;
-        run_ingest_inner(
-            &db,
-            &store,
-            root,
-            PreviewMode::Background,
-            &|_, _| {},
-            &mut |meta, total| {
-                // At gate time the previews must NOT exist yet.
-                gate = Some((meta, total, thumb_count(&db, 1)));
-            },
-            &mut |d, t| preview_last = Some((d, t)),
-        )
-        .unwrap();
-        assert_eq!(gate, Some((2, 2, 0)));
-        assert_eq!(preview_last, Some((2, 2)));
-        assert_eq!(thumb_count(&db, 1), 2);
     }
 }

@@ -84,6 +84,33 @@ pub fn media_counts(state: State<'_, AppState>) -> AppResult<MediaCounts> {
     })
 }
 
+/// File ids that currently have a valid loupe preview (a `kind = 1` thumbnail
+/// row that is not a failure tombstone and matches the file's current mtime).
+/// Drives the grid's per-cell "full preview still generating" spinner. The
+/// payload is just a list of ids (a few hundred at most), cheap to re-query as
+/// the background preview pass progresses.
+#[tauri::command]
+pub fn preview_ready_ids(state: State<'_, AppState>) -> AppResult<Vec<i64>> {
+    let db = {
+        let guard = state.project.lock().unwrap();
+        guard
+            .as_ref()
+            .ok_or(crate::error::AppError::NoProject)?
+            .db
+            .clone()
+    };
+    db.call_read(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT t.file_id FROM thumbnails t
+             JOIN files f ON f.id = t.file_id
+             WHERE t.kind = 1 AND t.failed = 0
+               AND t.source_mtime = f.mtime AND f.status = 0",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })
+}
+
 /// Return the light-weight index of all present files for one media tab.
 /// ~100 bytes per item; the whole catalog crosses IPC once and the frontend
 /// filters/virtualizes locally.
