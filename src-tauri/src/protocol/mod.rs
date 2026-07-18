@@ -71,35 +71,60 @@ fn respond_thumb<R: Runtime>(
     known_mtime: Option<i64>,
 ) {
     let state = app.state::<AppState>();
-    let guard = state.project.lock().unwrap();
-    let Some(project) = guard.as_ref() else {
-        responder.respond(plain(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "no project open".into(),
-        ));
-        return;
+    let (thumbs, root) = {
+        let guard = state.project.lock().unwrap();
+        let Some(project) = guard.as_ref() else {
+            responder.respond(plain(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no project open".into(),
+            ));
+            return;
+        };
+        (project.thumbs.clone(), project.root.clone())
     };
 
-    project.thumbs.enqueue(ThumbRequest {
+    // Fast path: an already-cached artifact (with a known mtime) is served
+    // straight from disk by THIS handler thread, without queuing a pool worker.
+    // This matters most during the background pregeneration pass: every worker is
+    // then busy with a multi-second decode, so an interactive loupe preview that
+    // is *already cached* would otherwise sit in the queue behind them and take a
+    // second to appear. A cache miss falls through to the pool, which generates
+    // and caches exactly as before. (temp-file+rename writes make the read
+    // race-safe — a cache file is never partially written.)
+    if let Some(mtime) = known_mtime {
+        let cache_abs = root
+            .join(".cullant")
+            .join("thumbs")
+            .join(cache_rel_path(file_id, mtime, kind));
+        if let Ok(bytes) = std::fs::read(&cache_abs) {
+            responder.respond(jpeg_ok(bytes));
+            return;
+        }
+    }
+
+    thumbs.enqueue(ThumbRequest {
         file_id,
         kind,
         known_mtime,
         respond: Box::new(move |result: AppResult<Vec<u8>>| match result {
-            Ok(bytes) => responder.respond(
-                Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "image/jpeg")
-                    // URLs carry ?v={mtime}, so aggressive caching is safe.
-                    .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
-                    .body(bytes)
-                    .unwrap(),
-            ),
+            Ok(bytes) => responder.respond(jpeg_ok(bytes)),
             Err(e) => {
                 tracing::debug!("thumb {file_id} failed: {e}");
                 responder.respond(plain(StatusCode::NOT_FOUND, e.to_string()))
             }
         }),
     });
+}
+
+/// A cached-image OK response. URLs carry `?v={mtime}`, so aggressive immutable
+/// caching in the webview is safe.
+fn jpeg_ok(bytes: Vec<u8>) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "image/jpeg")
+        .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
+        .body(bytes)
+        .unwrap()
 }
 
 /// Serve video bytes with HTTP Range support (mandatory for `<video>`
