@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { settings, type PreviewMode } from "../stores/settings.svelte";
+  import { settings } from "../stores/settings.svelte";
   import Keyboard from "@lucide/svelte/icons/keyboard";
 
   let {
@@ -22,33 +22,6 @@
     e.stopPropagation();
     if (e.key === "Escape") onclose();
   }
-
-  // description may contain <strong> (rendered via {@html}); these are static,
-  // trusted constants. Kept identical to PreviewModeIntro so the two match.
-  const previewModes: { value: PreviewMode; label: string; description: string }[] = [
-    {
-      value: "all",
-      label: "All during import",
-      description:
-        "Previews are generated together with thumbnails while the project opens. " +
-        "<strong>Slowest opening</strong>, biggest cache, but <strong>instant browsing</strong> " +
-        "from the first photo.",
-    },
-    {
-      value: "background",
-      label: "In background after opening",
-      description:
-        "The project opens as soon as thumbnails are ready; previews keep generating " +
-        "in the background. Photos you open jump the queue.",
-    },
-    {
-      value: "window",
-      label: "Around the focused photo",
-      description:
-        "No bulk generation: only photos near the one you are viewing are prepared. " +
-        "<strong>Fastest opening</strong>, smallest cache.",
-    },
-  ];
 </script>
 
 <div
@@ -66,29 +39,6 @@
     tabindex="-1"
   >
     <h2>Settings</h2>
-
-    <section>
-      <h3>Preview generation</h3>
-      <p class="hint">
-        Previews are the sharp 2560px images the loupe and compare views show.
-        Changes apply the next time a project is opened or rescanned.
-      </p>
-      {#each previewModes as m (m.value)}
-        <label class="option">
-          <input
-            type="radio"
-            name="preview-mode"
-            value={m.value}
-            checked={settings.previewMode === m.value}
-            onchange={() => settings.setPreviewMode(m.value)}
-          />
-          <span class="text">
-            <span class="label">{m.label}{m.value === "background" ? " (default)" : ""}</span>
-            <span class="description">{@html m.description}</span>
-          </span>
-        </label>
-      {/each}
-    </section>
 
     <section>
       <h3>Loupe display</h3>
@@ -123,6 +73,26 @@
             Reopen each project where you left off: restore the last sort order,
             media tab, active filters and focused photo. Off: every project opens
             with the defaults.
+          </span>
+        </span>
+      </label>
+    </section>
+
+    <section>
+      <h3>Media</h3>
+      <label class="option">
+        <input
+          type="checkbox"
+          checked={settings.generateVideoThumbs}
+          onchange={(e) => settings.setGenerateVideoThumbs(e.currentTarget.checked)}
+        />
+        <span class="text">
+          <span class="label">Pregenerate video thumbnails</span>
+          <span class="description">
+            Video posters are generated last — only after every photo thumbnail and
+            preview — because extracting them (via ffmpeg) is the slowest step. Off:
+            skip generating them in the background; a video's poster is still made
+            the moment you scroll to it.
           </span>
         </span>
       </label>
@@ -180,12 +150,6 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     opacity: 0.55;
-  }
-
-  .hint {
-    margin: 0 0 8px;
-    font-size: 12px;
-    opacity: 0.6;
   }
 
   .option {

@@ -11,25 +11,31 @@
   import Info from "@lucide/svelte/icons/info";
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
+  import { untrack } from "svelte";
   import { edgeBounce } from "../anim";
   import { previewUrl } from "../api";
-  import { settings } from "../stores/settings.svelte";
+  import { catalog } from "../stores/catalog.svelte";
 
   const item = $derived(session.focused);
 
-  // Warm neighboring previews so arrowing never waits on a cold decode. The
-  // ThumbPool is LIFO, so a real navigation enqueued after these warms still
-  // jumps the queue. In "window" preview mode the app relies on this warming
-  // entirely, so reach much further out.
+  // Warm just the immediate neighbours so arrowing doesn't wait on a cold decode.
+  // Kept deliberately small, and gated two ways so fast flipping never floods the
+  // pool: (1) a 1s dwell — arrowing quickly past a photo never prefetches its
+  // neighbours; (2) skip neighbours whose preview is already cached (nothing to
+  // warm — the protocol serves those straight from disk).
+  const WARM_OFFSETS = [1, -1, 2];
+  const WARM_DWELL_MS = 1000;
   $effect(() => {
-    const offsets =
-      settings.previewMode === "window"
-        ? Array.from({ length: 40 }, (_, i) => (i % 2 === 0 ? i / 2 + 1 : -(i + 1) / 2))
-        : [1, -1, 2];
-    for (const off of offsets) {
-      const n = session.filtered[session.focusedIndex + off];
-      if (n && n.kind !== 2) new Image().src = previewUrl(n);
-    }
+    const idx = session.focusedIndex;
+    const timer = setTimeout(() => {
+      for (const off of WARM_OFFSETS) {
+        const n = session.filtered[idx + off];
+        if (n && n.kind !== 2 && !untrack(() => catalog.previewReady.has(n.id))) {
+          new Image().src = previewUrl(n);
+        }
+      }
+    }, WARM_DWELL_MS);
+    return () => clearTimeout(timer);
   });
 
   let stage = $state<HTMLElement | null>(null);

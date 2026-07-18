@@ -1,23 +1,8 @@
 /** App-wide user preferences, persisted in localStorage. */
 
-import type { PreviewMode } from "../api";
-export type { PreviewMode };
-
-const PREVIEW_MODE_KEY = "cullant.previewMode";
 const PROGRESSIVE_LOUPE_KEY = "cullant.progressiveLoupe";
 const REMEMBER_SESSION_KEY = "cullant.rememberSession";
-const ONBOARDED_PREVIEW_KEY = "cullant.onboardedPreview";
-
-function loadPreviewMode(): PreviewMode {
-  try {
-    const raw = localStorage.getItem(PREVIEW_MODE_KEY);
-    if (raw === null) return "background";
-    const v = JSON.parse(raw);
-    return v === "all" || v === "window" ? v : "background";
-  } catch {
-    return "background";
-  }
-}
+const GENERATE_VIDEO_THUMBS_KEY = "cullant.generateVideoThumbs";
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
@@ -37,9 +22,6 @@ function save(key: string, value: unknown) {
 }
 
 class SettingsStore {
-  /** How 2560px previews are pregenerated (applies on the next open/rescan). */
-  previewMode = $state<PreviewMode>(loadPreviewMode());
-
   /** Paint the cached thumbnail instantly while the sharp preview loads. */
   progressiveLoupe = $state<boolean>(loadBool(PROGRESSIVE_LOUPE_KEY, true));
 
@@ -47,17 +29,11 @@ class SettingsStore {
    *  focused item (persisted in the per-project DB). */
   rememberSession = $state<boolean>(loadBool(REMEMBER_SESSION_KEY, true));
 
-  /**
-   * Whether the one-time preview-mode intro has been shown and confirmed.
-   * Gates the first interactive project open so the welcome dialog appears
-   * exactly once, ever.
-   */
-  onboardedPreview = $state<boolean>(loadBool(ONBOARDED_PREVIEW_KEY, false));
-
-  setPreviewMode(mode: PreviewMode) {
-    this.previewMode = mode;
-    save(PREVIEW_MODE_KEY, mode);
-  }
+  /** Pregenerate video poster thumbnails. They always run last (after every
+   *  photo thumbnail and preview) because ffmpeg extraction is the slow tier;
+   *  off skips their background pregeneration entirely. Mirrored to the backend
+   *  (see the sync effect in +page.svelte) since the ingest pass reads it. */
+  generateVideoThumbs = $state<boolean>(loadBool(GENERATE_VIDEO_THUMBS_KEY, true));
 
   setProgressiveLoupe(on: boolean) {
     this.progressiveLoupe = on;
@@ -69,9 +45,9 @@ class SettingsStore {
     save(REMEMBER_SESSION_KEY, on);
   }
 
-  setOnboardedPreview(on: boolean) {
-    this.onboardedPreview = on;
-    save(ONBOARDED_PREVIEW_KEY, on);
+  setGenerateVideoThumbs(on: boolean) {
+    this.generateVideoThumbs = on;
+    save(GENERATE_VIDEO_THUMBS_KEY, on);
   }
 }
 

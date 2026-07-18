@@ -133,8 +133,6 @@ export interface CommitOutcome {
 
 export type SortKey = "capture" | "name";
 export type MediaTab = "photos" | "videos";
-/** How 2560px previews are pregenerated (mirrors the backend enum). */
-export type PreviewMode = "all" | "background" | "window";
 
 export interface ScanProgress {
   found: number;
@@ -158,15 +156,19 @@ export interface CullState {
 }
 
 export const api = {
-  openProject: (path: string, previewMode?: PreviewMode) =>
-    invoke<ProjectInfo>("open_project", { path, previewMode }),
+  openProject: (path: string) => invoke<ProjectInfo>("open_project", { path }),
   // Android SAF folder picker; returns a content:// tree URI (or null if
   // cancelled) suitable to pass to openProject. No-op returning null on desktop.
   pickSafTree: () => invoke<string | null>("pick_saf_tree"),
   currentProject: () => invoke<ProjectInfo | null>("current_project"),
+  // Files still awaiting metadata (Phase A). Used to recover the open gate if a
+  // `metadata:done` event was missed on the startup auto-open path.
+  ingestPending: () => invoke<number>("ingest_pending"),
   closeProject: () => invoke("close_project"),
-  rescanProject: (previewMode?: PreviewMode) =>
-    invoke("rescan_project", { previewMode }),
+  rescanProject: () => invoke("rescan_project"),
+  // Push the "pregenerate video thumbnails" preference to the backend; the
+  // ingest pass reads it before its final (slow, ffmpeg) video-poster tier.
+  setGenerateVideoThumbs: (on: boolean) => invoke("set_generate_video_thumbs", { on }),
   listRecentProjects: () => invoke<RecentProject[]>("list_recent_projects"),
   // Probe the storage backing a project id (used to watch the open project's
   // folder/volume for disconnection while working).
@@ -177,6 +179,9 @@ export const api = {
   queryItems: (sort: SortKey, media: MediaTab, desc: boolean) =>
     invoke<ItemLite[]>("query_items", { sort, media, desc }),
   mediaCounts: () => invoke<MediaCounts>("media_counts"),
+  // File ids that already have a generated loupe preview (drives the grid's
+  // per-cell "preview still generating" spinner).
+  previewReadyIds: () => invoke<number[]>("preview_ready_ids"),
   setRating: (targets: Targets, rating: number) =>
     invoke<CullState[]>("set_rating", { targets, rating }),
   setFlag: (targets: Targets, flag: number) =>

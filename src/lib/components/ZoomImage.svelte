@@ -4,6 +4,11 @@
   import { view, MAX_SCALE } from "../stores/view.svelte";
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
+  import { catalog } from "../stores/catalog.svelte";
+
+  /** Dwell before requesting an *uncached* preview, so arrowing quickly through
+   *  photos never enqueues a decode for ones merely passed over. */
+  const PREVIEW_DWELL_MS = 1000;
 
   let {
     item,
@@ -179,42 +184,77 @@
 
   // Double-buffer the fit view: keep showing the previous photo until the new
   // preview has loaded, so rapid arrowing never flashes a blank pane.
-  let displayedSrc = $state(untrack(() => previewUrl(item)));
+  //
+  // On first mount there's no previous frame to hold, so with progressive loupe
+  // on we start from the (already cached) grid thumb, softened, and let the
+  // effect below swap in the sharp preview once it loads — matching what happens
+  // when arrowing to another photo. Without this the initial `displayedSrc`
+  // would equal the effect's target and the effect would early-out, so opening a
+  // photo whose preview isn't generated yet showed a blank pane instead of the
+  // blurry thumb. Progressive off keeps the old behavior (blank until the
+  // preview decodes), consistent with the double-buffer elsewhere.
+  const progressiveStart = untrack(() => settings.progressiveLoupe);
+  let displayedSrc = $state(
+    untrack(() => (progressiveStart ? thumbUrl(item) : previewUrl(item))),
+  );
   let displayedAlt = $state(untrack(() => item.name));
   /** True while the fit view shows the upscaled grid thumb as a stand-in. */
-  let softPreview = $state(false);
+  let softPreview = $state(progressiveStart);
 
   $effect(() => {
     const target = fitSrc;
     const alt = item.name;
     const progressive = settings.progressiveLoupe;
     const thumb = thumbUrl(item);
+    // Read cache membership UNTRACKED: the ~600ms previewReady refresh must not
+    // reset the dwell timer below (a preview that becomes cached mid-dwell simply
+    // loads instantly once the dwell elapses).
+    const cached = untrack(() => catalog.previewReady.has(item.id));
     if (target === untrack(() => displayedSrc)) return;
-    const loader = new Image();
-    // On error swap anyway — a broken image beats silently showing the wrong photo.
-    loader.onload = loader.onerror = () => {
-      if (timer !== undefined) clearTimeout(timer);
-      softPreview = false;
-      displayedSrc = target;
+
+    let softTimer: ReturnType<typeof setTimeout> | undefined;
+    let dwellTimer: ReturnType<typeof setTimeout> | undefined;
+    let loader: HTMLImageElement | undefined;
+
+    const showSoftThumb = () => {
+      if (!progressive) return;
+      softPreview = true;
+      displayedSrc = thumb;
       displayedAlt = alt;
     };
-    loader.src = target;
-    // Progressive fit: if the sharp preview takes longer than a beat, paint
-    // the (virtually always cached) grid thumb immediately, softened, and let
-    // the preview replace it on load. Cached previews land before the timer,
-    // so revisits never flash the soft frame.
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    if (progressive) {
-      timer = setTimeout(() => {
-        softPreview = true;
-        displayedSrc = thumb;
+
+    const loadPreview = () => {
+      loader = new Image();
+      // On error swap anyway — a broken image beats silently showing the wrong photo.
+      loader.onload = loader.onerror = () => {
+        if (softTimer !== undefined) clearTimeout(softTimer);
+        softPreview = false;
+        displayedSrc = target;
         displayedAlt = alt;
-      }, 80);
+      };
+      loader.src = target;
+      // Progressive fit: if the sharp preview takes longer than a beat, paint
+      // the (virtually always cached) grid thumb, softened, until it lands.
+      if (progressive) softTimer = setTimeout(showSoftThumb, 80);
+    };
+
+    if (cached) {
+      // Already generated → served straight from the disk cache by the protocol
+      // (no pool work), so load it right away for instant sharpness.
+      loadPreview();
+    } else {
+      // Not generated yet → requesting it would enqueue an expensive decode.
+      // Show the thumb now and only request the preview after a dwell, so rapid
+      // arrowing never enqueues previews for photos merely passed over.
+      showSoftThumb();
+      dwellTimer = setTimeout(loadPreview, PREVIEW_DWELL_MS);
     }
+
     return () => {
       // A newer target superseded this load; drop it so swaps stay in order.
-      loader.onload = loader.onerror = null;
-      if (timer !== undefined) clearTimeout(timer);
+      if (loader) loader.onload = loader.onerror = null;
+      if (softTimer !== undefined) clearTimeout(softTimer);
+      if (dwellTimer !== undefined) clearTimeout(dwellTimer);
     };
   });
 

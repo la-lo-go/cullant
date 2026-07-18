@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { SvelteSet } from "svelte/reactivity";
 import {
   api,
   type ItemLite,
@@ -10,7 +11,6 @@ import {
   type SortKey,
 } from "../api";
 import { session } from "./session.svelte";
-import { settings } from "./settings.svelte";
 import { view } from "./view.svelte";
 
 class CatalogStore {
@@ -22,11 +22,30 @@ class CatalogStore {
   media = $state<MediaTab>("photos");
   scanning = $state(false);
   scanFound = $state(0);
-  /** True while the initial scan + thumbnail preload blocks the grid. */
+  /** True while the initial scan + metadata read blocks the grid. Released on
+   *  `metadata:done`, so the grid appears correctly ordered without waiting for
+   *  thumbnails (those fill in progressively afterwards). */
   preloading = $state(false);
+  /** Gated metadata read (metadata:progress) — drives the preload screen. */
+  metaProgress = $state({ done: 0, total: 0 });
+  /** Background thumbnail pregeneration (thumbs:progress); total 0 = idle. */
   thumbProgress = $state({ done: 0, total: 0 });
   /** Background preview pregeneration (previews:progress); total 0 = idle. */
   previewProgress = $state({ done: 0, total: 0 });
+  /** Background video-poster pregeneration (videos:progress); total 0 = idle.
+   *  Runs last, after photo thumbnails and previews. */
+  videoProgress = $state({ done: 0, total: 0 });
+  /** Ids whose grid thumbnail has actually painted at least once. Lives here (not
+   *  in the grid component) so it survives grid unmount/remount — returning from
+   *  the loupe/compare view must not reset every cell to its loading skeleton and
+   *  re-request thumbnails that already exist. Cleared when the project changes. */
+  readonly thumbLoaded = new SvelteSet<number>();
+  /** Ids of files that already have a generated loupe preview. Drives the
+   *  per-cell "full preview still generating" spinner: an image whose grid
+   *  thumbnail has painted but whose id is not in here (while the preview pass
+   *  runs) is still waiting for its sharp preview. Refreshed from the backend as
+   *  the background preview pass progresses; cleared when the project changes. */
+  readonly previewReady = new SvelteSet<number>();
   error = $state("");
   /** Total present-file counts per kind, independent of the active tab. */
   mediaCounts = $state<MediaCounts>({ photos: 0, videos: 0 });
@@ -36,23 +55,52 @@ class CatalogStore {
     const info = await api.currentProject();
     if (info) {
       this.project = info;
+      this.thumbLoaded.clear();
+      this.previewReady.clear();
       this.preloading = true;
-      this.thumbProgress = { done: 0, total: 0 };
+      this.metaProgress = { done: 0, total: 0 };
       await this.refreshForOpen();
+      // Recover the gate if the backend finished ingesting before these event
+      // listeners existed (startup auto-open of an already-ingested project):
+      // no metadata:done would ever arrive. With files present and nothing left
+      // to read, it's safe to show the grid now.
+      if (info.fileCount > 0 && (await api.ingestPending()) === 0) {
+        this.preloading = false;
+      }
     }
   }
 
   async open(path: string) {
     this.error = "";
+    // Set the in-flight flags BEFORE awaiting openProject. The scan finishes in a
+    // few milliseconds and its scan:progress/scan:done events can arrive before
+    // this promise resolves; setting `scanning` after the await would then clobber
+    // the listener's reset and pin the status pill at "Scanning… 0" forever.
+    this.scanning = true;
+    this.scanFound = 0;
+    this.preloading = true;
+    this.metaProgress = { done: 0, total: 0 };
     try {
-      this.project = await api.openProject(path, settings.previewMode);
-      this.scanning = true;
-      this.scanFound = 0;
-      this.preloading = true;
-      this.thumbProgress = { done: 0, total: 0 };
+      this.project = await api.openProject(path);
+      this.thumbLoaded.clear();
+      this.previewReady.clear();
       await this.refreshForOpen();
     } catch (e) {
+      this.scanning = false;
+      this.preloading = false;
       this.error = String(e);
+    }
+  }
+
+  /// Pull the set of files that already have a loupe preview from the backend and
+  /// merge it in (add-only: a preview never disappears mid-session). Called as
+  /// the background preview pass makes progress so per-cell spinners clear.
+  async refreshPreviewReady() {
+    try {
+      const ids = await api.previewReadyIds();
+      for (const id of ids) this.previewReady.add(id);
+    } catch {
+      // Best-effort; a spinner just lingers until the next refresh.
     }
   }
 
@@ -93,6 +141,7 @@ class CatalogStore {
     this.items = [];
     this.scanning = false;
     this.preloading = false;
+    this.thumbLoaded.clear();
   }
 
   async refresh() {
@@ -128,6 +177,9 @@ class CatalogStore {
 export const catalog = new CatalogStore();
 catalog.adoptCurrent();
 
+// Throttle the preview-ready refetch during the (throttled-anyway) preview pass.
+let lastPreviewReadyRefresh = 0;
+
 // Backend events keep the catalog fresh while scan/metadata run.
 listen<ScanProgress>("scan:progress", (e) => {
   catalog.scanning = true;
@@ -137,21 +189,42 @@ listen<ScanDone>("scan:done", async () => {
   catalog.scanning = false;
   await catalog.refresh();
 });
+listen<{ done: number; total: number }>("metadata:progress", (e) => {
+  catalog.metaProgress = e.payload;
+});
 listen("metadata:done", async () => {
-  await catalog.refresh();
-});
-listen<{ done: number; total: number }>("thumbs:progress", (e) => {
-  catalog.thumbProgress = e.payload;
-});
-listen<{ done: number; total: number }>("previews:progress", (e) => {
-  // Reset to idle once the background tier completes.
-  catalog.previewProgress =
-    e.payload.done >= e.payload.total ? { done: 0, total: 0 } : e.payload;
-});
-listen<{ total: number }>("thumbs:done", async (e) => {
-  catalog.thumbProgress = { done: e.payload.total, total: e.payload.total };
+  // Metadata is in, so the grid can show correctly ordered by capture time.
+  // Release the gate; thumbnails fill in progressively (on-demand + background).
   catalog.preloading = false;
   await catalog.refresh();
+  // Seed which items already have previews (e.g. from a previous session), so
+  // items that are done never show the "generating preview" spinner.
+  void catalog.refreshPreviewReady();
+});
+listen<{ done: number; total: number }>("thumbs:progress", (e) => {
+  // Non-blocking pill. Reset to idle once the background tier completes.
+  catalog.thumbProgress =
+    e.payload.done >= e.payload.total ? { done: 0, total: 0 } : e.payload;
+});
+listen<{ total: number }>("thumbs:done", () => {
+  catalog.thumbProgress = { done: 0, total: 0 };
+});
+listen<{ done: number; total: number }>("previews:progress", (e) => {
+  const { done, total } = e.payload;
+  // Reset to idle once the background tier completes.
+  catalog.previewProgress = done >= total ? { done: 0, total: 0 } : e.payload;
+  // Refresh which items now have previews so their per-cell spinners clear.
+  // Throttled during the pass; always refetched on the final tick.
+  const now = Date.now();
+  if (done >= total || now - lastPreviewReadyRefresh > 600) {
+    lastPreviewReadyRefresh = now;
+    void catalog.refreshPreviewReady();
+  }
+});
+listen<{ done: number; total: number }>("videos:progress", (e) => {
+  // The final (video-poster) tier. Reset to idle once it completes.
+  catalog.videoProgress =
+    e.payload.done >= e.payload.total ? { done: 0, total: 0 } : e.payload;
 });
 listen<string>("scan:error", (e) => {
   catalog.scanning = false;

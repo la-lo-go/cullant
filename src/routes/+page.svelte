@@ -2,10 +2,10 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { session } from "$lib/stores/session.svelte";
+  import { settings } from "$lib/stores/settings.svelte";
   import { recent } from "$lib/stores/recent.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
-  import { settings } from "$lib/stores/settings.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import VirtualGrid from "$lib/components/VirtualGrid.svelte";
@@ -24,11 +24,9 @@
   import MoveDialog from "$lib/components/MoveDialog.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
-  import PreviewModeIntro from "$lib/components/PreviewModeIntro.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
   import TitleBar from "$lib/components/TitleBar.svelte";
-  import type { PreviewMode } from "$lib/api";
   import { api } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -58,10 +56,12 @@
   // Set when the open project's folder/volume becomes unreachable while working.
   let folderLostMsg = $state("");
 
-  // First-run onboarding: the very first interactive open shows a one-time
-  // welcome dialog to pick the preview loading mode. `introPath` stashes the
-  // project the user asked to open while the dialog is up.
-  let introPath = $state<string | null>(null);
+  // Keep the backend's video-thumbnail preference in sync with the setting.
+  // Runs once on mount (pushing the persisted value) and again on every toggle,
+  // so the next ingest pass honors it without needing a reopen.
+  $effect(() => {
+    void api.setGenerateVideoThumbs(settings.generateVideoThumbs);
+  });
 
   // Load the project's tag list + pending queue whenever a project opens.
   $effect(() => {
@@ -220,11 +220,8 @@
     if (path) await openProject(path);
   }
 
-  /**
-   * Interactive open gate. On the very first open ever, stash the target path
-   * and show the preview-mode intro instead of opening immediately; the dialog
-   * confirms the choice and then opens. Afterwards, open directly.
-   */
+  /** Open a project folder. Thumbnails fill in progressively, so this returns to
+   *  the grid as soon as the folder's photo metadata has been read. */
   async function openProject(path: string) {
     // Reject Cullant's own sidecar dir up front (the backend guards it too, so
     // the CULLANT_OPEN_PROJECT auto-open hook is covered regardless).
@@ -234,30 +231,7 @@
         "Pick the folder that contains your photos or videos instead.";
       return;
     }
-    if (!settings.onboardedPreview) {
-      introPath = path;
-      return;
-    }
     await catalog.open(path);
-  }
-
-  /** Intro confirmed: persist the chosen mode, mark onboarded, then open. */
-  async function confirmIntro(mode: PreviewMode) {
-    const path = introPath;
-    introPath = null;
-    if (path === null) return;
-    settings.setPreviewMode(mode);
-    settings.setOnboardedPreview(true);
-    await catalog.open(path);
-  }
-
-  /**
-   * Intro cancelled/Escaped: abort the open and leave `onboardedPreview` false
-   * so the dialog reappears on the next attempt (least-surprising: the user
-   * never gets a project loaded with a mode they didn't confirm).
-   */
-  function cancelIntro() {
-    introPath = null;
   }
 
   /**
@@ -313,16 +287,6 @@
             <span class="count">{catalog.mediaCounts.videos}</span>
           </button>
         </div>
-        {#if catalog.scanning}
-          <span class="status scanning">Scanning… {catalog.scanFound || ""}</span>
-        {:else if catalog.previewProgress.total > 0}
-          <span
-            class="status scanning previews-status"
-            title="Generating previews in the background — photos you open jump the queue"
-          >
-            Previews… {catalog.previewProgress.done} / {catalog.previewProgress.total}
-          </span>
-        {/if}
       </div>
       <div class="toolbar-center">
         <div class="segmented">
@@ -394,7 +358,7 @@
         >
           Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}
         </button>
-        <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject(settings.previewMode))}><RefreshCw size={14} /></button>
+        <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject())}><RefreshCw size={14} /></button>
         <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
         <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
       </div>
@@ -409,17 +373,17 @@
             <div class="pbar-fill"></div>
           </div>
         {:else}
-          {@const pdone = catalog.thumbProgress.done}
-          {@const ptotal = catalog.thumbProgress.total}
+          {@const pdone = catalog.metaProgress.done}
+          {@const ptotal = catalog.metaProgress.total}
           {@const ppct = ptotal > 0 ? Math.round((pdone / ptotal) * 100) : 0}
           <p class="phase">
-            Generating thumbnails… <span class="count">{pdone} / {ptotal > 0 ? ptotal : "?"}</span>
+            Reading photo info… <span class="count">{pdone} / {ptotal > 0 ? ptotal : "?"}</span>
           </p>
           {#if ptotal > 0}
             <div
               class="pbar"
               role="progressbar"
-              aria-label="Generating thumbnails"
+              aria-label="Reading photo info"
               aria-valuemin="0"
               aria-valuemax={ptotal}
               aria-valuenow={pdone}
@@ -428,7 +392,7 @@
             </div>
             <p class="pct">{ppct}%</p>
           {:else}
-            <div class="pbar indeterminate" role="progressbar" aria-label="Generating thumbnails">
+            <div class="pbar indeterminate" role="progressbar" aria-label="Reading photo info">
               <div class="pbar-fill"></div>
             </div>
           {/if}
@@ -532,10 +496,6 @@
         </div>
       </div>
     </div>
-  {/if}
-
-  {#if introPath !== null}
-    <PreviewModeIntro onstart={(mode) => void confirmIntro(mode)} oncancel={cancelIntro} />
   {/if}
 
   {#if view.shortcutsOpen}
@@ -735,11 +695,6 @@
   /* On touch devices the action bar is always visible, so its toggle is
      redundant — hide it there. */
   @media (pointer: coarse) {
-    /* Mobile shows preview-generation progress only in the grid's bottom-right
-       "Loading previews…" pill, not in the toolbar. */
-    .toolbar .previews-status {
-      display: none;
-    }
     .toolbar .touchbar-toggle {
       display: none;
     }
@@ -767,14 +722,6 @@
     }
   }
 
-  .status {
-    font-size: 12px;
-    opacity: 0.75;
-  }
-
-  .status.scanning {
-    color: var(--accent);
-  }
 
   button {
     border-radius: 6px;

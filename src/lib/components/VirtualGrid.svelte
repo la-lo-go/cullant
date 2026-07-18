@@ -30,9 +30,19 @@
   // cells overlapping their neighbors instead of shrinking cleanly in place.
   const SELECTED_INSET = 5;
 
-  // A small pill (bottom-right, over the cells) while background previews are
-  // still generating for the current view.
-  const loadingPreviews = $derived(catalog.previewProgress.total > 0);
+  // A small pill (bottom-right, over the cells) reporting whatever background
+  // work is in flight: scanning, then thumbnail generation, then previews. All
+  // status lives here — the top bar never shows these messages.
+  const bgStatus = $derived.by(() => {
+    if (catalog.scanning) return `Scanning… ${catalog.scanFound || 0}`;
+    const t = catalog.thumbProgress;
+    if (t.total > 0) return `Thumbnails ${t.done} / ${t.total}`;
+    const p = catalog.previewProgress;
+    if (p.total > 0) return `Previews ${p.done} / ${p.total}`;
+    const v = catalog.videoProgress;
+    if (v.total > 0) return `Video thumbnails ${v.done} / ${v.total}`;
+    return null;
+  });
 
   /** Whether an item's DISPLAYED aspect (after EXIF rotation) is portrait. Same
    *  swap logic as the orientation filter in session.svelte.ts: width/height
@@ -62,6 +72,17 @@
     if (posterFailed.has(id)) return;
     posterFailed = new Set(posterFailed).add(id);
   }
+
+  // Ids whose thumbnail has actually painted. Until then a subtle skeleton fills
+  // the cell — the grid opens before thumbnails are pregenerated, so many cells
+  // are briefly empty and fill in progressively. Lives in the catalog store so it
+  // survives this component unmounting (loupe/compare) and remounting, which must
+  // not re-skeleton and re-request thumbnails that already exist.
+  const loaded = catalog.thumbLoaded;
+  // Ids whose full loupe preview has been generated. A photo whose thumbnail has
+  // painted but whose preview is not here yet — while the preview pass runs —
+  // shows a small "generating preview" spinner.
+  const previewReady = catalog.previewReady;
 
   let viewport = $state<HTMLDivElement | null>(null);
   let canvasEl = $state<HTMLDivElement | null>(null);
@@ -401,7 +422,15 @@
         role="button"
         tabindex="-1"
       >
-        <div class="frame" class:labeled={v.item.label} class:portrait={isPortrait(v.item)} style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}>
+        <div
+          class="frame"
+          class:labeled={v.item.label}
+          class:portrait={isPortrait(v.item)}
+          class:loading={!loaded.has(v.item.id) &&
+            !v.item.thumbFailed &&
+            !(v.item.kind === 2 && posterFailed.has(v.item.id))}
+          style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}
+        >
           {#if v.item.kind === 2}
             {#if posterFailed.has(v.item.id)}
               <!-- No pregenerated poster (ffmpeg absent / undecodable): fall
@@ -414,6 +443,7 @@
                 decoding="async"
                 draggable="false"
                 loading="eager"
+                onload={() => loaded.add(v.item.id)}
                 onerror={() => markPosterFailed(v.item.id)}
               />
             {/if}
@@ -430,7 +460,13 @@
               decoding="async"
               draggable="false"
               loading="eager"
+              onload={() => loaded.add(v.item.id)}
             />
+          {/if}
+          {#if v.item.kind !== 2 && !v.item.thumbFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id) && catalog.previewProgress.total > 0}
+            <span class="preview-spin" title="Generating full preview…">
+              <Loader size={12} />
+            </span>
           {/if}
           {#if session.mirrorMode && v.item.groupSize > 1}
             <span class="chip pair" class:split={v.item.decoupled}>
@@ -474,10 +510,10 @@
     {/if}
   </div>
   </div>
-  {#if loadingPreviews}
+  {#if bgStatus}
     <div class="loading-pill" role="status" aria-live="polite">
       <span class="spin"><Loader size={13} /></span>
-      <span>Loading previews… {catalog.previewProgress.done} / {catalog.previewProgress.total}</span>
+      <span>{bgStatus}</span>
     </div>
   {/if}
 </div>
@@ -614,6 +650,30 @@
     user-select: none;
   }
 
+  /* Subtle shimmer while a cell's thumbnail is still being generated/decoded.
+     It's the frame's own background (behind the image AND the chips), so chips
+     stay on top and a finished portrait cell — once `.loading` drops — shows the
+     grid's dark background through its letterbox bars, not a gray box. */
+  .frame.loading {
+    background: linear-gradient(
+      100deg,
+      var(--surface-2) 30%,
+      var(--hover) 50%,
+      var(--surface-2) 70%
+    );
+    background-size: 200% 100%;
+    animation: cell-shimmer 2.4s ease-in-out infinite;
+  }
+
+  @keyframes cell-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+
   /* Portrait photos: cropping to fill the square cell hides most of the frame
      (a tall photo squeezed into a square loses its top/bottom). Show the whole
      photo letterboxed instead, pillarboxed against the cell's own background. */
@@ -708,6 +768,25 @@
     right: 6px;
     display: flex;
     gap: 3px;
+  }
+
+  /* "Full preview still generating" hint. Bottom-right is free for photos during
+     the preview pass (the video chip is video-only; rating/flag/tag chips get
+     added later, while culling). */
+  .preview-spin {
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px;
+    border-radius: 50%;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+    animation: pill-spin 1s linear infinite;
+    pointer-events: none;
   }
 
   .tagdot {
