@@ -3,7 +3,6 @@
   import { session, LABELS } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
   import Check from "@lucide/svelte/icons/check";
-  import FlagOff from "@lucide/svelte/icons/flag-off";
   import X from "@lucide/svelte/icons/x";
 
   const n = $derived(session.selectedIds.size);
@@ -28,7 +27,6 @@
 
   // These act on session.targets(), which is the current selection when one exists.
   const rate = (r: number) => void session.rate(r);
-  const flag = (f: number) => void session.flag(f);
   const label = (l: string) => void session.label(l);
   const toggleTag = (id: number) => void session.toggleTag(id);
 
@@ -40,6 +38,11 @@
   function allHaveFlag(f: number): boolean {
     return selectedItems.length > 0 && selectedItems.every((i) => i.flag === f);
   }
+
+  // Pick/Reject toggle: when the whole selection already has the flag,
+  // clicking again clears it to 0 (unflag).
+  const flag = (f: number) => void session.flag(allHaveFlag(f) ? 0 : f);
+
   function allHaveTag(tagId: number): boolean {
     return selectedItems.length > 0 && selectedItems.every((i) => i.tagIds.includes(tagId));
   }
@@ -55,9 +58,8 @@
   <span class="apply">Apply:</span>
 
   <div class="group">
-    <button class="btn reject" class:active-reject={allHaveFlag(-1)} title="Reject (X)" onclick={() => flag(-1)}><X size={15} /></button>
-    <button class="btn pick" class:active-pick={allHaveFlag(1)} title="Pick (P)" onclick={() => flag(1)}><Check size={15} /></button>
-    <button class="btn" class:active={allHaveFlag(0)} title="Unflag (U)" onclick={() => flag(0)}><FlagOff size={15} /></button>
+    <button class="btn reject" class:active-reject={allHaveFlag(-1)} title="Reject (X) — click again to unflag" onclick={() => flag(-1)}><X size={15} /></button>
+    <button class="btn pick" class:active-pick={allHaveFlag(1)} title="Pick (P) — click again to unflag" onclick={() => flag(1)}><Check size={15} /></button>
   </div>
 
   <div class="group stars">
@@ -171,12 +173,6 @@
   .btn:hover:not(.active) {
     border-color: var(--accent);
     color: #fff;
-  }
-
-  .btn.active {
-    background: var(--accent-fill);
-    color: #fff;
-    border-color: transparent;
   }
 
   /* Pick/reject read as a green check / red X even when inactive, matching the

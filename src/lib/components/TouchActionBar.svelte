@@ -22,7 +22,6 @@
   // focused item / current selection).
   const focused = $derived(session.focused);
   const rating = $derived(focused?.rating ?? 0);
-  const flag = $derived(focused?.flag ?? 0);
   const hasSelection = $derived(session.selectedIds.size > 0);
 
   const labelColors: Record<string, string> = {
@@ -61,6 +60,13 @@
   function tagActive(tagId: number): boolean {
     if (hasSelection) return selectedItems.length > 0 && selectedItems.every((i) => i.tagIds.includes(tagId));
     return focused?.tagIds.includes(tagId) ?? false;
+  }
+  // Pick/reject use the same selection-aware rule as labels/tags (and as the
+  // desktop SelectionBar): the toggle reads whether EVERY relevant item
+  // already has the flag, so both bars always issue the same command.
+  function flagActive(f: number): boolean {
+    if (hasSelection) return selectedItems.length > 0 && selectedItems.every((i) => i.flag === f);
+    return focused?.flag === f;
   }
 
   // Run a command, then release focus so a clicked button never swallows the
@@ -101,19 +107,19 @@
   <div class="group flags">
     <button
       class="btn reject"
-      class:active-reject={flag === -1}
-      title="Reject (X)"
+      class:active-reject={flagActive(-1)}
+      title="Reject (X) — click again to unflag"
       aria-label="Reject"
-      onclick={act(() => runCommand(flag === -1 ? "flag.unflag" : "flag.reject"))}
+      onclick={act(() => runCommand(flagActive(-1) ? "flag.unflag" : "flag.reject"))}
     >
       <X size={20} />
     </button>
     <button
       class="btn pick"
-      class:active-pick={flag === 1}
-      title="Pick (P)"
+      class:active-pick={flagActive(1)}
+      title="Pick (P) — click again to unflag"
       aria-label="Pick"
-      onclick={act(() => runCommand(flag === 1 ? "flag.unflag" : "flag.pick"))}
+      onclick={act(() => runCommand(flagActive(1) ? "flag.unflag" : "flag.pick"))}
     >
       <Check size={20} />
     </button>
