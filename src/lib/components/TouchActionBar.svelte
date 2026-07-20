@@ -20,7 +20,6 @@
   // The item the actions apply to (mirrors the keyboard path, which acts on the
   // focused item / current selection).
   const focused = $derived(session.focused);
-  const rating = $derived(focused?.rating ?? 0);
   const hasSelection = $derived(session.selectedIds.size > 0);
 
   const labelColors: Record<string, string> = {
@@ -29,13 +28,6 @@
     Green: "#59b85e",
     Blue: "#5588e0",
     Purple: "#9a66d6",
-  };
-  const labelCommands: Record<string, CommandId> = {
-    Red: "label.red",
-    Yellow: "label.yellow",
-    Green: "label.green",
-    Blue: "label.blue",
-    Purple: "label.purple",
   };
 
   // Tags applicable to the current media type (same derivation as SelectionBar/FiltersPanel).
@@ -51,6 +43,18 @@
   // it, so partial/no application never falsely reads as active.
   const selectedItems = $derived(
     hasSelection ? session.filtered.filter((i) => session.selectedIds.has(i.id)) : [],
+  );
+
+  // Displayed rating: the common value when every selected item shares one,
+  // the focused item's when there's no selection, and 0 (nothing lit) for a
+  // mixed selection — never a misleading partial value. Star clicks toggle
+  // against this same value, so display and action always agree.
+  const rating = $derived(
+    hasSelection
+      ? selectedItems.length > 0 && selectedItems.every((i) => i.rating === selectedItems[0].rating)
+        ? selectedItems[0].rating
+        : 0
+      : (focused?.rating ?? 0),
   );
   function labelActive(name: string): boolean {
     if (hasSelection) return selectedItems.length > 0 && selectedItems.every((i) => i.label === name);
@@ -146,7 +150,7 @@
         title={`${name} label`}
         aria-label={`${name} label`}
         style="--c: {color}"
-        onclick={act(() => runCommand(labelCommands[name]))}
+        onclick={act(() => session.setLabel(labelActive(name) ? null : name))}
       >
         <span class="swatch"></span>
       </button>

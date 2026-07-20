@@ -26,13 +26,11 @@
   let hovered = $state(0);
 
   // These act on session.targets(), which is the current selection when one exists.
-  const rate = (r: number) => void session.rate(r);
-  const label = (l: string) => void session.label(l);
   const toggleTag = (id: number) => void session.toggleTag(id);
 
-  // Selected items' own data (flag/tagIds), so a button can honestly reflect
-  // "does the WHOLE selection already have this" rather than always looking
-  // pre-applied regardless of actual state.
+  // Selected items' own data (flag/rating/label/tagIds), so a button can
+  // honestly reflect "does the WHOLE selection already have this" rather than
+  // always looking pre-applied regardless of actual state.
   const selectedItems = $derived(session.filtered.filter((i) => session.selectedIds.has(i.id)));
 
   function allHaveFlag(f: number): boolean {
@@ -42,6 +40,26 @@
   // Pick/Reject toggle: when the whole selection already has the flag,
   // clicking again clears it to 0 (unflag).
   const flag = (f: number) => void session.flag(allHaveFlag(f) ? 0 : f);
+
+  // Rating shared by the whole selection; 0 when mixed (or nothing selected),
+  // so the stars show nothing lit rather than a misleading partial value.
+  const commonRating = $derived(
+    selectedItems.length > 0 && selectedItems.every((i) => i.rating === selectedItems[0].rating)
+      ? selectedItems[0].rating
+      : 0,
+  );
+
+  // Stars toggle like the pick/reject flags: clicking the rating the whole
+  // selection already shares clears it to 0; any other click sets it.
+  const rate = (r: number) => void session.rate(r !== 0 && r === commonRating ? 0 : r);
+
+  function allHaveLabel(l: string): boolean {
+    return selectedItems.length > 0 && selectedItems.every((i) => i.label === l);
+  }
+
+  // Labels go through the explicit set/clear path: the bar already resolved
+  // set-vs-clear from the selection-uniform state it displays, so no toggle.
+  const label = (l: string) => void session.setLabel(allHaveLabel(l) ? null : l);
 
   function allHaveTag(tagId: number): boolean {
     return selectedItems.length > 0 && selectedItems.every((i) => i.tagIds.includes(tagId));
@@ -66,6 +84,7 @@
     {#each [1, 2, 3, 4, 5] as star (star)}
       <button
         class="star"
+        class:on={commonRating >= star}
         class:preview={hovered >= star}
         aria-label={`Set ${star} stars`}
         onmouseenter={() => (hovered = star)}
@@ -80,6 +99,7 @@
     {#each LABELS as l (l)}
       <button
         class="dot"
+        class:active={allHaveLabel(l)}
         style="--c: {labelColors[l]}"
         aria-label={`Label ${l}`}
         onclick={() => label(l)}
@@ -206,6 +226,12 @@
     line-height: 1;
   }
 
+  /* Lit stars for the selection's common rating; declared before `.preview`
+     so the hover preview wins while hovering. Same yellow as TouchActionBar. */
+  .star.on {
+    color: #e0c34f;
+  }
+
   .star.preview {
     color: #8a8a93;
   }
@@ -226,6 +252,13 @@
   }
 
   .dot:hover {
+    opacity: 1;
+    border-color: #fff;
+  }
+
+  /* Active = the whole selection carries this label; white outline like
+     TouchActionBar's `.swatchbtn.active .swatch`. */
+  .dot.active {
     opacity: 1;
     border-color: #fff;
   }

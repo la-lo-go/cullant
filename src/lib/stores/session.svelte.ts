@@ -623,6 +623,17 @@ class SessionStore {
     this.applyStates(await api.setLabel(t, next));
   }
 
+  /** Apply a label (null clears) exactly as given — no toggle. The bars use
+   *  this: they already resolve set-vs-clear from the selection-uniform state
+   *  they display, unlike the keyboard path (`label`), which toggles off the
+   *  focused item Lightroom-style. */
+  async setLabel(label: string | null) {
+    const t = this.targets();
+    if (!t) return;
+    this.applyStates(t.ids.map((id) => this.localGuess(id, { label })));
+    this.applyStates(await api.setLabel(t, label));
+  }
+
   /** Toggle a task tag on the focused photo (fan-out included). */
   async toggleTag(tagId: number, event?: KeyboardEvent) {
     const t = this.targets();
