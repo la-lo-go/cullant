@@ -36,7 +36,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Tag from "@lucide/svelte/icons/tag";
   import Type from "@lucide/svelte/icons/type";
-  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
+  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
@@ -326,7 +326,7 @@
             aria-label="Show/hide the action bar"
             onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
           >
-            <SlidersHorizontal size={14} />
+            <PanelBottom size={14} />
           </button>
         {/if}
         {#if hasSubfolders && view.mode === "grid"}

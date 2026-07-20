@@ -2,8 +2,7 @@
   import { catalog } from "../stores/catalog.svelte";
   import { session, LABELS } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
-  import Flag from "@lucide/svelte/icons/flag";
-  import Ban from "@lucide/svelte/icons/ban";
+  import Check from "@lucide/svelte/icons/check";
   import FlagOff from "@lucide/svelte/icons/flag-off";
   import X from "@lucide/svelte/icons/x";
 
@@ -56,9 +55,9 @@
   <span class="apply">Apply:</span>
 
   <div class="group">
-    <button class="btn" class:active={allHaveFlag(-1)} title="Reject" onclick={() => flag(-1)}><Ban size={15} /></button>
-    <button class="btn" class:active={allHaveFlag(1)} title="Pick" onclick={() => flag(1)}><Flag size={15} /></button>
-    <button class="btn" class:active={allHaveFlag(0)} title="Unflag" onclick={() => flag(0)}><FlagOff size={15} /></button>
+    <button class="btn reject" class:active-reject={allHaveFlag(-1)} title="Reject (X)" onclick={() => flag(-1)}><X size={15} /></button>
+    <button class="btn pick" class:active-pick={allHaveFlag(1)} title="Pick (P)" onclick={() => flag(1)}><Check size={15} /></button>
+    <button class="btn" class:active={allHaveFlag(0)} title="Unflag (U)" onclick={() => flag(0)}><FlagOff size={15} /></button>
   </div>
 
   <div class="group stars">
@@ -178,6 +177,27 @@
     background: var(--accent-fill);
     color: #fff;
     border-color: transparent;
+  }
+
+  /* Pick/reject read as a green check / red X even when inactive, matching the
+     thumbnail badges and the touch action bar; "active" adds the tinted
+     highlight. */
+  .btn.pick {
+    color: #6be675;
+  }
+
+  .btn.reject {
+    color: #ff6b6b;
+  }
+
+  .btn.active-pick {
+    border-color: #6be675;
+    background: rgba(107, 230, 117, 0.14);
+  }
+
+  .btn.active-reject {
+    border-color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.14);
   }
 
   .star {

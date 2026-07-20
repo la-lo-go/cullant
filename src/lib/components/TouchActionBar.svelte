@@ -7,10 +7,8 @@
   import type { CommandId } from "$lib/keyboard/keymap";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import Flag from "@lucide/svelte/icons/flag";
-  import Ban from "@lucide/svelte/icons/ban";
   import Star from "@lucide/svelte/icons/star";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Check from "@lucide/svelte/icons/check";
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import X from "@lucide/svelte/icons/x";
 
@@ -101,17 +99,23 @@
   {/if}
 
   <div class="group flags">
-    <button class="btn danger" title="Queue delete" aria-label="Queue delete" onclick={act(() => runCommand("delete.pair"))}>
-      <Trash2 size={20} />
+    <button
+      class="btn reject"
+      class:active-reject={flag === -1}
+      title="Reject (X)"
+      aria-label="Reject"
+      onclick={act(() => runCommand(flag === -1 ? "flag.unflag" : "flag.reject"))}
+    >
+      <X size={20} />
     </button>
     <button
-      class="btn"
+      class="btn pick"
       class:active-pick={flag === 1}
-      title="Pick"
+      title="Pick (P)"
       aria-label="Pick"
       onclick={act(() => runCommand(flag === 1 ? "flag.unflag" : "flag.pick"))}
     >
-      <Flag size={20} />
+      <Check size={20} />
     </button>
   </div>
 
@@ -162,15 +166,6 @@
   {/if}
 
   <div class="group actions">
-    <button
-      class="btn"
-      class:active-reject={flag === -1}
-      title="Reject"
-      aria-label="Reject"
-      onclick={act(() => runCommand(flag === -1 ? "flag.unflag" : "flag.reject"))}
-    >
-      <Ban size={20} />
-    </button>
     <button class="btn commit" title="Review & commit" aria-label="Review & commit" onclick={act(() => runCommand("commit.open"))}>
       <CheckCheck size={20} />
     </button>
@@ -262,18 +257,25 @@
     color: #e0c34f;
   }
 
-  .active-pick {
+  /* Pick/reject read as a green check / red X even when inactive, matching the
+     thumbnail badges and the desktop selection bar; "active" adds the tinted
+     highlight. */
+  .pick {
     color: #6be675;
+  }
+
+  .reject {
+    color: #ff6b6b;
+  }
+
+  .active-pick {
     border-color: #6be675;
+    background: rgba(107, 230, 117, 0.14);
   }
 
   .active-reject {
-    color: #ff6b6b;
     border-color: #ff6b6b;
-  }
-
-  .btn.danger:active {
-    color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.14);
   }
 
   .btn.commit {

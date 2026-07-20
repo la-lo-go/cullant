@@ -7,6 +7,8 @@
   import Scissors from "@lucide/svelte/icons/scissors";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import Check from "@lucide/svelte/icons/check";
+  import X from "@lucide/svelte/icons/x";
 
   let { items }: { items: ItemLite[] } = $props();
 
@@ -255,8 +257,9 @@
                 {/if}
               {/if}
               {#if settings.filmstripShowFlag && v.item.flag !== 0}
-                <span class="dot" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}
-                ></span>
+                <span class="flagbadge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
+                  {#if v.item.flag === 1}<Check size={11} />{:else}<X size={11} />{/if}
+                </span>
               {/if}
               {#if settings.filmstripShowRating && v.item.rating > 0}
                 <span class="stars">{"★".repeat(v.item.rating)}</span>
@@ -505,21 +508,23 @@
     color: #ffb86b;
   }
 
-  .dot {
+  /* Pick/reject flag badge: a green check / red X — the same visual language
+     as the grid's flag badge and both action bars (was a plain colored dot). */
+  .flagbadge {
     position: absolute;
     top: 4px;
     right: 4px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
+    display: inline-flex;
+    pointer-events: none;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9));
   }
 
-  .dot.pick {
-    background: #6be675;
+  .flagbadge.pick {
+    color: #6be675;
   }
 
-  .dot.reject {
-    background: #ff6b6b;
+  .flagbadge.reject {
+    color: #ff6b6b;
   }
 
   .stars {

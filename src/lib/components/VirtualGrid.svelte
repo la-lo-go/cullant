@@ -7,7 +7,6 @@
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
   import Scissors from "@lucide/svelte/icons/scissors";
   import Play from "@lucide/svelte/icons/play";
   import FileWarning from "@lucide/svelte/icons/file-warning";
@@ -477,7 +476,7 @@
               <span class="chip raw">RAW</span>
             {/if}
             {#if session.pendingDeleteIds.has(v.item.id)}
-              <span class="badge pending" title="Queued for deletion"><Trash2 size={12} /></span>
+              <span class="badge pending" title="Queued for deletion"><X size={12} /></span>
             {:else if v.item.flag !== 0}
               <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
                 {#if v.item.flag === 1}<Check size={12} />{:else}<X size={12} />{/if}
@@ -794,7 +793,7 @@
   }
 
   .badge.pending {
-    outline: 1px solid #ffb86b;
+    color: #ff6b6b;
   }
 
   /* bottom: 9px (not flush) — clears the label-bar below it (see .label-bar;
