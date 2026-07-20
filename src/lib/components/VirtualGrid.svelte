@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { thumbUrl, videoUrl, type ItemLite } from "../api";
+  import { thumbUrl, videoUrl, displayDims, type ItemLite } from "../api";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
@@ -44,19 +44,6 @@
     if (v.total > 0) return `Video thumbnails ${v.done} / ${v.total}`;
     return null;
   });
-
-  /** Whether an item's DISPLAYED aspect (after EXIF rotation) is portrait. Same
-   *  swap logic as the orientation filter in session.svelte.ts: width/height
-   *  are un-rotated sensor dims, and EXIF orientation 5-8 means the shown image
-   *  is turned 90°. Portrait cells skip the cover-crop (see .frame.portrait)
-   *  so a vertical photo isn't cropped to fill the square cell. */
-  function isPortrait(item: ItemLite): boolean {
-    if (item.width == null || item.height == null) return false;
-    const rotated = item.orientation != null && item.orientation >= 5 && item.orientation <= 8;
-    const w = rotated ? item.height : item.width;
-    const h = rotated ? item.width : item.height;
-    return h > w;
-  }
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -416,6 +403,8 @@
     {#each visible as v (v.item.id)}
       {@const selected = session.selectedIds.has(v.item.id)}
       {@const inset = selected ? SELECTED_INSET : 0}
+      {@const dims = displayDims(v.item)}
+      {@const portrait = dims !== null && dims.h > dims.w}
       <div
         class="cell"
         class:focused={v.index === session.focusedIndex}
@@ -426,18 +415,42 @@
       >
         <div
           class="frame"
-          class:labeled={v.item.label}
-          class:portrait={isPortrait(v.item)}
           class:loading={!loaded.has(v.item.id) &&
             !v.item.thumbFailed &&
             !(v.item.kind === 2 && posterFailed.has(v.item.id))}
-          style:--label-color={v.item.label ? labelColors[v.item.label] : "transparent"}
         >
-          {#if v.item.kind === 2}
-            {#if posterFailed.has(v.item.id)}
-              <!-- No pregenerated poster (ffmpeg absent / undecodable): fall
-                   back to the first metadata frame of the video itself. -->
-              <video src={videoUrl(v.item)} preload="metadata" muted></video>
+          <!-- Sized to the item's REAL aspect ratio when portrait (instead of
+               filling the square frame and cropping), so every badge/chip/label
+               below — all positioned relative to THIS box, not .frame — stays
+               within the actual visible photo instead of spilling into the
+               empty letterbox gutters. Landscape/unknown-dims items fill the
+               frame exactly (unchanged from before), cropped via object-fit. -->
+          <div
+            class="photo"
+            style={portrait && dims ? `width:auto; aspect-ratio:${dims.w}/${dims.h}` : ""}
+          >
+            {#if v.item.kind === 2}
+              {#if posterFailed.has(v.item.id)}
+                <!-- No pregenerated poster (ffmpeg absent / undecodable): fall
+                     back to the first metadata frame of the video itself. -->
+                <video src={videoUrl(v.item)} preload="metadata" muted></video>
+              {:else}
+                <img
+                  src={thumbUrl(v.item)}
+                  alt=""
+                  decoding="async"
+                  draggable="false"
+                  loading="eager"
+                  onload={() => loaded.add(v.item.id)}
+                  onerror={() => markPosterFailed(v.item.id)}
+                />
+              {/if}
+              <span class="chip video"><Play size={10} /></span>
+            {:else if v.item.thumbFailed}
+              <div class="unreadable" title="{v.item.name}.{v.item.ext} — couldn't be decoded">
+                <FileWarning size={22} />
+                <span>{v.item.ext.toUpperCase()}</span>
+              </div>
             {:else}
               <img
                 src={thumbUrl(v.item)}
@@ -446,58 +459,45 @@
                 draggable="false"
                 loading="eager"
                 onload={() => loaded.add(v.item.id)}
-                onerror={() => markPosterFailed(v.item.id)}
               />
             {/if}
-            <span class="chip video"><Play size={10} /></span>
-          {:else if v.item.thumbFailed}
-            <div class="unreadable" title="{v.item.name}.{v.item.ext} — couldn't be decoded">
-              <FileWarning size={22} />
-              <span>{v.item.ext.toUpperCase()}</span>
-            </div>
-          {:else}
-            <img
-              src={thumbUrl(v.item)}
-              alt=""
-              decoding="async"
-              draggable="false"
-              loading="eager"
-              onload={() => loaded.add(v.item.id)}
-            />
-          {/if}
-          {#if v.item.kind !== 2 && !v.item.thumbFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id) && catalog.previewProgress.total > 0}
-            <span class="preview-spin" title="Generating full preview…">
-              <Loader size={12} />
-            </span>
-          {/if}
-          {#if session.mirrorMode && v.item.groupSize > 1}
-            <span class="chip pair" class:split={v.item.decoupled}>
-              {#if v.item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
-            </span>
-          {:else if v.item.kind === 0}
-            <span class="chip raw">RAW</span>
-          {/if}
-          {#if session.pendingDeleteIds.has(v.item.id)}
-            <span class="badge pending" title="Queued for deletion"><Trash2 size={12} /></span>
-          {:else if v.item.flag !== 0}
-            <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
-              {#if v.item.flag === 1}<Check size={12} />{:else}<X size={12} />{/if}
-            </span>
-          {/if}
-          {#if v.item.rating > 0}
-            <span class="stars">{"★".repeat(v.item.rating)}</span>
-          {/if}
-          {#if v.item.tagIds.length > 0}
-            <span class="tags">
-              {#each v.item.tagIds.slice(0, 4) as tagId}
-                <span
-                  class="tagdot"
-                  style="background: {tags.byId.get(tagId)?.color ?? '#888'}"
-                  title={tags.byId.get(tagId)?.name}
-                ></span>
-              {/each}
-            </span>
-          {/if}
+            {#if v.item.kind !== 2 && !v.item.thumbFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id) && catalog.previewProgress.total > 0}
+              <span class="preview-spin" title="Generating full preview…">
+                <Loader size={12} />
+              </span>
+            {/if}
+            {#if v.item.label}
+              <span class="label-bar" style:background={labelColors[v.item.label]}></span>
+            {/if}
+            {#if session.mirrorMode && v.item.groupSize > 1}
+              <span class="chip pair" class:split={v.item.decoupled}>
+                {#if v.item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
+              </span>
+            {:else if v.item.kind === 0}
+              <span class="chip raw">RAW</span>
+            {/if}
+            {#if session.pendingDeleteIds.has(v.item.id)}
+              <span class="badge pending" title="Queued for deletion"><Trash2 size={12} /></span>
+            {:else if v.item.flag !== 0}
+              <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
+                {#if v.item.flag === 1}<Check size={12} />{:else}<X size={12} />{/if}
+              </span>
+            {/if}
+            {#if v.item.rating > 0}
+              <span class="stars">{"★".repeat(v.item.rating)}</span>
+            {/if}
+            {#if v.item.tagIds.length > 0}
+              <span class="tags">
+                {#each v.item.tagIds.slice(0, 4) as tagId}
+                  <span
+                    class="tagdot"
+                    style="background: {tags.byId.get(tagId)?.color ?? '#888'}"
+                    title={tags.byId.get(tagId)?.name}
+                  ></span>
+                {/each}
+              </span>
+            {/if}
+          </div>
         </div>
         {#if session.showNames}
           <span class="name">{v.item.name}.{v.item.ext}</span>
@@ -632,9 +632,9 @@
     position: relative;
     flex: 1;
     min-height: 0;
-    /* No fill: a portrait photo's letterbox bars (object-fit: contain) and the
-       gap while a thumbnail is still decoding just show the grid's own dark
-       background instead of a distinct gray box. */
+    /* No fill: a portrait photo's letterbox gutters (.photo narrower than
+       .frame — see below) and the gap while a thumbnail is still decoding just
+       show the grid's own dark background instead of a distinct gray box. */
     background: transparent;
     border-radius: 6px;
     overflow: hidden;
@@ -643,12 +643,45 @@
     justify-content: center;
   }
 
-  /* Label-color indicator: a colored strip along the bottom of the thumbnail.
-     Only drawn for items that actually have a label — an unlabeled cell must
-     reserve zero space here, or the 3px would read as a bottom gap and make the
-     thumbnail's bottom gutter asymmetric with its top/sides. */
-  .frame.labeled {
-    border-bottom: 3px solid var(--label-color);
+  /* The actual visible-photo box: fills .frame for landscape/square/unknown-
+     dims items (cropped via object-fit: cover below), but for a portrait item
+     is sized to its REAL aspect ratio (inline style, computed from the item's
+     displayed w/h) instead of the full square frame — full height, auto width,
+     so it's flush top/bottom and pillarboxed left/right without cropping.
+     Every chip/badge/stars/tags/label-color below is positioned relative to
+     THIS box (it's their nearest `position: relative` ancestor), which is
+     exactly what keeps them inside the actual photo instead of spilling into
+     the empty letterbox gutters. */
+  .photo {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: inherit;
+  }
+
+  /* Label-color indicator: a small rounded pill overlaid right at the photo's
+     bottom edge — BELOW .stars/.tags (which start at bottom: 9px), not sharing
+     their row, so the two kinds of badge never overlap. Deliberately NOT a
+     `border-bottom` (the previous approach): a border participates in the box
+     model, so it either grew .photo taller than its 100%/100% box (getting
+     partly clipped by the overflow: hidden above) or, once box-sizing fixed
+     that, ate into the image's own rendered size — visibly "lifting"/shrinking
+     the thumbnail to make room for it. An absolutely-positioned overlay
+     affects nothing about .photo's layout, and rounding all 4 corners (rather
+     than only the bottom two, which is what a bordered strip can ever show) is
+     what gives it a visible curve on its top edge too. */
+  .label-bar {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 2px;
+    height: 3px;
+    border-radius: 1.5px;
+    pointer-events: none;
   }
 
   .marquee {
@@ -663,9 +696,10 @@
 
   img,
   video {
-    /* Fill the square cell edge-to-edge (cropping the overflow) so the grid
-       reads as a tidy, uniform gallery with no letterbox band under each
-       thumbnail. The loupe (double-click) shows the full uncropped frame. */
+    /* .photo is already sized to the exact box the image should occupy (the
+       full frame for landscape/unknown dims, or the true aspect-ratio box for
+       portrait) — cover always fills it exactly, with no cropping in the
+       portrait case since the box ratio already matches the image's. */
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -673,9 +707,9 @@
   }
 
   /* Subtle shimmer while a cell's thumbnail is still being generated/decoded.
-     It's the frame's own background (behind the image AND the chips), so chips
-     stay on top and a finished portrait cell — once `.loading` drops — shows the
-     grid's dark background through its letterbox bars, not a gray box. */
+     It's the frame's own background (behind .photo and its chips), so chips
+     stay on top and a finished portrait cell shows the grid's dark background
+     through its letterbox gutters, not a gray box. */
   .frame.loading {
     background: linear-gradient(
       100deg,
@@ -694,14 +728,6 @@
     to {
       background-position: -200% 0;
     }
-  }
-
-  /* Portrait photos: cropping to fill the square cell hides most of the frame
-     (a tall photo squeezed into a square loses its top/bottom). Show the whole
-     photo letterboxed instead, pillarboxed against the cell's own background. */
-  .frame.portrait img,
-  .frame.portrait video {
-    object-fit: contain;
   }
 
   /* Shown instead of a thumbnail when the source couldn't be decoded. */
@@ -775,9 +801,11 @@
     outline: 1px solid #ffb86b;
   }
 
+  /* bottom: 9px (not flush) — clears the label-bar below it (see .label-bar;
+     that sits at bottom: 2-5px), so the two never overlap. */
   .stars {
     position: absolute;
-    bottom: 4px;
+    bottom: 9px;
     left: 6px;
     color: #ffd166;
     font-size: 12px;
@@ -786,7 +814,7 @@
 
   .tags {
     position: absolute;
-    bottom: 6px;
+    bottom: 9px;
     right: 6px;
     display: flex;
     gap: 3px;

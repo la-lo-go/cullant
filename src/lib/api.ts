@@ -58,6 +58,33 @@ export interface ItemLite {
   thumbFailed: boolean;
 }
 
+/** An item's DISPLAYED (post-EXIF-rotation) pixel dimensions, or `null` when
+ *  unknown. width/height are un-rotated sensor dims; EXIF orientation 5-8
+ *  means the shown image is turned 90°, so displayed w/h are swapped. */
+export function displayDims(item: ItemLite): { w: number; h: number } | null {
+  if (item.width == null || item.height == null) return null;
+  const rotated = item.orientation != null && item.orientation >= 5 && item.orientation <= 8;
+  return rotated ? { w: item.height, h: item.width } : { w: item.width, h: item.height };
+}
+
+/** The rendered size of a `dims`-ratio image `object-fit: contain`-ed into a
+ *  `maxW × maxH` box (same math the browser uses) — the exact box any
+ *  overlay/badge anchored to "the actual photo" must be sized to, whenever
+ *  BOTH box axes are free to be the binding constraint (a fixed-height square
+ *  cell only ever has one free axis; a fixed-WIDTH, variable-height cell like
+ *  the filmstrip can bind on either). Falls back to filling the whole box when
+ *  `dims` is unknown (matches plain `object-fit: contain`'s behavior absent
+ *  any other information). */
+export function containFit(
+  dims: { w: number; h: number } | null,
+  maxW: number,
+  maxH: number,
+): { w: number; h: number } {
+  if (!dims || dims.w <= 0 || dims.h <= 0 || maxW <= 0 || maxH <= 0) return { w: maxW, h: maxH };
+  const scale = Math.min(maxW / dims.w, maxH / dims.h);
+  return { w: dims.w * scale, h: dims.h * scale };
+}
+
 export interface MediaCounts {
   photos: number;
   videos: number;
