@@ -3,6 +3,16 @@
 const PROGRESSIVE_LOUPE_KEY = "cullant.progressiveLoupe";
 const REMEMBER_SESSION_KEY = "cullant.rememberSession";
 const GENERATE_VIDEO_THUMBS_KEY = "cullant.generateVideoThumbs";
+// Per-element visibility of the filmstrip's culling badges. Unlike the main
+// grid (where these always clamp to the actual photo's visible bounds), the
+// filmstrip's thumbnails are small enough that badges may legitimately sit
+// outside the letterboxed photo — so instead of clamping, each badge type is
+// individually toggleable.
+const FILMSTRIP_SHOW_TYPE_KEY = "cullant.filmstrip.showType";
+const FILMSTRIP_SHOW_RATING_KEY = "cullant.filmstrip.showRating";
+const FILMSTRIP_SHOW_LABEL_KEY = "cullant.filmstrip.showLabel";
+const FILMSTRIP_SHOW_FLAG_KEY = "cullant.filmstrip.showFlag";
+const FILMSTRIP_SHOW_TAGS_KEY = "cullant.filmstrip.showTags";
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
@@ -35,6 +45,14 @@ class SettingsStore {
    *  (see the sync effect in +page.svelte) since the ingest pass reads it. */
   generateVideoThumbs = $state<boolean>(loadBool(GENERATE_VIDEO_THUMBS_KEY, true));
 
+  /** Filmstrip badge visibility (see the keys above for why these exist
+   *  separately from the grid, which never lets a badge leave the photo). */
+  filmstripShowType = $state<boolean>(loadBool(FILMSTRIP_SHOW_TYPE_KEY, true));
+  filmstripShowRating = $state<boolean>(loadBool(FILMSTRIP_SHOW_RATING_KEY, true));
+  filmstripShowLabel = $state<boolean>(loadBool(FILMSTRIP_SHOW_LABEL_KEY, true));
+  filmstripShowFlag = $state<boolean>(loadBool(FILMSTRIP_SHOW_FLAG_KEY, true));
+  filmstripShowTags = $state<boolean>(loadBool(FILMSTRIP_SHOW_TAGS_KEY, true));
+
   setProgressiveLoupe(on: boolean) {
     this.progressiveLoupe = on;
     save(PROGRESSIVE_LOUPE_KEY, on);
@@ -48,6 +66,31 @@ class SettingsStore {
   setGenerateVideoThumbs(on: boolean) {
     this.generateVideoThumbs = on;
     save(GENERATE_VIDEO_THUMBS_KEY, on);
+  }
+
+  setFilmstripShowType(on: boolean) {
+    this.filmstripShowType = on;
+    save(FILMSTRIP_SHOW_TYPE_KEY, on);
+  }
+
+  setFilmstripShowRating(on: boolean) {
+    this.filmstripShowRating = on;
+    save(FILMSTRIP_SHOW_RATING_KEY, on);
+  }
+
+  setFilmstripShowLabel(on: boolean) {
+    this.filmstripShowLabel = on;
+    save(FILMSTRIP_SHOW_LABEL_KEY, on);
+  }
+
+  setFilmstripShowFlag(on: boolean) {
+    this.filmstripShowFlag = on;
+    save(FILMSTRIP_SHOW_FLAG_KEY, on);
+  }
+
+  setFilmstripShowTags(on: boolean) {
+    this.filmstripShowTags = on;
+    save(FILMSTRIP_SHOW_TAGS_KEY, on);
   }
 }
 

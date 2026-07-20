@@ -99,6 +99,58 @@
     </section>
 
     <section>
+      <h3>Filmstrip badges</h3>
+      <p class="hint">
+        The grid always keeps rating/label/tag badges inside the actual photo (a
+        portrait thumbnail's letterbox gutters stay clear). The filmstrip's
+        thumbnails are smaller, so its badges may sit outside the photo instead —
+        pick which ones to show there.
+      </p>
+      <div class="checks">
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={settings.filmstripShowType}
+            onchange={(e) => settings.setFilmstripShowType(e.currentTarget.checked)}
+          />
+          <span>Photo type (RAW+JPG)</span>
+        </label>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={settings.filmstripShowRating}
+            onchange={(e) => settings.setFilmstripShowRating(e.currentTarget.checked)}
+          />
+          <span>Star rating</span>
+        </label>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={settings.filmstripShowLabel}
+            onchange={(e) => settings.setFilmstripShowLabel(e.currentTarget.checked)}
+          />
+          <span>Color label</span>
+        </label>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={settings.filmstripShowFlag}
+            onchange={(e) => settings.setFilmstripShowFlag(e.currentTarget.checked)}
+          />
+          <span>Pick/reject flag</span>
+        </label>
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={settings.filmstripShowTags}
+            onchange={(e) => settings.setFilmstripShowTags(e.currentTarget.checked)}
+          />
+          <span>Tags</span>
+        </label>
+      </div>
+    </section>
+
+    <section>
       <h3>Keyboard</h3>
       <button class="shortcuts" onclick={onshowkeybindings}>
         <Keyboard size={14} />
@@ -185,6 +237,33 @@
     font-size: 12px;
     opacity: 0.65;
     line-height: 1.4;
+  }
+
+  .hint {
+    margin: 0 0 6px;
+    padding: 0 10px;
+    font-size: 12px;
+    opacity: 0.65;
+    line-height: 1.4;
+  }
+
+  .checks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    padding: 2px 10px 6px;
+  }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .check input {
+    accent-color: var(--accent);
   }
 
   .shortcuts {

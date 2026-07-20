@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { thumbUrl, videoUrl, type ItemLite } from "../api";
+  import { thumbUrl, videoUrl, displayDims, containFit, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
+  import { settings } from "../stores/settings.svelte";
+  import { tags } from "../stores/tags.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import Scissors from "@lucide/svelte/icons/scissors";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
@@ -8,12 +10,31 @@
 
   let { items }: { items: ItemLite[] } = $props();
 
+  const labelColors: Record<string, string> = {
+    Red: "#e05555",
+    Yellow: "#e0c34f",
+    Green: "#59b85e",
+    Blue: "#5588e0",
+    Purple: "#9a66d6",
+  };
+
   const CELL = 96;
   const OVERSCAN = 6;
+  // .cell's own padding (see its CSS) — the box object-fit: contain fits into.
+  const PAD_X = 3;
+  const PAD_Y = 8;
+  const AVAIL_W = CELL - PAD_X * 2;
 
   let strip = $state<HTMLDivElement | null>(null);
   let scrollLeft = $state(0);
   let width = $state(0);
+  // Reactive: the strip is user-resizable (drag its top edge), and unlike the
+  // (square, fixed-height) grid cell, a filmstrip cell's height is the OTHER
+  // free axis besides width — object-fit: contain can bind on either one
+  // depending on the photo's own aspect ratio, so badges anchored to a fixed
+  // offset from the CELL (rather than the actual rendered photo) drift away
+  // from the image whenever height is the non-binding axis.
+  const availH = $derived(Math.max(0, session.filmstripHeight - PAD_Y * 2));
 
   const first = $derived(Math.max(0, Math.floor(scrollLeft / CELL) - OVERSCAN));
   const last = $derived(
@@ -23,11 +44,16 @@
   // Keyed by file id in the template so each frame keeps a stable <img>:
   // scrolling adds/removes cells instead of reassigning `src` on reused nodes,
   // which previously left a node showing its old thumbnail until the new one
-  // decoded — a rapid flicker on fast (right-to-left) scroll.
+  // decoded — a rapid flicker on fast (right-to-left) scroll. `photoW`/`photoH`
+  // are the exact contain-fit box for the item's real aspect ratio (or the
+  // full available box, when dims aren't known yet) — see AVAIL_W/availH.
   const visible = $derived.by(() => {
-    const out: { item: ItemLite; index: number; x: number }[] = [];
+    const out: { item: ItemLite; index: number; x: number; photoW: number; photoH: number }[] =
+      [];
     for (let i = first; i < last; i++) {
-      out.push({ item: items[i], index: i, x: i * CELL });
+      const item = items[i];
+      const fit = containFit(displayDims(item), AVAIL_W, availH);
+      out.push({ item, index: i, x: i * CELL, photoW: fit.w, photoH: fit.h });
     }
     return out;
   });
@@ -182,19 +208,50 @@
             role="button"
             tabindex="-1"
           >
-            {#if v.item.kind === 2}
-              <video src={videoUrl(v.item)} preload="metadata" muted></video>
-            {:else}
-              <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
-            {/if}
-            {#if session.mirrorMode && v.item.groupSize > 1}
-              <span class="chip" class:split={v.item.decoupled}>
-                {#if v.item.decoupled}<Scissors size={8} /><span>SPLIT</span>{:else}RAW+JPG{/if}
-              </span>
-            {/if}
-            {#if v.item.flag !== 0}
-              <span class="dot" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}></span>
-            {/if}
+            <!-- Sized to the item's actual contain-fit box (photoW/photoH,
+                 computed from its real aspect ratio — see `visible` above),
+                 not the cell: object-fit: contain can bind on either the
+                 width or the height axis here (unlike the grid's square
+                 cells), so anchoring badges to the cell instead of this box
+                 left them a variable, often-large distance from the image
+                 whenever height was the slack axis. -->
+            <div class="photo" style="width:{v.photoW}px; height:{v.photoH}px">
+              {#if v.item.kind === 2}
+                <video src={videoUrl(v.item)} preload="metadata" muted></video>
+              {:else}
+                <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
+              {/if}
+              {#if settings.filmstripShowLabel && v.item.label}
+                <span class="label-bar" style:background={labelColors[v.item.label]}></span>
+              {/if}
+              {#if settings.filmstripShowType}
+                {#if session.mirrorMode && v.item.groupSize > 1}
+                  <span class="chip" class:split={v.item.decoupled}>
+                    {#if v.item.decoupled}<Scissors size={8} /><span>SPLIT</span>{:else}RAW+JPG{/if}
+                  </span>
+                {:else if v.item.kind === 0}
+                  <span class="chip">RAW</span>
+                {/if}
+              {/if}
+              {#if settings.filmstripShowFlag && v.item.flag !== 0}
+                <span class="dot" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}
+                ></span>
+              {/if}
+              {#if settings.filmstripShowRating && v.item.rating > 0}
+                <span class="stars">{"★".repeat(v.item.rating)}</span>
+              {/if}
+              {#if settings.filmstripShowTags && v.item.tagIds.length > 0}
+                <span class="tags">
+                  {#each v.item.tagIds.slice(0, 3) as tagId}
+                    <span
+                      class="tagdot"
+                      style="background: {tags.byId.get(tagId)?.color ?? '#888'}"
+                      title={tags.byId.get(tagId)?.name}
+                    ></span>
+                  {/each}
+                </span>
+              {/if}
+            </div>
           </div>
         {/each}
       </div>
@@ -361,10 +418,9 @@
     position: absolute;
     top: 0;
     height: 100%;
-    /* 8px (not 6px) vertical padding so the thumbnail bottom clears the overlay
-       scrollbar: its pill sits 2-6px above the panel edge, so 6px left the
-       image flush to the pill while the pill kept a 2px gap below it. 8px lifts
-       the image 2px off the pill, mirroring that 2px gap above and below. */
+    /* Defines the box `visible`'s containFit() sizes .photo into (see AVAIL_W/
+       availH in the script) — .photo ends up centered within whatever slack
+       that leaves, via the flex centering below. */
     padding: 8px 3px;
     box-sizing: border-box;
     display: flex;
@@ -378,19 +434,40 @@
     outline-offset: -2px;
   }
 
+  /* .photo is sized (inline style) to the item's real contain-fit box, so
+     every badge below anchors to the actual visible photo. */
+  .photo {
+    position: relative;
+    overflow: hidden;
+    border-radius: 3px;
+  }
+
   img,
   video {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-    border-radius: 3px;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
     user-select: none;
+  }
+
+  /* Label-color indicator: a small rounded pill overlaid on the photo,
+     BELOW .stars/.tags (bottom: 7px) so the two rows don't overlap. See
+     VirtualGrid.svelte's identical .label-bar for why this is an overlay
+     rather than a border. */
+  .label-bar {
+    position: absolute;
+    left: 6px;
+    right: 6px;
+    bottom: 2px;
+    height: 3px;
+    border-radius: 1.5px;
+    pointer-events: none;
   }
 
   .chip {
     position: absolute;
-    top: 8px;
-    left: 5px;
+    top: 4px;
+    left: 4px;
     display: inline-flex;
     align-items: center;
     gap: 2px;
@@ -409,8 +486,8 @@
 
   .dot {
     position: absolute;
-    top: 8px;
-    right: 6px;
+    top: 4px;
+    right: 4px;
     width: 8px;
     height: 8px;
     border-radius: 50%;
@@ -422,5 +499,31 @@
 
   .dot.reject {
     background: #ff6b6b;
+  }
+
+  .stars {
+    position: absolute;
+    bottom: 7px;
+    left: 4px;
+    color: #ffd166;
+    font-size: 8px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    pointer-events: none;
+  }
+
+  .tags {
+    position: absolute;
+    bottom: 7px;
+    right: 4px;
+    display: flex;
+    gap: 2px;
+    pointer-events: none;
+  }
+
+  .tagdot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
   }
 </style>
