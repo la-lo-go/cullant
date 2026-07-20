@@ -107,7 +107,12 @@
     top: 10px;
     right: calc(48px + var(--safe-right));
     width: 260px;
-    max-width: calc(100vw - 60px);
+    /* Leave at least the shared dialog edge margin on the left, and subtract
+       the safe-area insets that 100vw includes but the (already inset) viewer
+       does not, so the panel can't slide under a cutout in landscape. */
+    max-width: calc(
+      100vw - 48px - var(--dialog-edge-margin) - var(--inset-left) - var(--inset-right)
+    );
     max-height: calc(100% - 60px);
     overflow-y: auto;
     background: var(--surface-2);

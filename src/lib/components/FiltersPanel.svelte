@@ -147,12 +147,27 @@
   function clampToViewport() {
     if (!panelEl) return;
     panelEl.style.transform = "";
+    // The same gutter the CSS max-width reserves: the shared dialog edge
+    // margin (widened on narrow portrait phones) plus the safe-area insets,
+    // read back from the root so the clamp and the width cap never disagree.
+    const cs = getComputedStyle(document.documentElement);
+    const px = (name: string) => parseFloat(cs.getPropertyValue(name)) || 0;
+    const edge = px("--dialog-edge-margin") || 12;
+    const marginL = edge + px("--inset-left");
+    const marginR = edge + px("--inset-right");
     const rect = panelEl.getBoundingClientRect();
-    const margin = 8;
     let dx = 0;
-    if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
-    if (rect.left + dx < margin) dx = margin - rect.left;
+    if (rect.right > window.innerWidth - marginR) dx = window.innerWidth - marginR - rect.right;
+    if (rect.left + dx < marginL) dx = marginL - rect.left;
     if (dx) panelEl.style.transform = `translateX(${dx}px)`;
+    // Cap the height too: with the toolbar wrapped to several rows the panel
+    // starts far down the screen, and the CSS max-height alone would let it
+    // run past the bottom edge.
+    panelEl.style.maxHeight = "";
+    const bottom = edge + px("--inset-bottom");
+    const available = window.innerHeight - bottom - panelEl.getBoundingClientRect().top;
+    if (panelEl.offsetHeight > available)
+      panelEl.style.maxHeight = `${Math.max(available, 96)}px`;
   }
 
   $effect(() => {
@@ -383,10 +398,17 @@
     z-index: 41;
     margin-top: 4px;
     width: 320px;
-    max-width: calc(100vw - 16px);
+    /* Same gutter as the centered dialogs (shared token, widened on narrow
+       portrait phones) plus the side safe-area insets, so the dropdown never
+       hugs the screen edges; clampToViewport enforces the same margin. */
+    max-width: calc(
+      100vw - var(--dialog-edge-margin) * 2 - var(--inset-left) - var(--inset-right)
+    );
     /* Cap height to the viewport and scroll internally if the sections are
-       tall (e.g. many tags/extensions on a short phone screen). */
-    max-height: calc(100vh - 60px);
+       tall (e.g. many tags/extensions on a short phone screen). The bottom
+       inset keeps the panel clear of the gesture/nav bar; clampToViewport
+       tightens this further when the wrapped toolbar pushes the panel down. */
+    max-height: calc(100vh - 60px - var(--inset-bottom));
     overflow-y: auto;
     display: flex;
     flex-direction: column;
