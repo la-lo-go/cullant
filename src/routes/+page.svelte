@@ -248,7 +248,10 @@
 
 <!-- While the project's folder is unavailable, swallow all shortcuts so the user
      can't keep culling a project whose files are gone. -->
-<svelte:window onkeydown={(e) => folderLostMsg || handleKeydown(e)} />
+<svelte:window
+  onkeydown={(e) => folderLostMsg || handleKeydown(e)}
+  oncontextmenu={(e) => e.preventDefault()}
+/>
 
 <main class="app" class:fullscreen={view.fullscreen}>
   {#if showTitleBar}
@@ -579,6 +582,21 @@
      grid cells) is just as tappable and was still flashing it. */
   :global(*) {
     -webkit-tap-highlight-color: transparent;
+  }
+
+  /* No selectable text/UI chrome app-wide (grid labels, toolbar, dialogs, …) —
+     a stray text-selection highlight or drag-select is one of the things that
+     makes an app read as "a web page" rather than a native tool. Real text
+     entry (tag names, rename fields, the folder-path search, …) opts back in
+     explicitly below; nothing else in the app needs selection. */
+  :global(*) {
+    user-select: none;
+  }
+
+  :global(input),
+  :global(textarea),
+  :global([contenteditable]) {
+    user-select: text;
   }
 
   /* The single source of truth for the app's theme. Every component references
