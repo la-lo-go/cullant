@@ -95,11 +95,16 @@ where
     })
 }
 
+// Only photos (kind 0 = RAW, 1 = image/JPEG) get XMP sidecars; rating,
+// flagging or labeling a video must not queue an XMP write.
+
 pub fn set_rating(db: &Arc<Db>, targets: Targets, rating: i64) -> AppResult<Vec<CullState>> {
     let rating = rating.clamp(0, 5);
     apply(db, targets, move |conn, id, now| {
         conn.execute(
-            "UPDATE files SET rating = ?2, state_updated_at = ?3, xmp_dirty = 1 WHERE id = ?1",
+            "UPDATE files SET rating = ?2, state_updated_at = ?3,
+                   xmp_dirty = CASE WHEN kind IN (0, 1) THEN 1 ELSE xmp_dirty END
+             WHERE id = ?1",
             params![id, rating, now],
         )?;
         Ok(())
@@ -110,7 +115,9 @@ pub fn set_flag(db: &Arc<Db>, targets: Targets, flag: i64) -> AppResult<Vec<Cull
     let flag = flag.clamp(-1, 1);
     apply(db, targets, move |conn, id, now| {
         conn.execute(
-            "UPDATE files SET flag = ?2, state_updated_at = ?3, xmp_dirty = 1 WHERE id = ?1",
+            "UPDATE files SET flag = ?2, state_updated_at = ?3,
+                   xmp_dirty = CASE WHEN kind IN (0, 1) THEN 1 ELSE xmp_dirty END
+             WHERE id = ?1",
             params![id, flag, now],
         )?;
         Ok(())
@@ -124,7 +131,9 @@ pub fn set_label(
 ) -> AppResult<Vec<CullState>> {
     apply(db, targets, move |conn, id, now| {
         conn.execute(
-            "UPDATE files SET label = ?2, state_updated_at = ?3, xmp_dirty = 1 WHERE id = ?1",
+            "UPDATE files SET label = ?2, state_updated_at = ?3,
+                   xmp_dirty = CASE WHEN kind IN (0, 1) THEN 1 ELSE xmp_dirty END
+             WHERE id = ?1",
             params![id, label, now],
         )?;
         Ok(())

@@ -84,19 +84,66 @@ pub fn set_setting(db: &Arc<Db>, key: &str, value: &str) -> AppResult<()> {
     })
 }
 
-/// (file_id, rel_path, rating, flag, label)
-type DirtyRaw = (i64, String, i64, i64, Option<String>);
+/// One pending sidecar write: dirty photos grouped by their sidecar path.
+/// In a RAW+JPEG pair both members map to the same `IMG.xmp`, so the sidecar
+/// is written once and the dirty flag cleared for every member. Pair members
+/// normally share rating/flag/label via group fan-out; if they have diverged,
+/// the higher-id row wins (last writer).
+struct DirtySidecar {
+    /// Every dirty file mapping to this sidecar (all get `xmp_dirty` cleared).
+    file_ids: Vec<i64>,
+    /// rel_path of the representative photo (the winner when states diverge).
+    rel_path: String,
+    /// The sidecar rel_path all members map to (`IMG.CR3`/`IMG.JPG` → `IMG.xmp`).
+    sc_rel: String,
+    state: XmpState,
+}
 
-fn xmp_dirty_raws(db: &Arc<Db>) -> AppResult<Vec<DirtyRaw>> {
+/// Photos (kind 0 = RAW, 1 = image/JPEG) with pending XMP export, deduped by
+/// sidecar path. Videos (kind 2) never get sidecars.
+fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
     db.call(|conn| {
         let mut stmt = conn.prepare(
             "SELECT id, rel_path, rating, flag, label FROM files
-             WHERE status = 0 AND kind = 0 AND xmp_dirty = 1",
+             WHERE status = 0 AND kind IN (0, 1) AND xmp_dirty = 1
+             ORDER BY id",
         )?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+                r.get::<_, Option<String>>(4)?,
+            ))
         })?;
-        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        let mut out: Vec<DirtySidecar> = Vec::new();
+        for row in rows {
+            let (id, rel_path, rating, flag, label) = row?;
+            let sc_rel = xmp::sidecar_rel(&rel_path);
+            match out.iter_mut().find(|d| d.sc_rel == sc_rel) {
+                Some(d) => {
+                    d.file_ids.push(id);
+                    d.rel_path = rel_path;
+                    d.state = XmpState {
+                        rating,
+                        flag,
+                        label,
+                    };
+                }
+                None => out.push(DirtySidecar {
+                    file_ids: vec![id],
+                    rel_path,
+                    sc_rel,
+                    state: XmpState {
+                        rating,
+                        flag,
+                        label,
+                    },
+                }),
+            }
+        }
+        Ok(out)
     })
 }
 
@@ -130,7 +177,7 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
         }
     }
 
-    let xmp = xmp_dirty_raws(db)?;
+    let xmp = xmp_dirty_photos(db)?;
 
     let mut hasher = Xxh3::new();
     for list in [&deletes, &moves, &copies] {
@@ -138,8 +185,10 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
             hasher.update(format!("{}:{}:{:?}", p.id, p.file_id, p.dest).as_bytes());
         }
     }
-    for (id, ..) in &xmp {
-        hasher.update(format!("x{id}").as_bytes());
+    for d in &xmp {
+        for id in &d.file_ids {
+            hasher.update(format!("x{id}").as_bytes());
+        }
     }
     hasher.update(format!("{deletion_mode:?}").as_bytes());
     let plan_hash = format!("{:016x}", hasher.digest());
@@ -210,15 +259,16 @@ pub fn execute(
         ));
     }
 
-    let xmp_files = xmp_dirty_raws(db)?;
-    let total = plan.deletes.len() + plan.moves.len() + plan.copies.len() + xmp_files.len();
+    // The XMP file list is re-resolved after deletes/moves (below); the
+    // preview's count is only used for the progress total and summary here.
+    let total = plan.deletes.len() + plan.moves.len() + plan.copies.len() + plan.xmp_count;
     let started = now_secs();
 
     let summary = serde_json::json!({
         "deletes": plan.deletes.len(),
         "moves": plan.moves.len(),
         "copies": plan.copies.len(),
-        "xmp": xmp_files.len(),
+        "xmp": plan.xmp_count,
         "deletionMode": plan.deletion_mode,
     })
     .to_string();
@@ -265,7 +315,7 @@ pub fn execute(
         } else {
             Err("file missing on disk".into())
         };
-        // A RAW's sidecar travels with it.
+        // A photo's sidecar travels with it.
         if result.is_ok() {
             let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
             if sidecar_rel != p.rel_path && store.exists(&sidecar_rel).unwrap_or(false) {
@@ -368,6 +418,18 @@ pub fn execute(
             match &result {
                 Ok(()) => {
                     ok += 1;
+                    // A move carries the file's sidecar along (a copy leaves it
+                    // behind). Same collision policy as the file itself: the
+                    // target must not exist, and a sidecar failure only warns.
+                    if action_i == 1 {
+                        let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
+                        if sidecar_rel != p.rel_path && store.exists(&sidecar_rel).unwrap_or(false)
+                        {
+                            if let Err(e) = store.move_to(&sidecar_rel, &dest_dir) {
+                                tracing::warn!("sidecar move failed: {e}");
+                            }
+                        }
+                    }
                     let file_id = p.file_id;
                     let pending_id = p.id;
                     if action_i == 1 {
@@ -416,29 +478,30 @@ pub fn execute(
     }
 
     // --- XMP sidecars ---
-    for (file_id, rel_path, rating, flag, label) in xmp_files {
-        let state = XmpState {
-            rating,
-            flag,
-            label,
-        };
+    // Resolved only now, AFTER deletes and moves/copies: deleted files are
+    // status = 2 (excluded by the query, so no orphan sidecar is written at
+    // their old path) and moved files come back with their new rel_path.
+    let xmp_files = xmp_dirty_photos(db)?;
+    for d in xmp_files {
         let result: Result<String, String> =
-            xmp::write_sidecar(store, &rel_path, &state).map_err(|e| e.to_string());
+            xmp::write_sidecar(store, &d.rel_path, &d.state).map_err(|e| e.to_string());
         match &result {
             Ok(sc_rel) => {
                 ok += 1;
+                // Every file mapping to this sidecar (a RAW+JPEG pair shares
+                // it) is now exported.
+                let file_ids = d.file_ids.clone();
                 db.call(move |conn| {
-                    conn.execute(
-                        "UPDATE files SET xmp_dirty = 0 WHERE id = ?1",
-                        params![file_id],
-                    )?;
+                    for id in &file_ids {
+                        conn.execute("UPDATE files SET xmp_dirty = 0 WHERE id = ?1", params![id])?;
+                    }
                     Ok(())
                 })?;
                 record(
                     db,
-                    Some(file_id),
+                    Some(d.file_ids[0]),
                     3,
-                    Some(rel_path.clone()),
+                    Some(d.rel_path.clone()),
                     Some(sc_rel.clone()),
                     None,
                     Ok(()),
@@ -447,13 +510,13 @@ pub fn execute(
             Err(e) => {
                 errors += 1;
                 if error_samples.len() < 5 {
-                    error_samples.push(format!("{rel_path}: {e}"));
+                    error_samples.push(format!("{}: {e}", d.rel_path));
                 }
                 record(
                     db,
-                    Some(file_id),
+                    Some(d.file_ids[0]),
                     3,
-                    Some(rel_path.clone()),
+                    Some(d.rel_path.clone()),
                     None,
                     None,
                     Err(e.clone()),
@@ -620,5 +683,158 @@ mod tests {
         )
         .unwrap();
         assert!(execute(&db, &store, &plan.plan_hash, |_, _| {}).is_err());
+    }
+
+    fn rate(db: &Arc<Db>, exts: &[&str], rating: i64) {
+        crate::engine::culling::set_rating(
+            db,
+            Targets {
+                ids: exts.iter().map(|e| ids(db, e)).collect(),
+                as_groups: false,
+            },
+            rating,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn jpeg_gets_a_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("shot.jpg"), b"jpg").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+
+        rate(&db, &["jpg"], 3);
+
+        let plan = preview(&db, &store).unwrap();
+        assert_eq!(plan.xmp_count, 1);
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+        let content = fs::read_to_string(root.join("shot.xmp")).unwrap();
+        assert!(content.contains("xmp:Rating=\"3\""));
+    }
+
+    #[test]
+    fn deleted_photo_leaves_no_orphan_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("bad.cr3"), b"raw").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        set_setting(&db, "deletionMode", "trash").unwrap();
+
+        // Dirty, then deleted in the same commit: no sidecar may be written at
+        // the old (now empty) location, nor trashed alongside the file.
+        rate(&db, &["cr3"], 1);
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![ids(&db, "cr3")],
+                as_groups: false,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+
+        let plan = preview(&db, &store).unwrap();
+        assert_eq!(plan.xmp_count, 1); // still dirty at preview time
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+        assert!(!root.join("bad.cr3").exists());
+        assert!(
+            !root.join("bad.xmp").exists(),
+            "orphan sidecar at the old path"
+        );
+        assert!(
+            !root.join("_trash").join("bad.xmp").exists(),
+            "sidecar written then trashed"
+        );
+    }
+
+    #[test]
+    fn moved_photo_carries_its_sidecar_to_the_new_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("keep.cr3"), b"raw").unwrap();
+        // Pre-existing sidecar with foreign content (Lightroom develop settings).
+        fs::write(
+            root.join("keep.xmp"),
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    crs:Exposure2012="+0.55"/>
+ </rdf:RDF>
+</x:xmpmeta>"#,
+        )
+        .unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+
+        rate(&db, &["cr3"], 5);
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![ids(&db, "cr3")],
+                as_groups: false,
+            },
+            ActionKind::Move,
+            Some("selects".into()),
+            PairScope::Both,
+        )
+        .unwrap();
+
+        let plan = preview(&db, &store).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+        assert!(root.join("selects").join("keep.cr3").exists());
+        assert!(
+            !root.join("keep.xmp").exists(),
+            "sidecar left at the old path"
+        );
+        // The XMP phase ran against the NEW rel_path and merged into the
+        // carried sidecar, preserving the foreign content.
+        let content = fs::read_to_string(root.join("selects").join("keep.xmp")).unwrap();
+        assert!(content.contains("xmp:Rating=\"5\""));
+        assert!(content.contains("crs:Exposure2012=\"+0.55\""));
+    }
+
+    #[test]
+    fn raw_jpeg_pair_writes_one_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("IMG_1.cr3"), b"raw").unwrap();
+        fs::write(root.join("IMG_1.jpg"), b"jpg").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+
+        // Both members dirty (mirrors what group fan-out produces).
+        rate(&db, &["cr3", "jpg"], 4);
+
+        let plan = preview(&db, &store).unwrap();
+        assert_eq!(plan.xmp_count, 1, "pair members share one sidecar");
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+        assert_eq!(outcome.ok, 1, "one sidecar write, not two");
+        let content = fs::read_to_string(root.join("IMG_1.xmp")).unwrap();
+        assert!(content.contains("xmp:Rating=\"4\""));
+        // Both members got their dirty flag cleared by the single write.
+        let dirty: i64 = db
+            .call(|c| {
+                Ok(
+                    c.query_row("SELECT COUNT(*) FROM files WHERE xmp_dirty = 1", [], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .unwrap();
+        assert_eq!(dirty, 0);
     }
 }
