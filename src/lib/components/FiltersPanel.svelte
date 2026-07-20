@@ -108,13 +108,10 @@
     ).filter((o) => o.value === "all" || presentOrientations.has(o.value)),
   );
 
-  // Highest rating any present file carries; caps the star row (0 = none rated).
-  const maxRating = $derived.by(() => {
-    let m = 0;
-    for (const i of catalog.items) if (i.rating > m) m = i.rating;
-    return m;
-  });
-  const ratingStars = $derived(Array.from({ length: maxRating }, (_, k) => k + 1));
+  // Always all 5 — a filter option must stay offered even when nothing in the
+  // project currently carries that rating (unlike orientation/label below,
+  // which intentionally hide values nothing present has).
+  const RATING_STARS = [1, 2, 3, 4, 5];
 
   // Color labels actually applied somewhere in the project.
   const presentLabels = $derived.by(() => {
@@ -234,27 +231,25 @@
     </div>
   </section>
 
-  {#if maxRating > 0}
-    <section>
-      <span class="lbl">Minimum rating</span>
-      <div class="row stars">
-        {#each ratingStars as star (star)}
-          <button
-            class="star"
-            class:lit={hovered === 0 && session.minRating >= star}
-            class:preview={hovered >= star}
-            aria-label={`At least ${star} stars`}
-            onmouseenter={() => (hovered = star)}
-            onmouseleave={() => (hovered = 0)}
-            onclick={() => {
-              session.minRating = session.minRating === star ? 0 : star;
-              session.clampFocus();
-            }}>★</button
-          >
-        {/each}
-      </div>
-    </section>
-  {/if}
+  <section>
+    <span class="lbl">Minimum rating</span>
+    <div class="row stars">
+      {#each RATING_STARS as star (star)}
+        <button
+          class="star"
+          class:lit={hovered === 0 && session.minRating >= star}
+          class:preview={hovered >= star}
+          aria-label={`At least ${star} stars`}
+          onmouseenter={() => (hovered = star)}
+          onmouseleave={() => (hovered = 0)}
+          onclick={() => {
+            session.minRating = session.minRating === star ? 0 : star;
+            session.clampFocus();
+          }}>★</button
+        >
+      {/each}
+    </div>
+  </section>
 
   {#if presentLabels.length > 0}
     <section>
