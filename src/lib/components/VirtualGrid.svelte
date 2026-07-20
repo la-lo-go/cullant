@@ -4,6 +4,7 @@
   import { session } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
+  import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -397,6 +398,7 @@
 <div class="grid-root">
   <div
     class="viewport"
+    id="photo-grid-scroll"
     role="grid"
     aria-label="Photo grid"
     tabindex="-1"
@@ -510,6 +512,19 @@
     {/if}
   </div>
   </div>
+  <!-- Native bar hidden on .viewport below — matches the folder tree/filmstrip
+       convention (no 8px carved out of the grid's own width for a scrollbar
+       gutter); this floats over the content instead. -->
+  <OverlayScrollbar
+    orientation="vertical"
+    viewport={height}
+    content={totalRows * CELL + MARGIN_Y * 2}
+    position={scrollTop}
+    controls="photo-grid-scroll"
+    onSeek={(pos) => {
+      if (viewport) viewport.scrollTop = pos;
+    }}
+  />
   {#if bgStatus}
     <div class="loading-pill" role="status" aria-live="polite">
       <span class="spin"><Loader size={13} /></span>
@@ -537,6 +552,13 @@
     /* Let the browser handle vertical scroll; a long-press marquee takes over
        via pointer capture. */
     touch-action: pan-y;
+    /* Native bar hidden — same treatment as the folder tree and filmstrip;
+       the OverlayScrollbar sibling above renders the visible thumb instead. */
+    scrollbar-width: none;
+  }
+
+  .viewport::-webkit-scrollbar {
+    display: none;
   }
 
   .loading-pill {
