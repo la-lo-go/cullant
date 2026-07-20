@@ -67,6 +67,12 @@ class CatalogStore {
       if (info.fileCount > 0 && (await api.ingestPending()) === 0) {
         this.preloading = false;
       }
+      // Same recovery for previewReady: this path adopts a project the backend
+      // already had open (no fresh scan of THIS session will emit metadata:done
+      // or previews:progress to seed it), so every already-generated preview
+      // would otherwise look "not ready yet" — the loupe would then always take
+      // the soft-thumb + 1s-dwell path even when nothing needs generating.
+      void this.refreshPreviewReady();
     }
   }
 
