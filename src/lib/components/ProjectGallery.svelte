@@ -312,6 +312,10 @@
     border-radius: 5px;
     color: #999;
     opacity: 0;
+    /* Not inherited: the parent .card.unavailable sets cursor: default, but the
+       delete action stays clickable there (see the comment on .card.unavailable
+       above) and must show a pointer, not the card's inherited default arrow. */
+    cursor: pointer;
   }
 
   .card:hover .delete {
