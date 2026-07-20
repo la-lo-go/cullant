@@ -31,6 +31,7 @@ Frontend: `lib/api.ts` (typed invoke wrappers), `lib/stores/*.svelte.ts` (rune-c
 
 - Culling state and pending actions are **always per-file** in SQLite; `groups` is a materialized pairing identity, and the mirror switch is a pure view/dispatch concept (flipping it never migrates data).
 - Commands accept `targets: { ids, asGroups }`; the backend owns pair fan-out. Frontend does optimistic updates reconciled against the authoritative rows the command returns + `state:changed` events.
+- **Reject flag = queued delete, kept in sync**: `session.flag()` is the single choke point — flagging `-1` enqueues a delete (so rejects appear in the commit dialog), flagging `0`/`1` removes it via `remove_pending_for_files` (same group fan-out). Project open reconciles pre-existing rejects (`session.syncRejectedToQueue`, called from `catalog.refreshForOpen`), and unqueueing a delete row in the commit dialog also clears the flag.
 - Toolbar controls call the `blurring()` helper (in `+page.svelte`) so a focused button/select never swallows arrow-key navigation.
 - Dialogs: dark `#232329` panel + backdrop, `stopPropagation` on their keydown, Escape cancels.
 - Keyboard: Lightroom-style defaults (`P/X/U`, `1-5`, `6-9`/`-`, Caps Lock auto-advance with Shift inverting), fully remappable (persisted in localStorage). `view.back` = Esc returns loupe/compare → grid.

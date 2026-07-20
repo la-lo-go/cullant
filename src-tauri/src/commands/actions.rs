@@ -32,6 +32,19 @@ pub fn enqueue_action(
 }
 
 #[tauri::command]
+pub fn remove_pending_for_files(
+    targets: Targets,
+    action: ActionKind,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<usize> {
+    let (db, _) = project(&state)?;
+    let n = actions::remove_for_files(&db, targets, action)?;
+    let _ = app.emit("pending:changed", ());
+    Ok(n)
+}
+
+#[tauri::command]
 pub fn remove_pending(
     pending_ids: Vec<i64>,
     app: AppHandle,

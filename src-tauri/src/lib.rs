@@ -250,6 +250,7 @@ pub fn run() {
             commands::tags::toggle_task_tag,
             commands::actions::enqueue_action,
             commands::actions::remove_pending,
+            commands::actions::remove_pending_for_files,
             commands::actions::clear_pending,
             commands::actions::list_pending,
             commands::actions::commit_preview,

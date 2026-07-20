@@ -115,6 +115,26 @@ pub fn enqueue(
     })
 }
 
+/// Remove queued actions of a given kind for a set of files. Targets get the
+/// same group fan-out as enqueue, so unqueueing follows pair semantics
+/// (e.g. un-rejecting a photo drops the delete for its RAW+JPEG partner too).
+pub fn remove_for_files(db: &Arc<Db>, targets: Targets, action: ActionKind) -> AppResult<usize> {
+    db.call(move |conn| {
+        let tx = conn.transaction()?;
+        let ids = super::culling::expand_targets(&tx, &targets)?;
+        let mut count = 0;
+        {
+            let mut stmt = tx
+                .prepare_cached("DELETE FROM pending_actions WHERE file_id = ?1 AND action = ?2")?;
+            for id in &ids {
+                count += stmt.execute(params![id, action as i64])?;
+            }
+        }
+        tx.commit()?;
+        Ok(count)
+    })
+}
+
 pub fn remove(db: &Arc<Db>, pending_ids: Vec<i64>) -> AppResult<()> {
     db.call(move |conn| {
         let tx = conn.transaction()?;
@@ -257,6 +277,94 @@ mod tests {
             PairScope::Both,
         )
         .unwrap();
+        assert_eq!(list(&db).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn remove_for_files_follows_group_fanout_and_keeps_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("A.cr3"), b"raw").unwrap();
+        fs::write(root.join("A.jpg"), b"jpg").unwrap();
+        fs::write(root.join("B.jpg"), b"jpg").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let raw_id: i64 = db
+            .call(|c| Ok(c.query_row("SELECT id FROM files WHERE ext='cr3'", [], |r| r.get(0))?))
+            .unwrap();
+
+        // Queue deletes for the A pair (mirror fan-out) and for solo B.
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![raw_id],
+                as_groups: true,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+        let b_id: i64 = db
+            .call(|c| {
+                Ok(
+                    c.query_row("SELECT id FROM files WHERE rel_path='B.jpg'", [], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .unwrap();
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![b_id],
+                as_groups: false,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+        assert_eq!(list(&db).unwrap().len(), 3);
+
+        // Unqueue by targeting one pair member with groups on: both halves go.
+        let n = remove_for_files(
+            &db,
+            Targets {
+                ids: vec![raw_id],
+                as_groups: true,
+            },
+            ActionKind::Delete,
+        )
+        .unwrap();
+        assert_eq!(n, 2);
+
+        let pending = list(&db).unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].rel_path, "B.jpg");
+
+        // With groups off only the targeted file is unqueued.
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![raw_id],
+                as_groups: true,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+        let n = remove_for_files(
+            &db,
+            Targets {
+                ids: vec![raw_id],
+                as_groups: false,
+            },
+            ActionKind::Delete,
+        )
+        .unwrap();
+        assert_eq!(n, 1);
         assert_eq!(list(&db).unwrap().len(), 2);
     }
 }

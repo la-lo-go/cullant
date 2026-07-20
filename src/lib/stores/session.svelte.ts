@@ -596,6 +596,14 @@ class SessionStore {
     this.applyStates(t.ids.map((id) => this.localGuess(id, { flag })));
     this.maybeAdvance(event);
     this.applyStates(await api.setFlag(t, flag));
+    // Invariant: reject flag = queued delete. Every flag write funnels through
+    // here, so this is the single place that keeps the two in sync: rejecting
+    // enqueues a delete, un-rejecting/picking removes it. Same Targets as the
+    // flag write, so the backend pair fan-out matches.
+    if (flag === -1) await api.enqueueAction(t, "delete", null, "both");
+    else await api.removePendingForFiles(t, "delete");
+    // The pending:changed listener refreshes too; this keeps ordering explicit.
+    await this.refreshPending();
   }
 
   async toggleFlag(event?: KeyboardEvent) {
@@ -636,6 +644,21 @@ class SessionStore {
     this.pendingDeleteIds = new Set(
       pending.filter((p) => p.action === "delete").map((p) => p.fileId)
     );
+  }
+
+  /** Reconcile rejects made before the reject-flag/delete-queue sync existed:
+   *  enqueue a delete for every file in the catalog still at flag -1. Runs once
+   *  per project open; enqueueAction upserts, so it's idempotent. Queries both
+   *  media tabs (the full catalog) rather than the currently loaded one. */
+  async syncRejectedToQueue() {
+    const ids: number[] = [];
+    for (const media of ["photos", "videos"] as const) {
+      const items = await api.queryItems("capture", media, false);
+      for (const i of items) if (i.flag === -1) ids.push(i.id);
+    }
+    if (ids.length === 0) return;
+    await api.enqueueAction({ ids, asGroups: true }, "delete", null, "both");
+    await this.refreshPending();
   }
 
   /** Queue a delete for the focused photo. Scope picks pair members. */

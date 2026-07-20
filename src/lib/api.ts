@@ -232,6 +232,10 @@ export const api = {
     pairScope: PairScope
   ) => invoke<number>("enqueue_action", { targets, action, dest, pairScope }),
   removePending: (pendingIds: number[]) => invoke("remove_pending", { pendingIds }),
+  // Remove every pending action of a kind that touches the given files. Used to
+  // unqueue deletes when a reject flag is cleared (the mirror of enqueueAction).
+  removePendingForFiles: (targets: Targets, action: ActionKind) =>
+    invoke<number>("remove_pending_for_files", { targets, action }),
   clearPending: () => invoke("clear_pending"),
   listPending: () => invoke<PendingAction[]>("list_pending"),
   commitPreview: () => invoke<CommitPlan>("commit_preview"),

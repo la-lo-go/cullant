@@ -62,18 +62,24 @@
     }
   }
 
-  async function unqueue(ids: number[]) {
-    await api.removePending(ids);
+  async function unqueue(row: PlanRow, isDelete: boolean) {
+    await api.removePending(row.ids);
+    // Deletes mirror the reject flag: unqueueing a delete also un-rejects the
+    // files, keeping flag and queue in sync in both directions. Rows are already
+    // per-file expanded, hence asGroups: false. Moves/copies leave flags alone.
+    if (isDelete) await api.setFlag({ ids: row.fileIds, asGroups: false }, 0);
     await session.refreshPending();
     await refresh();
   }
 
   // A single line in an expanded action list. `ids` are the pending-action ids
   // it stands for — two when a RAW+JPEG pair is collapsed into one line, so its
-  // unqueue button removes both halves at once.
+  // unqueue button removes both halves at once. `fileIds` are the underlying
+  // files, needed to clear the reject flag when a delete is unqueued.
   interface PlanRow {
     label: string;
     ids: number[];
+    fileIds: number[];
     dest: string | null;
   }
 
@@ -120,12 +126,14 @@
           rows.push({
             label: `${raw.relPath}+${splitName(jpeg.relPath).ext.toLowerCase()}`,
             ids: [raw.id, jpeg.id],
+            fileIds: [raw.fileId, jpeg.fileId],
             dest: raw.dest,
           });
           continue;
         }
       }
-      for (const p of g) rows.push({ label: p.relPath, ids: [p.id], dest: p.dest });
+      for (const p of g)
+        rows.push({ label: p.relPath, ids: [p.id], fileIds: [p.fileId], dest: p.dest });
     }
     return rows;
   }
@@ -196,7 +204,7 @@
             {#each deleteRows as row}
               <li>
                 {row.label}
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row.ids)}><X size={12} /></button>
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, true)}><X size={12} /></button>
               </li>
             {/each}
           </ul>
@@ -215,7 +223,7 @@
             {#each moveRows as row}
               <li>
                 {row.label} → {row.dest}/
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row.ids)}><X size={12} /></button>
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, false)}><X size={12} /></button>
               </li>
             {/each}
           </ul>
@@ -234,7 +242,7 @@
             {#each copyRows as row}
               <li>
                 {row.label} → {row.dest}/
-                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row.ids)}><X size={12} /></button>
+                <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, false)}><X size={12} /></button>
               </li>
             {/each}
           </ul>

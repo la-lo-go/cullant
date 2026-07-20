@@ -128,6 +128,9 @@ class CatalogStore {
     // Always clears the `restoring` guard, even when the setting is off or no
     // saved state exists.
     await session.restoreSessionState();
+    // Backfill the delete queue for files rejected before the reject/queue
+    // sync existed (once per open; idempotent).
+    await session.syncRejectedToQueue();
   }
 
   /// Apply a sort/media view remembered from a saved session, without the
