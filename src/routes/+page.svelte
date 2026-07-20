@@ -917,7 +917,10 @@
     border: 1px solid transparent;
     border-radius: 6px;
     background: transparent;
-    padding: 4px 9px;
+    /* 3px vertical (not 4px) to match .media-btn's rhythm — with the .segmented
+       container's own 2px padding + 1px border, this lands the pill at the same
+       total height (38px) as every other toolbar button. */
+    padding: 3px 9px;
     transition: background-color 0.15s ease, color 0.15s ease;
   }
 
