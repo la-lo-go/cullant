@@ -467,7 +467,7 @@
               </span>
             {/if}
             {#if v.item.label}
-              <span class="label-bar" style:background={labelColors[v.item.label]}></span>
+              <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
             {/if}
             {#if session.mirrorMode && v.item.groupSize > 1}
               <span class="chip pair" class:split={v.item.decoupled}>
@@ -663,24 +663,20 @@
     border-radius: inherit;
   }
 
-  /* Label-color indicator: a small rounded pill overlaid right at the photo's
-     bottom edge — BELOW .stars/.tags (which start at bottom: 9px), not sharing
-     their row, so the two kinds of badge never overlap. Deliberately NOT a
-     `border-bottom` (the previous approach): a border participates in the box
-     model, so it either grew .photo taller than its 100%/100% box (getting
-     partly clipped by the overflow: hidden above) or, once box-sizing fixed
-     that, ate into the image's own rendered size — visibly "lifting"/shrinking
-     the thumbnail to make room for it. An absolutely-positioned overlay
-     affects nothing about .photo's layout, and rounding all 4 corners (rather
-     than only the bottom two, which is what a bordered strip can ever show) is
-     what gives it a visible curve on its top edge too. */
+  /* Label-color indicator: a colored strip flush along the photo's bottom
+     edge — full-width, side to side, its top edge curving up at both ends
+     with the photo's corner rounding. It's the overlay element's OWN bottom
+     border (inset: 0 + box-sizing: border-box), which reproduces the old
+     `.frame.labeled` border look without its drawback: a border on .photo
+     itself would participate in the box model and either overflow .photo's
+     100%/100% box or shrink the image to make room for itself. Sits BELOW
+     .stars/.tags (bottom: 9px), so the two never overlap. */
   .label-bar {
     position: absolute;
-    left: 8px;
-    right: 8px;
-    bottom: 2px;
-    height: 3px;
-    border-radius: 1.5px;
+    inset: 0;
+    box-sizing: border-box;
+    border-bottom: 3px solid;
+    border-radius: inherit;
     pointer-events: none;
   }
 
@@ -802,7 +798,7 @@
   }
 
   /* bottom: 9px (not flush) — clears the label-bar below it (see .label-bar;
-     that sits at bottom: 2-5px), so the two never overlap. */
+     that occupies the photo's bottom 0-3px), so the two never overlap. */
   .stars {
     position: absolute;
     bottom: 9px;

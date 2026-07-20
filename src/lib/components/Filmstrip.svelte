@@ -222,7 +222,7 @@
                 <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
               {/if}
               {#if settings.filmstripShowLabel && v.item.label}
-                <span class="label-bar" style:background={labelColors[v.item.label]}></span>
+                <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
               {/if}
               {#if settings.filmstripShowType}
                 {#if session.mirrorMode && v.item.groupSize > 1}
@@ -450,17 +450,17 @@
     user-select: none;
   }
 
-  /* Label-color indicator: a small rounded pill overlaid on the photo,
-     BELOW .stars/.tags (bottom: 7px) so the two rows don't overlap. See
-     VirtualGrid.svelte's identical .label-bar for why this is an overlay
-     rather than a border. */
+  /* Label-color indicator: a colored strip flush along the photo's bottom
+     edge — full-width, side to side, its top edge curving up at both ends
+     with the corner rounding. Same overlay-border technique as
+     VirtualGrid.svelte's .label-bar (see that comment for why the border
+     lives on an overlay element, not on .photo itself). */
   .label-bar {
     position: absolute;
-    left: 6px;
-    right: 6px;
-    bottom: 2px;
-    height: 3px;
-    border-radius: 1.5px;
+    inset: 0;
+    box-sizing: border-box;
+    border-bottom: 3px solid;
+    border-radius: inherit;
     pointer-events: none;
   }
 
