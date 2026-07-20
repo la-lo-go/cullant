@@ -42,6 +42,7 @@
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
   import ListFilter from "@lucide/svelte/icons/list-filter";
   import SettingsIcon from "@lucide/svelte/icons/settings";
+  import CheckCheck from "@lucide/svelte/icons/check-check";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -352,17 +353,17 @@
             <FiltersPanel />
           {/if}
         </div>
+        <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject())}><RefreshCw size={14} /></button>
+        <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
+        <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
         <button
           class="commit"
           class:haswork={session.pendingCount > 0}
           title="Review & commit pending actions (Ctrl+Enter)"
           onclick={blurring(() => (session.commitDialogOpen = true))}
         >
-          Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}
+          <CheckCheck size={14} /><span>Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}</span>
         </button>
-        <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject())}><RefreshCw size={14} /></button>
-        <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
-        <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
       </div>
     </header>
     {/if}
