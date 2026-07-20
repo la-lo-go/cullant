@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { thumbUrl, videoUrl, displayDims, type ItemLite } from "../api";
+  import { thumbUrl, displayDims, type ItemLite } from "../api";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
@@ -10,6 +10,7 @@
   import X from "@lucide/svelte/icons/x";
   import Scissors from "@lucide/svelte/icons/scissors";
   import Play from "@lucide/svelte/icons/play";
+  import Film from "@lucide/svelte/icons/film";
   import FileWarning from "@lucide/svelte/icons/file-warning";
   import Loader from "@lucide/svelte/icons/loader";
   import { edgeBounce } from "../anim";
@@ -433,9 +434,14 @@
           >
             {#if v.item.kind === 2}
               {#if posterFailed.has(v.item.id)}
-                <!-- No pregenerated poster (ffmpeg absent / undecodable): fall
-                     back to the first metadata frame of the video itself. -->
-                <video src={videoUrl(v.item)} preload="metadata" muted></video>
+                <!-- No pregenerated poster (ffmpeg absent / undecodable): a
+                     neutral, on-brand placeholder that still reads as a video,
+                     instead of a live <video> (heavy on mobile, and it usually
+                     just paints black when the poster couldn't be made). -->
+                <div class="no-poster" title="{v.item.name}.{v.item.ext}">
+                  <Film size={22} />
+                  <span>{v.item.ext.toUpperCase()}</span>
+                </div>
               {:else}
                 <img
                   src={thumbUrl(v.item)}
@@ -669,8 +675,7 @@
      not .photo — opacity on the wrapper would wash out the red-X badge (and
      the other chips), which must stay fully readable. Same treatment as
      Filmstrip.svelte. */
-  .photo.queued img,
-  .photo.queued video {
+  .photo.queued img {
     opacity: 0.4;
     filter: grayscale(35%);
   }
@@ -702,8 +707,7 @@
     z-index: 2;
   }
 
-  img,
-  video {
+  img {
     /* .photo is already sized to the exact box the image should occupy (the
        full frame for landscape/unknown dims, or the true aspect-ratio box for
        portrait) — cover always fills it exactly, with no cropping in the
@@ -750,6 +754,28 @@
   }
 
   .unreadable span {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+
+  /* Video with no generated poster (ffmpeg missing / undecodable clip). Reads
+     as a deliberate video tile, not an error: a filled dark box + film glyph +
+     extension, with the Play chip still on top. */
+  .no-poster {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background: var(--surface-2);
+    color: #8a8a93;
+    user-select: none;
+  }
+
+  .no-poster span {
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.03em;
