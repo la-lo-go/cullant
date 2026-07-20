@@ -9,7 +9,6 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Star from "@lucide/svelte/icons/star";
   import Check from "@lucide/svelte/icons/check";
-  import CheckCheck from "@lucide/svelte/icons/check-check";
   import X from "@lucide/svelte/icons/x";
 
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
@@ -170,12 +169,6 @@
       {/each}
     </div>
   {/if}
-
-  <div class="group actions">
-    <button class="btn commit" title="Review & commit" aria-label="Review & commit" onclick={act(() => runCommand("commit.open"))}>
-      <CheckCheck size={20} />
-    </button>
-  </div>
 </div>
 
 <style>
@@ -282,11 +275,6 @@
   .active-reject {
     border-color: #ff6b6b;
     background: rgba(255, 107, 107, 0.14);
-  }
-
-  .btn.commit {
-    color: var(--accent);
-    border-color: var(--border-strong);
   }
 
   .swatch {
