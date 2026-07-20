@@ -133,7 +133,9 @@
     width: 480px;
     /* Honor the safe-area insets the backdrop pads with, so the cap matches the
        space actually available between the system bars/cutout. */
-    max-width: calc(100vw - 24px - var(--inset-left) - var(--inset-right));
+    max-width: calc(
+      100vw - var(--dialog-edge-margin) * 2 - var(--inset-left) - var(--inset-right)
+    );
     max-height: 80vh;
     display: flex;
     flex-direction: column;

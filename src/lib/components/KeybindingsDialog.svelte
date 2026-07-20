@@ -83,7 +83,7 @@
     border-radius: 10px;
     padding: 16px 20px;
     width: 460px;
-    max-width: calc(100vw - 24px);
+    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
     max-height: 80vh;
     display: flex;
     flex-direction: column;

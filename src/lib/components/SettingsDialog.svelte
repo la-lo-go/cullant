@@ -132,7 +132,7 @@
     border-radius: 10px;
     padding: 16px 20px;
     width: 460px;
-    max-width: calc(100vw - 24px);
+    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
     max-height: calc(100vh - 48px - var(--inset-top) - var(--inset-bottom));
     overflow-y: auto;
     outline: none;

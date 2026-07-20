@@ -58,7 +58,7 @@
     border-radius: 10px;
     padding: 16px 20px;
     width: 380px;
-    max-width: calc(100vw - 24px);
+    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
     outline: none;
   }
 

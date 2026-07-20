@@ -633,11 +633,27 @@
     --inset-bottom: env(safe-area-inset-bottom, 0px);
     --inset-left: env(safe-area-inset-left, 0px);
 
+    /* Side margin every centered modal dialog's max-width subtracts (one side;
+       dialogs subtract it ×2). Every dialog references this ONE token instead
+       of hardcoding its own margin, so the mobile-portrait override below
+       widens the gutter for all of them at once. */
+    --dialog-edge-margin: 12px;
+
     font-family: Inter, "Segoe UI", Avenir, Helvetica, Arial, sans-serif;
     font-size: 14px;
     color: #e8e8e8;
     background-color: var(--bg);
     color-scheme: dark;
+  }
+
+  /* Narrow portrait viewports (phones): the 12px default reads as the dialog
+     sticking to the screen edges, so give it noticeably more breathing room.
+     Width-gated (not a device check) so a narrow, tall desktop window gets the
+     same treatment — the actual problem is available width, not the platform. */
+  @media (max-width: 600px) and (orientation: portrait) {
+    :global(:root) {
+      --dialog-edge-margin: 20px;
+    }
   }
 
   /* App-styled scrollbars: a thin thumb in the app accent (mint) hugging
@@ -1120,7 +1136,7 @@
     border-radius: 10px;
     padding: 18px 22px;
     width: 400px;
-    max-width: calc(100vw - 24px);
+    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
   }
 
   .fl-panel h2 {
