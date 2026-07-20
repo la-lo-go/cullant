@@ -14,3 +14,6 @@ vite.config.ts.timestamp-*
 
 # JetBrains IDE project files
 .idea/
+
+# Machine-local agent permissions
+.claude/settings.local.json
