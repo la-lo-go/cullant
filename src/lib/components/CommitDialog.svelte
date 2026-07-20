@@ -182,7 +182,11 @@
       {/if}
 
       <div class="rows">
-        <button class="row" onclick={() => (expanded = expanded === "deletes" ? null : "deletes")}>
+        <button
+          class="row"
+          disabled={plan.deletes.length === 0}
+          onclick={() => (expanded = expanded === "deletes" ? null : "deletes")}
+        >
           <span class="icon"><Trash2 size={16} /></span>
           <span class="what">Delete {plan.deletes.length} file(s)</span>
           <span class="how">{deletionModeNames[plan.deletionMode]}</span>
@@ -198,7 +202,11 @@
           </ul>
         {/if}
 
-        <button class="row" onclick={() => (expanded = expanded === "moves" ? null : "moves")}>
+        <button
+          class="row"
+          disabled={plan.moves.length === 0}
+          onclick={() => (expanded = expanded === "moves" ? null : "moves")}
+        >
           <span class="icon"><FolderInput size={16} /></span>
           <span class="what">Move {plan.moves.length} file(s)</span>
         </button>
@@ -213,7 +221,11 @@
           </ul>
         {/if}
 
-        <button class="row" onclick={() => (expanded = expanded === "copies" ? null : "copies")}>
+        <button
+          class="row"
+          disabled={plan.copies.length === 0}
+          onclick={() => (expanded = expanded === "copies" ? null : "copies")}
+        >
           <span class="icon"><Copy size={16} /></span>
           <span class="what">Copy {plan.copies.length} file(s)</span>
         </button>
@@ -350,6 +362,11 @@
   }
 
   .row.static {
+    cursor: default;
+  }
+
+  .row:disabled {
+    opacity: 0.4;
     cursor: default;
   }
 
