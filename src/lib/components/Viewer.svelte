@@ -15,8 +15,17 @@
   import { edgeBounce } from "../anim";
   import { previewUrl } from "../api";
   import { catalog } from "../stores/catalog.svelte";
+  import { tags } from "../stores/tags.svelte";
 
   const item = $derived(session.focused);
+
+  const labelColors: Record<string, string> = {
+    Red: "#e05555",
+    Yellow: "#e0c34f",
+    Green: "#59b85e",
+    Blue: "#5588e0",
+    Purple: "#9a66d6",
+  };
 
   // Warm just the immediate neighbours so arrowing doesn't wait on a cold decode.
   // Kept deliberately small, and gated two ways so fast flipping never floods the
@@ -97,7 +106,7 @@
       {/if}
       {#if !view.fullscreen}
         <div class="info">
-          <span class="filename">{item.relPath}</span>
+          <span class="filename" style:color={item.label ? labelColors[item.label] : null}>{item.relPath}</span>
           {#if session.mirrorMode && item.groupSize > 1}
             <span class="chip" class:split={item.decoupled}>
               {#if item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
@@ -106,7 +115,13 @@
           {#if item.rating > 0}<span class="stars">{"★".repeat(item.rating)}</span>{/if}
           {#if item.flag === 1}<span class="pick"><Check size={14} /></span>{/if}
           {#if item.flag === -1}<span class="reject"><X size={14} /></span>{/if}
-          {#if item.label}<span class="label">{item.label}</span>{/if}
+          {#each item.tagIds as tagId (tagId)}
+            {@const t = tags.byId.get(tagId)}
+            {#if t}
+              {@const c = t.color ?? "#888"}
+              <span class="tagpill" style="border-color: {c}; background: {c}2e">{t.name}</span>
+            {/if}
+          {/each}
           <span class="pos">{session.focusedIndex + 1} / {session.filtered.length}</span>
         </div>
       {/if}
@@ -143,7 +158,8 @@
     right: 0;
     bottom: 0;
     display: flex;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 4px 12px;
     align-items: center;
     padding: 6px calc(12px + var(--safe-right)) 6px calc(12px + var(--safe-left));
     font-size: 12px;
@@ -230,8 +246,15 @@
     color: #ff6b6b;
   }
 
-  .label {
-    opacity: 0.8;
+  .tagpill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid;
+    /* Border color and a ~18% alpha tint (2e suffix) are set inline from the
+       tag's #rrggbb color. */
+    color: #eee;
   }
 
   .pos {

@@ -2,6 +2,7 @@
   import { previewUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
+  import { tags } from "../stores/tags.svelte";
   import ZoomImage from "./ZoomImage.svelte";
   import Filmstrip from "./Filmstrip.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -12,6 +13,14 @@
   import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
+
+  const labelColors: Record<string, string> = {
+    Red: "#e05555",
+    Yellow: "#e0c34f",
+    Green: "#59b85e",
+    Blue: "#5588e0",
+    Purple: "#9a66d6",
+  };
 
   let panes = $state<HTMLElement | null>(null);
   // Bounce the panes when stepping past the first/last photo. Track the
@@ -118,7 +127,16 @@
           {#if pinnedSide === "left"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
         {#if !view.fullscreen}
-          <span class="caption" class:focused-caption={focusedSide === "left"}>{left.name}.{left.ext}</span>
+          <span class="caption" class:focused-caption={focusedSide === "left"}>
+            <span style:color={left.label ? labelColors[left.label] : null}>{left.name}.{left.ext}</span>
+            {#each left.tagIds as tagId (tagId)}
+              {@const t = tags.byId.get(tagId)}
+              {#if t}
+                {@const c = t.color ?? "#888"}
+                <span class="tagpill" style="border-color: {c}; background: {c}2e">{t.name}</span>
+              {/if}
+            {/each}
+          </span>
         {/if}
       </div>
     {/if}
@@ -137,7 +155,16 @@
           {#if pinnedSide === "right"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
         {#if !view.fullscreen}
-          <span class="caption" class:focused-caption={focusedSide === "right"}>{right.name}.{right.ext}</span>
+          <span class="caption" class:focused-caption={focusedSide === "right"}>
+            <span style:color={right.label ? labelColors[right.label] : null}>{right.name}.{right.ext}</span>
+            {#each right.tagIds as tagId (tagId)}
+              {@const t = tags.byId.get(tagId)}
+              {#if t}
+                {@const c = t.color ?? "#888"}
+                <span class="tagpill" style="border-color: {c}; background: {c}2e">{t.name}</span>
+              {/if}
+            {/each}
+          </span>
         {/if}
       </div>
     {:else}
@@ -265,12 +292,28 @@
     position: absolute;
     bottom: 6px;
     left: 10px;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-width: calc(100% - 20px);
     font-size: 12px;
     opacity: 0.7;
     background: rgba(0, 0, 0, 0.5);
     padding: 2px 8px;
     border-radius: 4px;
     pointer-events: none;
+  }
+
+  .tagpill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid;
+    /* Border color and a ~18% alpha tint (2e suffix) are set inline from the
+       tag's #rrggbb color. */
+    color: #eee;
   }
 
   .focused-caption {
