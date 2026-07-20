@@ -1,6 +1,10 @@
 <script lang="ts">
   import { settings } from "../stores/settings.svelte";
   import Keyboard from "@lucide/svelte/icons/keyboard";
+  import Monitor from "@lucide/svelte/icons/monitor";
+  import Film from "@lucide/svelte/icons/film";
+  import Video from "@lucide/svelte/icons/video";
+  import History from "@lucide/svelte/icons/history";
 
   let {
     onclose,
@@ -38,129 +42,176 @@
     role="dialog"
     tabindex="-1"
   >
-    <h2>Settings</h2>
+    <header class="head">
+      <h2>Settings</h2>
+    </header>
 
-    <section>
-      <h3>Loupe display</h3>
-      <label class="option">
-        <input
-          type="checkbox"
-          checked={settings.progressiveLoupe}
-          onchange={(e) => settings.setProgressiveLoupe(e.currentTarget.checked)}
-        />
-        <span class="text">
-          <span class="label">Progressive loading</span>
-          <span class="description">
-            Paint the small thumbnail instantly (slightly soft for a moment) while the
-            sharp preview loads. Off: keep showing the previous photo until the new
-            preview is ready.
+    <div class="content">
+      <section class="card">
+        <header class="card-head">
+          <Monitor size={16} />
+          <span class="card-text">
+            <span class="card-title">Display</span>
+            <span class="card-desc">How photos load and appear while you cull.</span>
           </span>
-        </span>
-      </label>
-    </section>
-
-    <section>
-      <h3>Session</h3>
-      <label class="option">
-        <input
-          type="checkbox"
-          checked={settings.rememberSession}
-          onchange={(e) => settings.setRememberSession(e.currentTarget.checked)}
-        />
-        <span class="text">
-          <span class="label">Remember per project</span>
-          <span class="description">
-            Reopen each project where you left off: restore the last sort order,
-            media tab, active filters and focused photo. Off: every project opens
-            with the defaults.
+        </header>
+        <label class="option">
+          <input
+            type="checkbox"
+            checked={settings.progressiveLoupe}
+            onchange={(e) => settings.setProgressiveLoupe(e.currentTarget.checked)}
+          />
+          <span class="text">
+            <span class="label">Progressive loading</span>
+            <span class="description">
+              Paint the small thumbnail instantly (slightly soft for a moment) while the
+              sharp preview loads. Off: keep showing the previous photo until the new
+              preview is ready.
+            </span>
           </span>
-        </span>
-      </label>
-    </section>
-
-    <section>
-      <h3>Media</h3>
-      <label class="option">
-        <input
-          type="checkbox"
-          checked={settings.generateVideoThumbs}
-          onchange={(e) => settings.setGenerateVideoThumbs(e.currentTarget.checked)}
-        />
-        <span class="text">
-          <span class="label">Pregenerate video thumbnails</span>
-          <span class="description">
-            Video posters are generated last — only after every photo thumbnail and
-            preview — because extracting them (via ffmpeg) is the slowest step. Off:
-            skip generating them in the background; a video's poster is still made
-            the moment you scroll to it.
+        </label>
+        <label class="option">
+          <input
+            type="checkbox"
+            checked={settings.dimQueuedDeletes}
+            onchange={(e) => settings.setDimQueuedDeletes(e.currentTarget.checked)}
+          />
+          <span class="text">
+            <span class="label">Dim thumbnails marked for deletion</span>
+            <span class="description">
+              Thumbnails queued for deletion render at reduced opacity in the grid and
+              filmstrip, so rejects are easy to spot at a glance.
+            </span>
           </span>
-        </span>
-      </label>
-    </section>
+        </label>
+      </section>
 
-    <section>
-      <h3>Filmstrip badges</h3>
-      <p class="hint">
-        The grid always keeps rating/label/tag badges inside the actual photo (a
-        portrait thumbnail's letterbox gutters stay clear). The filmstrip's
-        thumbnails are smaller, so its badges may sit outside the photo instead —
-        pick which ones to show there.
-      </p>
-      <div class="checks">
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={settings.filmstripShowType}
-            onchange={(e) => settings.setFilmstripShowType(e.currentTarget.checked)}
-          />
-          <span>Photo type (RAW+JPG)</span>
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={settings.filmstripShowRating}
-            onchange={(e) => settings.setFilmstripShowRating(e.currentTarget.checked)}
-          />
-          <span>Star rating</span>
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={settings.filmstripShowLabel}
-            onchange={(e) => settings.setFilmstripShowLabel(e.currentTarget.checked)}
-          />
-          <span>Color label</span>
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={settings.filmstripShowFlag}
-            onchange={(e) => settings.setFilmstripShowFlag(e.currentTarget.checked)}
-          />
-          <span>Pick/reject flag</span>
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={settings.filmstripShowTags}
-            onchange={(e) => settings.setFilmstripShowTags(e.currentTarget.checked)}
-          />
-          <span>Tags</span>
-        </label>
-      </div>
-    </section>
+      <section class="card">
+        <header class="card-head">
+          <Film size={16} />
+          <span class="card-text">
+            <span class="card-title">Filmstrip badges</span>
+            <span class="card-desc">
+              The grid always keeps rating/label/tag badges inside the actual photo (a
+              portrait thumbnail's letterbox gutters stay clear). The filmstrip's
+              thumbnails are smaller, so its badges may sit outside the photo instead —
+              pick which ones to show there.
+            </span>
+          </span>
+        </header>
+        <div class="checks">
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={settings.filmstripShowType}
+              onchange={(e) => settings.setFilmstripShowType(e.currentTarget.checked)}
+            />
+            <span>Photo type (RAW+JPG)</span>
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={settings.filmstripShowRating}
+              onchange={(e) => settings.setFilmstripShowRating(e.currentTarget.checked)}
+            />
+            <span>Star rating</span>
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={settings.filmstripShowLabel}
+              onchange={(e) => settings.setFilmstripShowLabel(e.currentTarget.checked)}
+            />
+            <span>Color label</span>
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={settings.filmstripShowFlag}
+              onchange={(e) => settings.setFilmstripShowFlag(e.currentTarget.checked)}
+            />
+            <span>Pick/reject flag</span>
+          </label>
+          <label class="check">
+            <input
+              type="checkbox"
+              checked={settings.filmstripShowTags}
+              onchange={(e) => settings.setFilmstripShowTags(e.currentTarget.checked)}
+            />
+            <span>Tags</span>
+          </label>
+        </div>
+      </section>
 
-    <section>
-      <h3>Keyboard</h3>
-      <button class="shortcuts" onclick={onshowkeybindings}>
-        <Keyboard size={14} />
-        <span>Keyboard shortcuts…</span>
-      </button>
-    </section>
+      <section class="card">
+        <header class="card-head">
+          <Video size={16} />
+          <span class="card-text">
+            <span class="card-title">Media</span>
+            <span class="card-desc">Background generation of video poster frames.</span>
+          </span>
+        </header>
+        <label class="option">
+          <input
+            type="checkbox"
+            checked={settings.generateVideoThumbs}
+            onchange={(e) => settings.setGenerateVideoThumbs(e.currentTarget.checked)}
+          />
+          <span class="text">
+            <span class="label">Pregenerate video thumbnails</span>
+            <span class="description">
+              Video posters are generated last — only after every photo thumbnail and
+              preview — because extracting them (via ffmpeg) is the slowest step. Off:
+              skip generating them in the background; a video's poster is still made
+              the moment you scroll to it.
+            </span>
+          </span>
+        </label>
+      </section>
 
-    <div class="actions">
-      <button class="close" onclick={onclose}>Close</button>
+      <section class="card">
+        <header class="card-head">
+          <History size={16} />
+          <span class="card-text">
+            <span class="card-title">Session</span>
+            <span class="card-desc">What is restored when you reopen a project.</span>
+          </span>
+        </header>
+        <label class="option">
+          <input
+            type="checkbox"
+            checked={settings.rememberSession}
+            onchange={(e) => settings.setRememberSession(e.currentTarget.checked)}
+          />
+          <span class="text">
+            <span class="label">Remember per project</span>
+            <span class="description">
+              Reopen each project where you left off: restore the last sort order,
+              media tab, active filters and focused photo. Off: every project opens
+              with the defaults.
+            </span>
+          </span>
+        </label>
+      </section>
+
+      <section class="card">
+        <header class="card-head">
+          <Keyboard size={16} />
+          <span class="card-text">
+            <span class="card-title">Keyboard</span>
+            <span class="card-desc">Review and remap every shortcut.</span>
+          </span>
+        </header>
+        <button class="shortcuts" onclick={onshowkeybindings}>
+          <Keyboard size={14} />
+          <span>Keyboard shortcuts…</span>
+        </button>
+      </section>
     </div>
+
+    <footer class="actions">
+      <button class="close" onclick={onclose}>Close</button>
+    </footer>
   </div>
 </div>
 
@@ -182,35 +233,85 @@
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
     border-radius: 10px;
-    padding: 16px 20px;
-    width: 460px;
+    width: 500px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
     max-height: calc(100vh - 48px - var(--inset-top) - var(--inset-bottom));
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
     outline: none;
   }
 
+  .head {
+    padding: 14px 20px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
   h2 {
-    margin: 0 0 8px;
-    font-size: 15px;
+    margin: 0;
+    font-size: 16px;
   }
 
-  h3 {
-    margin: 14px 0 4px;
-    font-size: 12px;
+  /* Scrollable body: the header and footer stay put while the category cards
+     scroll on small viewports. */
+  .content {
+    overflow-y: auto;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Each category is a card one shade darker than the dialog surface, so the
+     grouping reads at a glance. */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 10px 6px;
+  }
+
+  .card-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 2px 10px 8px;
+    color: var(--accent);
+  }
+
+  .card-head :global(svg) {
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .card-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .card-title {
+    font-size: 13px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    opacity: 0.55;
+    color: #e8e8e8;
   }
 
+  .card-desc {
+    font-size: 12px;
+    opacity: 0.65;
+    line-height: 1.4;
+  }
+
+  /* Setting rows are full-width and at least 44px tall so the whole row is a
+     comfortable touch target on phones. */
   .option {
     display: flex;
     align-items: flex-start;
     gap: 10px;
+    min-height: 44px;
     padding: 8px 10px;
     border-radius: 8px;
     cursor: pointer;
+    box-sizing: border-box;
   }
 
   .option:hover {
@@ -218,8 +319,15 @@
   }
 
   .option input {
-    margin-top: 3px;
+    margin-top: 2px;
+  }
+
+  input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
     accent-color: var(--accent);
+    cursor: pointer;
   }
 
   .text {
@@ -231,45 +339,45 @@
   .label {
     font-size: 13px;
     font-weight: 600;
+    line-height: 1.3;
   }
 
   .description {
-    font-size: 12px;
+    font-size: 12.5px;
     opacity: 0.65;
     line-height: 1.4;
   }
 
-  .hint {
-    margin: 0 0 6px;
-    padding: 0 10px;
-    font-size: 12px;
-    opacity: 0.65;
-    line-height: 1.4;
-  }
-
+  /* Badge toggles stack vertically (mobile-first) instead of wrapping inline. */
   .checks {
     display: flex;
-    flex-wrap: wrap;
-    gap: 4px 14px;
-    padding: 2px 10px 6px;
+    flex-direction: column;
   }
 
   .check {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 12.5px;
+    gap: 10px;
+    min-height: 44px;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 13px;
     cursor: pointer;
+    box-sizing: border-box;
   }
 
-  .check input {
-    accent-color: var(--accent);
+  .check:hover {
+    background: var(--hover);
   }
 
   .shortcuts {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 6px;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 44px;
+    margin-bottom: 4px;
   }
 
   .actions {
@@ -277,9 +385,9 @@
     align-items: center;
     justify-content: flex-end;
     gap: 10px;
-    margin-top: 16px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
   }
-
 
   button {
     border-radius: 6px;
@@ -294,5 +402,10 @@
 
   button:hover {
     border-color: var(--accent);
+  }
+
+  .close {
+    min-width: 96px;
+    min-height: 44px;
   }
 </style>
