@@ -24,17 +24,40 @@
   const PAD_X = 3;
   const PAD_Y = 8;
   const AVAIL_W = CELL - PAD_X * 2;
+  // Absolute floor/ceiling for the drag-resize (see onResizeMove) — the
+  // effective ceiling is the lower of MAX_H and contentMaxH below.
+  const MIN_H = 72;
+  const MAX_H = 320;
 
   let strip = $state<HTMLDivElement | null>(null);
   let scrollLeft = $state(0);
   let width = $state(0);
+
+  // Tallest the strip ever needs to be: the height at which even the most-
+  // portrait thumbnail stops growing (each thumbnail is contain-fit, so its
+  // rendered height tops out at AVAIL_W * h/w — width-bound). Dragging past
+  // that only adds empty space above/below every cell. With no known dims
+  // there's no content cap, just the absolute MAX_H.
+  const contentMaxH = $derived.by(() => {
+    let maxRatio = 0;
+    for (const item of items) {
+      const dims = displayDims(item);
+      if (dims && dims.w > 0) maxRatio = Math.max(maxRatio, dims.h / dims.w);
+    }
+    if (maxRatio <= 0) return MAX_H;
+    return Math.min(MAX_H, Math.max(MIN_H, Math.ceil(AVAIL_W * maxRatio) + PAD_Y * 2));
+  });
+  // Rendered height: the persisted preference clamped to what the current
+  // items can actually fill (a tall preference saved from a portrait-heavy
+  // catalog must not leave dead space in a landscape-only one).
+  const stripH = $derived(Math.min(session.filmstripHeight, contentMaxH));
   // Reactive: the strip is user-resizable (drag its top edge), and unlike the
   // (square, fixed-height) grid cell, a filmstrip cell's height is the OTHER
   // free axis besides width — object-fit: contain can bind on either one
   // depending on the photo's own aspect ratio, so badges anchored to a fixed
   // offset from the CELL (rather than the actual rendered photo) drift away
   // from the image whenever height is the non-binding axis.
-  const availH = $derived(Math.max(0, session.filmstripHeight - PAD_Y * 2));
+  const availH = $derived(Math.max(0, stripH - PAD_Y * 2));
 
   const first = $derived(Math.max(0, Math.floor(scrollLeft / CELL) - OVERSCAN));
   const last = $derived(
@@ -86,8 +109,6 @@
 
   // Drag the top edge to resize; dragging it below COLLAPSE_AT hides the strip
   // (the peek arrow at the bottom, and the F toggle, bring it back).
-  const MIN_H = 72;
-  const MAX_H = 320;
   const COLLAPSE_AT = 56;
 
   let resizing = $state(false);
@@ -108,7 +129,7 @@
     // Past the threshold only *flags* a pending collapse (strip stays at MIN_H,
     // dimmed) instead of committing it, so dragging back out cancels the hide.
     pendingCollapse = h < COLLAPSE_AT;
-    session.filmstripHeight = Math.min(MAX_H, Math.max(MIN_H, h));
+    session.filmstripHeight = Math.min(contentMaxH, Math.max(MIN_H, h));
   }
 
   function endResize(e: PointerEvent) {
@@ -164,7 +185,7 @@
 </script>
 
 {#if session.showFilmstrip}
-  <div class="filmstrip" class:pending-collapse={pendingCollapse} style="height: {session.filmstripHeight}px">
+  <div class="filmstrip" class:pending-collapse={pendingCollapse} style="height: {stripH}px">
     <!-- Top-edge resize handle. -->
     <div
       class="resize-handle"
