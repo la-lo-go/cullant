@@ -46,7 +46,8 @@ export JAVA_HOME="C:\Program Files\Microsoft\jdk-17.0.19.10-hotspot"
 ### Build commands and what they produce
 
 ```sh
-npx tauri android init        # one-time scaffold (already done — gen/android is committed)
+npx tauri android init        # one-time scaffold (already done — gen/android is committed;
+                              # re-running overwrites customizations, see "Re-running" below)
 npx tauri android dev         # dev build, deploys to a connected device/emulator
 npx tauri android build [flags]
 ```
@@ -66,6 +67,54 @@ Key flags:
 | `--aab` | Emit `.aab` (Play Store upload format; not installable directly). |
 | `--split-per-abi` | With multiple targets, emit one APK/AAB per ABI instead of a single fat one. |
 | (no target flags) | Builds all 4 ABIs (`aarch64`, `armv7`, `i686`, `x86_64`) into one **universal** artifact bundling every `.so`. |
+
+### Launch (splash) screen
+
+The launch screen is customized: the app theme's `windowBackground` is a
+layer-list painting the app background color (`@color/cullant_bg` = `#222728`,
+the `bg` theme token from `src/routes/+page.svelte`) with the Cullant mark
+centered at 96dp. On Android 12+ the system splash also derives its background
+from `windowBackground`, so the same color shows from the very first frame.
+
+Files involved (all under `src-tauri/gen/android/app/src/main/res/`):
+
+- `values/colors.xml` — adds `cullant_bg`.
+- `drawable/splash_logo.xml` — the brand mark as a hand-written vector
+  drawable (converted from `logo/icon-square.svg`).
+- `drawable/splash_background.xml` — layer-list: `cullant_bg` + centered
+  `splash_logo`.
+- `values/themes.xml` and `values-night/themes.xml` — set
+  `android:windowBackground` to `@drawable/splash_background`.
+
+### Re-running `tauri android init`
+
+Re-init **overwrites** scaffold-owned files unconditionally: the generator
+(cargo-mobile2's bicycle templating) copies/renders every template file over
+whatever exists, with no skip-if-modified logic. Files you created that are
+not in the template pack (e.g. the two `drawable/splash_*.xml` above) survive,
+but template-owned files are reset to scaffold defaults — including
+`values/themes.xml`, `values-night/themes.xml`, `values/colors.xml`,
+`layout/activity_main.xml`, `AndroidManifest.xml`, and
+`app/build.gradle.kts` (which would also drop the release-signing wiring).
+
+Since `gen/android` is committed, the recovery path after any re-init is:
+
+```sh
+git status src-tauri/gen/android          # see what was reset
+git checkout -- src-tauri/gen/android     # restore all customizations
+```
+
+If the scaffold was regenerated *on purpose* (e.g. after a Tauri CLI upgrade),
+diff instead and re-apply only the customizations:
+
+1. `values/colors.xml`: re-add the `cullant_bg` color (`#FF222728`).
+2. `values/themes.xml` and `values-night/themes.xml`: add
+   `<item name="android:windowBackground">@drawable/splash_background</item>`
+   to `Theme.cullant`.
+3. `app/build.gradle.kts`: re-apply the release-signing block (see
+   "Release signing" below).
+4. The `drawable/splash_logo.xml` / `splash_background.xml` files survive
+   untouched; restore from git if they were deleted anyway.
 
 ### Size comparison (why target matters)
 

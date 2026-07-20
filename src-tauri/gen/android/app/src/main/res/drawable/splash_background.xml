@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launch screen: app background color + centered brand mark, shown as the
+     window background while the WebView loads. Referenced from
+     values/themes.xml and values-night/themes.xml. On Android 12+ the system
+     splash screen also derives its background from windowBackground. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/cullant_bg" />
+    <item
+        android:drawable="@drawable/splash_logo"
+        android:width="96dp"
+        android:height="96dp"
+        android:gravity="center" />
+</layer-list>

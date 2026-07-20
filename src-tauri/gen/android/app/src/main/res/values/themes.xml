@@ -1,6 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.cullant" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
+        <!-- Launch/splash surface while the WebView loads: dark brand
+             background with the centered Cullant mark. -->
+        <item name="android:windowBackground">@drawable/splash_background</item>
     </style>
 </resources>
