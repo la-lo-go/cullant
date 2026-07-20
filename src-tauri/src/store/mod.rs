@@ -74,6 +74,17 @@ pub trait ProjectStore: Send + Sync {
     fn local_path(&self, _rel: &str) -> Option<std::path::PathBuf> {
         None
     }
+
+    /// Hand the file at `rel` to the OS to open in an external default app (used
+    /// as the "play in an external video player" escape hatch when the in-app
+    /// WebView can't decode a clip). Only the SAF backend implements this —
+    /// backends that expose a [`local_path`](ProjectStore::local_path) are opened
+    /// through the `opener` plugin by the caller instead.
+    fn open_external(&self, _rel: &str) -> AppResult<()> {
+        Err(crate::error::AppError::Other(
+            "open_external is not supported by this store".into(),
+        ))
+    }
 }
 
 /// Read an entire file from the store into memory. Used by the decoders, which

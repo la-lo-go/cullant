@@ -63,4 +63,12 @@ impl<R: Runtime> Saf<R> {
     pub fn delete_document(&self, _tree_uri: &str, _doc: &str) -> Result<()> {
         Err(Error::Unsupported)
     }
+    pub fn open_document(
+        &self,
+        _tree_uri: &str,
+        _doc: &str,
+        _mime_type: Option<&str>,
+    ) -> Result<()> {
+        Err(Error::Unsupported)
+    }
 }

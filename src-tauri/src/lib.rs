@@ -260,6 +260,7 @@ pub fn run() {
             commands::session::get_session_state,
             commands::session::set_session_state,
             commands::metadata::get_file_metadata,
+            commands::media::open_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

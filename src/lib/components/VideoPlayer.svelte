@@ -1,11 +1,13 @@
 <script lang="ts">
-  import { videoUrl, type ItemLite } from "../api";
+  import { api, videoUrl, type ItemLite } from "../api";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
   import Volume2 from "@lucide/svelte/icons/volume-2";
   import VolumeX from "@lucide/svelte/icons/volume-x";
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
 
   let { item }: { item: ItemLite } = $props();
 
@@ -20,6 +22,13 @@
   let muted = $state(false);
   let volume = $state(1);
   let fullscreen = $state(false);
+
+  // Set when the WebView reports it can't decode this clip (a MediaError on the
+  // element). Android's built-in media stack supports far fewer codecs than a
+  // desktop browser, so HEVC/other clips can fail here even though they play
+  // fine in a native app — hence the "open externally" escape hatch. Reset per
+  // clip in the item-change effect below.
+  let failed = $state(false);
 
   // YouTube-style auto-hide of the transport chrome. `uiVisible` gates the bar's
   // opacity + the wrapper's cursor; `hovering` is true while the pointer sits on
@@ -77,9 +86,17 @@
     paused = true;
     uiVisible = true;
     hovering = false;
+    failed = false;
     // Grab focus so Space toggles playback immediately, without a prior click.
     wrap?.focus();
   });
+
+  // Hand the clip to an external app (system default player). The reliable
+  // escape hatch when in-app decode fails; also offered pre-emptively so the
+  // user is never stuck on a silent black frame the WebView never errors on.
+  function openExternally() {
+    void api.openExternal(item.id);
+  }
 
   function togglePlay() {
     if (!video) return;
@@ -155,8 +172,23 @@
     bind:volume
     src={videoUrl(item)}
     preload="metadata"
+    playsinline
     onclick={togglePlay}
+    onerror={() => (failed = true)}
   ></video>
+
+  {#if failed}
+    <!-- Shown when the WebView can't decode the clip. Not part of the transport
+         chrome, so it stays put while the (now useless) controls auto-hide. -->
+    <div class="fallback">
+      <TriangleAlert size={30} />
+      <p>This video can't be played here.</p>
+      <button class="open-ext" onclick={openExternally}>
+        <ExternalLink size={16} />
+        <span>Open in external player</span>
+      </button>
+    </div>
+  {/if}
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
@@ -201,6 +233,10 @@
       title="Volume"
     />
 
+    <button class="ctl" title="Open in external player" onclick={() => { openExternally(); refocus(); }}>
+      <ExternalLink size={16} />
+    </button>
+
     <button class="ctl" title={fullscreen ? "Exit fullscreen" : "Fullscreen"} onclick={() => { void toggleFullscreen(); refocus(); }}>
       {#if fullscreen}<Minimize size={16} />{:else}<Maximize size={16} />{/if}
     </button>
@@ -225,6 +261,49 @@
     object-fit: contain;
     background: var(--bg-stage);
     cursor: pointer;
+  }
+
+  /* Centered "can't decode — open externally" panel. Sits above the video
+     (which is showing nothing useful) but below the transport bar's z-index so
+     the controls stay reachable. Same pill/backdrop language as the chrome. */
+  .fallback {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 24px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(2px);
+  }
+
+  .fallback p {
+    margin: 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .open-ext {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.85);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .open-ext:hover {
+    background: var(--accent);
   }
 
   /* Transport bar: same semi-transparent dark, rounded, pill language as the

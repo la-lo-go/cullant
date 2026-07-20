@@ -248,6 +248,9 @@ export const api = {
   setSessionState: (value: string) => invoke("set_session_state", { value }),
   getFileMetadata: (fileId: number) =>
     invoke<FileMetadata>("get_file_metadata", { fileId }),
+  // Open a media file in the OS default external app (the "play in an external
+  // player" fallback for videos the in-app WebView can't decode).
+  openExternal: (fileId: number) => invoke("open_external", { fileId }),
 };
 
 // The cullant:// scheme is served as http://cullant.localhost/ on Windows and

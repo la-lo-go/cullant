@@ -299,6 +299,18 @@ impl ProjectStore for SafStore {
         Ok(())
     }
 
+    fn open_external(&self, rel: &str) -> AppResult<()> {
+        let doc = self.resolve(rel)?;
+        // Pass no MIME: the SAF provider reports the document's real type via
+        // ContentResolver.getType, which is more reliable than guessing from the
+        // extension. The Kotlin side fires an ACTION_VIEW chooser granting the
+        // picked app temporary read access to the content URI.
+        self.saf()
+            .open_document(&self.tree_uri, &doc, None)
+            .map_err(Self::err)?;
+        Ok(())
+    }
+
     fn exists(&self, rel: &str) -> AppResult<bool> {
         if rel.is_empty() {
             return Ok(true);

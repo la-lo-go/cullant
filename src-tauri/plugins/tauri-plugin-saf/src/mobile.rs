@@ -183,6 +183,27 @@ impl<R: Runtime> Saf<R> {
         Ok(res.document_id)
     }
 
+    /// Launch an Android `ACTION_VIEW` chooser so the user can open the document
+    /// in an external app (e.g. a video player the in-app WebView can't match).
+    /// Passing `mime_type = None` lets the SAF provider report the real type.
+    pub fn open_document(
+        &self,
+        tree_uri: &str,
+        document_id: &str,
+        mime_type: Option<&str>,
+    ) -> Result<()> {
+        // Kotlin resolves `{ "ok": true }`; reuse AccessResponse to decode it.
+        self.0.run_mobile_plugin::<AccessResponse>(
+            "openDocument",
+            OpenDocumentPayload {
+                tree_uri: tree_uri.to_string(),
+                document_id: document_id.to_string(),
+                mime_type: mime_type.map(str::to_string),
+            },
+        )?;
+        Ok(())
+    }
+
     /// Permanently delete a document.
     pub fn delete_document(&self, tree_uri: &str, document_id: &str) -> Result<()> {
         // Kotlin resolves `{ "ok": true }`; reuse AccessResponse to decode it.

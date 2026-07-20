@@ -122,6 +122,16 @@ pub(crate) struct DeleteDocumentPayload {
     pub document_id: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OpenDocumentPayload {
+    pub tree_uri: String,
+    pub document_id: String,
+    /// Explicit MIME to hand the external app, or `None` to let the SAF
+    /// provider report the document's real type.
+    pub mime_type: Option<String>,
+}
+
 /// Returned by create/rename/move/copy: the resulting document's id
 /// (which changes on rename/move for many providers).
 #[derive(Deserialize)]

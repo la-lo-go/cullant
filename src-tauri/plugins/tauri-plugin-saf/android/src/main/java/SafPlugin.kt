@@ -75,6 +75,13 @@ class DeleteDocumentArgs {
     lateinit var documentId: String
 }
 
+@InvokeArg
+class OpenDocumentArgs {
+    lateinit var treeUri: String
+    lateinit var documentId: String
+    var mimeType: String? = null
+}
+
 @TauriPlugin
 class SafPlugin(private val activity: Activity) : Plugin(activity) {
     private val resolver get() = activity.contentResolver
@@ -352,6 +359,33 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(res)
         } catch (e: Exception) {
             invoke.reject(e.message ?: "failed to delete document")
+        }
+    }
+
+    // Hand a document to an external app via an ACTION_VIEW chooser. The clip
+    // stays where it is (SAF content URI); the launched app gets a temporary
+    // read grant for the lifetime of that task. Used as the "open in an external
+    // player" fallback when the in-app WebView can't decode a video.
+    @Command
+    fun openDocument(invoke: Invoke) {
+        val args = invoke.parseArgs(OpenDocumentArgs::class.java)
+        try {
+            val uri = docUri(args.treeUri, args.documentId)
+            val mime = args.mimeType ?: resolver.getType(uri) ?: "*/*"
+            val view = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            val chooser = Intent.createChooser(view, null).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.startActivity(chooser)
+            val res = JSObject()
+            res.put("ok", true)
+            invoke.resolve(res)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "failed to open document")
         }
     }
 
