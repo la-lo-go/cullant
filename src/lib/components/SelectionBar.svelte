@@ -124,14 +124,25 @@
 </div>
 
 <style>
+  /* Overlaid at the top of the grid area (the parent mounts it inside the
+     relatively-positioned .grid-area), NOT in normal flow: the bar mounting or
+     unmounting mid-marquee would otherwise push every thumbnail down/up, which
+     re-maps the pointer's row hit-testing and oscillates the selection it just
+     created. A subtle shadow separates it from the thumbnails it floats over. */
   .selbar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 30;
     display: flex;
     align-items: center;
     gap: 12px;
     padding: 4px 12px;
+    box-sizing: border-box;
     background: var(--surface-2);
     border-bottom: 1px solid var(--border);
-    flex: none;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
     font-size: 12px;
     overflow-x: auto;
     white-space: nowrap;

@@ -402,12 +402,15 @@
         {/if}
       </div>
     {:else}
-      {#if session.selectedIds.size > 0 && view.mode === "grid"}
-        <SelectionBar />
-      {/if}
-
       {#if view.mode === "grid"}
         <div class="grid-area">
+          {#if session.selectedIds.size > 0}
+            <!-- Rendered as an overlay inside the (positioned) grid area, NOT in
+                 flow: the bar appearing/disappearing mid-marquee would otherwise
+                 shift every thumbnail, re-map the pointer's row hit-testing, and
+                 oscillate the selection it just created. -->
+            <SelectionBar />
+          {/if}
           {#if session.folderTreeVisible}
             <FolderTree />
           {:else if hasSubfolders}
@@ -427,10 +430,15 @@
       {:else}
         <CompareView />
       {/if}
-      <TouchActionBar
-        forceShow={touchBarVisible && view.mode !== "grid"}
-        hidden={(view.mode === "grid" && session.selectedIds.size === 0) || view.fullscreen}
-      />
+      <!-- Grid mode docks the bar as an overlay (same principle as SelectionBar:
+           appearing on the first selection must not shrink the grid and jump the
+           layout). Viewer/compare keep it in flow, as before. -->
+      <div class="touchbar-dock" class:overlay={view.mode === "grid"}>
+        <TouchActionBar
+          forceShow={touchBarVisible && view.mode !== "grid"}
+          hidden={(view.mode === "grid" && session.selectedIds.size === 0) || view.fullscreen}
+        />
+      </div>
     {/if}
   {:else}
     <div class="home" class:centered={recent.list.length === 0}>
@@ -691,6 +699,8 @@
     height: 100vh;
     height: 100dvh; /* track the real viewport across Android rotations */
     box-sizing: border-box;
+    /* Anchors the touch-bar overlay dock in grid mode (see .touchbar-dock). */
+    position: relative;
     /* Inset the whole app so nothing ever sits under the system bars or cutout,
        and zero out the --safe-* vars that edge-hugging children (touch bar,
        filmstrip…) consume. The TOP inset is deliberately left off here: the
@@ -1025,6 +1035,26 @@
 
   .grid-area :global(.viewport) {
     flex: 1;
+  }
+
+  /* Default: transparent wrapper — the touch bar stays an in-flow flex child of
+     .app (viewer/compare behavior unchanged). */
+  .touchbar-dock {
+    display: contents;
+  }
+
+  /* Grid mode: float the bar over the bottom of the grid instead of taking
+     flow space, so the first tap-selection doesn't shrink the grid and bounce
+     every thumbnail (the same jump the SelectionBar overlay fixes up top).
+     The inset offsets keep it above the system nav bar / clear of cutouts,
+     matching the padding .app applies to its in-flow children. */
+  .touchbar-dock.overlay {
+    display: block;
+    position: absolute;
+    left: var(--inset-left);
+    right: var(--inset-right);
+    bottom: var(--inset-bottom);
+    z-index: 30;
   }
 
   /* Peek tab shown at the left edge when the folder tree is collapsed. It
