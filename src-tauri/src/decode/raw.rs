@@ -90,10 +90,17 @@ impl<'a> RawSession<'a> {
                             $label,
                             img.width(),
                             img.height(),
-                            if ok { " -> ACCEPTED" } else { " (too small, keep probing)" }
+                            if ok {
+                                " -> ACCEPTED"
+                            } else {
+                                " (too small, keep probing)"
+                            }
                         );
                         if ok {
-                            return Ok(DecodedRaw { image: img, is_full: $is_full });
+                            return Ok(DecodedRaw {
+                                image: img,
+                                is_full: $is_full,
+                            });
                         }
                         // Keep the largest-so-far in case nothing is adequate.
                         let keep = match &best {
@@ -101,7 +108,13 @@ impl<'a> RawSession<'a> {
                             None => true,
                         };
                         if keep {
-                            best = Some(($label, DecodedRaw { image: img, is_full: $is_full }));
+                            best = Some((
+                                $label,
+                                DecodedRaw {
+                                    image: img,
+                                    is_full: $is_full,
+                                },
+                            ));
                         }
                     }
                     Ok(None) => {
@@ -114,9 +127,21 @@ impl<'a> RawSession<'a> {
             }};
         }
 
-        probe!("thumbnail", self.decoder.thumbnail_image(self.source, &params), false);
-        probe!("preview", self.decoder.preview_image(self.source, &params), false);
-        probe!("full(full-res)", self.decoder.full_image(self.source, &params), true);
+        probe!(
+            "thumbnail",
+            self.decoder.thumbnail_image(self.source, &params),
+            false
+        );
+        probe!(
+            "preview",
+            self.decoder.preview_image(self.source, &params),
+            false
+        );
+        probe!(
+            "full(full-res)",
+            self.decoder.full_image(self.source, &params),
+            true
+        );
 
         match best {
             Some((label, raw)) => {
@@ -180,19 +205,31 @@ fn raf_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
 fn rd_u16(b: &[u8], off: usize, le: bool) -> Option<u16> {
     let s = b.get(off..off + 2)?;
     let a = [s[0], s[1]];
-    Some(if le { u16::from_le_bytes(a) } else { u16::from_be_bytes(a) })
+    Some(if le {
+        u16::from_le_bytes(a)
+    } else {
+        u16::from_be_bytes(a)
+    })
 }
 
 fn rd_u32(b: &[u8], off: usize, le: bool) -> Option<u32> {
     let s = b.get(off..off + 4)?;
     let a = [s[0], s[1], s[2], s[3]];
-    Some(if le { u32::from_le_bytes(a) } else { u32::from_be_bytes(a) })
+    Some(if le {
+        u32::from_le_bytes(a)
+    } else {
+        u32::from_be_bytes(a)
+    })
 }
 
 fn rd_u64(b: &[u8], off: usize, le: bool) -> Option<u64> {
     let s = b.get(off..off + 8)?;
     let a: [u8; 8] = s.try_into().ok()?;
-    Some(if le { u64::from_le_bytes(a) } else { u64::from_be_bytes(a) })
+    Some(if le {
+        u64::from_le_bytes(a)
+    } else {
+        u64::from_be_bytes(a)
+    })
 }
 
 /// One scalar value (BYTE/SHORT/LONG, first element) from a 12-byte IFD entry at
@@ -201,8 +238,8 @@ fn rd_u64(b: &[u8], off: usize, le: bool) -> Option<u64> {
 fn tiff_entry_scalar(b: &[u8], e: usize, typ: u16, le: bool) -> Option<u32> {
     match typ {
         1 => b.get(e + 8).map(|&x| u32::from(x)), // BYTE
-        3 => rd_u16(b, e + 8, le).map(u32::from),  // SHORT
-        4 => rd_u32(b, e + 8, le),                 // LONG
+        3 => rd_u16(b, e + 8, le).map(u32::from), // SHORT
+        4 => rd_u32(b, e + 8, le),                // LONG
         _ => None,
     }
 }
@@ -441,7 +478,10 @@ fn cr3_walk(b: &[u8], mut pos: usize, end: usize, depth: u32, best: &mut Option<
 /// Find a JPEG SOI (`FF D8`) within a small box payload `[start, end)`.
 fn cr3_find_jpeg(b: &[u8], start: usize, end: usize) -> Option<usize> {
     let slice = b.get(start..end)?;
-    slice.windows(2).position(|w| w == [0xFF, 0xD8]).map(|p| start + p)
+    slice
+        .windows(2)
+        .position(|w| w == [0xFF, 0xD8])
+        .map(|p| start + p)
 }
 
 pub struct RawMeta {
