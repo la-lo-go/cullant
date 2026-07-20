@@ -13,6 +13,7 @@ const FILMSTRIP_SHOW_RATING_KEY = "cullant.filmstrip.showRating";
 const FILMSTRIP_SHOW_LABEL_KEY = "cullant.filmstrip.showLabel";
 const FILMSTRIP_SHOW_FLAG_KEY = "cullant.filmstrip.showFlag";
 const FILMSTRIP_SHOW_TAGS_KEY = "cullant.filmstrip.showTags";
+const DIM_QUEUED_DELETES_KEY = "cullant.dimQueuedDeletes";
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
@@ -53,6 +54,12 @@ class SettingsStore {
   filmstripShowFlag = $state<boolean>(loadBool(FILMSTRIP_SHOW_FLAG_KEY, true));
   filmstripShowTags = $state<boolean>(loadBool(FILMSTRIP_SHOW_TAGS_KEY, true));
 
+  /** Darken the thumbnails of files marked for deletion — reject flag OR
+   *  queued delete (grid + filmstrip), so a doomed photo reads at a glance
+   *  while culling. The red-X badge stays fully visible — only the photo
+   *  itself dims. */
+  dimQueuedDeletes = $state<boolean>(loadBool(DIM_QUEUED_DELETES_KEY, true));
+
   setProgressiveLoupe(on: boolean) {
     this.progressiveLoupe = on;
     save(PROGRESSIVE_LOUPE_KEY, on);
@@ -91,6 +98,11 @@ class SettingsStore {
   setFilmstripShowTags(on: boolean) {
     this.filmstripShowTags = on;
     save(FILMSTRIP_SHOW_TAGS_KEY, on);
+  }
+
+  setDimQueuedDeletes(on: boolean) {
+    this.dimQueuedDeletes = on;
+    save(DIM_QUEUED_DELETES_KEY, on);
   }
 }
 

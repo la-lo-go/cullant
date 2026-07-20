@@ -238,7 +238,12 @@
                  cells), so anchoring badges to the cell instead of this box
                  left them a variable, often-large distance from the image
                  whenever height was the slack axis. -->
-            <div class="photo" style="width:{v.photoW}px; height:{v.photoH}px">
+            <div
+              class="photo"
+              class:queued={settings.dimQueuedDeletes &&
+                (v.item.flag === -1 || session.pendingDeleteIds.has(v.item.id))}
+              style="width:{v.photoW}px; height:{v.photoH}px"
+            >
               {#if v.item.kind === 2}
                 <video src={videoUrl(v.item)} preload="metadata" muted></video>
               {:else}
@@ -472,6 +477,15 @@
     height: 100%;
     object-fit: cover;
     user-select: none;
+  }
+
+  /* Marked for deletion (reject flag or queued delete): dim the image itself,
+     not .photo — opacity on the wrapper would wash out the flag badge and
+     chips overlaid on the photo. Same treatment as VirtualGrid.svelte. */
+  .photo.queued img,
+  .photo.queued video {
+    opacity: 0.4;
+    filter: grayscale(35%);
   }
 
   /* Label-color indicator: a colored strip flush along the photo's bottom

@@ -2,6 +2,7 @@
   import { thumbUrl, videoUrl, displayDims, type ItemLite } from "../api";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
+  import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
@@ -426,6 +427,8 @@
                frame exactly (unchanged from before), cropped via object-fit. -->
           <div
             class="photo"
+            class:queued={settings.dimQueuedDeletes &&
+              (v.item.flag === -1 || session.pendingDeleteIds.has(v.item.id))}
             style={portrait && dims ? `width:auto; aspect-ratio:${dims.w}/${dims.h}` : ""}
           >
             {#if v.item.kind === 2}
@@ -660,6 +663,16 @@
     justify-content: center;
     overflow: hidden;
     border-radius: inherit;
+  }
+
+  /* Marked for deletion (reject flag or queued delete): dim the image itself,
+     not .photo — opacity on the wrapper would wash out the red-X badge (and
+     the other chips), which must stay fully readable. Same treatment as
+     Filmstrip.svelte. */
+  .photo.queued img,
+  .photo.queued video {
+    opacity: 0.4;
+    filter: grayscale(35%);
   }
 
   /* Label-color indicator: a colored strip flush along the photo's bottom
