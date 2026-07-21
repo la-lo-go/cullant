@@ -408,8 +408,21 @@
     return PULL_MAX * (1 - Math.exp(-dy / PULL_MAX));
   }
 
+  // A marquee selection (long-press armed, or a live drag/marquee) always wins
+  // over pull-to-refresh: a hold-then-drag from the top must build a selection
+  // and reach the cells below, never pull the refresh spinner.
+  function marqueeEngaged(): boolean {
+    return longPressTimer !== null || (drag?.active ?? false) || marquee !== null;
+  }
+
   function onTouchStart(e: TouchEvent) {
-    if (refreshing || e.touches.length !== 1 || !viewport || viewport.scrollTop > 0) {
+    if (
+      refreshing ||
+      marqueeEngaged() ||
+      e.touches.length !== 1 ||
+      !viewport ||
+      viewport.scrollTop > 0
+    ) {
       pulling = false;
       return;
     }
@@ -419,6 +432,14 @@
 
   function onTouchMove(e: TouchEvent) {
     if (!pulling || refreshing || !viewport) return;
+    // A marquee took over mid-gesture (the long-press fired into a selection):
+    // abandon the pull and hand the drag to the selection machinery.
+    if (marqueeEngaged()) {
+      pulling = false;
+      pullDragging = false;
+      pullY = 0;
+      return;
+    }
     const dy = e.touches[0].clientY - pullStartY;
     // A non-downward move, or the list having scrolled, ends the pull and hands
     // the gesture back to native scrolling.
