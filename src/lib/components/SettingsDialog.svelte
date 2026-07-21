@@ -460,6 +460,19 @@
     cursor: pointer;
   }
 
+  /* No lingering focus ring on the last-tapped control (checkbox / select /
+     button) — matches the app-wide button rule, extended here to the inputs
+     the settings dialog uses. */
+  input:focus,
+  input:focus-visible,
+  select:focus,
+  select:focus-visible,
+  button:focus,
+  button:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
   .text {
     display: flex;
     flex-direction: column;
