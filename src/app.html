@@ -10,6 +10,21 @@
     <!-- Tint the system status/navigation bars to match the toolbar (--surface-2)
          so the top inset strip reads as one continuous colour with the toolbar. -->
     <meta name="theme-color" content="#2c3334" />
+    <!-- Kill the focus ring on every button app-wide. On touch (Android WebView)
+         a tapped button keeps its :focus outline until another element is
+         pressed, which reads as a stray blue border. No button relies on a focus
+         style, so remove it everywhere (:focus and :focus-visible) along with the
+         tap-highlight flash. -->
+    <style>
+      button {
+        -webkit-tap-highlight-color: transparent;
+      }
+      button:focus,
+      button:focus-visible {
+        outline: none !important;
+        box-shadow: none !important;
+      }
+    </style>
     <title>Tauri + SvelteKit + Typescript App</title>
     %sveltekit.head%
   </head>
