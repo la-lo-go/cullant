@@ -635,6 +635,9 @@ class SessionStore {
     const t = this.targets();
     if (!t) return;
     this.applyStates(t.ids.map((id) => this.localGuess(id, { label })));
+    // Fast culling advances on any classification from the bars too, matching the
+    // keyboard `label()` path. No-ops outside fast culling / outside loupe-compare.
+    this.maybeAdvance();
     this.applyStates(await api.setLabel(t, label));
   }
 
