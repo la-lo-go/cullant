@@ -181,11 +181,10 @@
   .touchbar {
     display: none;
     align-items: center;
-    /* Spread the button groups across the full width, equal space between them.
-       `gap` is the minimum floor: when the groups overflow a narrow screen,
-       space-between collapses to start-alignment and the bar scrolls from the
-       left with the groups kept apart by the gap. */
-    justify-content: space-between;
+    /* Keep the button groups together and centered, with the slack split to the
+       two sides. `safe` falls back to start-alignment when the groups overflow a
+       narrow screen, so the leading ones stay reachable while it scrolls. */
+    justify-content: safe center;
     gap: 8px;
     overflow-x: auto;
     flex-wrap: nowrap;
