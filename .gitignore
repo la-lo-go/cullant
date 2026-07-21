@@ -12,8 +12,9 @@ vite.config.ts.timestamp-*
 # Affinity Designer lock files
 *~lock~
 
-# JetBrains IDE project files
+# Editor project files
 .idea/
+.vscode/
 
 # Local agent tooling (Claude Code / skills) — never part of the project
 .claude/
