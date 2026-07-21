@@ -257,9 +257,9 @@
             onchange={(e) => settings.setAutoRescanMinutes(Number(e.currentTarget.value))}
           >
             <option value={0} selected={settings.autoRescanMinutes === 0}>Off</option>
-            <option value={1} selected={settings.autoRescanMinutes === 1}>Every minute</option>
-            <option value={5} selected={settings.autoRescanMinutes === 5}>Every 5 minutes</option>
-            <option value={15} selected={settings.autoRescanMinutes === 15}>Every 15 minutes</option>
+            <option value={1} selected={settings.autoRescanMinutes === 1}>1 minute</option>
+            <option value={5} selected={settings.autoRescanMinutes === 5}>5 minutes</option>
+            <option value={15} selected={settings.autoRescanMinutes === 15}>15 minutes</option>
           </select>
         </div>
       </section>
@@ -276,6 +276,7 @@
           <Keyboard size={14} />
           <span>Keyboard shortcuts…</span>
         </button>
+        <p class="hint">Press ? anytime to see the shortcuts you have configured.</p>
       </section>
     </div>
   </div>
@@ -521,6 +522,13 @@
     width: 100%;
     min-height: 44px;
     margin-bottom: 4px;
+  }
+
+  .hint {
+    margin: 2px 2px 6px;
+    font-size: 12.5px;
+    opacity: 0.65;
+    line-height: 1.4;
   }
 
   button {
