@@ -175,7 +175,9 @@
   >
     <header>
       <h2>Commit pending actions</h2>
-      <button onclick={close}>Close</button>
+      <button class="close-x" onclick={close} aria-label="Close" title="Close">
+        <X size={18} />
+      </button>
     </header>
 
     {#if plan}
@@ -305,8 +307,13 @@
     align-items: center;
     justify-content: center;
     z-index: 100;
-    /* Keep the centered panel inside the safe area (system bars, cutout). */
-    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+    /* Guaranteed gutter on every side: the larger of the safe-area inset (system
+       bars / cutout) and the shared edge margin, so the panel never touches the
+       screen edges on mobile. The dialog then fills the padded area. */
+    padding: max(var(--inset-top), var(--dialog-edge-margin))
+      max(var(--inset-right), var(--dialog-edge-margin))
+      max(var(--inset-bottom), var(--dialog-edge-margin))
+      max(var(--inset-left), var(--dialog-edge-margin));
     box-sizing: border-box;
   }
 
@@ -316,8 +323,8 @@
     border-radius: 10px;
     padding: 16px 20px;
     width: 520px;
-    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
-    max-height: 85vh;
+    max-width: 100%;
+    max-height: 100%;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -440,6 +447,27 @@
     color: #e8e8e8;
     background-color: var(--control);
     cursor: pointer;
+  }
+
+  /* Corner dismiss: borderless icon button, ≥40px hit area for touch. */
+  .close-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+  }
+
+  .close-x:hover {
+    background: var(--hover);
+    opacity: 1;
   }
 
   footer {

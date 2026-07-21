@@ -61,8 +61,13 @@
     align-items: center;
     justify-content: center;
     z-index: 100;
-    /* Keep the centered panel inside the safe area (system bars, cutout). */
-    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
+    /* Guaranteed gutter on every side: the larger of the safe-area inset (system
+       bars / cutout) and the shared edge margin, so the panel never touches the
+       screen edges on mobile. */
+    padding: max(var(--inset-top), var(--dialog-edge-margin))
+      max(var(--inset-right), var(--dialog-edge-margin))
+      max(var(--inset-bottom), var(--dialog-edge-margin))
+      max(var(--inset-left), var(--dialog-edge-margin));
     box-sizing: border-box;
   }
 
@@ -72,7 +77,7 @@
     border-radius: 10px;
     padding: 16px 20px;
     width: 380px;
-    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
+    max-width: 100%;
     outline: none;
   }
 

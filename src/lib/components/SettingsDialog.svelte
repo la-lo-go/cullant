@@ -6,6 +6,7 @@
   import Video from "@lucide/svelte/icons/video";
   import History from "@lucide/svelte/icons/history";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import X from "@lucide/svelte/icons/x";
 
   let {
     onclose,
@@ -15,6 +16,11 @@
     /** Open the keyboard-shortcuts dialog (owned by the page). */
     onshowkeybindings: () => void;
   } = $props();
+
+  // Touch platform (Android) reaches the manual rescan via pull-to-refresh;
+  // desktop uses the title-bar menu. The auto-rescan help text reflects whichever
+  // one this device actually has.
+  const isTouch = navigator.userAgent.includes("Android");
 
   let panel = $state<HTMLDivElement | null>(null);
 
@@ -45,6 +51,9 @@
   >
     <header class="head">
       <h2>Settings</h2>
+      <button class="close-x" onclick={onclose} aria-label="Close settings" title="Close">
+        <X size={18} />
+      </button>
     </header>
 
     <div class="content">
@@ -65,9 +74,7 @@
           <span class="text">
             <span class="label">Progressive loading</span>
             <span class="description">
-              Paint the small thumbnail instantly (slightly soft for a moment) while the
-              sharp preview loads. Off: keep showing the previous photo until the new
-              preview is ready.
+              Show the thumbnail instantly while the sharp preview loads.
             </span>
           </span>
         </label>
@@ -80,8 +87,7 @@
           <span class="text">
             <span class="label">Dim thumbnails marked for deletion</span>
             <span class="description">
-              Thumbnails queued for deletion render at reduced opacity in the grid and
-              filmstrip, so rejects are easy to spot at a glance.
+              Fade rejects in the grid and filmstrip so they stand out at a glance.
             </span>
           </span>
         </label>
@@ -93,10 +99,7 @@
           <span class="card-text">
             <span class="card-title">Filmstrip badges</span>
             <span class="card-desc">
-              The grid always keeps rating/label/tag badges inside the actual photo (a
-              portrait thumbnail's letterbox gutters stay clear). The filmstrip's
-              thumbnails are smaller, so its badges may sit outside the photo instead —
-              pick which ones to show there.
+              Which badges to show on the filmstrip's small thumbnails.
             </span>
           </span>
         </header>
@@ -161,10 +164,7 @@
           <span class="text">
             <span class="label">Pregenerate video thumbnails</span>
             <span class="description">
-              Video posters are generated last — only after every photo thumbnail and
-              preview — because extracting them (via ffmpeg) is the slowest step. Off:
-              skip generating them in the background; a video's poster is still made
-              the moment you scroll to it.
+              Build video posters in the background. Off: each is made when you scroll to it.
             </span>
           </span>
         </label>
@@ -187,9 +187,7 @@
           <span class="text">
             <span class="label">Remember per project</span>
             <span class="description">
-              Reopen each project where you left off: restore the last sort order,
-              media tab, active filters and focused photo. Off: every project opens
-              with the defaults.
+              Restore each project's last sort, filters and focused photo.
             </span>
           </span>
         </label>
@@ -200,16 +198,19 @@
           <RefreshCw size={16} />
           <span class="card-text">
             <span class="card-title">Project folder</span>
-            <span class="card-desc">Keeping the catalog in sync with files added or removed outside Cullant.</span>
+            <span class="card-desc">Keep the catalog in sync with files changed outside Cullant.</span>
           </span>
         </header>
         <div class="option row">
           <span class="text">
             <span class="label">Auto-rescan interval</span>
             <span class="description">
-              How often to automatically rescan for added, removed or changed files.
-              Only runs while the folder is reachable. You can always rescan now from
-              the title-bar menu, or by pulling down the grid on touch.
+              How often to rescan for added or removed files, when the folder is reachable.
+              {#if isTouch}
+                Pull down the grid to rescan now.
+              {:else}
+                Rescan now from the title-bar menu.
+              {/if}
             </span>
           </span>
           <select
@@ -238,10 +239,6 @@
         </button>
       </section>
     </div>
-
-    <footer class="actions">
-      <button class="close" onclick={onclose}>Close</button>
-    </footer>
   </div>
 </div>
 
@@ -272,13 +269,39 @@
   }
 
   .head {
-    padding: 14px 20px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 12px 12px 20px;
     border-bottom: 1px solid var(--border);
   }
 
   h2 {
     margin: 0;
     font-size: 16px;
+    flex: 1;
+  }
+
+  /* Corner dismiss: a borderless icon button, ≥40px hit area for touch. */
+  .close-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+    cursor: pointer;
+  }
+
+  .close-x:hover {
+    background: var(--hover);
+    opacity: 1;
   }
 
   /* Scrollable body: the header and footer stay put while the category cards
@@ -327,7 +350,10 @@
 
   .card-desc {
     font-size: 12px;
-    opacity: 0.65;
+    /* Neutral, not the card-head's accent (which the icon uses) — descriptions
+       shouldn't read as colored links. */
+    color: #e8e8e8;
+    opacity: 0.55;
     line-height: 1.4;
   }
 
@@ -445,15 +471,6 @@
     margin-bottom: 4px;
   }
 
-  .actions {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-    padding: 12px 20px;
-    border-top: 1px solid var(--border);
-  }
-
   button {
     border-radius: 6px;
     border: 1px solid var(--border-strong);
@@ -467,10 +484,5 @@
 
   button:hover {
     border-color: var(--accent);
-  }
-
-  .close {
-    min-width: 96px;
-    min-height: 44px;
   }
 </style>

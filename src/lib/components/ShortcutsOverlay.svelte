@@ -6,6 +6,7 @@
     type CommandCategory,
     type CommandId,
   } from "../keyboard/keymap";
+  import X from "@lucide/svelte/icons/x";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -105,7 +106,9 @@
   >
     <header>
       <h2>Keyboard shortcuts</h2>
-      <button onclick={onclose}>Close</button>
+      <button class="close-x" onclick={onclose} aria-label="Close" title="Close">
+        <X size={18} />
+      </button>
     </header>
     <div class="sections">
       {#each sections as section}
@@ -244,14 +247,25 @@
     color: #e8e8e8;
   }
 
-  button {
-    border-radius: 6px;
-    border: 1px solid var(--border-strong);
-    padding: 4px 10px;
-    font-size: 12px;
-    font-family: inherit;
-    color: #e8e8e8;
-    background-color: var(--control);
+  /* Corner dismiss: borderless icon button, ≥40px hit area for touch. */
+  .close-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
     cursor: pointer;
+  }
+
+  .close-x:hover {
+    background: var(--hover);
+    opacity: 1;
   }
 </style>

@@ -2,6 +2,7 @@
   import { api, type TaskTag } from "../api";
   import { tags } from "../stores/tags.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import X from "@lucide/svelte/icons/x";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -70,7 +71,9 @@
   >
     <header>
       <h2>Task tags</h2>
-      <button onclick={onclose}>Close</button>
+      <button class="close-x" onclick={onclose} aria-label="Close" title="Close">
+        <X size={18} />
+      </button>
     </header>
     <p class="hint">
       Task tags mark work to do after culling (retouch, trim…). Assign a direct
@@ -227,6 +230,28 @@
 
   button:hover {
     border-color: var(--accent);
+  }
+
+  /* Corner dismiss: borderless icon button, ≥40px hit area for touch. */
+  .close-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+  }
+
+  .close-x:hover {
+    background: var(--hover);
+    border: none;
+    opacity: 1;
   }
 
   .del {

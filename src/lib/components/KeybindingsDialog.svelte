@@ -1,6 +1,7 @@
 <script lang="ts">
   import { keymap } from "../keyboard/dispatcher.svelte";
   import { COMMANDS, DEFAULT_BINDINGS, normalizeKey } from "../keyboard/keymap";
+  import X from "@lucide/svelte/icons/x";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -42,7 +43,9 @@
     <header>
       <h2>Keyboard shortcuts</h2>
       <button onclick={() => keymap.reset()}>Reset all</button>
-      <button onclick={onclose}>Close</button>
+      <button class="close-x" onclick={onclose} aria-label="Close" title="Close">
+        <X size={18} />
+      </button>
     </header>
     <p class="hint">
       Click a shortcut, then press the new key. Esc cancels. Hold Shift while rating to
@@ -145,5 +148,25 @@
     color: #e8e8e8;
     background-color: var(--control);
     cursor: pointer;
+  }
+
+  /* Corner dismiss: borderless icon button, ≥40px hit area for touch. */
+  .close-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    opacity: 0.7;
+  }
+
+  .close-x:hover {
+    background: var(--hover);
+    opacity: 1;
   }
 </style>
