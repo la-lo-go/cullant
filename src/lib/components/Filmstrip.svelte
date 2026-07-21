@@ -93,9 +93,6 @@
   // the mode is on, so the recentre effect below doesn't counter-scroll (fight)
   // the drag that is itself moving the focus.
   let lockScrollTs = 0;
-  // Debounce that snaps the centered photo to exact center once the strip stops
-  // moving (lock-carousel only).
-  let snapTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Scroll handler: track the position and, in lock-carousel mode, drive the
   // focused photo from whichever cell is centered — so moving the strip moves
@@ -111,23 +108,8 @@
         session.focusedIndex = idx;
         session.selectionAnchor = idx;
       }
-      // Snap the active cell to dead center once scrolling settles (~0.2s after
-      // the last scroll, so it waits for the carousel to actually stop).
-      if (snapTimer) clearTimeout(snapTimer);
-      snapTimer = setTimeout(snapCentered, 200);
     }
   }
-
-  function snapCentered() {
-    snapTimer = null;
-    if (!strip || !settings.lockCarousel || width === 0) return;
-    const target = Math.max(0, session.focusedIndex * CELL - width / 2 + CELL / 2);
-    if (Math.abs(strip.scrollLeft - target) > 1) strip.scrollTo({ left: target, behavior: "smooth" });
-  }
-
-  $effect(() => () => {
-    if (snapTimer) clearTimeout(snapTimer);
-  });
   // The strip div is destroyed/recreated every time the filmstrip is hidden
   // and shown again (the {#if} above swaps it for the peek button), so track
   // its identity: a freshly (re)mounted strip must always center instantly,
