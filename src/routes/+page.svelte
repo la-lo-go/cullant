@@ -33,7 +33,6 @@
   import Columns2 from "@lucide/svelte/icons/columns-2";
   import Link from "@lucide/svelte/icons/link";
   import Unlink from "@lucide/svelte/icons/unlink";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Tag from "@lucide/svelte/icons/tag";
   import Type from "@lucide/svelte/icons/type";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
@@ -55,6 +54,9 @@
   let showCloseConfirm = $state(false);
   // Set when the open project's folder/volume becomes unreachable while working.
   let folderLostMsg = $state("");
+  // Mirrors the storage watcher's last verdict, so the auto-rescan below can skip
+  // ticks while a drive is disconnected instead of probing a second time.
+  let storageOk = $state(true);
 
   // Keep the backend's video-thumbnail preference in sync with the setting.
   // Runs once on mount (pushing the persisted value) and again on every toggle,
@@ -192,6 +194,7 @@
     const check = async () => {
       try {
         const info = await api.probeStorage(proj.rootPath);
+        storageOk = info.state === "ok";
         if (info.state === "ok") {
           wasOk = true;
           folderLostMsg = ""; // reconnected → let the user carry on
@@ -208,6 +211,23 @@
     };
     void check();
     const id = setInterval(() => void check(), 4000);
+    return () => clearInterval(id);
+  });
+
+  // Periodically rescan the open project's folder for added/removed/changed
+  // files, at the interval chosen in Settings (0 = off). Only fires while the
+  // storage is reachable and no scan is already running, so a disconnected drive
+  // or an in-flight rescan is never piled onto. The rescan is fire-and-forget:
+  // its scan:* events reconcile the catalog just like the manual triggers.
+  $effect(() => {
+    const minutes = settings.autoRescanMinutes;
+    if (!catalog.project || minutes <= 0) return;
+    const id = setInterval(
+      () => {
+        if (storageOk && !catalog.scanning) void api.rescanProject();
+      },
+      minutes * 60 * 1000,
+    );
     return () => clearInterval(id);
   });
 
@@ -260,6 +280,7 @@
       onOpenNew={() => void pickProject()}
       onOpenRecent={(path) => void openProject(path)}
       onCloseProject={() => (showCloseConfirm = true)}
+      onRescan={() => void api.rescanProject()}
     />
   {/if}
   {#if catalog.project}
@@ -353,7 +374,6 @@
             <FiltersPanel />
           {/if}
         </div>
-        <button title="Rescan project folder" onclick={blurring(() => void api.rescanProject())}><RefreshCw size={14} /></button>
         <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
         <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
         <button

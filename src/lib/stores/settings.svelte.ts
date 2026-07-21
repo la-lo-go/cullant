@@ -14,11 +14,27 @@ const FILMSTRIP_SHOW_LABEL_KEY = "cullant.filmstrip.showLabel";
 const FILMSTRIP_SHOW_FLAG_KEY = "cullant.filmstrip.showFlag";
 const FILMSTRIP_SHOW_TAGS_KEY = "cullant.filmstrip.showTags";
 const DIM_QUEUED_DELETES_KEY = "cullant.dimQueuedDeletes";
+const AUTO_RESCAN_MINUTES_KEY = "cullant.autoRescanMinutes";
+
+/** Allowed auto-rescan intervals in minutes; 0 means off. Kept as a whitelist
+ *  so a stale/garbled stored value can never yield a pathological interval. */
+export const AUTO_RESCAN_CHOICES = [0, 1, 5, 15] as const;
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
     const raw = localStorage.getItem(key);
     return raw === null ? fallback : JSON.parse(raw) === true;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadChoice(key: string, choices: readonly number[], fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    const n = JSON.parse(raw);
+    return choices.includes(n) ? n : fallback;
   } catch {
     return fallback;
   }
@@ -59,6 +75,12 @@ class SettingsStore {
    *  while culling. The red-X badge stays fully visible — only the photo
    *  itself dims. */
   dimQueuedDeletes = $state<boolean>(loadBool(DIM_QUEUED_DELETES_KEY, true));
+
+  /** How often (minutes) to automatically rescan the open project's folder for
+   *  added/removed/changed files; 0 disables it. Only fires while the storage is
+   *  reachable, so a disconnected drive isn't polled. A manual rescan is always
+   *  available (title-bar menu on desktop, pull-to-refresh on mobile). */
+  autoRescanMinutes = $state<number>(loadChoice(AUTO_RESCAN_MINUTES_KEY, AUTO_RESCAN_CHOICES, 5));
 
   setProgressiveLoupe(on: boolean) {
     this.progressiveLoupe = on;
@@ -103,6 +125,11 @@ class SettingsStore {
   setDimQueuedDeletes(on: boolean) {
     this.dimQueuedDeletes = on;
     save(DIM_QUEUED_DELETES_KEY, on);
+  }
+
+  setAutoRescanMinutes(minutes: number) {
+    this.autoRescanMinutes = minutes;
+    save(AUTO_RESCAN_MINUTES_KEY, minutes);
   }
 }
 

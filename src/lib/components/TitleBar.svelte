@@ -10,6 +10,7 @@
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import LogOut from "@lucide/svelte/icons/log-out";
   import Album from "@lucide/svelte/icons/album";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Usb from "@lucide/svelte/icons/usb";
   import Network from "@lucide/svelte/icons/network";
@@ -30,10 +31,12 @@
     onOpenNew,
     onOpenRecent,
     onCloseProject,
+    onRescan,
   }: {
     onOpenNew: () => void;
     onOpenRecent: (path: string) => void;
     onCloseProject: () => void;
+    onRescan: () => void;
   } = $props();
 
   // Frameless custom chrome. Only ever mounted on desktop Windows (the parent
@@ -118,6 +121,15 @@
             {/each}
           {/if}
           <div class="sep"></div>
+          <button
+            class="item"
+            role="menuitem"
+            title="Rescan the project folder for added, removed or changed files"
+            onclick={() => choose(onRescan)}
+          >
+            <RefreshCw size={15} />
+            <span>Rescan project folder</span>
+          </button>
           <button
             class="item danger"
             role="menuitem"

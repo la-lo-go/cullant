@@ -5,6 +5,7 @@
   import Film from "@lucide/svelte/icons/film";
   import Video from "@lucide/svelte/icons/video";
   import History from "@lucide/svelte/icons/history";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
 
   let {
     onclose,
@@ -196,6 +197,35 @@
 
       <section class="card">
         <header class="card-head">
+          <RefreshCw size={16} />
+          <span class="card-text">
+            <span class="card-title">Project folder</span>
+            <span class="card-desc">Keeping the catalog in sync with files added or removed outside Cullant.</span>
+          </span>
+        </header>
+        <div class="option row">
+          <span class="text">
+            <span class="label">Auto-rescan interval</span>
+            <span class="description">
+              How often to automatically rescan for added, removed or changed files.
+              Only runs while the folder is reachable. You can always rescan now from
+              the title-bar menu, or by pulling down the grid on touch.
+            </span>
+          </span>
+          <select
+            aria-label="Auto-rescan interval"
+            onchange={(e) => settings.setAutoRescanMinutes(Number(e.currentTarget.value))}
+          >
+            <option value={0} selected={settings.autoRescanMinutes === 0}>Off</option>
+            <option value={1} selected={settings.autoRescanMinutes === 1}>Every minute</option>
+            <option value={5} selected={settings.autoRescanMinutes === 5}>Every 5 minutes</option>
+            <option value={15} selected={settings.autoRescanMinutes === 15}>Every 15 minutes</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="card">
+        <header class="card-head">
           <Keyboard size={16} />
           <span class="card-text">
             <span class="card-title">Keyboard</span>
@@ -316,6 +346,41 @@
 
   .option:hover {
     background: var(--hover);
+  }
+
+  /* A setting whose control sits inline at the right (e.g. a dropdown) rather
+     than a leading checkbox. */
+  .option.row {
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: default;
+  }
+
+  .option.row:hover {
+    background: transparent;
+  }
+
+  .option.row .text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  select {
+    flex: none;
+    min-height: 40px;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    color: #e8e8e8;
+    background-color: var(--control);
+    cursor: pointer;
+  }
+
+  select:hover {
+    border-color: var(--accent);
   }
 
   .option input {
