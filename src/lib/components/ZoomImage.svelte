@@ -238,19 +238,13 @@
       if (progressive) softTimer = setTimeout(showSoftThumb, 80);
     };
 
-    // Lock-carousel tracks the strip scroll 1:1: swap to THIS item's (instant,
-    // cached) thumb right away so the double-buffer never keeps the outgoing
-    // photo on screen through the load — which during a fast carousel scroll
-    // reads as the previous image glitching before the next one appears.
-    if (untrack(() => settings.lockCarousel)) {
-      softPreview = true;
-      displayedSrc = thumb;
-      displayedAlt = alt;
-    }
-
     if (cached) {
       // Already generated → served straight from the disk cache by the protocol
-      // (no pool work), so load it right away for instant sharpness.
+      // (no pool work), so load it right away for instant sharpness. No thumb
+      // stand-in: swapping in the sharp preview directly is what avoids the
+      // brief small/blurry flash before the full image (the previous
+      // lock-carousel instant-thumb forced that flash even when cached, and
+      // regardless of the progressive-loupe setting).
       loadPreview();
     } else {
       // Not generated yet → requesting it would enqueue an expensive decode.
@@ -814,8 +808,13 @@
   }
 
   img.fit {
-    max-width: 100%;
-    max-height: 100%;
+    /* Fill the frame and contain-fit inside it, so the soft grid-thumb stand-in
+       renders at exactly the same size the sharp preview will — max-width/height
+       alone left a small (sub-frame) thumb at its tiny natural size, so it
+       flashed smaller-then-bigger. The preview is always larger than the frame,
+       so it's unaffected. */
+    width: 100%;
+    height: 100%;
     object-fit: contain;
     user-select: none;
   }
