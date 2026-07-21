@@ -111,9 +111,10 @@
         session.focusedIndex = idx;
         session.selectionAnchor = idx;
       }
-      // Snap the active cell to dead center once scrolling settles.
+      // Snap the active cell to dead center once scrolling settles (~0.2s after
+      // the last scroll, so it waits for the carousel to actually stop).
       if (snapTimer) clearTimeout(snapTimer);
-      snapTimer = setTimeout(snapCentered, 140);
+      snapTimer = setTimeout(snapCentered, 200);
     }
   }
 
