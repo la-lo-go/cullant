@@ -27,6 +27,7 @@ export type CommandId =
   | "view.viewer"
   | "view.compare"
   | "view.back"
+  | "view.fullscreen"
   | "zoom.toggle"
   | "zoom.in"
   | "zoom.out"
@@ -90,6 +91,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "view.viewer", title: "Loupe view", category: "Views" },
   { id: "view.compare", title: "Compare view", category: "Views" },
   { id: "view.back", title: "Back to grid", category: "Views" },
+  { id: "view.fullscreen", title: "Toggle full screen", category: "Views" },
   { id: "zoom.toggle", title: "Toggle zoom", category: "Zoom" },
   { id: "zoom.in", title: "Zoom in", category: "Zoom" },
   { id: "zoom.out", title: "Zoom out", category: "Zoom" },
@@ -139,6 +141,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "view.viewer": ["e", "enter"],
   "view.compare": ["c"],
   "view.back": ["escape"],
+  "view.fullscreen": ["f"],
   "zoom.toggle": ["z", "space"],
   // Ctrl+= is the primary zoom-in; some keyboard layouts report the key as "+",
   // so bind that too. Ctrl+- zooms out.
@@ -153,7 +156,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "action.moveCopy": ["v"],
   "commit.open": ["ctrl+enter"],
   "info.toggle": ["i"],
-  "ui.toggleFilmstrip": ["f"],
+  "ui.toggleFilmstrip": [],
   "ui.toggleFolderTree": ["d"],
   "ui.toggleShortcuts": ["?"],
 };

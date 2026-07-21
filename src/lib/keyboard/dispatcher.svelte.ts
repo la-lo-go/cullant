@@ -94,6 +94,10 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       if (view.mode !== "grid") view.mode = "grid";
       else session.clearSelection();
       return;
+    case "view.fullscreen":
+      // Full screen is a loupe/compare affordance; a no-op in the grid.
+      if (view.mode !== "grid") view.toggleFullscreen();
+      return;
     case "zoom.toggle":
       if (view.mode !== "grid") view.requestZoomToggle();
       return;
@@ -130,6 +134,9 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       session.toggleShowFilmstrip();
       return;
     case "ui.toggleShortcuts":
+      // Ignore key auto-repeat: holding `?` would otherwise flip the cheat-sheet
+      // open/closed many times a second.
+      if (e?.repeat) return;
       view.shortcutsOpen = !view.shortcutsOpen;
       return;
   }
@@ -185,7 +192,11 @@ export function handleKeydown(e: KeyboardEvent) {
     e.preventDefault();
     const cmd =
       keymap.bindings.get(normalized) ?? keymap.bindings.get(normalizeKey(e, false));
-    if (cmd === "ui.toggleShortcuts" || cmd === "view.back") view.shortcutsOpen = false;
+    // Ignore `?` auto-repeat here too: a held toggle key must not close-then-
+    // (via the normal path) reopen the sheet, flickering it.
+    if ((cmd === "ui.toggleShortcuts" && !e.repeat) || cmd === "view.back") {
+      view.shortcutsOpen = false;
+    }
     return;
   }
 
