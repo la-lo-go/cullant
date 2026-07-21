@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { thumbUrl, displayDims, type ItemLite } from "../api";
+  import { api, thumbUrl, displayDims, type ItemLite } from "../api";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
@@ -381,6 +381,97 @@
       edgeRaf = 0;
     }
   }
+
+  // --- touch pull-to-refresh (mobile) ---
+  // Dragging down while already scrolled to the top reveals a spinner and, past
+  // a threshold, rescans the project folder — the same social-app gesture, so
+  // phones don't need the toolbar's rescan button (moved to the title bar on
+  // desktop). Touch-only: these listeners never fire on a mouse, so desktop is
+  // unaffected. Runs in parallel with the pointer-event selection machinery — a
+  // downward drag trips its TAP_SLOP/long-press cancellation, so it never also
+  // starts a marquee or a tap.
+  const PULL_MAX = 96; // hard cap on how far the content can be dragged
+  const PULL_THRESHOLD = 64; // release past this to trigger a rescan
+  const PULL_REST = 52; // spinner's resting offset while refreshing
+  const PULL_START_SLOP = 8; // ignore jitter this small so a tap never engages a pull
+  const MIN_SPIN_MS = 1000; // keep the spinner up at least this long
+
+  let pullY = $state(0);
+  let pullDragging = $state(false); // finger down and owning the gesture (no transition)
+  let refreshing = $state(false);
+  let pullStartY = 0;
+  let pulling = false; // gesture candidate: began at the very top
+
+  // Elastic resistance: fast at first, asymptotic toward PULL_MAX so it can't be
+  // dragged arbitrarily far and feels rubber-banded.
+  function resist(dy: number): number {
+    return PULL_MAX * (1 - Math.exp(-dy / PULL_MAX));
+  }
+
+  function onTouchStart(e: TouchEvent) {
+    if (refreshing || e.touches.length !== 1 || !viewport || viewport.scrollTop > 0) {
+      pulling = false;
+      return;
+    }
+    pulling = true;
+    pullStartY = e.touches[0].clientY;
+  }
+
+  function onTouchMove(e: TouchEvent) {
+    if (!pulling || refreshing || !viewport) return;
+    const dy = e.touches[0].clientY - pullStartY;
+    // A non-downward move, or the list having scrolled, ends the pull and hands
+    // the gesture back to native scrolling.
+    if (dy <= 0 || viewport.scrollTop > 0) {
+      pulling = false;
+      pullDragging = false;
+      pullY = 0;
+      return;
+    }
+    if (dy < PULL_START_SLOP) return; // jitter / start of a tap — don't engage yet
+    e.preventDefault(); // own the gesture: no native overscroll while pulling
+    pullDragging = true;
+    pullY = resist(dy - PULL_START_SLOP);
+  }
+
+  function onTouchEnd() {
+    if (!pulling) return;
+    pulling = false;
+    pullDragging = false;
+    if (pullY >= PULL_THRESHOLD) void doRefresh();
+    else pullY = 0;
+  }
+
+  async function doRefresh() {
+    refreshing = true;
+    pullY = PULL_REST;
+    const started = Date.now();
+    void api.rescanProject();
+    // The rescan is fire-and-forget (its scan:* events drive the catalog); hold
+    // the spinner a beat so an instant, no-op rescan still reads as a deliberate
+    // refresh rather than a flicker.
+    const wait = Math.max(0, MIN_SPIN_MS - (Date.now() - started));
+    await new Promise((r) => setTimeout(r, wait));
+    refreshing = false;
+    pullY = 0;
+  }
+
+  // Attach the touch listeners manually: touchmove must be non-passive so its
+  // preventDefault (suppressing native overscroll) actually takes effect.
+  $effect(() => {
+    const el = viewport;
+    if (!el) return;
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+  });
 </script>
 
 <div class="grid-root">
@@ -400,7 +491,11 @@
     onpointercancel={endDrag}
     ondblclick={onDblClick}
   >
-  <div class="canvas" bind:this={canvasEl} style="height:{totalRows * CELL + MARGIN_Y * 2}px">
+  <div
+    class="canvas"
+    bind:this={canvasEl}
+    style="height:{totalRows * CELL + MARGIN_Y * 2}px; transform: translateY({pullY}px); transition:{pullDragging ? 'none' : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)'}"
+  >
     {#each visible as v (v.item.id)}
       {@const selected = session.selectedIds.has(v.item.id)}
       {@const inset = selected ? SELECTED_INSET : 0}
@@ -533,6 +628,20 @@
       if (viewport) viewport.scrollTop = pos;
     }}
   />
+  {#if pullY > 0 || refreshing}
+    <div
+      class="pull-indicator"
+      class:refreshing
+      class:armed={!refreshing && pullY >= PULL_THRESHOLD}
+      style="transform: translateY({pullY}px); opacity:{Math.min(1, pullY / PULL_THRESHOLD)}; transition:{pullDragging
+        ? 'none'
+        : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s'}"
+    >
+      <span class="pull-spin" style={refreshing ? "" : `transform: rotate(${pullY * 3}deg)`}>
+        <Loader size={18} />
+      </span>
+    </div>
+  {/if}
   {#if bgStatus}
     <div class="loading-pill" role="status" aria-live="polite">
       <span class="spin"><Loader size={13} /></span>
@@ -590,6 +699,38 @@
 
   .loading-pill .spin {
     display: inline-flex;
+    animation: pill-spin 1s linear infinite;
+  }
+
+  /* Pull-to-refresh spinner: rides in the gap opened above the grid content as
+     the finger drags down (the .canvas translates with it). Anchored just above
+     the top edge so translateY(pullY) slides it into view. */
+  .pull-indicator {
+    position: absolute;
+    top: -44px;
+    left: 0;
+    right: 0;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    pointer-events: none;
+    color: #8a8a93;
+  }
+
+  /* Past the release threshold: switch to the brand accent so the user knows a
+     release will now trigger the refresh. */
+  .pull-indicator.armed,
+  .pull-indicator.refreshing {
+    color: var(--accent);
+  }
+
+  .pull-spin {
+    display: inline-flex;
+  }
+
+  .pull-indicator.refreshing .pull-spin {
     animation: pill-spin 1s linear infinite;
   }
 
