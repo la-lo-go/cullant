@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, videoUrl, type ItemLite } from "../api";
+  import { api, thumbUrl, videoUrl, type ItemLite } from "../api";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
   import Volume2 from "@lucide/svelte/icons/volume-2";
@@ -8,6 +8,7 @@
   import Minimize from "@lucide/svelte/icons/minimize";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import Film from "@lucide/svelte/icons/film";
 
   let { item }: { item: ItemLite } = $props();
 
@@ -29,6 +30,19 @@
   // fine in a native app — hence the "open externally" escape hatch. Reset per
   // clip in the item-change effect below.
   let failed = $state(false);
+
+  // Poster shown over the (paused, pre-playback) video so the clip never opens on
+  // a black frame. We paint the generated thumbnail; if it 404s — no poster was
+  // ever generated (ffmpeg absent / undecodable) — we fall back to the same
+  // film-glyph placeholder the grid uses. Cleared once playback starts, and reset
+  // per clip in the item-change effect below.
+  let showPoster = $state(true);
+  let posterFailed = $state(false);
+
+  // The volume slider is hidden until the speaker button is pressed, then pops up
+  // in a small popover above the button (touch-friendly: no permanent slider
+  // eating bar width). Closed on outside click and when the chrome auto-hides.
+  let volOpen = $state(false);
 
   // YouTube-style auto-hide of the transport chrome. `uiVisible` gates the bar's
   // opacity + the wrapper's cursor; `hovering` is true while the pointer sits on
@@ -87,8 +101,16 @@
     uiVisible = true;
     hovering = false;
     failed = false;
+    showPoster = true;
+    posterFailed = false;
+    volOpen = false;
     // Grab focus so Space toggles playback immediately, without a prior click.
     wrap?.focus();
+  });
+
+  // The volume popover has no business staying open once the chrome hides.
+  $effect(() => {
+    if (!uiVisible) volOpen = false;
   });
 
   // Hand the clip to an external app (system default player). The reliable
@@ -174,8 +196,32 @@
     preload="metadata"
     playsinline
     onclick={togglePlay}
+    onplay={() => (showPoster = false)}
     onerror={() => (failed = true)}
   ></video>
+
+  {#if showPoster && !failed}
+    <!-- Pre-playback poster so the clip doesn't open on a black frame. Passes
+         pointer events through to the video below (a tap still plays). -->
+    <div class="video-poster">
+      {#if posterFailed}
+        <div class="no-poster">
+          <Film size={48} />
+          <span>{item.ext.toUpperCase()}</span>
+        </div>
+      {:else}
+        <img src={thumbUrl(item)} alt="" onerror={() => (posterFailed = true)} />
+      {/if}
+    </div>
+  {/if}
+
+  {#if volOpen}
+    <!-- Outside-click catcher for the volume popover (same trick as the title
+         bar's menu backdrop). Sits below the transport bar so its controls stay
+         live; a click anywhere else closes the popover. -->
+    <button class="vol-backdrop" aria-label="Close volume" onclick={() => (volOpen = false)}
+    ></button>
+  {/if}
 
   {#if failed}
     <!-- Shown when the WebView can't decode the clip. Not part of the transport
@@ -217,21 +263,30 @@
 
     <span class="time dur">{fmt(duration)}</span>
 
-    <button class="ctl" title={muted ? "Unmute" : "Mute"} onclick={() => { toggleMute(); refocus(); }}>
-      {#if muted || volume === 0}<VolumeX size={16} />{:else}<Volume2 size={16} />{/if}
-    </button>
-
-    <input
-      class="vol"
-      type="range"
-      min="0"
-      max="1"
-      step="0.01"
-      value={muted ? 0 : volume}
-      oninput={(e) => { volume = e.currentTarget.valueAsNumber; muted = volume === 0; }}
-      onchange={refocus}
-      title="Volume"
-    />
+    <div class="vol-wrap">
+      {#if volOpen}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="vol-popover" onpointerenter={() => { hovering = true; }} onpointerleave={() => { hovering = false; }}>
+          <button class="ctl" title={muted ? "Unmute" : "Mute"} onclick={() => { toggleMute(); refocus(); }}>
+            {#if muted || volume === 0}<VolumeX size={16} />{:else}<Volume2 size={16} />{/if}
+          </button>
+          <input
+            class="vol"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value={muted ? 0 : volume}
+            oninput={(e) => { volume = e.currentTarget.valueAsNumber; muted = volume === 0; }}
+            onchange={refocus}
+            title="Volume"
+          />
+        </div>
+      {/if}
+      <button class="ctl" title="Volume" aria-label="Volume" onclick={() => { volOpen = !volOpen; refocus(); }}>
+        {#if muted || volume === 0}<VolumeX size={16} />{:else}<Volume2 size={16} />{/if}
+      </button>
+    </div>
 
     <button class="ctl" title="Open in external player" onclick={() => { openExternally(); refocus(); }}>
       <ExternalLink size={16} />
@@ -384,10 +439,83 @@
     cursor: pointer;
   }
 
-  .vol {
+  /* Pre-playback poster over the video. Mirrors the video's own contain-fit on
+     the same dark stage, so swapping poster→frame is seamless. Click-through so a
+     tap on the frame still starts playback. */
+  .video-poster {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-stage);
+    pointer-events: none;
+  }
+
+  .video-poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+
+  /* No poster was ever generated — same film-glyph placeholder as the grid. */
+  .no-poster {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #8a8a93;
+    user-select: none;
+  }
+
+  .no-poster span {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+
+  /* Anchors the volume popover above the speaker button. */
+  .vol-wrap {
+    position: relative;
     flex: 0 0 auto;
-    width: 72px;
-    height: 12px;
+    display: inline-flex;
+  }
+
+  .vol-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    border: none;
+    background: transparent;
+    cursor: default;
+  }
+
+  /* Floating volume panel: pops up centered above the speaker button, above the
+     transport bar's own z-index so it's never clipped by the bar. */
+  .vol-popover {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 8px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(6px);
+  }
+
+  /* Vertical slider (modern writing-mode approach; Android WebView is Chromium). */
+  .vol {
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 12px;
+    height: 90px;
     margin: 0;
     accent-color: var(--accent);
     cursor: pointer;
