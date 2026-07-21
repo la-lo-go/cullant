@@ -222,6 +222,17 @@
             {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
           {/if}
         </button>
+        <button
+          class="seg"
+          class:active={catalog.sort === "size"}
+          title="Sort by file size (click again to reverse)"
+          onclick={() => void catalog.setSort("size")}
+        >
+          <span>Size</span>
+          {#if catalog.sort === "size"}
+            {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
+          {/if}
+        </button>
       </div>
     </section>
   {/if}

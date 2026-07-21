@@ -158,7 +158,7 @@ export interface CommitOutcome {
   errorSamples: string[];
 }
 
-export type SortKey = "capture" | "name";
+export type SortKey = "capture" | "name" | "size";
 export type MediaTab = "photos" | "videos";
 
 export interface ScanProgress {

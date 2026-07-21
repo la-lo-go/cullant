@@ -40,6 +40,7 @@ pub enum SortKey {
     #[default]
     Capture,
     Name,
+    Size,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -144,6 +145,7 @@ pub fn query_items(
         let order = match sort {
             SortKey::Capture => format!("COALESCE(capture_time, mtime) {dir}, rel_path {dir}"),
             SortKey::Name => format!("rel_path {dir}"),
+            SortKey::Size => format!("f.size {dir}, rel_path {dir}"),
         };
         let sql = format!(
             "SELECT f.id, f.group_id, f.kind, f.rel_path, f.basename, f.ext, f.mtime,
