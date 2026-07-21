@@ -112,7 +112,7 @@
                 title={p.storage.state === "disconnected" && p.storage.volumeName
                   ? `Not connected — ${p.storage.volumeName}`
                   : p.path}
-                disabled={p.storage.state === "notFound"}
+                disabled={p.storage.state !== "ok"}
                 onclick={() => choose(() => onOpenRecent(p.path))}
               >
                 <RecentIcon size={15} />
@@ -300,8 +300,12 @@
     background: var(--hover);
   }
 
+  /* Disabled rows (a recent project whose drive is disconnected or missing):
+     an explicitly darker text/icon colour so it plainly reads as unavailable —
+     dimming via opacity over the dark menu would make it fade lighter, not
+     darker, which is the opposite of what's wanted. */
   .item:disabled {
-    opacity: 0.4;
+    color: #5d5d64;
     cursor: default;
   }
 
