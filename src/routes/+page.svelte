@@ -47,8 +47,26 @@
 
   const REPO_URL = "https://github.com/la-lo-go/cullant";
 
-  // Desktop opt-in for the touch action bar (always shown on touch devices).
-  let touchBarVisible = $state(false);
+  // Compare/loupe action bar: default visible, and remember the user's last
+  // toggle across sessions. (It only ever renders in loupe/compare — see the
+  // `view.mode !== "grid"` gate on <TouchActionBar>.)
+  const TOUCHBAR_KEY = "cullant.touchBarVisible";
+  function loadTouchBarVisible(): boolean {
+    try {
+      const raw = localStorage.getItem(TOUCHBAR_KEY);
+      return raw === null ? true : JSON.parse(raw) === true;
+    } catch {
+      return true;
+    }
+  }
+  let touchBarVisible = $state(loadTouchBarVisible());
+  $effect(() => {
+    try {
+      localStorage.setItem(TOUCHBAR_KEY, JSON.stringify(touchBarVisible));
+    } catch {
+      // persistence is best-effort
+    }
+  });
   let showKeybindings = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
@@ -798,7 +816,10 @@
      center sit after left rather than truly mid-viewport, but there's no
      third zone competing for that row's space); the right zone claims a full
      row of its own (flex-basis 100% forces the wrap) and wraps its own
-     buttons across as many further rows as it needs. */
+     buttons across as many further rows as it needs. `space-between` then
+     spreads those buttons edge-to-edge, filling the row's free space as the
+     gaps between them (with `gap` as the minimum floor) — one row when they
+     fit, every wrapped row likewise balanced when they don't. */
   @media (max-width: 720px) {
     .toolbar {
       flex-wrap: wrap;
@@ -806,7 +827,7 @@
     }
     .toolbar-right {
       flex: 1 1 100%;
-      justify-content: flex-start;
+      justify-content: space-between;
     }
     /* The Photos/Videos pill's 1px border + 2px padding inset its content, so it
        reads as ~3px right of the flush buttons that wrap onto the row below.
