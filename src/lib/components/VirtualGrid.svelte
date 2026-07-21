@@ -637,7 +637,10 @@
         ? 'none'
         : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s'}"
     >
-      <span class="pull-spin" style={refreshing ? "" : `transform: rotate(${pullY * 3}deg)`}>
+      <!-- Static while pulling; the spin animation begins only on release (the
+           `refreshing` class), so it never snaps a pull-proportional angle back
+           to zero at the moment the rescan fires. -->
+      <span class="pull-spin">
         <Loader size={18} />
       </span>
     </div>
