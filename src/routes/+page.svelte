@@ -88,8 +88,10 @@
    * Unified "back" action shared by desktop and Android. Hierarchy:
    *   1. If any modal/overlay is open, close the top-most one (and stop).
    *   2. Else if in loupe/compare, return to the grid.
-   *   3. Else (grid, nothing open) treat it as "close the project" and open the
-   *      close-project confirmation. Backing out of THAT dialog hits rule 1.
+   *   3. Else if items are selected in the grid, clear the selection.
+   *   4. Else (grid, nothing open, nothing selected) treat it as "close the
+   *      project" and open the close-project confirmation. Backing out of THAT
+   *      dialog hits rule 1.
    */
   function goBack() {
     // Top-most first, matching the visual stacking order of the dialogs below.
@@ -132,6 +134,13 @@
     }
     if (view.mode !== "grid") {
       view.mode = "grid";
+      return;
+    }
+    // A selection is itself a "state" to back out of: clear it before the app
+    // treats back as "leave the project" (mirrors Esc via the keyboard
+    // dispatcher's view.back).
+    if (session.selectedIds.size > 0) {
+      session.clearSelection();
       return;
     }
     // At the grid root: offer to close the project. On the welcome screen
