@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, thumbUrl, videoUrl, type ItemLite } from "../api";
+  import { api, previewUrl, videoUrl, type ItemLite } from "../api";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
   import Volume2 from "@lucide/svelte/icons/volume-2";
@@ -126,10 +126,6 @@
     else video.pause();
   }
 
-  function toggleMute() {
-    muted = !muted;
-  }
-
   async function toggleFullscreen() {
     if (!wrap) return;
     if (document.fullscreenElement) await document.exitFullscreen();
@@ -210,7 +206,7 @@
           <span>{item.ext.toUpperCase()}</span>
         </div>
       {:else}
-        <img src={thumbUrl(item)} alt="" onerror={() => (posterFailed = true)} />
+        <img src={previewUrl(item)} alt="" onerror={() => (posterFailed = true)} />
       {/if}
     </div>
   {/if}
@@ -267,9 +263,6 @@
       {#if volOpen}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="vol-popover" onpointerenter={() => { hovering = true; }} onpointerleave={() => { hovering = false; }}>
-          <button class="ctl" title={muted ? "Unmute" : "Mute"} onclick={() => { toggleMute(); refocus(); }}>
-            {#if muted || volume === 0}<VolumeX size={16} />{:else}<Volume2 size={16} />{/if}
-          </button>
           <input
             class="vol"
             type="range"
