@@ -15,6 +15,8 @@ const FILMSTRIP_SHOW_FLAG_KEY = "cullant.filmstrip.showFlag";
 const FILMSTRIP_SHOW_TAGS_KEY = "cullant.filmstrip.showTags";
 const DIM_QUEUED_DELETES_KEY = "cullant.dimQueuedDeletes";
 const AUTO_RESCAN_MINUTES_KEY = "cullant.autoRescanMinutes";
+const FAST_CULLING_KEY = "cullant.fastCulling";
+const LOCK_CAROUSEL_KEY = "cullant.lockCarousel";
 
 /** Allowed auto-rescan intervals in minutes; 0 means off. Kept as a whitelist
  *  so a stale/garbled stored value can never yield a pathological interval. */
@@ -82,6 +84,16 @@ class SettingsStore {
    *  available (title-bar menu on desktop, pull-to-refresh on mobile). */
   autoRescanMinutes = $state<number>(loadChoice(AUTO_RESCAN_MINUTES_KEY, AUTO_RESCAN_CHOICES, 5));
 
+  /** Fast culling: in the loupe/compare views, any classification (rating, flag,
+   *  label, tag) auto-advances to the next photo — no Caps Lock needed. Off by
+   *  default; the grid is never affected. */
+  fastCulling = $state<boolean>(loadBool(FAST_CULLING_KEY, false));
+
+  /** Lock the filmstrip to the shown photo: scrolling the strip moves the loupe
+   *  to whichever cell is centered (a carousel), instead of scrolling
+   *  independently of the selection. Off by default. */
+  lockCarousel = $state<boolean>(loadBool(LOCK_CAROUSEL_KEY, false));
+
   setProgressiveLoupe(on: boolean) {
     this.progressiveLoupe = on;
     save(PROGRESSIVE_LOUPE_KEY, on);
@@ -130,6 +142,16 @@ class SettingsStore {
   setAutoRescanMinutes(minutes: number) {
     this.autoRescanMinutes = minutes;
     save(AUTO_RESCAN_MINUTES_KEY, minutes);
+  }
+
+  setFastCulling(on: boolean) {
+    this.fastCulling = on;
+    save(FAST_CULLING_KEY, on);
+  }
+
+  setLockCarousel(on: boolean) {
+    this.lockCarousel = on;
+    save(LOCK_CAROUSEL_KEY, on);
   }
 }
 

@@ -578,7 +578,11 @@ class SessionStore {
   private maybeAdvance(event?: KeyboardEvent) {
     const caps = event?.getModifierState("CapsLock") ?? false;
     const shift = event?.shiftKey ?? false;
-    const advance = (caps || this.autoAdvancePref) !== shift; // XOR: shift inverts
+    // Fast culling: in the loupe/compare views every classification jumps to the
+    // next photo, no Caps Lock needed. Folds into the same XOR, so Shift can
+    // still hold position for a one-off. The grid is never affected.
+    const fast = settings.fastCulling && view.mode !== "grid";
+    const advance = (caps || this.autoAdvancePref || fast) !== shift; // XOR: shift inverts
     if (advance) this.moveFocus(1);
   }
 

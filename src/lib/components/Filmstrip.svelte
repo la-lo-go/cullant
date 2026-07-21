@@ -89,6 +89,27 @@
   const RAPID_STEP_MS = 180;
   let lastRecentre = 0;
   let hasCentered = false;
+  // Lock-carousel: `performance.now()` of the last scroll the user drove while
+  // the mode is on, so the recentre effect below doesn't counter-scroll (fight)
+  // the drag that is itself moving the focus.
+  let lockScrollTs = 0;
+
+  // Scroll handler: track the position and, in lock-carousel mode, drive the
+  // focused photo from whichever cell is centered — so moving the strip moves
+  // the loupe. Independent scrolling (mode off) just tracks the position.
+  function onStripScroll() {
+    if (!strip) return;
+    scrollLeft = strip.scrollLeft;
+    if (settings.lockCarousel && width > 0 && items.length > 0) {
+      lockScrollTs = performance.now();
+      const centered = Math.round((scrollLeft + width / 2 - CELL / 2) / CELL);
+      const idx = Math.max(0, Math.min(items.length - 1, centered));
+      if (idx !== session.focusedIndex) {
+        session.focusedIndex = idx;
+        session.selectionAnchor = idx;
+      }
+    }
+  }
   // The strip div is destroyed/recreated every time the filmstrip is hidden
   // and shown again (the {#if} above swaps it for the peek button), so track
   // its identity: a freshly (re)mounted strip must always center instantly,
@@ -100,7 +121,16 @@
       lastStripEl = strip;
       hasCentered = false;
     }
-    const target = Math.max(0, session.focusedIndex * CELL - width / 2 + CELL / 2);
+    const focused = session.focusedIndex; // tracked for reactivity
+    // In lock-carousel mode a focus change that came from the user's own strip
+    // scroll must not trigger a counter-scroll (it would fight the drag). A focus
+    // change from elsewhere (keyboard nav) still recentres, since no recent
+    // scroll set lockScrollTs.
+    if (settings.lockCarousel && performance.now() - lockScrollTs < 250) {
+      hasCentered = true;
+      return;
+    }
+    const target = Math.max(0, focused * CELL - width / 2 + CELL / 2);
     const now = performance.now();
     const rapid = now - lastRecentre < RAPID_STEP_MS;
     lastRecentre = now;
@@ -217,7 +247,7 @@
       id="filmstrip-scroll"
       bind:this={strip}
       bind:clientWidth={width}
-      onscroll={() => strip && (scrollLeft = strip.scrollLeft)}
+      onscroll={onStripScroll}
     >
       <div class="canvas" style="width:{items.length * CELL}px">
         {#each visible as v (v.item.id)}

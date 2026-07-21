@@ -6,6 +6,7 @@
   import Video from "@lucide/svelte/icons/video";
   import History from "@lucide/svelte/icons/history";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Zap from "@lucide/svelte/icons/zap";
   import X from "@lucide/svelte/icons/x";
 
   let {
@@ -88,6 +89,44 @@
             <span class="label">Dim thumbnails marked for deletion</span>
             <span class="description">
               Fade rejects in the grid and filmstrip so they stand out at a glance.
+            </span>
+          </span>
+        </label>
+      </section>
+
+      <section class="card">
+        <header class="card-head">
+          <Zap size={16} />
+          <span class="card-text">
+            <span class="card-title">Culling</span>
+            <span class="card-desc">Faster keyboard/touch culling in the loupe and compare views.</span>
+          </span>
+        </header>
+        <label class="option">
+          <input
+            type="checkbox"
+            checked={settings.fastCulling}
+            onchange={(e) => settings.setFastCulling(e.currentTarget.checked)}
+          />
+          <span class="text">
+            <span class="label">Fast culling</span>
+            <span class="description">
+              In the loupe and compare views, any rating, flag, label or tag jumps to the
+              next photo automatically. Hold Shift to stay put.
+            </span>
+          </span>
+        </label>
+        <label class="option">
+          <input
+            type="checkbox"
+            checked={settings.lockCarousel}
+            onchange={(e) => settings.setLockCarousel(e.currentTarget.checked)}
+          />
+          <span class="text">
+            <span class="label">Lock carousel</span>
+            <span class="description">
+              Scrolling the filmstrip moves the loupe to the centered photo, instead of
+              scrolling on its own.
             </span>
           </span>
         </label>
