@@ -238,6 +238,16 @@
       if (progressive) softTimer = setTimeout(showSoftThumb, 80);
     };
 
+    // Lock-carousel tracks the strip scroll 1:1: swap to THIS item's (instant,
+    // cached) thumb right away so the double-buffer never keeps the outgoing
+    // photo on screen through the load — which during a fast carousel scroll
+    // reads as the previous image glitching before the next one appears.
+    if (untrack(() => settings.lockCarousel)) {
+      softPreview = true;
+      displayedSrc = thumb;
+      displayedAlt = alt;
+    }
+
     if (cached) {
       // Already generated → served straight from the disk cache by the protocol
       // (no pool work), so load it right away for instant sharpness.
