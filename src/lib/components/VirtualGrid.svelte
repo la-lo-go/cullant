@@ -391,8 +391,12 @@
       const tap = touchTap;
       touchTap = null;
       cancelLongPress();
-      if (e.type !== "pointercancel" && !tap.moved && tap.onCell) {
-        if (session.selectedIds.size > 0) {
+      if (e.type !== "pointercancel" && !tap.moved) {
+        if (!tap.onCell) {
+          // A clean tap on empty grid space clears the whole selection, matching
+          // the desktop empty-space click (which resolves to an empty marquee).
+          session.clearSelection();
+        } else if (session.selectedIds.size > 0) {
           // A selection is already active (started via long-press): taps toggle
           // membership instead of opening, so you can build a multi-selection one
           // tap at a time.
