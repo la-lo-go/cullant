@@ -464,16 +464,21 @@ fn run_moves_copies(
                     let pending_id = p.id;
                     if action_i == 1 {
                         let new_rel = dest_rel.clone();
+                        // One transaction so a crash cannot leave the new rel_path
+                        // recorded while the stale pending move row survives (which
+                        // would resurface as a bogus pending action next preview).
                         run.db.call(move |conn| {
+                            let tx = conn.transaction()?;
                             let dir = new_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                            conn.execute(
+                            tx.execute(
                                 "UPDATE files SET rel_path = ?2, dir = ?3 WHERE id = ?1",
                                 params![file_id, new_rel, dir],
                             )?;
-                            conn.execute(
+                            tx.execute(
                                 "DELETE FROM pending_actions WHERE id = ?1",
                                 params![pending_id],
                             )?;
+                            tx.commit()?;
                             Ok(())
                         })?;
                     } else {
