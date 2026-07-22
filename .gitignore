@@ -19,3 +19,6 @@ vite.config.ts.timestamp-*
 # Local agent tooling (Claude Code / skills) — never part of the project
 .claude/
 .agents/
+
+# Adversarial review run artifacts (ledger, reports, backlog)
+.cullant-review/
