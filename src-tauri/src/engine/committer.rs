@@ -328,10 +328,12 @@ fn run_deletes(
     mode: DeletionMode,
 ) -> AppResult<()> {
     for p in deletes {
-        let mut result: Result<String, String> = if run.store.exists(&p.rel_path).unwrap_or(false) {
-            delete_via_store(run.store, &p.rel_path, mode).map_err(|e| e.to_string())
-        } else {
-            Err("file missing on disk".into())
+        let mut result: Result<String, String> = match run.store.exists(&p.rel_path) {
+            Ok(true) => delete_via_store(run.store, &p.rel_path, mode).map_err(|e| e.to_string()),
+            Ok(false) => Err("file missing on disk".into()),
+            // A real access error (e.g. a disconnected network project folder)
+            // must not masquerade as "file missing on disk".
+            Err(e) => Err(format!("cannot access file: {e}")),
         };
         // A photo's sidecar travels with it — but a RAW+JPEG pair shares one
         // sidecar (IMG.CR3 and IMG.JPG both map to IMG.xmp). Deleting only one
