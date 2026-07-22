@@ -215,6 +215,39 @@ pub fn toggle(db: &Arc<Db>, targets: Targets, tag_id: i64) -> AppResult<Vec<TagC
     })
 }
 
+/// Remove EVERY task tag from the targets (with group fan-out). Returns one
+/// `TagChange { tagged: false }` per removed pairing, so the UI drops them the
+/// same way it applies a toggle-off. A file with no tags contributes nothing.
+pub fn clear(db: &Arc<Db>, targets: Targets) -> AppResult<Vec<TagChange>> {
+    db.call(move |conn| {
+        let tx = conn.transaction()?;
+        let ids = super::culling::expand_targets(&tx, &targets)?;
+        let mut changes = Vec::new();
+        {
+            let mut sel = tx.prepare_cached("SELECT tag_id FROM file_tags WHERE file_id = ?1")?;
+            let mut del = tx.prepare_cached("DELETE FROM file_tags WHERE file_id = ?1")?;
+            for id in &ids {
+                let tag_ids: Vec<i64> = sel
+                    .query_map(params![id], |r| r.get(0))?
+                    .collect::<Result<_, _>>()?;
+                if tag_ids.is_empty() {
+                    continue;
+                }
+                del.execute(params![id])?;
+                for tag_id in tag_ids {
+                    changes.push(TagChange {
+                        file_id: *id,
+                        tag_id,
+                        tagged: false,
+                    });
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(changes)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,5 +309,70 @@ mod tests {
         .unwrap();
         assert_eq!(removed.len(), 2);
         assert!(removed.iter().all(|c| !c.tagged));
+    }
+
+    #[test]
+    fn clear_removes_every_tag_with_fanout() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("A.cr3"), b"raw").unwrap();
+        fs::write(root.join("A.jpg"), b"jpg").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+
+        let all = list(&db).unwrap();
+        let retouch = all.iter().find(|t| t.name == "Retouch").unwrap();
+        let grade = all.iter().find(|t| t.name == "Color grade").unwrap();
+        let raw_id: i64 = db
+            .call(|c| Ok(c.query_row("SELECT id FROM files WHERE ext='cr3'", [], |r| r.get(0))?))
+            .unwrap();
+        let pair = Targets {
+            ids: vec![raw_id],
+            as_groups: true,
+        };
+
+        // Apply two tags across the pair (fan-out → both members).
+        toggle(
+            &db,
+            Targets {
+                ids: vec![raw_id],
+                as_groups: true,
+            },
+            retouch.id,
+        )
+        .unwrap();
+        toggle(
+            &db,
+            Targets {
+                ids: vec![raw_id],
+                as_groups: true,
+            },
+            grade.id,
+        )
+        .unwrap();
+        let before: i64 = db
+            .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM file_tags", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(before, 4, "2 tags × 2 members");
+
+        // Clearing the pair drops every pairing and reports each removal.
+        let changes = clear(&db, pair).unwrap();
+        assert_eq!(changes.len(), 4);
+        assert!(changes.iter().all(|c| !c.tagged));
+        let after: i64 = db
+            .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM file_tags", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(after, 0);
+
+        // Clearing again is a no-op (nothing to remove, nothing reported).
+        assert!(clear(
+            &db,
+            Targets {
+                ids: vec![raw_id],
+                as_groups: true
+            }
+        )
+        .unwrap()
+        .is_empty());
     }
 }

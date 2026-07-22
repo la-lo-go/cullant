@@ -57,3 +57,14 @@ pub fn toggle_task_tag(
     let _ = app.emit("filetags:changed", &changes);
     Ok(changes)
 }
+
+#[tauri::command]
+pub fn clear_task_tags(
+    targets: Targets,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<TagChange>> {
+    let changes = tags::clear(&project_db(&state)?, targets)?;
+    let _ = app.emit("filetags:changed", &changes);
+    Ok(changes)
+}

@@ -234,6 +234,7 @@ export const api = {
   deleteTaskTag: (tagId: number) => invoke("delete_task_tag", { tagId }),
   toggleTaskTag: (targets: Targets, tagId: number) =>
     invoke<TagChange[]>("toggle_task_tag", { targets, tagId }),
+  clearTaskTags: (targets: Targets) => invoke<TagChange[]>("clear_task_tags", { targets }),
   enqueueAction: (
     targets: Targets,
     action: ActionKind,

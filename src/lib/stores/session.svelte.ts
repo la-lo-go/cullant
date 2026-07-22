@@ -641,6 +641,23 @@ class SessionStore {
     this.applyStates(await api.setLabel(t, label));
   }
 
+  /** Wipe ALL classification off the current targets in one action: rating,
+   *  flag, color label and every task tag. Clearing the flag also unqueues the
+   *  delete a reject implies (the same reject-flag = queued-delete invariant the
+   *  `flag()` choke point maintains). Never auto-advances — a reset is not a
+   *  cull step. */
+  async clearClassification() {
+    const t = this.targets();
+    if (!t) return;
+    this.applyStates(t.ids.map((id) => this.localGuess(id, { rating: 0, flag: 0, label: null })));
+    this.applyStates(await api.setRating(t, 0));
+    this.applyStates(await api.setFlag(t, 0));
+    this.applyStates(await api.setLabel(t, null));
+    await api.removePendingForFiles(t, "delete");
+    tags.applyChanges(await api.clearTaskTags(t));
+    await this.refreshPending();
+  }
+
   /** Toggle a task tag on the focused photo (fan-out included). */
   async toggleTag(tagId: number, event?: KeyboardEvent) {
     const t = this.targets();

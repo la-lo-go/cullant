@@ -248,6 +248,7 @@ pub fn run() {
             commands::tags::update_task_tag,
             commands::tags::delete_task_tag,
             commands::tags::toggle_task_tag,
+            commands::tags::clear_task_tags,
             commands::actions::enqueue_action,
             commands::actions::remove_pending,
             commands::actions::remove_pending_for_files,

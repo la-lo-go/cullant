@@ -4,6 +4,7 @@
   import { tags } from "../stores/tags.svelte";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
+  import Eraser from "@lucide/svelte/icons/eraser";
 
   const n = $derived(session.selectedIds.size);
 
@@ -136,6 +137,17 @@
       {/each}
     </div>
   {/if}
+
+  <div class="group">
+    <button
+      class="btn"
+      title="Clear all classification (rating, flag, label, tags)"
+      aria-label="Clear all classification"
+      onclick={act(() => session.clearClassification())}
+    >
+      <Eraser size={15} />
+    </button>
+  </div>
 </div>
 
 <style>

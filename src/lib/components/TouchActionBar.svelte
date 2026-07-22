@@ -10,6 +10,7 @@
   import Star from "@lucide/svelte/icons/star";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
+  import Eraser from "@lucide/svelte/icons/eraser";
 
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
   // opt-in: the parent flips `forceShow` from a toolbar toggle. `hidden` lets
@@ -194,6 +195,17 @@
       {/each}
     </div>
   {/if}
+
+  <div class="group clear">
+    <button
+      class="btn"
+      title="Clear all classification (rating, flag, label, tags)"
+      aria-label="Clear all classification"
+      onclick={act(() => session.clearClassification())}
+    >
+      <Eraser size={20} />
+    </button>
+  </div>
 </div>
 
 <style>
