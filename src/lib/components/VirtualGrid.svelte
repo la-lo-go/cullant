@@ -450,11 +450,22 @@
     return PULL_MAX * (1 - Math.exp(-dy / PULL_MAX));
   }
 
-  // A marquee selection (long-press armed, or a live drag/marquee) always wins
-  // over pull-to-refresh: a hold-then-drag from the top must build a selection
-  // and reach the cells below, never pull the refresh spinner.
+  // Only an ACTIVE marquee suppresses pull-to-refresh: a long-press that already
+  // fired into a selection (`drag.active`), or a live marquee. That is the
+  // "held the finger still long enough to start selecting, now dragging onto the
+  // cells below" case that must win over a pull.
+  //
+  // A merely PENDING `longPressTimer` must NOT count here. It is armed on every
+  // touch — including the first frames of an ordinary pull-down — and the pull
+  // engages (8px) before the timer is cancelled (>10px of movement), so testing
+  // it aborted the pull on its very first move and `pulling` never recovered.
+  // A genuine pull cancels the pending long-press itself (onPointerMove past
+  // TAP_SLOP), so it can never turn into a marquee; a genuine selection only
+  // reaches "dragging onto the cells below" after the long-press has fired, when
+  // `drag.active` is already true. So `drag.active` is the correct, sufficient
+  // signal, and the pending-timer term merely broke the pull entirely.
   function marqueeEngaged(): boolean {
-    return longPressTimer !== null || (drag?.active ?? false) || marquee !== null;
+    return (drag?.active ?? false) || marquee !== null;
   }
 
   function onTouchStart(e: TouchEvent) {
