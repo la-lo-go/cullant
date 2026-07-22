@@ -432,9 +432,9 @@
   // unaffected. Runs in parallel with the pointer-event selection machinery — a
   // downward drag trips its TAP_SLOP/long-press cancellation, so it never also
   // starts a marquee or a tap.
-  const PULL_MAX = 96; // hard cap on how far the content can be dragged
-  const PULL_THRESHOLD = 64; // release past this to trigger a rescan
-  const PULL_REST = 52; // spinner's resting offset while refreshing
+  const PULL_MAX = 120; // hard cap on how far the content can be dragged
+  const PULL_THRESHOLD = 48; // release past this to trigger a rescan
+  const PULL_REST = 44; // spinner's resting offset while refreshing
   const PULL_START_SLOP = 8; // ignore jitter this small so a tap never engages a pull
   const MIN_SPIN_MS = 1000; // keep the spinner up at least this long
 
@@ -725,6 +725,11 @@
     display: flex;
     min-height: 0;
     min-width: 0;
+    /* Clip the pull-to-refresh spinner (anchored at top:-44px) to the grid area
+       so its portion above the grid's top edge stays hidden under the toolbar —
+       it appears to emerge from beneath the header instead of over it. The
+       OverlayScrollbar and loading-pill both sit within these bounds. */
+    overflow: hidden;
   }
 
   .viewport {
