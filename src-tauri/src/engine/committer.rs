@@ -41,6 +41,14 @@ pub struct CommitPlan {
     pub deletion_mode: DeletionMode,
     pub conflicts: Vec<String>,
     pub plan_hash: String,
+    // Per-section digests. A single-section commit (the hold-to-run buttons)
+    // validates only its own section against the current preview, so executing
+    // one section never invalidates the others' hashes the way the whole-plan
+    // `plan_hash` would.
+    pub deletes_hash: String,
+    pub moves_hash: String,
+    pub copies_hash: String,
+    pub xmp_hash: String,
 }
 
 #[derive(Serialize, Clone)]
@@ -179,6 +187,29 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
 
     let xmp = xmp_dirty_photos(db)?;
 
+    // Per-section digests. The delete section folds in the deletion mode (it
+    // changes what the commit does), so switching mode re-previews and refreshes
+    // the hold-to-run hash the dialog holds.
+    let deletes_hash = {
+        let mut h = Xxh3::new();
+        for p in &deletes {
+            h.update(format!("{}:{}", p.id, p.file_id).as_bytes());
+        }
+        h.update(format!("{deletion_mode:?}").as_bytes());
+        format!("{:016x}", h.digest())
+    };
+    let moves_hash = hash_pending(&moves);
+    let copies_hash = hash_pending(&copies);
+    let xmp_hash = {
+        let mut h = Xxh3::new();
+        for d in &xmp {
+            for id in &d.file_ids {
+                h.update(format!("x{id}").as_bytes());
+            }
+        }
+        format!("{:016x}", h.digest())
+    };
+
     let mut hasher = Xxh3::new();
     for list in [&deletes, &moves, &copies] {
         for p in list {
@@ -201,7 +232,20 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
         deletion_mode,
         conflicts,
         plan_hash,
+        deletes_hash,
+        moves_hash,
+        copies_hash,
+        xmp_hash,
     })
+}
+
+/// Digest of a move/copy section: id, file id and destination of each action.
+fn hash_pending(items: &[PendingAction]) -> String {
+    let mut h = Xxh3::new();
+    for p in items {
+        h.update(format!("{}:{}:{:?}", p.id, p.file_id, p.dest).as_bytes());
+    }
+    format!("{:016x}", h.digest())
 }
 
 /// True when another still-present file (status = 0) shares this file's group,
@@ -263,19 +307,22 @@ fn store_trash(store: &dyn ProjectStore, rel: &str) -> AppResult<String> {
     Ok(serde_json::json!({ "mode": "trash", "trashPath": final_rel }).to_string())
 }
 
-/// Mutable bookkeeping shared by the three commit phases (deletes, moves/copies,
-/// XMP): running counts, a globally capped sample of error strings, progress
-/// ticks, and the `commit_entries` audit writer.
+/// Mutable bookkeeping shared by the commit phases (deletes, moves, copies,
+/// XMP): running counts, a globally capped sample of error strings, per-phase
+/// progress ticks, and the `commit_entries` audit writer. Progress is reported
+/// per phase (label + local done/total) so the dialog can name the current step
+/// ("Deleting 5/12") instead of one opaque overall bar.
 struct CommitRun<'a> {
     db: &'a Arc<Db>,
     store: &'a dyn ProjectStore,
     commit_id: i64,
-    total: usize,
     ok: usize,
     errors: usize,
     error_samples: Vec<String>,
-    done: usize,
-    progress: &'a mut dyn FnMut(usize, usize),
+    phase: &'static str,
+    phase_done: usize,
+    phase_total: usize,
+    progress: &'a mut dyn FnMut(&str, usize, usize),
 }
 
 impl CommitRun<'_> {
@@ -290,9 +337,18 @@ impl CommitRun<'_> {
         }
     }
 
+    /// Enter a phase and emit its opening 0/total, so the UI shows the step
+    /// immediately even before the first item finishes.
+    fn begin_phase(&mut self, phase: &'static str, total: usize) {
+        self.phase = phase;
+        self.phase_done = 0;
+        self.phase_total = total;
+        (self.progress)(phase, 0, total);
+    }
+
     fn tick(&mut self) {
-        self.done += 1;
-        (self.progress)(self.done, self.total);
+        self.phase_done += 1;
+        (self.progress)(self.phase, self.phase_done, self.phase_total);
     }
 
     /// Append one row to `commit_entries` describing what happened to a file.
@@ -327,6 +383,10 @@ fn run_deletes(
     deletes: &[PendingAction],
     mode: DeletionMode,
 ) -> AppResult<()> {
+    if deletes.is_empty() {
+        return Ok(()); // no phase event for an empty section (avoids UI flicker)
+    }
+    run.begin_phase("deletes", deletes.len());
     for p in deletes {
         let mut result: Result<String, String> = match run.store.exists(&p.rel_path) {
             Ok(true) => delete_via_store(run.store, &p.rel_path, mode).map_err(|e| e.to_string()),
@@ -401,111 +461,125 @@ fn run_deletes(
     Ok(())
 }
 
-fn run_moves_copies(
-    run: &mut CommitRun,
-    moves: &[PendingAction],
-    copies: &[PendingAction],
-) -> AppResult<()> {
-    for (list, action_i) in [(moves, 1i64), (copies, 2i64)] {
-        for p in list {
-            let dest = p.dest.clone().unwrap_or_default();
-            let file_name = p
-                .rel_path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&p.rel_path)
-                .to_string();
-            let dest_dir = dest.trim_matches('/').to_string();
-            let dest_rel = if dest_dir.is_empty() {
-                file_name.clone()
-            } else {
-                format!("{dest_dir}/{file_name}")
-            };
+fn run_moves(run: &mut CommitRun, moves: &[PendingAction]) -> AppResult<()> {
+    if moves.is_empty() {
+        return Ok(());
+    }
+    run.begin_phase("moves", moves.len());
+    for p in moves {
+        process_move_copy(run, p, 1)?;
+    }
+    Ok(())
+}
 
-            let result: Result<(), String> = (|| {
-                if !run.store.exists(&p.rel_path).map_err(|e| e.to_string())? {
-                    return Err("file missing on disk".into());
-                }
-                if run.store.exists(&dest_rel).map_err(|e| e.to_string())? {
-                    return Err(format!("target exists: {dest_rel}"));
-                }
-                run.store
-                    .create_dir_all(&dest_dir)
-                    .map_err(|e| e.to_string())?;
-                if action_i == 1 {
-                    run.store
-                        .move_to(&p.rel_path, &dest_dir)
-                        .map_err(|e| e.to_string())?;
-                } else {
-                    run.store
-                        .copy(&p.rel_path, &dest_rel)
-                        .map_err(|e| e.to_string())?;
-                }
-                Ok(())
-            })();
+fn run_copies(run: &mut CommitRun, copies: &[PendingAction]) -> AppResult<()> {
+    if copies.is_empty() {
+        return Ok(());
+    }
+    run.begin_phase("copies", copies.len());
+    for p in copies {
+        process_move_copy(run, p, 2)?;
+    }
+    Ok(())
+}
 
-            match &result {
-                Ok(()) => {
-                    run.note_ok();
-                    // A move carries the file's sidecar along (a copy leaves it
-                    // behind). Same collision policy as the file itself: the
-                    // target must not exist, and a sidecar failure only warns.
-                    if action_i == 1 {
-                        let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
-                        if sidecar_rel != p.rel_path
-                            && run.store.exists(&sidecar_rel).unwrap_or(false)
-                        {
-                            if let Err(e) = run.store.move_to(&sidecar_rel, &dest_dir) {
-                                tracing::warn!("sidecar move failed: {e}");
-                            }
-                        }
+/// One move (`action_i == 1`) or copy (`action_i == 2`), including its sidecar,
+/// DB row update and audit record. Ticks the current phase once.
+fn process_move_copy(run: &mut CommitRun, p: &PendingAction, action_i: i64) -> AppResult<()> {
+    let dest = p.dest.clone().unwrap_or_default();
+    let file_name = p
+        .rel_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&p.rel_path)
+        .to_string();
+    let dest_dir = dest.trim_matches('/').to_string();
+    let dest_rel = if dest_dir.is_empty() {
+        file_name.clone()
+    } else {
+        format!("{dest_dir}/{file_name}")
+    };
+
+    let result: Result<(), String> = (|| {
+        if !run.store.exists(&p.rel_path).map_err(|e| e.to_string())? {
+            return Err("file missing on disk".into());
+        }
+        if run.store.exists(&dest_rel).map_err(|e| e.to_string())? {
+            return Err(format!("target exists: {dest_rel}"));
+        }
+        run.store
+            .create_dir_all(&dest_dir)
+            .map_err(|e| e.to_string())?;
+        if action_i == 1 {
+            run.store
+                .move_to(&p.rel_path, &dest_dir)
+                .map_err(|e| e.to_string())?;
+        } else {
+            run.store
+                .copy(&p.rel_path, &dest_rel)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+
+    match &result {
+        Ok(()) => {
+            run.note_ok();
+            // A move carries the file's sidecar along (a copy leaves it
+            // behind). Same collision policy as the file itself: the
+            // target must not exist, and a sidecar failure only warns.
+            if action_i == 1 {
+                let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
+                if sidecar_rel != p.rel_path && run.store.exists(&sidecar_rel).unwrap_or(false) {
+                    if let Err(e) = run.store.move_to(&sidecar_rel, &dest_dir) {
+                        tracing::warn!("sidecar move failed: {e}");
                     }
-                    let file_id = p.file_id;
-                    let pending_id = p.id;
-                    if action_i == 1 {
-                        let new_rel = dest_rel.clone();
-                        // One transaction so a crash cannot leave the new rel_path
-                        // recorded while the stale pending move row survives (which
-                        // would resurface as a bogus pending action next preview).
-                        run.db.call(move |conn| {
-                            let tx = conn.transaction()?;
-                            let dir = new_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                            tx.execute(
-                                "UPDATE files SET rel_path = ?2, dir = ?3 WHERE id = ?1",
-                                params![file_id, new_rel, dir],
-                            )?;
-                            tx.execute(
-                                "DELETE FROM pending_actions WHERE id = ?1",
-                                params![pending_id],
-                            )?;
-                            tx.commit()?;
-                            Ok(())
-                        })?;
-                    } else {
-                        run.db.call(move |conn| {
-                            conn.execute(
-                                "DELETE FROM pending_actions WHERE id = ?1",
-                                params![pending_id],
-                            )?;
-                            Ok(())
-                        })?;
-                    }
-                }
-                Err(e) => {
-                    run.note_err(&p.rel_path, e);
                 }
             }
-            run.record(
-                Some(p.file_id),
-                action_i,
-                Some(p.rel_path.clone()),
-                Some(dest_rel),
-                None,
-                result,
-            )?;
-            run.tick();
+            let file_id = p.file_id;
+            let pending_id = p.id;
+            if action_i == 1 {
+                let new_rel = dest_rel.clone();
+                // One transaction so a crash cannot leave the new rel_path
+                // recorded while the stale pending move row survives (which
+                // would resurface as a bogus pending action next preview).
+                run.db.call(move |conn| {
+                    let tx = conn.transaction()?;
+                    let dir = new_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+                    tx.execute(
+                        "UPDATE files SET rel_path = ?2, dir = ?3 WHERE id = ?1",
+                        params![file_id, new_rel, dir],
+                    )?;
+                    tx.execute(
+                        "DELETE FROM pending_actions WHERE id = ?1",
+                        params![pending_id],
+                    )?;
+                    tx.commit()?;
+                    Ok(())
+                })?;
+            } else {
+                run.db.call(move |conn| {
+                    conn.execute(
+                        "DELETE FROM pending_actions WHERE id = ?1",
+                        params![pending_id],
+                    )?;
+                    Ok(())
+                })?;
+            }
+        }
+        Err(e) => {
+            run.note_err(&p.rel_path, e);
         }
     }
+    run.record(
+        Some(p.file_id),
+        action_i,
+        Some(p.rel_path.clone()),
+        Some(dest_rel),
+        None,
+        result,
+    )?;
+    run.tick();
     Ok(())
 }
 
@@ -514,6 +588,10 @@ fn run_moves_copies(
 /// written at their old path) and moved files come back with their new rel_path.
 fn run_xmp(run: &mut CommitRun) -> AppResult<()> {
     let xmp_files = xmp_dirty_photos(run.db)?;
+    if xmp_files.is_empty() {
+        return Ok(());
+    }
+    run.begin_phase("xmp", xmp_files.len());
     for d in xmp_files {
         let result: Result<String, String> =
             xmp::write_sidecar(run.store, &d.rel_path, &d.state).map_err(|e| e.to_string());
@@ -555,29 +633,33 @@ fn run_xmp(run: &mut CommitRun) -> AppResult<()> {
     Ok(())
 }
 
-pub fn execute(
+/// Which action sections a single execution runs. The whole-plan Execute runs
+/// all four; each hold-to-run button runs exactly one.
+#[derive(Clone, Copy)]
+struct Phases {
+    deletes: bool,
+    moves: bool,
+    copies: bool,
+    xmp: bool,
+}
+
+/// Run the selected phases of an already-validated plan under one `commits`
+/// audit row. Phases always run in the fixed order deletes → moves → copies →
+/// XMP; XMP is resolved last (inside `run_xmp`) so it sees the post-move paths
+/// and skips just-deleted files.
+fn run_commit(
     db: &Arc<Db>,
     store: &dyn ProjectStore,
-    plan_hash: &str,
-    mut progress: impl FnMut(usize, usize),
+    plan: &CommitPlan,
+    phases: Phases,
+    mut progress: impl FnMut(&str, usize, usize),
 ) -> AppResult<CommitOutcome> {
-    let plan = preview(db, store)?;
-    if plan.plan_hash != plan_hash {
-        return Err(AppError::Other(
-            "pending actions changed since the preview — review again".into(),
-        ));
-    }
-
-    // The XMP file list is re-resolved after deletes/moves (below); the
-    // preview's count is only used for the progress total and summary here.
-    let total = plan.deletes.len() + plan.moves.len() + plan.copies.len() + plan.xmp_count;
     let started = now_secs();
-
     let summary = serde_json::json!({
-        "deletes": plan.deletes.len(),
-        "moves": plan.moves.len(),
-        "copies": plan.copies.len(),
-        "xmp": plan.xmp_count,
+        "deletes": if phases.deletes { plan.deletes.len() } else { 0 },
+        "moves": if phases.moves { plan.moves.len() } else { 0 },
+        "copies": if phases.copies { plan.copies.len() } else { 0 },
+        "xmp": if phases.xmp { plan.xmp_count } else { 0 },
         "deletionMode": plan.deletion_mode,
     })
     .to_string();
@@ -593,17 +675,27 @@ pub fn execute(
         db,
         store,
         commit_id,
-        total,
         ok: 0,
         errors: 0,
         error_samples: Vec::new(),
-        done: 0,
+        phase: "",
+        phase_done: 0,
+        phase_total: 0,
         progress: &mut progress,
     };
 
-    run_deletes(&mut run, &plan.deletes, plan.deletion_mode)?;
-    run_moves_copies(&mut run, &plan.moves, &plan.copies)?;
-    run_xmp(&mut run)?;
+    if phases.deletes {
+        run_deletes(&mut run, &plan.deletes, plan.deletion_mode)?;
+    }
+    if phases.moves {
+        run_moves(&mut run, &plan.moves)?;
+    }
+    if phases.copies {
+        run_copies(&mut run, &plan.copies)?;
+    }
+    if phases.xmp {
+        run_xmp(&mut run)?;
+    }
 
     let CommitRun {
         ok,
@@ -628,6 +720,91 @@ pub fn execute(
         errors,
         error_samples,
     })
+}
+
+pub fn execute(
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+    plan_hash: &str,
+    progress: impl FnMut(&str, usize, usize),
+) -> AppResult<CommitOutcome> {
+    let plan = preview(db, store)?;
+    if plan.plan_hash != plan_hash {
+        return Err(AppError::Other(
+            "pending actions changed since the preview — review again".into(),
+        ));
+    }
+    run_commit(
+        db,
+        store,
+        &plan,
+        Phases {
+            deletes: true,
+            moves: true,
+            copies: true,
+            xmp: true,
+        },
+        progress,
+    )
+}
+
+/// Execute a single section ("deletes" | "moves" | "copies" | "xmp"), validating
+/// only that section's digest against a fresh preview. Powers the dialog's
+/// per-section hold-to-run buttons, so committing one section leaves the others
+/// pending with their own (still-valid) hashes.
+pub fn execute_section(
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+    section: &str,
+    section_hash: &str,
+    progress: impl FnMut(&str, usize, usize),
+) -> AppResult<CommitOutcome> {
+    let plan = preview(db, store)?;
+    let (current, phases) = match section {
+        "deletes" => (
+            &plan.deletes_hash,
+            Phases {
+                deletes: true,
+                moves: false,
+                copies: false,
+                xmp: false,
+            },
+        ),
+        "moves" => (
+            &plan.moves_hash,
+            Phases {
+                deletes: false,
+                moves: true,
+                copies: false,
+                xmp: false,
+            },
+        ),
+        "copies" => (
+            &plan.copies_hash,
+            Phases {
+                deletes: false,
+                moves: false,
+                copies: true,
+                xmp: false,
+            },
+        ),
+        "xmp" => (
+            &plan.xmp_hash,
+            Phases {
+                deletes: false,
+                moves: false,
+                copies: false,
+                xmp: true,
+            },
+        ),
+        other => return Err(AppError::Other(format!("unknown commit section: {other}"))),
+    };
+    if current != section_hash {
+        return Err(AppError::Other(
+            "pending actions changed since the preview — review again".into(),
+        ));
+    }
+    run_commit(db, store, &plan, phases, progress)
 }
 
 #[cfg(test)]
@@ -720,7 +897,7 @@ mod tests {
         assert_eq!(plan.xmp_count, 1);
         assert!(plan.conflicts.is_empty());
 
-        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
         assert_eq!(outcome.ok, 3);
 
@@ -767,7 +944,7 @@ mod tests {
             PairScope::Both,
         )
         .unwrap();
-        assert!(execute(&db, &store, &plan.plan_hash, |_, _| {}).is_err());
+        assert!(execute(&db, &store, &plan.plan_hash, |_, _, _| {}).is_err());
     }
 
     fn rate(db: &Arc<Db>, exts: &[&str], rating: i64) {
@@ -780,6 +957,86 @@ mod tests {
             rating,
         )
         .unwrap();
+    }
+
+    fn id_of(db: &Arc<Db>, rel: &str) -> i64 {
+        let rel = rel.to_string();
+        db.call(move |c| {
+            Ok(c.query_row(
+                "SELECT id FROM files WHERE rel_path = ?1",
+                params![rel],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn section_commit_runs_one_section_and_leaves_the_rest_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("bad.jpg"), b"jpg").unwrap();
+        fs::write(root.join("sel.jpg"), b"jpg").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        set_setting(&db, "deletionMode", "trash").unwrap();
+
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![id_of(&db, "bad.jpg")],
+                as_groups: false,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![id_of(&db, "sel.jpg")],
+                as_groups: false,
+            },
+            ActionKind::Move,
+            Some("selects".into()),
+            PairScope::Both,
+        )
+        .unwrap();
+
+        let plan = preview(&db, &store).unwrap();
+        assert_eq!(plan.deletes.len(), 1);
+        assert_eq!(plan.moves.len(), 1);
+
+        // Commit ONLY the deletes section.
+        let outcome =
+            execute_section(&db, &store, "deletes", &plan.deletes_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+        assert_eq!(outcome.ok, 1);
+        assert!(!root.join("bad.jpg").exists(), "delete section ran");
+        assert!(
+            root.join("sel.jpg").exists(),
+            "move section must NOT have run"
+        );
+
+        // The move is still pending, and its hash is unchanged by the delete commit.
+        let plan2 = preview(&db, &store).unwrap();
+        assert_eq!(plan2.deletes.len(), 0);
+        assert_eq!(plan2.moves.len(), 1);
+        assert_eq!(
+            plan2.moves_hash, plan.moves_hash,
+            "an untouched section's hash stays valid across a sibling commit"
+        );
+
+        // A stale section hash is rejected.
+        assert!(execute_section(&db, &store, "moves", "deadbeef", |_, _, _| {}).is_err());
+
+        // Now commit the move section.
+        let outcome =
+            execute_section(&db, &store, "moves", &plan2.moves_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+        assert!(root.join("selects").join("sel.jpg").exists());
     }
 
     #[test]
@@ -795,7 +1052,7 @@ mod tests {
 
         let plan = preview(&db, &store).unwrap();
         assert_eq!(plan.xmp_count, 1);
-        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
         let content = fs::read_to_string(root.join("shot.xmp")).unwrap();
         assert!(content.contains("xmp:Rating=\"3\""));
@@ -828,7 +1085,7 @@ mod tests {
 
         let plan = preview(&db, &store).unwrap();
         assert_eq!(plan.xmp_count, 1); // still dirty at preview time
-        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
         assert!(!root.join("bad.cr3").exists());
         assert!(
@@ -876,7 +1133,7 @@ mod tests {
         .unwrap();
 
         let plan = preview(&db, &store).unwrap();
-        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
         assert!(root.join("selects").join("keep.cr3").exists());
         assert!(
@@ -904,7 +1161,7 @@ mod tests {
         // Rate the pair and commit, so IMG_1.xmp exists and both members are clean.
         rate(&db, &["cr3", "jpg"], 5);
         let plan = preview(&db, &store).unwrap();
-        execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
         assert!(root.join("IMG_1.xmp").exists());
 
         // Delete the RAW only; the JPEG survives and still needs its sidecar.
@@ -920,7 +1177,7 @@ mod tests {
         )
         .unwrap();
         let plan = preview(&db, &store).unwrap();
-        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
 
         assert!(!root.join("IMG_1.cr3").exists(), "RAW should be trashed");
@@ -946,7 +1203,7 @@ mod tests {
 
         let plan = preview(&db, &store).unwrap();
         assert_eq!(plan.xmp_count, 1, "pair members share one sidecar");
-        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
         assert_eq!(outcome.ok, 1, "one sidecar write, not two");
         let content = fs::read_to_string(root.join("IMG_1.xmp")).unwrap();

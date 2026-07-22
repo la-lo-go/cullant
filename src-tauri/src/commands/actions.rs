@@ -84,12 +84,46 @@ pub fn commit_execute(
 ) -> AppResult<CommitOutcome> {
     let (db, store) = project(&state)?;
     let progress_app = app.clone();
-    let outcome = committer::execute(&db, store.as_ref(), &plan_hash, move |done, total| {
-        let _ = progress_app.emit(
-            "commit:progress",
-            serde_json::json!({ "done": done, "total": total }),
-        );
-    })?;
+    let outcome = committer::execute(
+        &db,
+        store.as_ref(),
+        &plan_hash,
+        move |phase, done, total| {
+            let _ = progress_app.emit(
+                "commit:progress",
+                serde_json::json!({ "phase": phase, "done": done, "total": total }),
+            );
+        },
+    )?;
+    let _ = app.emit("pending:changed", ());
+    let _ = app.emit("commit:done", &outcome);
+    Ok(outcome)
+}
+
+/// Commit a single section (deletes / moves / copies / xmp) — the dialog's
+/// hold-to-run buttons. Validates only that section's digest, so the untouched
+/// sections stay pending with their own still-valid hashes.
+#[tauri::command]
+pub fn commit_execute_section(
+    section: String,
+    section_hash: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<CommitOutcome> {
+    let (db, store) = project(&state)?;
+    let progress_app = app.clone();
+    let outcome = committer::execute_section(
+        &db,
+        store.as_ref(),
+        &section,
+        &section_hash,
+        move |phase, done, total| {
+            let _ = progress_app.emit(
+                "commit:progress",
+                serde_json::json!({ "phase": phase, "done": done, "total": total }),
+            );
+        },
+    )?;
     let _ = app.emit("pending:changed", ());
     let _ = app.emit("commit:done", &outcome);
     Ok(outcome)

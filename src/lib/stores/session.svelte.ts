@@ -655,6 +655,9 @@ class SessionStore {
   pendingCount = $state(0);
   commitDialogOpen = $state(false);
   moveDialogOpen = $state(false);
+  /** Result of the most recent commit, surfaced as a popup AFTER the commit
+   *  dialog closes (null = nothing to announce). */
+  commitDone = $state<{ title: string; message: string } | null>(null);
 
   async refreshPending() {
     const pending = await api.listPending();

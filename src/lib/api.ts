@@ -149,7 +149,16 @@ export interface CommitPlan {
   deletionMode: DeletionMode;
   conflicts: string[];
   planHash: string;
+  /** Per-section digests for the hold-to-run buttons; each validates only its
+   *  own section, so committing one leaves the others' hashes valid. */
+  deletesHash: string;
+  movesHash: string;
+  copiesHash: string;
+  xmpHash: string;
 }
+
+/** A single commit section, targetable by the per-section hold-to-run buttons. */
+export type CommitSection = "deletes" | "moves" | "copies" | "xmp";
 
 export interface CommitOutcome {
   commitId: number;
@@ -240,6 +249,8 @@ export const api = {
   listPending: () => invoke<PendingAction[]>("list_pending"),
   commitPreview: () => invoke<CommitPlan>("commit_preview"),
   commitExecute: (planHash: string) => invoke<CommitOutcome>("commit_execute", { planHash }),
+  commitExecuteSection: (section: CommitSection, sectionHash: string) =>
+    invoke<CommitOutcome>("commit_execute_section", { section, sectionHash }),
   getProjectSetting: (key: string) => invoke<string | null>("get_project_setting", { key }),
   setProjectSetting: (key: string, value: string) =>
     invoke("set_project_setting", { key, value }),

@@ -255,6 +255,7 @@ pub fn run() {
             commands::actions::list_pending,
             commands::actions::commit_preview,
             commands::actions::commit_execute,
+            commands::actions::commit_execute_section,
             commands::actions::get_project_setting,
             commands::actions::set_project_setting,
             commands::session::get_session_state,

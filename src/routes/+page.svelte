@@ -607,6 +607,14 @@
     <CommitDialog />
   {/if}
 
+  {#if session.commitDone}
+    <AlertDialog
+      title={session.commitDone.title}
+      message={session.commitDone.message}
+      onclose={() => (session.commitDone = null)}
+    />
+  {/if}
+
   {#if session.moveDialogOpen}
     <MoveDialog />
   {/if}

@@ -70,6 +70,8 @@
   p {
     font-size: 13px;
     opacity: 0.7;
+    /* Preserve newlines in multi-line messages (e.g. commit error samples). */
+    white-space: pre-wrap;
   }
 
   .actions {
