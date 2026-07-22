@@ -456,6 +456,7 @@
        tightens this further when the wrapped toolbar pushes the panel down. */
     max-height: calc(100vh - 60px - var(--inset-bottom));
     overflow-y: auto;
+    scrollbar-width: none;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -465,6 +466,10 @@
     border-radius: 10px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     font-size: 12px;
+  }
+
+  .panel::-webkit-scrollbar {
+    display: none;
   }
 
   header {
