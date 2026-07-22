@@ -40,6 +40,8 @@
   import VideoIcon from "@lucide/svelte/icons/video";
   import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
   import ListFilter from "@lucide/svelte/icons/list-filter";
+  import ArrowUp from "@lucide/svelte/icons/arrow-up";
+  import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import SettingsIcon from "@lucide/svelte/icons/settings";
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
@@ -358,6 +360,32 @@
             {#if session.mirrorMode}<Link size={14} /><span>Mirror</span>{:else}<Unlink size={14} /><span>Separate</span>{/if}
           </button>
         {/if}
+        <div class="filters-anchor">
+          <button
+            class:active={session.filtersPanelOpen}
+            class:haswork={session.hasActiveFilters}
+            title="Sort & filter"
+            onclick={blurring(() => (session.filtersPanelOpen = !session.filtersPanelOpen))}
+          >
+            <ListFilter size={14} />
+            <span>Sort &amp; Filter</span>
+            {#if view.mode === "grid"}
+              <span class="sort-hint">
+                <span
+                  >{catalog.sort === "capture"
+                    ? "Date"
+                    : catalog.sort === "name"
+                      ? "Name"
+                      : "Size"}</span
+                >
+                {#if catalog.sortDesc}<ArrowDown size={11} />{:else}<ArrowUp size={11} />{/if}
+              </span>
+            {/if}
+          </button>
+          {#if session.filtersPanelOpen}
+            <FiltersPanel />
+          {/if}
+        </div>
         {#if view.mode === "grid"}
           <button
             class:active={session.showNames}
@@ -387,20 +415,6 @@
             <FolderTreeIcon size={14} />
           </button>
         {/if}
-        <div class="filters-anchor">
-          <button
-            class:active={session.filtersPanelOpen}
-            class:haswork={session.hasActiveFilters}
-            title="Sort & filter"
-            onclick={blurring(() => (session.filtersPanelOpen = !session.filtersPanelOpen))}
-          >
-            <ListFilter size={14} />
-            <span>Sort &amp; Filter</span>
-          </button>
-          {#if session.filtersPanelOpen}
-            <FiltersPanel />
-          {/if}
-        </div>
         <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
         <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
         <button
@@ -973,6 +987,19 @@
   .filters-anchor {
     position: relative;
     display: inline-flex;
+  }
+
+  /* Current sort shown right on the toolbar button, so the active order reads
+     at a glance without opening the panel. */
+  .sort-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding-left: 6px;
+    margin-left: 4px;
+    border-left: 1px solid var(--border);
+    opacity: 0.7;
+    font-size: 11px;
   }
 
   /* Active-filters indicator on the Filters button. */
