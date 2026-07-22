@@ -38,10 +38,31 @@ pub fn write_sidecar(
     use std::io::Write;
 
     let sc_rel = sidecar_rel(rel_path);
-    let output = match read_all(store, &sc_rel)
-        .ok()
-        .and_then(|b| String::from_utf8(b).ok())
-    {
+    // A missing sidecar is expected (write fresh). Any other case that ends in a
+    // fresh overwrite must warn first, so foreign content (e.g. Lightroom develop
+    // settings) is never lost silently — including a stat error, an unreadable
+    // file, or non-UTF-8 bytes.
+    let existing = match store.exists(&sc_rel) {
+        Ok(true) => match read_all(store, &sc_rel) {
+            Ok(bytes) => match String::from_utf8(bytes) {
+                Ok(text) => Some(text),
+                Err(e) => {
+                    tracing::warn!("sidecar {sc_rel} is not valid UTF-8 ({e}); rewriting fresh");
+                    None
+                }
+            },
+            Err(e) => {
+                tracing::warn!("sidecar {sc_rel} unreadable ({e}); rewriting fresh");
+                None
+            }
+        },
+        Ok(false) => None,
+        Err(e) => {
+            tracing::warn!("cannot stat sidecar {sc_rel} ({e}); a fresh write may overwrite it");
+            None
+        }
+    };
+    let output = match existing {
         Some(existing) => merge_into_existing(&existing, state).unwrap_or_else(|e| {
             tracing::warn!("sidecar merge failed for {sc_rel} ({e}); rewriting fresh");
             fresh_sidecar(state)
