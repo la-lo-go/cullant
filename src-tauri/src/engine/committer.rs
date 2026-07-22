@@ -246,6 +246,284 @@ fn store_trash(store: &dyn ProjectStore, rel: &str) -> AppResult<String> {
     Ok(serde_json::json!({ "mode": "trash", "trashPath": final_rel }).to_string())
 }
 
+/// Mutable bookkeeping shared by the three commit phases (deletes, moves/copies,
+/// XMP): running counts, a globally capped sample of error strings, progress
+/// ticks, and the `commit_entries` audit writer.
+struct CommitRun<'a> {
+    db: &'a Arc<Db>,
+    store: &'a dyn ProjectStore,
+    commit_id: i64,
+    total: usize,
+    ok: usize,
+    errors: usize,
+    error_samples: Vec<String>,
+    done: usize,
+    progress: &'a mut dyn FnMut(usize, usize),
+}
+
+impl CommitRun<'_> {
+    fn note_ok(&mut self) {
+        self.ok += 1;
+    }
+
+    fn note_err(&mut self, ctx: &str, err: &str) {
+        self.errors += 1;
+        if self.error_samples.len() < 5 {
+            self.error_samples.push(format!("{ctx}: {err}"));
+        }
+    }
+
+    fn tick(&mut self) {
+        self.done += 1;
+        (self.progress)(self.done, self.total);
+    }
+
+    /// Append one row to `commit_entries` describing what happened to a file.
+    fn record(
+        &self,
+        file_id: Option<i64>,
+        action: i64,
+        before: Option<String>,
+        after: Option<String>,
+        undo: Option<String>,
+        result: Result<(), String>,
+    ) -> AppResult<()> {
+        let commit_id = self.commit_id;
+        let (res_i, err) = match &result {
+            Ok(()) => (0i64, None),
+            Err(e) => (2i64, Some(e.clone())),
+        };
+        self.db.call(move |conn| {
+            conn.execute(
+                "INSERT INTO commit_entries
+                 (commit_id, file_id, action, before_path, after_path, undo_info, result, error)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![commit_id, file_id, action, before, after, undo, res_i, err],
+            )?;
+            Ok(())
+        })
+    }
+}
+
+fn run_deletes(
+    run: &mut CommitRun,
+    deletes: &[PendingAction],
+    mode: DeletionMode,
+) -> AppResult<()> {
+    for p in deletes {
+        let mut result: Result<String, String> = if run.store.exists(&p.rel_path).unwrap_or(false) {
+            delete_via_store(run.store, &p.rel_path, mode).map_err(|e| e.to_string())
+        } else {
+            Err("file missing on disk".into())
+        };
+        // A photo's sidecar travels with it.
+        if result.is_ok() {
+            let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
+            if sidecar_rel != p.rel_path && run.store.exists(&sidecar_rel).unwrap_or(false) {
+                if let Err(e) = delete_via_store(run.store, &sidecar_rel, mode) {
+                    tracing::warn!("sidecar delete failed: {e}");
+                }
+            }
+        }
+        match &mut result {
+            Ok(undo) => {
+                run.note_ok();
+                let file_id = p.file_id;
+                run.db.call(move |conn| {
+                    let tx = conn.transaction()?;
+                    tx.execute(
+                        "UPDATE files SET status = 2 WHERE id = ?1",
+                        params![file_id],
+                    )?;
+                    tx.execute(
+                        "DELETE FROM pending_actions WHERE file_id = ?1",
+                        params![file_id],
+                    )?;
+                    // If it was the group's primary, promote the survivor.
+                    tx.execute(
+                        "UPDATE groups SET primary_file_id =
+                           (SELECT id FROM files WHERE group_id = groups.id AND status = 0 LIMIT 1)
+                         WHERE primary_file_id = ?1",
+                        params![file_id],
+                    )?;
+                    tx.commit()?;
+                    Ok(())
+                })?;
+                run.record(
+                    Some(p.file_id),
+                    0,
+                    Some(p.rel_path.clone()),
+                    None,
+                    Some(undo.clone()),
+                    Ok(()),
+                )?;
+            }
+            Err(e) => {
+                run.note_err(&p.rel_path, e);
+                run.record(
+                    Some(p.file_id),
+                    0,
+                    Some(p.rel_path.clone()),
+                    None,
+                    None,
+                    Err(e.clone()),
+                )?;
+            }
+        }
+        run.tick();
+    }
+    Ok(())
+}
+
+fn run_moves_copies(
+    run: &mut CommitRun,
+    moves: &[PendingAction],
+    copies: &[PendingAction],
+) -> AppResult<()> {
+    for (list, action_i) in [(moves, 1i64), (copies, 2i64)] {
+        for p in list {
+            let dest = p.dest.clone().unwrap_or_default();
+            let file_name = p
+                .rel_path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&p.rel_path)
+                .to_string();
+            let dest_dir = dest.trim_matches('/').to_string();
+            let dest_rel = if dest_dir.is_empty() {
+                file_name.clone()
+            } else {
+                format!("{dest_dir}/{file_name}")
+            };
+
+            let result: Result<(), String> = (|| {
+                if !run.store.exists(&p.rel_path).map_err(|e| e.to_string())? {
+                    return Err("file missing on disk".into());
+                }
+                if run.store.exists(&dest_rel).map_err(|e| e.to_string())? {
+                    return Err(format!("target exists: {dest_rel}"));
+                }
+                run.store
+                    .create_dir_all(&dest_dir)
+                    .map_err(|e| e.to_string())?;
+                if action_i == 1 {
+                    run.store
+                        .move_to(&p.rel_path, &dest_dir)
+                        .map_err(|e| e.to_string())?;
+                } else {
+                    run.store
+                        .copy(&p.rel_path, &dest_rel)
+                        .map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            })();
+
+            match &result {
+                Ok(()) => {
+                    run.note_ok();
+                    // A move carries the file's sidecar along (a copy leaves it
+                    // behind). Same collision policy as the file itself: the
+                    // target must not exist, and a sidecar failure only warns.
+                    if action_i == 1 {
+                        let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
+                        if sidecar_rel != p.rel_path
+                            && run.store.exists(&sidecar_rel).unwrap_or(false)
+                        {
+                            if let Err(e) = run.store.move_to(&sidecar_rel, &dest_dir) {
+                                tracing::warn!("sidecar move failed: {e}");
+                            }
+                        }
+                    }
+                    let file_id = p.file_id;
+                    let pending_id = p.id;
+                    if action_i == 1 {
+                        let new_rel = dest_rel.clone();
+                        run.db.call(move |conn| {
+                            let dir = new_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+                            conn.execute(
+                                "UPDATE files SET rel_path = ?2, dir = ?3 WHERE id = ?1",
+                                params![file_id, new_rel, dir],
+                            )?;
+                            conn.execute(
+                                "DELETE FROM pending_actions WHERE id = ?1",
+                                params![pending_id],
+                            )?;
+                            Ok(())
+                        })?;
+                    } else {
+                        run.db.call(move |conn| {
+                            conn.execute(
+                                "DELETE FROM pending_actions WHERE id = ?1",
+                                params![pending_id],
+                            )?;
+                            Ok(())
+                        })?;
+                    }
+                }
+                Err(e) => {
+                    run.note_err(&p.rel_path, e);
+                }
+            }
+            run.record(
+                Some(p.file_id),
+                action_i,
+                Some(p.rel_path.clone()),
+                Some(dest_rel),
+                None,
+                result,
+            )?;
+            run.tick();
+        }
+    }
+    Ok(())
+}
+
+/// Write pending XMP sidecars. Resolved only now, AFTER deletes and moves/copies:
+/// deleted files are status = 2 (excluded by the query, so no orphan sidecar is
+/// written at their old path) and moved files come back with their new rel_path.
+fn run_xmp(run: &mut CommitRun) -> AppResult<()> {
+    let xmp_files = xmp_dirty_photos(run.db)?;
+    for d in xmp_files {
+        let result: Result<String, String> =
+            xmp::write_sidecar(run.store, &d.rel_path, &d.state).map_err(|e| e.to_string());
+        match &result {
+            Ok(sc_rel) => {
+                run.note_ok();
+                // Every file mapping to this sidecar (a RAW+JPEG pair shares it)
+                // is now exported.
+                let file_ids = d.file_ids.clone();
+                run.db.call(move |conn| {
+                    for id in &file_ids {
+                        conn.execute("UPDATE files SET xmp_dirty = 0 WHERE id = ?1", params![id])?;
+                    }
+                    Ok(())
+                })?;
+                run.record(
+                    Some(d.file_ids[0]),
+                    3,
+                    Some(d.rel_path.clone()),
+                    Some(sc_rel.clone()),
+                    None,
+                    Ok(()),
+                )?;
+            }
+            Err(e) => {
+                run.note_err(&d.rel_path, e);
+                run.record(
+                    Some(d.file_ids[0]),
+                    3,
+                    Some(d.rel_path.clone()),
+                    None,
+                    None,
+                    Err(e.clone()),
+                )?;
+            }
+        }
+        run.tick();
+    }
+    Ok(())
+}
+
 pub fn execute(
     db: &Arc<Db>,
     store: &dyn ProjectStore,
@@ -280,252 +558,28 @@ pub fn execute(
         Ok(conn.last_insert_rowid())
     })?;
 
-    let mut ok = 0usize;
-    let mut errors = 0usize;
-    let mut error_samples = Vec::new();
-    let mut done = 0usize;
-
-    let record = |db: &Arc<Db>,
-                  file_id: Option<i64>,
-                  action: i64,
-                  before: Option<String>,
-                  after: Option<String>,
-                  undo: Option<String>,
-                  result: Result<(), String>|
-     -> AppResult<()> {
-        let (res_i, err) = match &result {
-            Ok(()) => (0i64, None),
-            Err(e) => (2i64, Some(e.clone())),
-        };
-        db.call(move |conn| {
-            conn.execute(
-                "INSERT INTO commit_entries
-                 (commit_id, file_id, action, before_path, after_path, undo_info, result, error)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![commit_id, file_id, action, before, after, undo, res_i, err],
-            )?;
-            Ok(())
-        })
+    let mut run = CommitRun {
+        db,
+        store,
+        commit_id,
+        total,
+        ok: 0,
+        errors: 0,
+        error_samples: Vec::new(),
+        done: 0,
+        progress: &mut progress,
     };
 
-    // --- deletes ---
-    for p in &plan.deletes {
-        let mut result: Result<String, String> = if store.exists(&p.rel_path).unwrap_or(false) {
-            delete_via_store(store, &p.rel_path, plan.deletion_mode).map_err(|e| e.to_string())
-        } else {
-            Err("file missing on disk".into())
-        };
-        // A photo's sidecar travels with it.
-        if result.is_ok() {
-            let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
-            if sidecar_rel != p.rel_path && store.exists(&sidecar_rel).unwrap_or(false) {
-                if let Err(e) = delete_via_store(store, &sidecar_rel, plan.deletion_mode) {
-                    tracing::warn!("sidecar delete failed: {e}");
-                }
-            }
-        }
-        match &mut result {
-            Ok(undo) => {
-                ok += 1;
-                let file_id = p.file_id;
-                db.call(move |conn| {
-                    let tx = conn.transaction()?;
-                    tx.execute(
-                        "UPDATE files SET status = 2 WHERE id = ?1",
-                        params![file_id],
-                    )?;
-                    tx.execute(
-                        "DELETE FROM pending_actions WHERE file_id = ?1",
-                        params![file_id],
-                    )?;
-                    // If it was the group's primary, promote the survivor.
-                    tx.execute(
-                        "UPDATE groups SET primary_file_id =
-                           (SELECT id FROM files WHERE group_id = groups.id AND status = 0 LIMIT 1)
-                         WHERE primary_file_id = ?1",
-                        params![file_id],
-                    )?;
-                    tx.commit()?;
-                    Ok(())
-                })?;
-                record(
-                    db,
-                    Some(p.file_id),
-                    0,
-                    Some(p.rel_path.clone()),
-                    None,
-                    Some(undo.clone()),
-                    Ok(()),
-                )?;
-            }
-            Err(e) => {
-                errors += 1;
-                if error_samples.len() < 5 {
-                    error_samples.push(format!("{}: {e}", p.rel_path));
-                }
-                record(
-                    db,
-                    Some(p.file_id),
-                    0,
-                    Some(p.rel_path.clone()),
-                    None,
-                    None,
-                    Err(e.clone()),
-                )?;
-            }
-        }
-        done += 1;
-        progress(done, total);
-    }
+    run_deletes(&mut run, &plan.deletes, plan.deletion_mode)?;
+    run_moves_copies(&mut run, &plan.moves, &plan.copies)?;
+    run_xmp(&mut run)?;
 
-    // --- moves & copies ---
-    for (list, action_i) in [(&plan.moves, 1i64), (&plan.copies, 2i64)] {
-        for p in list {
-            let dest = p.dest.clone().unwrap_or_default();
-            let file_name = p
-                .rel_path
-                .rsplit('/')
-                .next()
-                .unwrap_or(&p.rel_path)
-                .to_string();
-            let dest_dir = dest.trim_matches('/').to_string();
-            let dest_rel = if dest_dir.is_empty() {
-                file_name.clone()
-            } else {
-                format!("{dest_dir}/{file_name}")
-            };
-
-            let result: Result<(), String> = (|| {
-                if !store.exists(&p.rel_path).map_err(|e| e.to_string())? {
-                    return Err("file missing on disk".into());
-                }
-                if store.exists(&dest_rel).map_err(|e| e.to_string())? {
-                    return Err(format!("target exists: {dest_rel}"));
-                }
-                store.create_dir_all(&dest_dir).map_err(|e| e.to_string())?;
-                if action_i == 1 {
-                    store
-                        .move_to(&p.rel_path, &dest_dir)
-                        .map_err(|e| e.to_string())?;
-                } else {
-                    store
-                        .copy(&p.rel_path, &dest_rel)
-                        .map_err(|e| e.to_string())?;
-                }
-                Ok(())
-            })();
-
-            match &result {
-                Ok(()) => {
-                    ok += 1;
-                    // A move carries the file's sidecar along (a copy leaves it
-                    // behind). Same collision policy as the file itself: the
-                    // target must not exist, and a sidecar failure only warns.
-                    if action_i == 1 {
-                        let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
-                        if sidecar_rel != p.rel_path && store.exists(&sidecar_rel).unwrap_or(false)
-                        {
-                            if let Err(e) = store.move_to(&sidecar_rel, &dest_dir) {
-                                tracing::warn!("sidecar move failed: {e}");
-                            }
-                        }
-                    }
-                    let file_id = p.file_id;
-                    let pending_id = p.id;
-                    if action_i == 1 {
-                        let new_rel = dest_rel.clone();
-                        db.call(move |conn| {
-                            let dir = new_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                            conn.execute(
-                                "UPDATE files SET rel_path = ?2, dir = ?3 WHERE id = ?1",
-                                params![file_id, new_rel, dir],
-                            )?;
-                            conn.execute(
-                                "DELETE FROM pending_actions WHERE id = ?1",
-                                params![pending_id],
-                            )?;
-                            Ok(())
-                        })?;
-                    } else {
-                        db.call(move |conn| {
-                            conn.execute(
-                                "DELETE FROM pending_actions WHERE id = ?1",
-                                params![pending_id],
-                            )?;
-                            Ok(())
-                        })?;
-                    }
-                }
-                Err(e) => {
-                    errors += 1;
-                    if error_samples.len() < 5 {
-                        error_samples.push(format!("{}: {e}", p.rel_path));
-                    }
-                }
-            }
-            record(
-                db,
-                Some(p.file_id),
-                action_i,
-                Some(p.rel_path.clone()),
-                Some(dest_rel),
-                None,
-                result,
-            )?;
-            done += 1;
-            progress(done, total);
-        }
-    }
-
-    // --- XMP sidecars ---
-    // Resolved only now, AFTER deletes and moves/copies: deleted files are
-    // status = 2 (excluded by the query, so no orphan sidecar is written at
-    // their old path) and moved files come back with their new rel_path.
-    let xmp_files = xmp_dirty_photos(db)?;
-    for d in xmp_files {
-        let result: Result<String, String> =
-            xmp::write_sidecar(store, &d.rel_path, &d.state).map_err(|e| e.to_string());
-        match &result {
-            Ok(sc_rel) => {
-                ok += 1;
-                // Every file mapping to this sidecar (a RAW+JPEG pair shares
-                // it) is now exported.
-                let file_ids = d.file_ids.clone();
-                db.call(move |conn| {
-                    for id in &file_ids {
-                        conn.execute("UPDATE files SET xmp_dirty = 0 WHERE id = ?1", params![id])?;
-                    }
-                    Ok(())
-                })?;
-                record(
-                    db,
-                    Some(d.file_ids[0]),
-                    3,
-                    Some(d.rel_path.clone()),
-                    Some(sc_rel.clone()),
-                    None,
-                    Ok(()),
-                )?;
-            }
-            Err(e) => {
-                errors += 1;
-                if error_samples.len() < 5 {
-                    error_samples.push(format!("{}: {e}", d.rel_path));
-                }
-                record(
-                    db,
-                    Some(d.file_ids[0]),
-                    3,
-                    Some(d.rel_path.clone()),
-                    None,
-                    None,
-                    Err(e.clone()),
-                )?;
-            }
-        }
-        done += 1;
-        progress(done, total);
-    }
+    let CommitRun {
+        ok,
+        errors,
+        error_samples,
+        ..
+    } = run;
 
     let status = if errors == 0 { 1i64 } else { 2i64 };
     let finished = now_secs();
