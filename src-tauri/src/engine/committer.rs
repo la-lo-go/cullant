@@ -204,6 +204,23 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
     })
 }
 
+/// True when another still-present file (status = 0) shares this file's group,
+/// and therefore its sidecar — pair members map to the same `IMG.xmp`. Used to
+/// keep a shared sidecar alive when only one pair member is deleted. The file
+/// being deleted is still status = 0 here, so `id != ?1` excludes it.
+fn sidecar_shared_with_survivor(db: &Arc<Db>, file_id: i64) -> AppResult<bool> {
+    db.call(move |conn| {
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM files
+             WHERE status = 0 AND id != ?1
+               AND group_id = (SELECT group_id FROM files WHERE id = ?1)",
+            params![file_id],
+            |r| r.get(0),
+        )?;
+        Ok(n > 0)
+    })
+}
+
 /// Delete one file (by rel_path) according to the mode, through the store.
 /// Returns undo info JSON (with a project-relative trash path when applicable).
 fn delete_via_store(store: &dyn ProjectStore, rel: &str, mode: DeletionMode) -> AppResult<String> {
@@ -316,10 +333,17 @@ fn run_deletes(
         } else {
             Err("file missing on disk".into())
         };
-        // A photo's sidecar travels with it.
+        // A photo's sidecar travels with it — but a RAW+JPEG pair shares one
+        // sidecar (IMG.CR3 and IMG.JPG both map to IMG.xmp). Deleting only one
+        // member (delete-RAW-only, or a per-member reject) must NOT remove the
+        // sidecar while the partner survives, or that survivor loses its
+        // exported rating/flag/label. Remove it only when no live file maps to it.
         if result.is_ok() {
             let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
-            if sidecar_rel != p.rel_path && run.store.exists(&sidecar_rel).unwrap_or(false) {
+            if sidecar_rel != p.rel_path
+                && run.store.exists(&sidecar_rel).unwrap_or(false)
+                && !sidecar_shared_with_survivor(run.db, p.file_id)?
+            {
                 if let Err(e) = delete_via_store(run.store, &sidecar_rel, mode) {
                     tracing::warn!("sidecar delete failed: {e}");
                 }
@@ -857,6 +881,47 @@ mod tests {
         let content = fs::read_to_string(root.join("selects").join("keep.xmp")).unwrap();
         assert!(content.contains("xmp:Rating=\"5\""));
         assert!(content.contains("crs:Exposure2012=\"+0.55\""));
+    }
+
+    #[test]
+    fn deleting_one_pair_member_keeps_the_shared_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("IMG_1.cr3"), b"raw").unwrap();
+        fs::write(root.join("IMG_1.jpg"), b"jpg").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        set_setting(&db, "deletionMode", "trash").unwrap();
+
+        // Rate the pair and commit, so IMG_1.xmp exists and both members are clean.
+        rate(&db, &["cr3", "jpg"], 5);
+        let plan = preview(&db, &store).unwrap();
+        execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        assert!(root.join("IMG_1.xmp").exists());
+
+        // Delete the RAW only; the JPEG survives and still needs its sidecar.
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![ids(&db, "cr3")],
+                as_groups: false,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+        let plan = preview(&db, &store).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+
+        assert!(!root.join("IMG_1.cr3").exists(), "RAW should be trashed");
+        assert!(root.join("IMG_1.jpg").exists(), "JPEG must survive");
+        assert!(
+            root.join("IMG_1.xmp").exists(),
+            "the surviving JPEG's shared sidecar must not be deleted with the RAW"
+        );
     }
 
     #[test]
