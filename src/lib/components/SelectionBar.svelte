@@ -33,13 +33,26 @@
   // always looking pre-applied regardless of actual state.
   const selectedItems = $derived(session.filtered.filter((i) => session.selectedIds.has(i.id)));
 
-  function allHaveFlag(f: number): boolean {
-    return selectedItems.length > 0 && selectedItems.every((i) => i.flag === f);
-  }
+  // Shared flag / label / tag state of the whole selection, computed in ONE pass
+  // and read many times from the markup (per flag button, per label swatch, per
+  // tag). `flag`/`label` hold the common value or null when the selection is
+  // mixed/empty; `tagIds` is the intersection of every item's tags.
+  const summary = $derived.by(() => {
+    const items = selectedItems;
+    if (items.length === 0)
+      return { flag: null as number | null, label: null as string | null, tagIds: new Set<number>() };
+    const first = items[0];
+    const flag = items.every((i) => i.flag === first.flag) ? first.flag : null;
+    const label = items.every((i) => i.label === first.label) ? first.label : null;
+    const tagIds = new Set<number>(
+      first.tagIds.filter((t) => items.every((i) => i.tagIds.includes(t))),
+    );
+    return { flag, label, tagIds };
+  });
 
   // Pick/Reject toggle: when the whole selection already has the flag,
   // clicking again clears it to 0 (unflag).
-  const flag = (f: number) => void session.flag(allHaveFlag(f) ? 0 : f);
+  const flag = (f: number) => void session.flag(summary.flag === f ? 0 : f);
 
   // Rating shared by the whole selection; 0 when mixed (or nothing selected),
   // so the stars show nothing lit rather than a misleading partial value.
@@ -53,31 +66,33 @@
   // selection already shares clears it to 0; any other click sets it.
   const rate = (r: number) => void session.rate(r !== 0 && r === commonRating ? 0 : r);
 
-  function allHaveLabel(l: string): boolean {
-    return selectedItems.length > 0 && selectedItems.every((i) => i.label === l);
-  }
-
   // Labels go through the explicit set/clear path: the bar already resolved
   // set-vs-clear from the selection-uniform state it displays, so no toggle.
-  const label = (l: string) => void session.setLabel(allHaveLabel(l) ? null : l);
+  const label = (l: string) => void session.setLabel(summary.label === l ? null : l);
 
-  function allHaveTag(tagId: number): boolean {
-    return selectedItems.length > 0 && selectedItems.every((i) => i.tagIds.includes(tagId));
+  // Run a handler, then release focus so a clicked button never swallows the
+  // arrow keys used for grid navigation (mirrors the `blurring()` toolbar helper
+  // and TouchActionBar's `act()`).
+  function act(fn: () => void): (e: MouseEvent) => void {
+    return (e) => {
+      fn();
+      (e.currentTarget as HTMLElement).blur();
+    };
   }
 </script>
 
 <div class="selbar">
   <span class="head">
     <strong>{n}</strong> selected
-    <button class="clear" title="Clear selection (Esc)" aria-label="Clear selection" onclick={() => session.clearSelection()}>
+    <button class="clear" title="Clear selection (Esc)" aria-label="Clear selection" onclick={act(() => session.clearSelection())}>
       <X size={12} />
     </button>
   </span>
   <span class="apply">Apply:</span>
 
   <div class="group">
-    <button class="btn reject" class:active-reject={allHaveFlag(-1)} title="Reject (X) — click again to unflag" onclick={() => flag(-1)}><X size={15} /></button>
-    <button class="btn pick" class:active-pick={allHaveFlag(1)} title="Pick (P) — click again to unflag" onclick={() => flag(1)}><Check size={15} /></button>
+    <button class="btn reject" class:active-reject={summary.flag === -1} title="Reject (X) — click again to unflag" onclick={act(() => flag(-1))}><X size={15} /></button>
+    <button class="btn pick" class:active-pick={summary.flag === 1} title="Pick (P) — click again to unflag" onclick={act(() => flag(1))}><Check size={15} /></button>
   </div>
 
   <div class="group stars">
@@ -89,20 +104,20 @@
         aria-label={`Set ${star} stars`}
         onmouseenter={() => (hovered = star)}
         onmouseleave={() => (hovered = 0)}
-        onclick={() => rate(star)}>★</button
+        onclick={act(() => rate(star))}>★</button
       >
     {/each}
-    <button class="star zero" aria-label="Clear rating" onclick={() => rate(0)}>0</button>
+    <button class="star zero" aria-label="Clear rating" onclick={act(() => rate(0))}>0</button>
   </div>
 
   <div class="group labels">
     {#each LABELS as l (l)}
       <button
         class="dot"
-        class:active={allHaveLabel(l)}
+        class:active={summary.label === l}
         style="--c: {labelColors[l]}"
         aria-label={`Label ${l}`}
-        onclick={() => label(l)}
+        onclick={act(() => label(l))}
       ></button>
     {/each}
   </div>
@@ -112,9 +127,9 @@
       {#each scopedTags as tag (tag.id)}
         <button
           class="tagseg"
-          class:active={allHaveTag(tag.id)}
+          class:active={summary.tagIds.has(tag.id)}
           style="--c: {tag.color ?? '#888'}"
-          onclick={() => toggleTag(tag.id)}
+          onclick={act(() => toggleTag(tag.id))}
         >
           <span class="tagdot"></span>{tag.name}
         </button>

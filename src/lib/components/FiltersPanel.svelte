@@ -41,21 +41,42 @@
   // entirely client-side over catalog.items, so the same in-memory rows tell us
   // which values the project actually contains: each section offers only those,
   // and hides completely when every present file shares one value (nothing to
-  // discriminate). No backend facet query is needed. ---
-
-  // Which RAW/JPEG composition categories occur among the current photos.
-  const typePresence = $derived.by(() => {
+  // discriminate). No backend facet query is needed. All four facets are filled
+  // in ONE pass over catalog.items — a keystroke-rate remap must not re-scan the
+  // whole catalog four times. ---
+  const facets = $derived.by(() => {
     let raw = false;
     let jpeg = false;
     let pair = false;
+    const exts = new Set<string>();
+    const orientations = new Set<OrientationFilter>();
+    const labels = new Set<string>();
     for (const i of catalog.items) {
       const isPair = i.groupSize > 1 && !i.decoupled;
       if (isPair) pair = true;
       else if (i.kind === 0) raw = true;
       else if (i.kind === 1) jpeg = true;
+
+      if (i.ext) exts.add(i.ext.toLowerCase());
+
+      if (i.width != null && i.height != null) {
+        // Mirrors the filter's rotation handling: EXIF orientation 5-8 means the
+        // shown image is turned 90°, so use the displayed (swapped) dimensions.
+        const rotated = i.orientation != null && i.orientation >= 5 && i.orientation <= 8;
+        const w = rotated ? i.height : i.width;
+        const h = rotated ? i.width : i.height;
+        if (h > w) orientations.add("portrait");
+        else if (w > h) orientations.add("landscape");
+        else orientations.add("square");
+      }
+
+      if (i.label) labels.add(i.label);
     }
-    return { raw, jpeg, pair };
+    return { typePresence: { raw, jpeg, pair }, exts, orientations, labels };
   });
+
+  // Which RAW/JPEG composition categories occur among the current photos.
+  const typePresence = $derived(facets.typePresence);
 
   const typeOptions = $derived(
     (
@@ -75,27 +96,10 @@
   );
 
   // Distinct extensions present in the current media tab (lowercased, sorted).
-  const presentExts = $derived.by(() => {
-    const s = new Set<string>();
-    for (const i of catalog.items) if (i.ext) s.add(i.ext.toLowerCase());
-    return [...s].sort();
-  });
+  const presentExts = $derived([...facets.exts].sort());
 
-  // Displayed-aspect orientations that occur (mirrors the filter's rotation
-  // handling: EXIF orientation 5-8 means the shown image is turned 90°).
-  const presentOrientations = $derived.by(() => {
-    const s = new Set<OrientationFilter>();
-    for (const i of catalog.items) {
-      if (i.width == null || i.height == null) continue;
-      const rotated = i.orientation != null && i.orientation >= 5 && i.orientation <= 8;
-      const w = rotated ? i.height : i.width;
-      const h = rotated ? i.width : i.height;
-      if (h > w) s.add("portrait");
-      else if (w > h) s.add("landscape");
-      else s.add("square");
-    }
-    return s;
-  });
+  // Displayed-aspect orientations that occur.
+  const presentOrientations = $derived(facets.orientations);
 
   const orientationOptions = $derived(
     (
@@ -114,11 +118,7 @@
   const RATING_STARS = [1, 2, 3, 4, 5];
 
   // Color labels actually applied somewhere in the project.
-  const presentLabels = $derived.by(() => {
-    const s = new Set<string>();
-    for (const i of catalog.items) if (i.label) s.add(i.label);
-    return LABELS.filter((l) => s.has(l));
-  });
+  const presentLabels = $derived(LABELS.filter((l) => facets.labels.has(l)));
 
   // Hover-preview state for the minimum-rating star row (0 = not hovering).
   let hovered = $state(0);
@@ -138,6 +138,13 @@
   }
 
   let panelEl = $state<HTMLDivElement | null>(null);
+
+  // Focus the panel on open. The toolbar toggle blurs its trigger, so without
+  // this nothing inside .panel holds focus and the Escape keydown never reaches
+  // onPanelKeydown; it would fall through to the global keymap instead.
+  $effect(() => {
+    panelEl?.focus();
+  });
 
   // Keeps the panel fully on-screen regardless of where the toolbar button
   // sits (it can be anywhere horizontally once the toolbar wraps on mobile).
@@ -172,9 +179,27 @@
 
   $effect(() => {
     clampToViewport();
-    window.addEventListener("resize", clampToViewport);
-    return () => window.removeEventListener("resize", clampToViewport);
+    // Throttle to one clamp per frame: the raw resize event fires far faster
+    // than a repaint, and each clamp forces synchronous layout.
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        clampToViewport();
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
   });
+
+  function onPanelKeydown(e: KeyboardEvent) {
+    e.stopPropagation();
+    if (e.key === "Escape") session.filtersPanelOpen = false;
+  }
 </script>
 
 <!-- Backdrop closes the panel on an outside click. -->
@@ -184,7 +209,14 @@
   onclick={() => (session.filtersPanelOpen = false)}
 ></div>
 
-<div class="panel" bind:this={panelEl} role="dialog" aria-label="Sort & filter">
+<div
+  class="panel"
+  bind:this={panelEl}
+  role="dialog"
+  aria-label="Sort & filter"
+  tabindex="-1"
+  onkeydown={onPanelKeydown}
+>
   <header>
     <span class="title">Sort & Filter</span>
     <button
@@ -399,6 +431,9 @@
   }
 
   .panel {
+    /* The panel takes focus on open (so Escape works); it is not a text field,
+       so suppress the focus ring the browser would draw around it. */
+    outline: none;
     position: absolute;
     top: 100%;
     /* Baseline anchor; JS (clampToViewport) shifts the panel via transform

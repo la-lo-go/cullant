@@ -45,6 +45,10 @@
   let pinchStartScale = 1;
   let pinchAnchor = { x: 0.5, y: 0.5 };
   let pinchedThisGesture = false;
+  // Frame rect cached at pinch start: framePoint() is hit on every pointermove
+  // of a live pinch, and getBoundingClientRect forces layout each call. Cleared
+  // when the pinch ends so other gestures read a fresh rect.
+  let pinchFrameRect: DOMRect | null = null;
   let swipeStartX = 0;
   let swipeStartY = 0;
   let lastTapTime = 0;
@@ -341,7 +345,7 @@
 
   function framePoint(e: { clientX: number; clientY: number }): { x: number; y: number } {
     if (!frame) return { x: frameW / 2, y: frameH / 2 };
-    const r = frame.getBoundingClientRect();
+    const r = pinchFrameRect ?? frame.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
 
@@ -598,6 +602,7 @@
       if (pointers.size === 2) {
         // Second finger down: begin a pinch anchored on the finger midpoint.
         pinchedThisGesture = true;
+        pinchFrameRect = frame ? frame.getBoundingClientRect() : null;
         const [a, b] = [...pointers.values()];
         pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
         pinchStartScale = z.zoomed ? z.scale : fit;
@@ -669,7 +674,10 @@
       const wasSingle = pointers.size === 1;
       const wasPinching = pinchStartDist > 0;
       pointers.delete(e.pointerId);
-      if (pointers.size < 2) pinchStartDist = 0;
+      if (pointers.size < 2) {
+        pinchStartDist = 0;
+        pinchFrameRect = null;
+      }
 
       // Pinch ended below (or at) fit: spring back and leave zoom mode.
       if (wasPinching && pointers.size < 2 && z.zoomed && z.scale <= fit + 1e-6) {
@@ -739,7 +747,10 @@
 
   function onPointerCancel(e: PointerEvent) {
     pointers.delete(e.pointerId);
-    if (pointers.size < 2) pinchStartDist = 0;
+    if (pointers.size < 2) {
+      pinchStartDist = 0;
+      pinchFrameRect = null;
+    }
     if (pointers.size === 0) dragging = false;
   }
 </script>

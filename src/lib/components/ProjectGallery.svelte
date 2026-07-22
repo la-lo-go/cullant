@@ -21,12 +21,15 @@
     unknown: HardDrive,
   };
 
-  // Poll storage availability while the gallery is open. Desktop also reacts to
-  // window focus / visibility changes (below), but Android gets no such event
-  // when a volume is (un)plugged, so a short interval keeps the connected /
-  // disconnected badges live without a manual rescan.
+  // Poll storage availability while the gallery is open. Desktop already reacts
+  // to window focus / visibility changes (below), so the poll is only for touch
+  // devices (Android), which get no such event when a volume is (un)plugged.
   $effect(() => {
-    const id = setInterval(() => void recent.refresh(), 3000);
+    if (!window.matchMedia("(pointer: coarse)").matches) return;
+    const id = setInterval(
+      () => recent.refresh().catch((e) => console.error("recent refresh failed", e)),
+      3000,
+    );
     return () => clearInterval(id);
   });
 
@@ -37,7 +40,7 @@
   // this component only renders while no project is open, so mounting already
   // covers "catalog.project became null").
   $effect(() => {
-    void recent.refresh();
+    recent.refresh().catch((e) => console.error("recent refresh failed", e));
   });
 
   // Re-check folder/volume availability live: when the app window regains focus
@@ -48,7 +51,10 @@
     let timer: ReturnType<typeof setTimeout> | undefined;
     const refreshSoon = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => void recent.refresh(), 150);
+      timer = setTimeout(
+        () => recent.refresh().catch((e) => console.error("recent refresh failed", e)),
+        150,
+      );
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") refreshSoon();
@@ -88,7 +94,7 @@
   function confirmDelete() {
     const path = deleteTarget?.path;
     deleteTarget = null;
-    if (path) void recent.deleteProject(path);
+    if (path) recent.deleteProject(path).catch((e) => console.error("delete project failed", e));
   }
 </script>
 
@@ -98,58 +104,57 @@
       {#each recent.list as project, index (project.path)}
         {@const st = project.storage}
         {@const KindIcon = kindIcon[st.kind]}
-        <button
-          class="card"
-          class:unavailable={st.state !== "ok"}
-          class:disconnected={st.state === "disconnected"}
-          title={project.path}
-          onclick={() => openCard(project)}
-        >
-          <span class="kind-badge" title={st.volumeName ?? st.kind}>
-            <KindIcon size={13} />
-          </span>
-          <div class="preview">
-            {#if st.state === "ok"}
-              {#each PREVIEW_SLOTS as slot, i}
-                <img
-                  class="peek peek-{i}"
-                  src={recentThumbUrl(index, slot, project.path)}
-                  alt=""
-                  loading="lazy"
-                  onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
-                />
-              {/each}
-            {:else if st.state === "disconnected"}
-              <Unplug size={38} strokeWidth={1.25} />
-            {:else}
-              <ImageOff size={40} strokeWidth={1.25} />
-            {/if}
-          </div>
-          <span class="name">{project.displayName}</span>
-          <span class="meta">
-            {#if st.state === "ok"}
-              Opened {relativeTime(project.lastOpened)}
-            {:else if st.state === "disconnected"}
-              Not connected{st.volumeName ? ` — ${st.volumeName}` : ""}
-            {:else}
-              Folder not found
-            {/if}
-          </span>
-          <span
+        <!-- The delete control is a sibling of the card button, not a child:
+             nesting an interactive element inside a <button> is invalid HTML and
+             leaves it keyboard-unreachable. -->
+        <div class="card-wrap">
+          <button
+            class="card"
+            class:unavailable={st.state !== "ok"}
+            class:disconnected={st.state === "disconnected"}
+            title={project.path}
+            onclick={() => openCard(project)}
+          >
+            <span class="kind-badge" title={st.volumeName ?? st.kind}>
+              <KindIcon size={13} />
+            </span>
+            <div class="preview">
+              {#if st.state === "ok"}
+                {#each PREVIEW_SLOTS as slot, i}
+                  <img
+                    class="peek peek-{i}"
+                    src={recentThumbUrl(index, slot, project.path)}
+                    alt=""
+                    loading="lazy"
+                    onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+                  />
+                {/each}
+              {:else if st.state === "disconnected"}
+                <Unplug size={38} strokeWidth={1.25} />
+              {:else}
+                <ImageOff size={40} strokeWidth={1.25} />
+              {/if}
+            </div>
+            <span class="name">{project.displayName}</span>
+            <span class="meta">
+              {#if st.state === "ok"}
+                Opened {relativeTime(project.lastOpened)}
+              {:else if st.state === "disconnected"}
+                Not connected{st.volumeName ? ` — ${st.volumeName}` : ""}
+              {:else}
+                Folder not found
+              {/if}
+            </span>
+          </button>
+          <button
             class="delete"
-            role="button"
-            tabindex="-1"
             title="Delete Cullant data for this project (your photos are kept)"
+            aria-label="Delete Cullant data for this project"
             onclick={(e) => askDeleteCard(e, project)}
-            onkeydown={(e) => {
-              if (e.key !== "Enter" && e.key !== " ") return;
-              e.preventDefault();
-              askDeleteCard(e, project);
-            }}
           >
             <Trash2 size={13} />
-          </span>
-        </button>
+          </button>
+        </div>
       {/each}
     </div>
   </div>
@@ -181,12 +186,17 @@
   }
 
 
+  .card-wrap {
+    position: relative;
+  }
+
   .card {
     position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 2px;
+    width: 100%;
     padding: 14px 10px 10px;
     border-radius: 10px;
     border: 1px solid var(--border);
@@ -309,16 +319,16 @@
     justify-content: center;
     width: 20px;
     height: 20px;
+    border: none;
+    background: transparent;
     border-radius: 5px;
     color: #999;
     opacity: 0;
-    /* Not inherited: the parent .card.unavailable sets cursor: default, but the
-       delete action stays clickable there (see the comment on .card.unavailable
-       above) and must show a pointer, not the card's inherited default arrow. */
     cursor: pointer;
   }
 
-  .card:hover .delete {
+  .card-wrap:hover .delete,
+  .delete:focus-visible {
     opacity: 1;
   }
 

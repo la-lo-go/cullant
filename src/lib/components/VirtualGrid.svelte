@@ -176,6 +176,14 @@
     lastViewY: number; // viewport-relative, for edge auto-scroll
   } | null = null;
   let edgeRaf = 0;
+  // Covered index range (columns/rows) of the last marquee rebuild. When a frame
+  // leaves it unchanged, the selection Set is already correct — skip the rebuild.
+  let lastMarqueeRange: { c0: number; c1: number; r0: number; r1: number } | null = null;
+  // The items reference the last rebuild read. If the catalog is replaced while
+  // a drag sits parked at a scroll-capped edge (unchanged range every frame),
+  // the covered ids changed even though the range did not, so the skip must not
+  // fire — the Set would keep stale ids at those slots.
+  let lastMarqueeItems: typeof items | null = null;
   // Touch: a pending long-press (before it turns into a marquee).
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   // Touch tap-vs-scroll, recorded on touchstart. A release under TAP_SLOP with
@@ -191,6 +199,18 @@
       longPressTimer = null;
     }
   }
+
+  // Destroy mid-drag would otherwise leave a self-rescheduling edge-scroll frame
+  // and a long-press timer that fires on a detached element. Cancel both (and
+  // drop the drag) on unmount.
+  $effect(() => () => {
+    if (edgeRaf) {
+      cancelAnimationFrame(edgeRaf);
+      edgeRaf = 0;
+    }
+    cancelLongPress();
+    drag = null;
+  });
 
   /** Cells are a uniform grid — geometry replaces DOM hit-testing. Returns
    *  null off-grid (scrollbar) or the hit index (may be out of range). */
@@ -215,6 +235,7 @@
     const viewY = y - viewport.scrollTop;
 
     const beginMarquee = (active: boolean) => {
+      lastMarqueeRange = null; // fresh drag: first applyMarquee must rebuild
       drag = {
         pointerId: e.pointerId,
         startX: x,
@@ -324,11 +345,26 @@
     const y1 = Math.max(drag.startY, y);
     marquee = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 
-    const next = new Set(drag.base);
     const c0 = Math.max(0, Math.floor((x0 - padX) / CELL));
     const c1 = Math.min(cols - 1, Math.floor((x1 - padX) / CELL));
     const r0 = Math.max(0, Math.floor((y0 - MARGIN_Y) / CELL));
     const r1 = Math.min(totalRows - 1, Math.floor((y1 - MARGIN_Y) / CELL));
+    // The rectangle grew/shrank visually but still covers the same cells: the
+    // selection Set is already correct, so skip rebuilding it this frame.
+    if (
+      lastMarqueeRange &&
+      lastMarqueeItems === items &&
+      lastMarqueeRange.c0 === c0 &&
+      lastMarqueeRange.c1 === c1 &&
+      lastMarqueeRange.r0 === r0 &&
+      lastMarqueeRange.r1 === r1
+    ) {
+      return;
+    }
+    lastMarqueeRange = { c0, c1, r0, r1 };
+    lastMarqueeItems = items;
+
+    const next = new Set(drag.base);
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
         const i = r * cols + c;
@@ -376,6 +412,8 @@
     if (viewport?.hasPointerCapture(e.pointerId)) viewport.releasePointerCapture(e.pointerId);
     drag = null;
     marquee = null;
+    lastMarqueeRange = null;
+    lastMarqueeItems = null; // release the reference so a stale items array is not retained
     if (edgeRaf) {
       cancelAnimationFrame(edgeRaf);
       edgeRaf = 0;

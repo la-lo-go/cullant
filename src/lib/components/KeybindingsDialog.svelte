@@ -9,10 +9,18 @@
     return (keymap.overrides[id] ?? DEFAULT_BINDINGS[id]).join(", ");
   }
 
-  // This dialog stops all keydowns from bubbling to the global window
-  // dispatcher (so grid/loupe shortcuts never fire behind it) — which also
-  // means it must capture the rebind key itself instead of relying on
-  // dispatcher.svelte.ts's handleKeydown, which never sees it.
+  let panel = $state<HTMLDivElement | null>(null);
+
+  // Focus the panel so keydowns land here first (and stop) instead of the
+  // global keymap.
+  $effect(() => {
+    panel?.focus();
+  });
+
+  // With the panel focused, keydowns reach this handler first; it stops them
+  // from bubbling to the global window dispatcher (so grid/loupe shortcuts
+  // never fire behind the dialog). That also means it must capture the rebind
+  // key itself, since dispatcher.svelte.ts's handleKeydown never sees it.
   function onKeydown(e: KeyboardEvent) {
     if (keymap.rebinding) {
       e.preventDefault();
@@ -35,6 +43,7 @@
 >
   <div
     class="dialog"
+    bind:this={panel}
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
@@ -90,6 +99,7 @@
     max-height: 80vh;
     display: flex;
     flex-direction: column;
+    outline: none;
   }
 
   header {

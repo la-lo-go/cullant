@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { thumbUrl, videoUrl, displayDims, containFit, type ItemLite } from "../api";
+  import { thumbUrl, displayDims, containFit, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
@@ -9,6 +9,8 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
+  import Play from "@lucide/svelte/icons/play";
+  import Film from "@lucide/svelte/icons/film";
 
   let { items }: { items: ItemLite[] } = $props();
 
@@ -22,6 +24,16 @@
 
   const CELL = 96;
   const OVERSCAN = 6;
+
+  // Video ids whose pregenerated poster couldn't be served (ffmpeg absent or the
+  // clip was undecodable → 404). Those cells fall back to a Film-glyph tile, the
+  // same as VirtualGrid — never a live <video> (heavy: scrolling clips would
+  // spin up many decoders, and a metadata failure just paints a blank box).
+  let posterFailed = $state<Set<number>>(new Set());
+  function markPosterFailed(id: number) {
+    if (posterFailed.has(id)) return;
+    posterFailed = new Set(posterFailed).add(id);
+  }
   // .cell's own padding (see its CSS) — the box object-fit: contain fits into.
   const PAD_X = 3;
   const PAD_Y = 8;
@@ -40,14 +52,26 @@
   // rendered height tops out at AVAIL_W * h/w — width-bound). Dragging past
   // that only adds empty space above/below every cell. With no known dims
   // there's no content cap, just the absolute MAX_H.
+  // Memoized on the items reference: the max aspect ratio only changes when the
+  // item set (hence the array reference) changes. A flag/sort/filter remap that
+  // yields the same reference reuses the cached value instead of re-scanning the
+  // whole catalog. Dimensions only become known via a catalog refresh, which
+  // also replaces the array, so a stale reference can never hide a dims change.
+  let cachedItemsRef: ItemLite[] | null = null;
+  let cachedContentMaxH = MAX_H;
   const contentMaxH = $derived.by(() => {
+    if (items === cachedItemsRef) return cachedContentMaxH;
     let maxRatio = 0;
     for (const item of items) {
       const dims = displayDims(item);
       if (dims && dims.w > 0) maxRatio = Math.max(maxRatio, dims.h / dims.w);
     }
-    if (maxRatio <= 0) return MAX_H;
-    return Math.min(MAX_H, Math.max(MIN_H, Math.ceil(AVAIL_W * maxRatio) + PAD_Y * 2));
+    cachedItemsRef = items;
+    cachedContentMaxH =
+      maxRatio <= 0
+        ? MAX_H
+        : Math.min(MAX_H, Math.max(MIN_H, Math.ceil(AVAIL_W * maxRatio) + PAD_Y * 2));
+    return cachedContentMaxH;
   });
   // Rendered height: the persisted preference clamped to what the current
   // items can actually fill (a tall preference saved from a portrait-heavy
@@ -279,7 +303,21 @@
               style="width:{v.photoW}px; height:{v.photoH}px"
             >
               {#if v.item.kind === 2}
-                <video src={videoUrl(v.item)} preload="metadata" muted></video>
+                {#if posterFailed.has(v.item.id)}
+                  <div class="no-poster" title="{v.item.name}.{v.item.ext}">
+                    <Film size={16} />
+                    <span>{v.item.ext.toUpperCase()}</span>
+                  </div>
+                {:else}
+                  <img
+                    src={thumbUrl(v.item)}
+                    alt=""
+                    decoding="async"
+                    draggable="false"
+                    onerror={() => markPosterFailed(v.item.id)}
+                  />
+                {/if}
+                <span class="videobadge"><Play size={9} /></span>
               {:else}
                 <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
               {/if}
@@ -505,8 +543,7 @@
     border-radius: 3px;
   }
 
-  img,
-  video {
+  img {
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -516,10 +553,42 @@
   /* Marked for deletion (reject flag or queued delete): dim the image itself,
      not .photo — opacity on the wrapper would wash out the flag badge and
      chips overlaid on the photo. Same treatment as VirtualGrid.svelte. */
-  .photo.queued img,
-  .photo.queued video {
+  .photo.queued img {
     opacity: 0.4;
     filter: grayscale(35%);
+  }
+
+  /* Video with no generated poster (ffmpeg missing / undecodable clip): a dark
+     film-glyph tile, matching VirtualGrid's fallback. */
+  .no-poster {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: var(--surface-2);
+    color: #8a8a93;
+    user-select: none;
+  }
+
+  .no-poster span {
+    font-size: 8px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+
+  /* Small play glyph marking a cell as a video (the poster is a still frame). */
+  .videobadge {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    display: inline-flex;
+    align-items: center;
+    color: #ddd;
+    pointer-events: none;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.9));
   }
 
   /* Label-color indicator: a colored strip flush along the photo's bottom

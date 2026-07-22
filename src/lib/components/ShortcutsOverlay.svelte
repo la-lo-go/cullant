@@ -88,6 +88,13 @@
     chips.push(prettyKey(rest === "" ? "+" : rest));
     return chips;
   }
+
+  // Close on Escape from within the panel, then stop propagation so the key
+  // never reaches the global keymap behind the overlay.
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") onclose();
+    e.stopPropagation();
+  }
 </script>
 
 <div
@@ -99,7 +106,7 @@
   <div
     class="dialog"
     onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
+    onkeydown={onKeydown}
     role="dialog"
     aria-label="Keyboard shortcuts"
     tabindex="-1"

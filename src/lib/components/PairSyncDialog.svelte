@@ -2,6 +2,18 @@
   import { session } from "../stores/session.svelte";
 
   let { groupId }: { groupId: number } = $props();
+
+  let panel = $state<HTMLDivElement | null>(null);
+
+  // Focus the panel so Escape lands here (and stops) instead of the global keymap.
+  $effect(() => {
+    panel?.focus();
+  });
+
+  function onKeydown(e: KeyboardEvent) {
+    e.stopPropagation();
+    if (e.key === "Escape") session.recoupleDialogFor = null;
+  }
 </script>
 
 <div
@@ -12,8 +24,9 @@
 >
   <div
     class="dialog"
+    bind:this={panel}
     onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
+    onkeydown={onKeydown}
     role="dialog"
     tabindex="-1"
   >
@@ -57,6 +70,7 @@
     padding: 16px 20px;
     width: 380px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
+    outline: none;
   }
 
   h2 {

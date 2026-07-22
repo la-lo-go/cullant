@@ -21,7 +21,19 @@
         // Guard against a late response for a photo we already stepped past.
         if (id === item.id) meta = m;
       })
-      .finally(() => (loading = false));
+      .catch((e) => {
+        // A failed read must not leave the panel stuck on "Reading…"; fall back
+        // to the empty state for the current photo.
+        if (id === item.id) {
+          console.error("metadata read failed", e);
+          meta = null;
+        }
+      })
+      .finally(() => {
+        // Stepping fast can resolve an earlier request while a newer one is in
+        // flight; only the current item's request may clear the loading flag.
+        if (id === item.id) loading = false;
+      });
   });
 
   function fmtSize(bytes: number): string {

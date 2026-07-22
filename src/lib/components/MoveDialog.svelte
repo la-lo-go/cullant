@@ -4,28 +4,56 @@
 
   let dest = $state("selects");
   let input = $state<HTMLInputElement | null>(null);
+  let busy = $state(false);
+  let error = $state("");
 
   $effect(() => {
     input?.focus();
     input?.select();
   });
 
+  // Keep the destination a relative path under the project root. Drop empty,
+  // "." and ".." segments (so "../../outside" cannot climb out) and any segment
+  // with a colon (a Windows drive like "C:" is drive-relative, so PathBuf::join
+  // on the backend would discard the project root and jump to that drive).
+  const safeFolder = $derived(
+    dest
+      .split(/[\\/]+/)
+      .filter((s) => s !== "" && s !== "." && s !== ".." && !s.includes(":"))
+      .join("/"),
+  );
+
+  // Selection-aware targets: the whole selection when one exists, else the
+  // focused item (matches how the other actions fan out).
+  function moveTargets() {
+    const ids =
+      session.selectedIds.size > 0
+        ? [...session.selectedIds]
+        : session.focused
+          ? [session.focused.id]
+          : [];
+    return { ids, asGroups: session.mirrorMode };
+  }
+
   function close() {
     session.moveDialogOpen = false;
   }
 
   async function queue(action: "move" | "copy") {
-    const item = session.focused;
-    const folder = dest.trim().replace(/^[\\/]+|[\\/]+$/g, "");
-    if (!item || !folder) return;
-    await api.enqueueAction(
-      { ids: [item.id], asGroups: session.mirrorMode },
-      action,
-      folder,
-      "both"
-    );
-    await session.refreshPending();
-    close();
+    if (busy) return;
+    const targets = moveTargets();
+    if (targets.ids.length === 0 || !safeFolder) return;
+    busy = true;
+    error = "";
+    try {
+      await api.enqueueAction(targets, action, safeFolder, "both");
+      await session.refreshPending();
+      close();
+    } catch (e) {
+      error = String(e);
+    } finally {
+      busy = false;
+    }
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -49,9 +77,10 @@
       Enter = move · Ctrl+Enter = copy · Esc = cancel
     </p>
     <input bind:this={input} bind:value={dest} placeholder="e.g. selects or deliver/client" />
+    {#if error}<p class="error">{error}</p>{/if}
     <div class="buttons">
-      <button onclick={() => queue("move")}>Queue move</button>
-      <button onclick={() => queue("copy")}>Queue copy</button>
+      <button onclick={() => queue("move")} disabled={busy || !safeFolder}>Queue move</button>
+      <button onclick={() => queue("copy")} disabled={busy || !safeFolder}>Queue copy</button>
     </div>
   </div>
 </div>
@@ -119,7 +148,18 @@
     cursor: pointer;
   }
 
-  button:hover {
+  button:hover:not(:disabled) {
     border-color: var(--accent);
+  }
+
+  button:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
+
+  .error {
+    color: #ff6b6b;
+    font-size: 13px;
+    margin: 0;
   }
 </style>

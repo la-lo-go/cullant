@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { previewUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
+  import { catalog } from "../stores/catalog.svelte";
   import { view } from "../stores/view.svelte";
   import { tags } from "../stores/tags.svelte";
   import ZoomImage from "./ZoomImage.svelte";
@@ -81,12 +83,30 @@
     if (next) pinnedItem = next;
   }
 
-  // Warm the cache one photo ahead of the focus, so arrowing quickly
-  // through a burst always finds the next preview already decoded.
+  // Warm the cache one photo ahead of the focus, so arrowing quickly through a
+  // burst always finds the next preview already decoded. Gated like Viewer.svelte:
+  // a dwell so fast flipping never floods the pool, and a skip for previews
+  // already cached (nothing to warm — the protocol serves those from disk).
+  const AHEAD_DWELL_MS = 1000;
   $effect(() => {
-    const ahead = session.filtered[session.focusedIndex + 2];
-    if (ahead && ahead.kind !== 2) {
-      new Image().src = previewUrl(ahead);
+    const idx = session.focusedIndex;
+    const timer = setTimeout(() => {
+      const ahead = session.filtered[idx + 2];
+      if (ahead && ahead.kind !== 2 && !untrack(() => catalog.previewReady.has(ahead.id))) {
+        new Image().src = previewUrl(ahead);
+      }
+    }, AHEAD_DWELL_MS);
+    return () => clearTimeout(timer);
+  });
+
+  // When a pinned pane's photo is deleted from the catalog, drop the pin so
+  // ZoomImage stops requesting a dead id (mirrors the selectedIds pruning). A
+  // photo merely filtered out still shows via pinnedLive's snapshot fallback,
+  // so this checks the catalog itself, not the visible filter.
+  $effect(() => {
+    if (pinnedItem && !catalog.items.some((i) => i.id === pinnedItem!.id)) {
+      pinnedSide = null;
+      pinnedItem = null;
     }
   });
 </script>

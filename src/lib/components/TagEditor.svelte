@@ -9,6 +9,7 @@
   let newName = $state("");
   let newScope = $state(2);
   let newColor = $state("#7a9bd6");
+  let error = $state("");
   /** Tag id currently listening for a shortcut key. */
   let recording = $state<number | null>(null);
 
@@ -17,19 +18,34 @@
   async function create() {
     const name = newName.trim();
     if (!name) return;
-    await api.createTaskTag(name, null, newScope, newColor);
-    newName = "";
-    await tags.refresh();
+    error = "";
+    try {
+      await api.createTaskTag(name, null, newScope, newColor);
+      newName = "";
+      await tags.refresh();
+    } catch (e) {
+      error = String(e);
+    }
   }
 
   async function remove(tag: TaskTag) {
-    await api.deleteTaskTag(tag.id);
-    await tags.refresh();
+    error = "";
+    try {
+      await api.deleteTaskTag(tag.id);
+      await tags.refresh();
+    } catch (e) {
+      error = String(e);
+    }
   }
 
   async function setScope(tag: TaskTag, e: Event) {
-    await api.updateTaskTag({ ...tag, scope: Number((e.target as HTMLSelectElement).value) });
-    await tags.refresh();
+    error = "";
+    try {
+      await api.updateTaskTag({ ...tag, scope: Number((e.target as HTMLSelectElement).value) });
+      await tags.refresh();
+    } catch (err) {
+      error = String(err);
+    }
   }
 
   function recordShortcut(tag: TaskTag) {
@@ -40,6 +56,9 @@
     if (recording === null) return;
     e.preventDefault();
     e.stopPropagation();
+    // A lone modifier press is not a shortcut on its own — keep listening for
+    // the next real key so we never store "ctrl+control".
+    if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta") return;
     const tag = tags.all.find((t) => t.id === recording);
     recording = null;
     if (!tag || e.key === "Escape") return;
@@ -52,6 +71,21 @@
     await api.updateTaskTag({ ...tag, shortcut: e.key === "Backspace" ? null : shortcut });
     await tags.refresh();
   }
+
+  // Escape closes the dialog (unless a shortcut is being recorded, where the
+  // window capture handler above consumes it to cancel the recording instead).
+  function onDialogKeydown(e: KeyboardEvent) {
+    e.stopPropagation();
+    if (e.key === "Escape" && recording === null) onclose();
+  }
+
+  let dialogEl = $state<HTMLDivElement | null>(null);
+
+  // Focus the panel on open so a key pressed before any click lands here and
+  // stops, instead of reaching the global keymap and acting on the grid.
+  $effect(() => {
+    dialogEl?.focus();
+  });
 </script>
 
 <svelte:window onkeydowncapture={onKeydown} />
@@ -64,8 +98,9 @@
 >
   <div
     class="dialog"
+    bind:this={dialogEl}
     onclick={(e) => e.stopPropagation()}
-    onkeydown={(e) => e.stopPropagation()}
+    onkeydown={onDialogKeydown}
     role="dialog"
     tabindex="-1"
   >
@@ -107,6 +142,7 @@
       <input type="color" bind:value={newColor} title="Tag color" />
       <button onclick={create}>Add</button>
     </div>
+    {#if error}<p class="error">{error}</p>{/if}
   </div>
 </div>
 
@@ -125,6 +161,8 @@
   }
 
   .dialog {
+    /* The dialog takes focus on open (so keys stop here); suppress the ring. */
+    outline: none;
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
     border-radius: 10px;
@@ -258,6 +296,12 @@
     display: inline-flex;
     align-items: center;
     opacity: 0.6;
+  }
+
+  .error {
+    color: #ff6b6b;
+    font-size: 12px;
+    margin: 0;
   }
 
   input[type="color"] {

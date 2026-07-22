@@ -56,20 +56,41 @@
         : 0
       : (focused?.rating ?? 0),
   );
+  // Shared active state computed in ONE pass, read many times from the markup
+  // (per flag button, per label swatch, per tag — in both the class binding and
+  // the click handler). With a selection it's the common flag/label and the tag
+  // intersection across every selected item (null/empty when mixed); otherwise
+  // the single focused item's own state.
+  const active = $derived.by(() => {
+    if (hasSelection) {
+      const items = selectedItems;
+      if (items.length === 0)
+        return { flag: null as number | null, label: null as string | null, tagIds: new Set<number>() };
+      const first = items[0];
+      return {
+        flag: items.every((i) => i.flag === first.flag) ? first.flag : null,
+        label: items.every((i) => i.label === first.label) ? first.label : null,
+        tagIds: new Set<number>(first.tagIds.filter((t) => items.every((i) => i.tagIds.includes(t)))),
+      };
+    }
+    return {
+      flag: focused?.flag ?? null,
+      label: focused?.label ?? null,
+      tagIds: new Set<number>(focused?.tagIds ?? []),
+    };
+  });
+
   function labelActive(name: string): boolean {
-    if (hasSelection) return selectedItems.length > 0 && selectedItems.every((i) => i.label === name);
-    return focused?.label === name;
+    return active.label === name;
   }
   function tagActive(tagId: number): boolean {
-    if (hasSelection) return selectedItems.length > 0 && selectedItems.every((i) => i.tagIds.includes(tagId));
-    return focused?.tagIds.includes(tagId) ?? false;
+    return active.tagIds.has(tagId);
   }
   // Pick/reject use the same selection-aware rule as labels/tags (and as the
   // desktop SelectionBar): the toggle reads whether EVERY relevant item
   // already has the flag, so both bars always issue the same command.
   function flagActive(f: number): boolean {
-    if (hasSelection) return selectedItems.length > 0 && selectedItems.every((i) => i.flag === f);
-    return focused?.flag === f;
+    return active.flag === f;
   }
 
   // Run a command, then release focus so a clicked button never swallows the

@@ -13,37 +13,33 @@
   const children = $derived([...node.children.values()]);
 </script>
 
-<button
-  class="node"
-  class:active={session.folderFilter === node.path}
-  style="padding-left: {depth * 16 + 8}px"
-  onclick={() => (session.folderFilter = node.path)}
->
+<!-- The chevron is a real <button> sibling of the node button, overlaid on the
+     node's leading spacer: nesting an interactive element inside a <button> is
+     invalid HTML and leaves the chevron keyboard-unreachable. -->
+<div class="row">
+  <button
+    class="node"
+    class:active={session.folderFilter === node.path}
+    style="padding-left: {depth * 16 + 8}px"
+    onclick={() => (session.folderFilter = node.path)}
+  >
+    <span class="chevron-spacer"></span>
+    <Folder size={13} />
+    <span class="name">{node.name}</span>
+    <span class="count">{node.count}</span>
+  </button>
   {#if hasChildren}
-    <span
+    <button
       class="chevron"
-      role="button"
-      tabindex="-1"
-      onclick={(e) => {
-        e.stopPropagation();
-        expanded = !expanded;
-      }}
-      onkeydown={(e) => {
-        if (e.key !== "Enter" && e.key !== " ") return;
-        e.stopPropagation();
-        e.preventDefault();
-        expanded = !expanded;
-      }}
+      style="left: {depth * 16 + 8}px"
+      aria-label={expanded ? "Collapse" : "Expand"}
+      aria-expanded={expanded}
+      onclick={() => (expanded = !expanded)}
     >
       {#if expanded}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
-    </span>
-  {:else}
-    <span class="chevron-spacer"></span>
+    </button>
   {/if}
-  <Folder size={13} />
-  <span class="name">{node.name}</span>
-  <span class="count">{node.count}</span>
-</button>
+</div>
 {#if hasChildren && expanded}
   {#each children as child (child.path)}
     <FolderTreeNode node={child} depth={depth + 1} />
@@ -51,6 +47,10 @@
 {/if}
 
 <style>
+  .row {
+    position: relative;
+  }
+
   .node {
     display: flex;
     align-items: center;
@@ -78,7 +78,6 @@
     color: var(--accent);
   }
 
-  .chevron,
   .chevron-spacer {
     display: inline-flex;
     align-items: center;
@@ -86,7 +85,27 @@
     width: 14px;
     height: 14px;
     flex: none;
+  }
+
+  /* Overlaid on the node's leading spacer (left set inline per depth). */
+  .chevron {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
     opacity: 0.6;
+  }
+
+  .chevron:hover {
+    opacity: 1;
   }
 
   .name {

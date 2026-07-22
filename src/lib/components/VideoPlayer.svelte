@@ -117,7 +117,7 @@
   // escape hatch when in-app decode fails; also offered pre-emptively so the
   // user is never stuck on a silent black frame the WebView never errors on.
   function openExternally() {
-    void api.openExternal(item.id);
+    api.openExternal(item.id).catch((e) => console.error("open external failed", e));
   }
 
   function togglePlay() {
@@ -128,8 +128,14 @@
 
   async function toggleFullscreen() {
     if (!wrap) return;
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else await wrap.requestFullscreen();
+    // requestFullscreen/exitFullscreen reject if the gesture is disallowed or the
+    // element is gone; swallow it rather than leaving an unhandled rejection.
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await wrap.requestFullscreen();
+    } catch (e) {
+      console.error("fullscreen toggle failed", e);
+    }
   }
 
   function onFullscreenChange() {

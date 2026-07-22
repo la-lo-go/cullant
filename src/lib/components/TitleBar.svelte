@@ -62,15 +62,30 @@
   // open. The name doubles as the menu trigger.
   let menuOpen = $state(false);
 
-  // Up to three most-recently-opened projects other than the current one, for
+  // Up to five most-recently-opened projects other than the current one, for
   // quick switching. Refreshed each time the menu opens.
   const otherRecent = $derived(
     recent.list.filter((p) => p.path !== catalog.project?.rootPath).slice(0, 5),
   );
 
+  let menuEl = $state<HTMLDivElement | null>(null);
+
   function toggleMenu() {
     menuOpen = !menuOpen;
     if (menuOpen) void recent.refresh();
+  }
+
+  // Focus the menu on open so Escape reaches onMenuKeydown; the trigger button
+  // keeps focus after the click otherwise, and it is a sibling of .menu.
+  $effect(() => {
+    if (menuOpen) menuEl?.focus();
+  });
+
+  function onMenuKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      menuOpen = false;
+      e.stopPropagation();
+    }
   }
 
   function choose(fn: () => void) {
@@ -95,7 +110,7 @@
       {#if menuOpen}
         <!-- Full-window backdrop: an outside click closes the menu. -->
         <button class="menu-backdrop" aria-label="Close menu" onclick={() => (menuOpen = false)}></button>
-        <div class="menu" role="menu">
+        <div class="menu" role="menu" tabindex="-1" bind:this={menuEl} onkeydown={onMenuKeydown}>
           <button class="item" role="menuitem" onclick={() => choose(onOpenNew)}>
             <FolderOpen size={15} />
             <span>Open new project…</span>
@@ -260,6 +275,8 @@
   }
 
   .menu {
+    /* The menu takes focus on open (so Escape works); suppress the focus ring. */
+    outline: none;
     position: absolute;
     top: calc(100% + 2px);
     left: 6px;
