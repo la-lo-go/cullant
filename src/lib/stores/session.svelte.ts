@@ -570,7 +570,11 @@ class SessionStore {
       else next.add(item.id);
     }
     this.selectedIds = next;
-    this.focusedIndex = index;
+    // Making a selection drops the focus outline entirely: a focused cell next
+    // to (or on) the selection reads as "still active", so on touch a tap that
+    // deselects a cell but re-focuses it looks like nothing happened. Anchor is
+    // kept for a subsequent Shift-range.
+    this.focusedIndex = -1;
     this.selectionAnchor = index;
   }
 
@@ -586,7 +590,8 @@ class SessionStore {
       if (item) next.add(item.id);
     }
     this.selectedIds = next;
-    this.focusedIndex = index;
+    // Drop focus while a selection exists (see toggleSelect); keep the anchor.
+    this.focusedIndex = -1;
     this.selectionAnchor = anchor;
   }
 
@@ -597,6 +602,8 @@ class SessionStore {
 
   selectAll() {
     this.selectedIds = new Set(this.filtered.map((i) => i.id));
+    // No focus while a selection exists (see toggleSelect).
+    this.focusedIndex = -1;
   }
 
   /**

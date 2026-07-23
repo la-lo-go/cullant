@@ -577,7 +577,7 @@
       {@const portrait = dims !== null && dims.h > dims.w}
       <div
         class="cell"
-        class:focused={v.index === session.focusedIndex}
+        class:focused={v.index === session.focusedIndex && session.selectedIds.size === 0}
         class:selected
         style="transform: translate({v.x + GAP / 2 + inset}px, {v.y + GAP / 2 + inset}px); width:{CELL - GAP - inset * 2}px; height:{CELL - GAP - inset * 2}px"
         role="button"
