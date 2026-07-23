@@ -10,6 +10,7 @@ import {
   type SyncFrom,
   type Targets,
 } from "../api";
+import { groupCompare } from "../gridGroups";
 import { apertureBucket, focalBucket, isoBucket, shutterBucket } from "../metadataFacets";
 import { catalog } from "./catalog.svelte";
 import { settings } from "./settings.svelte";
@@ -30,6 +31,8 @@ interface SavedSession {
   sort?: SortKey;
   sortDesc?: boolean;
   media?: MediaTab;
+  gridDensity?: GridDensity;
+  groupBy?: string[];
   filters?: {
     flagFilter?: FlagFilter;
     minRating?: number;
@@ -110,6 +113,9 @@ function isInFolder(relPath: string, folder: string): boolean {
 
 export const LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
 export type Label = (typeof LABELS)[number];
+
+/** Grid thumbnail size. `medium` is the historical default. */
+export type GridDensity = "small" | "medium" | "large";
 
 class SessionStore {
   // --- filters ---
@@ -212,6 +218,55 @@ class SessionStore {
   selectedIds = $state<Set<number>>(new Set());
   /** Index into `filtered` where the last explicit selection started (Shift ranges). */
   selectionAnchor = $state<number | null>(null);
+
+  // --- grid view (density + grouping) ---
+  /** Grid thumbnail size; persisted per project via the session blob. */
+  gridDensity = $state<GridDensity>("medium");
+  /** Ordered grouping dimensions (keys from `gridGroups`); [] = no grouping
+   *  (the default flat grid). Level 0 is the outermost section. */
+  groupBy = $state<string[]>([]);
+  /** Whether the grid-view popover (density + group-by) is open. */
+  viewPanelOpen = $state(false);
+
+  setDensity(d: GridDensity) {
+    this.gridDensity = d;
+  }
+
+  /** Append a grouping level (a dimension not already active). */
+  addGroupLevel(key: string) {
+    if (!this.groupBy.includes(key)) this.groupBy = [...this.groupBy, key];
+  }
+
+  /** Replace the dimension at a level, or remove the level when key is "". A
+   *  dimension already used at another level is ignored (no duplicate sections). */
+  setGroupLevel(index: number, key: string) {
+    if (index < 0 || index >= this.groupBy.length) return;
+    if (key === "") {
+      this.groupBy = this.groupBy.filter((_, i) => i !== index);
+      return;
+    }
+    if (this.groupBy.includes(key) && this.groupBy[index] !== key) return;
+    const next = [...this.groupBy];
+    next[index] = key;
+    this.groupBy = next;
+  }
+
+  removeGroupLevel(index: number) {
+    this.groupBy = this.groupBy.filter((_, i) => i !== index);
+  }
+
+  /** Move a level up (dir -1) or down (dir +1); reorders the nesting. */
+  moveGroupLevel(index: number, dir: -1 | 1) {
+    const j = index + dir;
+    if (j < 0 || j >= this.groupBy.length) return;
+    const next = [...this.groupBy];
+    [next[index], next[j]] = [next[j], next[index]];
+    this.groupBy = next;
+  }
+
+  clearGroups() {
+    if (this.groupBy.length > 0) this.groupBy = [];
+  }
 
   /** Show filenames under grid thumbnails (persisted). */
   showNames = $state<boolean>(loadBoolPref(SHOW_NAMES_KEY, true));
@@ -375,6 +430,14 @@ class SessionStore {
     if (this.folderFilter !== null) {
       out = out.filter((i) => isInFolder(i.relPath, this.folderFilter!));
     }
+    // Grouping is a stable multi-level sort applied last, so items of the same
+    // bucket become contiguous while the active catalog sort survives within the
+    // deepest bucket. Keeping it in `filtered` (not just the grid) means the
+    // focus/selection index space matches what the grid draws. Copy first: `out`
+    // may still alias catalog.items here (separate mode with no active filter).
+    if (this.groupBy.length > 0) {
+      out = [...out].sort((a, b) => groupCompare(a, b, this.groupBy));
+    }
     return out;
   });
 
@@ -413,6 +476,8 @@ class SessionStore {
       sort: catalog.sort,
       sortDesc: catalog.sortDesc,
       media: catalog.media,
+      gridDensity: this.gridDensity,
+      groupBy: this.groupBy,
       filters: {
         flagFilter: this.flagFilter,
         minRating: this.minRating,
@@ -453,6 +518,8 @@ class SessionStore {
       } catch {
         return;
       }
+      if (s.gridDensity) this.gridDensity = s.gridDensity;
+      if (Array.isArray(s.groupBy)) this.groupBy = s.groupBy.filter((k) => typeof k === "string");
       const f = s.filters;
       if (f) {
         if (f.flagFilter) this.flagFilter = f.flagFilter;
