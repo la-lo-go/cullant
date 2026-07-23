@@ -295,6 +295,9 @@
   const TAP_SLOP = 10;
   let touchTap: { index: number; onCell: boolean; x: number; y: number; moved: boolean } | null =
     null;
+  // Touch: last tap on a cell while a selection was active, for double-tap-to-open.
+  const DOUBLE_TAP_MS = 320;
+  let lastSelTap: { index: number; time: number } | null = null;
 
   function cancelLongPress() {
     if (longPressTimer) {
@@ -475,7 +478,13 @@
    *  this can't live on the .cell element — recompute the hit cell instead. */
   function onDblClick(e: MouseEvent) {
     const hit = hitTest(e);
-    if (hit?.onCell) view.mode = "viewer";
+    if (!hit?.onCell) return;
+    // Focus the double-clicked photo before opening so the loupe shows IT. With a
+    // selection active, focus is intentionally dropped (a selection has no single
+    // "focused" cell), so without this the loupe would open on nothing.
+    session.selectOnly(hit.index);
+    view.markOpenedFromGrid();
+    view.mode = "viewer";
   }
 
   function endDrag(e: PointerEvent) {
@@ -493,10 +502,25 @@
           // the desktop empty-space click (which resolves to an empty marquee).
           session.clearSelection();
         } else if (session.selectedIds.size > 0) {
-          // A selection is already active (started via long-press): taps toggle
-          // membership instead of opening, so you can build a multi-selection one
-          // tap at a time.
-          session.toggleSelect(tap.index);
+          // A selection is already active (started via long-press): a single tap
+          // toggles membership so you can build a multi-selection one tap at a
+          // time — it must NOT open (focus is dropped while selecting, so opening
+          // would land the loupe on nothing). A quick double-tap on the same cell
+          // opens it instead, focusing it first.
+          const now = performance.now();
+          if (
+            lastSelTap &&
+            lastSelTap.index === tap.index &&
+            now - lastSelTap.time < DOUBLE_TAP_MS
+          ) {
+            lastSelTap = null;
+            session.selectOnly(tap.index);
+            view.markOpenedFromGrid();
+            view.mode = "viewer";
+          } else {
+            lastSelTap = { index: tap.index, time: now };
+            session.toggleSelect(tap.index);
+          }
         } else {
           session.selectOnly(tap.index);
           // Note the tap-open so ZoomImage can ignore the second tap of a
