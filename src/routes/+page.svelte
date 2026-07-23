@@ -36,7 +36,6 @@
   import Link from "@lucide/svelte/icons/link";
   import Unlink from "@lucide/svelte/icons/unlink";
   import Tag from "@lucide/svelte/icons/tag";
-  import Type from "@lucide/svelte/icons/type";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
@@ -376,32 +375,21 @@
           >
             <ListFilter size={14} />
             <span>Sort &amp; Filter</span>
-            {#if view.mode === "grid"}
-              <span class="sort-hint">
-                <span
-                  >{catalog.sort === "capture"
-                    ? "Date"
-                    : catalog.sort === "name"
-                      ? "Name"
-                      : "Size"}</span
-                >
-                {#if catalog.sortDesc}<ArrowDown size={11} />{:else}<ArrowUp size={11} />{/if}
-              </span>
-            {/if}
+            <span class="sort-hint">
+              <span
+                >{catalog.sort === "capture"
+                  ? "Date"
+                  : catalog.sort === "name"
+                    ? "Name"
+                    : "Size"}</span
+              >
+              {#if catalog.sortDesc}<ArrowDown size={11} />{:else}<ArrowUp size={11} />{/if}
+            </span>
           </button>
           {#if session.filtersPanelOpen}
             <FiltersPanel />
           {/if}
         </div>
-        {#if view.mode === "grid"}
-          <button
-            class:active={session.showNames}
-            title="Show/hide file names"
-            onclick={blurring(() => session.toggleShowNames())}
-          >
-            <Type size={14} />
-          </button>
-        {/if}
         {#if view.mode !== "grid"}
           <button
             class="touchbar-toggle"
@@ -1210,7 +1198,7 @@
     flex: none;
     display: flex;
     align-items: center;
-    padding: 6px 6px 4px;
+    padding: 6px;
   }
 
   /* Anchors the GridViewPanel popover under the View button. */

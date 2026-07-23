@@ -1,10 +1,8 @@
 <script lang="ts">
   import { session, type GridDensity } from "../stores/session.svelte";
-  import { GROUP_DIMS, groupDim } from "../gridGroups";
-  import Plus from "@lucide/svelte/icons/plus";
+  import { GROUP_DIMS } from "../gridGroups";
+  import DragList from "./DragList.svelte";
   import X from "@lucide/svelte/icons/x";
-  import ChevronUp from "@lucide/svelte/icons/chevron-up";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
 
   const densities: { value: GridDensity; label: string }[] = [
     { value: "small", label: "Small" },
@@ -57,6 +55,13 @@
   </section>
 
   <section>
+    <button class="toggle" class:on={session.showNames} onclick={() => session.toggleShowNames()}>
+      <span>Show file names</span>
+      <span class="pill"></span>
+    </button>
+  </section>
+
+  <section>
     <div class="lbl-row">
       <span class="lbl">Group by</span>
       {#if session.groupBy.length > 0}
@@ -68,39 +73,31 @@
       <p class="hint">Not grouped — one flat grid.</p>
     {/if}
 
-    {#each session.groupBy as key, i (key)}
-      <div class="level">
-        <span class="depth">{i + 1}</span>
-        <select
-          class="dimsel"
-          value={key}
-          onchange={(e) => session.setGroupLevel(i, e.currentTarget.value)}
-        >
-          {#each available(key) as d (d.key)}
-            <option value={d.key}>{d.label}</option>
-          {/each}
-        </select>
-        <button
-          class="icon"
-          title="Move up"
-          disabled={i === 0}
-          onclick={() => session.moveGroupLevel(i, -1)}
-        >
-          <ChevronUp size={14} />
-        </button>
-        <button
-          class="icon"
-          title="Move down"
-          disabled={i === session.groupBy.length - 1}
-          onclick={() => session.moveGroupLevel(i, 1)}
-        >
-          <ChevronDown size={14} />
-        </button>
-        <button class="icon" title="Remove" onclick={() => session.removeGroupLevel(i)}>
-          <X size={14} />
-        </button>
-      </div>
-    {/each}
+    {#if session.groupBy.length > 0}
+      <DragList
+        items={session.groupBy}
+        keyOf={(k) => k}
+        onMove={(f, t) => session.reorderGroupLevel(f, t)}
+        ariaLabel="Grouping levels"
+      >
+        {#snippet row(key, i)}
+          <div class="level">
+            <select
+              class="dimsel"
+              value={key}
+              onchange={(e) => session.setGroupLevel(i, e.currentTarget.value)}
+            >
+              {#each available(key) as d (d.key)}
+                <option value={d.key}>{d.label}</option>
+              {/each}
+            </select>
+            <button class="icon" title="Remove" onclick={() => session.removeGroupLevel(i)}>
+              <X size={14} />
+            </button>
+          </div>
+        {/snippet}
+      </DragList>
+    {/if}
 
     {#if unused.length > 0}
       <select
@@ -116,6 +113,17 @@
           <option value={d.key}>{d.label}</option>
         {/each}
       </select>
+    {/if}
+
+    {#if session.groupBy.length > 0}
+      <button
+        class="toggle"
+        class:on={session.stickyGroupHeader}
+        onclick={() => (session.stickyGroupHeader = !session.stickyGroupHeader)}
+      >
+        <span>Sticky group header</span>
+        <span class="pill"></span>
+      </button>
     {/if}
   </section>
 </div>
@@ -228,35 +236,60 @@
     gap: 4px;
   }
 
-  .depth {
-    width: 16px;
-    height: 16px;
-    flex: none;
+  /* Label + switch row (Show file names / Sticky group header). Its own control
+     so the panel never shows a device-default checkbox. */
+  .toggle {
     display: flex;
     align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    background: var(--control);
-    color: #8a8a93;
-    font-size: 10px;
+    justify-content: space-between;
+    width: 100%;
+    background: none;
+    border: none;
+    color: #ddd;
+    padding: 2px 0;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
   }
 
+  .pill {
+    flex: none;
+    position: relative;
+    width: 34px;
+    height: 18px;
+    border-radius: 9px;
+    background: var(--control);
+    transition: background 0.15s ease;
+  }
+
+  .pill::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #888;
+    transition:
+      transform 0.15s ease,
+      background 0.15s ease;
+  }
+
+  .toggle.on .pill {
+    background: var(--accent-fill);
+  }
+
+  .toggle.on .pill::after {
+    transform: translateX(16px);
+    background: #fff;
+  }
+
+  /* Look comes from the app-wide :global(select) rule; only layout here. */
   .dimsel {
     flex: 1;
     min-width: 0;
-    background: var(--control);
-    color: #ddd;
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
-    padding: 5px 8px;
     font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-  }
-
-  .dimsel:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   .dimsel.add {

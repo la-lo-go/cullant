@@ -33,6 +33,7 @@ interface SavedSession {
   media?: MediaTab;
   gridDensity?: GridDensity;
   groupBy?: string[];
+  stickyGroupHeader?: boolean;
   filters?: {
     flagFilter?: FlagFilter;
     minRating?: number;
@@ -225,6 +226,9 @@ class SessionStore {
   /** Ordered grouping dimensions (keys from `gridGroups`); [] = no grouping
    *  (the default flat grid). Level 0 is the outermost section. */
   groupBy = $state<string[]>([]);
+  /** Pin the current outermost group's header to the top of the grid while
+   *  scrolling (only meaningful when grouping is active). Persisted per project. */
+  stickyGroupHeader = $state(false);
   /** Whether the grid-view popover (density + group-by) is open. */
   viewPanelOpen = $state(false);
 
@@ -255,12 +259,19 @@ class SessionStore {
     this.groupBy = this.groupBy.filter((_, i) => i !== index);
   }
 
-  /** Move a level up (dir -1) or down (dir +1); reorders the nesting. */
-  moveGroupLevel(index: number, dir: -1 | 1) {
-    const j = index + dir;
-    if (j < 0 || j >= this.groupBy.length) return;
+  /** Move a level from one position to another (drag-reorder the nesting). */
+  reorderGroupLevel(from: number, to: number) {
+    if (
+      from === to ||
+      from < 0 ||
+      to < 0 ||
+      from >= this.groupBy.length ||
+      to >= this.groupBy.length
+    )
+      return;
     const next = [...this.groupBy];
-    [next[index], next[j]] = [next[j], next[index]];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
     this.groupBy = next;
   }
 
@@ -478,6 +489,7 @@ class SessionStore {
       media: catalog.media,
       gridDensity: this.gridDensity,
       groupBy: this.groupBy,
+      stickyGroupHeader: this.stickyGroupHeader,
       filters: {
         flagFilter: this.flagFilter,
         minRating: this.minRating,
@@ -520,6 +532,7 @@ class SessionStore {
       }
       if (s.gridDensity) this.gridDensity = s.gridDensity;
       if (Array.isArray(s.groupBy)) this.groupBy = s.groupBy.filter((k) => typeof k === "string");
+      if (typeof s.stickyGroupHeader === "boolean") this.stickyGroupHeader = s.stickyGroupHeader;
       const f = s.filters;
       if (f) {
         if (f.flagFilter) this.flagFilter = f.flagFilter;
