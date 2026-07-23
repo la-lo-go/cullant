@@ -6,7 +6,6 @@
   import { recent } from "$lib/stores/recent.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
-  import { groupDim } from "$lib/gridGroups";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
   import VirtualGrid from "$lib/components/VirtualGrid.svelte";
   import FolderTree from "$lib/components/FolderTree.svelte";
@@ -39,10 +38,8 @@
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
-  import FolderTreeIcon from "@lucide/svelte/icons/folder-tree";
   import ListFilter from "@lucide/svelte/icons/list-filter";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
-  import Layers from "@lucide/svelte/icons/layers";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import SettingsIcon from "@lucide/svelte/icons/settings";
@@ -212,8 +209,9 @@
   // toggle when there are no RAWs to fan actions out to.
   const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
 
-  // Compact "Camera › Date" summary of the active grouping for the view button.
-  const groupSummary = $derived(session.groupBy.map((k) => groupDim(k)?.label ?? k).join(" › "));
+  // The grid view (density/grouping) differs from its defaults — colours the
+  // View toolbar button, the same way active filters colour Sort & Filter.
+  const hasCustomView = $derived(session.groupBy.length > 0 || session.gridDensity !== "medium");
 
   // Watch the open project's storage while working: if its folder/volume goes
   // away (drive unplugged, folder moved/deleted) warn once, and clear the
@@ -390,6 +388,20 @@
             <FiltersPanel />
           {/if}
         </div>
+        <div class="view-anchor">
+          <button
+            class:active={session.viewPanelOpen}
+            class:haswork={hasCustomView}
+            title="Grid view — thumbnail size & grouping"
+            aria-label="Grid view"
+            onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
+          >
+            <LayoutGrid size={14} />
+          </button>
+          {#if session.viewPanelOpen}
+            <GridViewPanel />
+          {/if}
+        </div>
         {#if view.mode !== "grid"}
           <button
             class="touchbar-toggle"
@@ -399,15 +411,6 @@
             onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
           >
             <PanelBottom size={14} />
-          </button>
-        {/if}
-        {#if hasSubfolders && view.mode === "grid"}
-          <button
-            class:active={session.folderTreeVisible}
-            title="Show/hide folder tree (D)"
-            onclick={blurring(() => (session.folderTreeVisible = !session.folderTreeVisible))}
-          >
-            <FolderTreeIcon size={14} />
           </button>
         {/if}
         <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
@@ -479,28 +482,7 @@
               <ChevronRight size={16} />
             </button>
           {/if}
-          <div class="grid-col">
-            <div class="grid-viewbar">
-              <div class="view-anchor">
-                <button
-                  class="view-btn"
-                  class:active={session.viewPanelOpen || session.groupBy.length > 0}
-                  title="Grid view — thumbnail size & grouping"
-                  onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
-                >
-                  <LayoutGrid size={14} />
-                  <span>View</span>
-                  {#if session.groupBy.length > 0}
-                    <span class="group-hint"><Layers size={12} /> {groupSummary}</span>
-                  {/if}
-                </button>
-                {#if session.viewPanelOpen}
-                  <GridViewPanel />
-                {/if}
-              </div>
-            </div>
-            <VirtualGrid items={session.filtered} />
-          </div>
+          <VirtualGrid items={session.filtered} />
         </div>
       {:else if view.mode === "viewer"}
         <Viewer />
@@ -1184,63 +1166,9 @@
     flex: 1;
   }
 
-  /* Column holding the view strip above the grid, so the strip spans the grid
-     width (right of the folder tree) rather than the whole app. */
-  .grid-col {
-    flex: 1;
-    min-width: 0;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .grid-viewbar {
-    flex: none;
-    display: flex;
-    align-items: center;
-    padding: 6px;
-  }
-
-  /* Anchors the GridViewPanel popover under the View button. */
+  /* Anchors the GridViewPanel popover under the View toolbar button. */
   .view-anchor {
     position: relative;
-  }
-
-  .view-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: min(60vw, 340px);
-    background: var(--control);
-    border: 1px solid transparent;
-    border-radius: 6px;
-    color: #bbb;
-    padding: 5px 10px;
-    cursor: pointer;
-    font-size: 12px;
-    font-family: inherit;
-  }
-
-  .view-btn:hover {
-    border-color: var(--accent);
-    color: #fff;
-  }
-
-  .view-btn.active {
-    background: var(--accent-fill);
-    color: #fff;
-  }
-
-  .view-btn .group-hint {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    opacity: 0.85;
-    border-left: 1px solid rgba(255, 255, 255, 0.25);
-    padding-left: 6px;
   }
 
   /* Default: transparent wrapper — the touch bar stays an in-flow flex child of

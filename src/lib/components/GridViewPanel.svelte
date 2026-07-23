@@ -139,7 +139,7 @@
     outline: none;
     position: absolute;
     top: 100%;
-    left: 0;
+    right: 0;
     z-index: 41;
     margin-top: 4px;
     width: 288px;
