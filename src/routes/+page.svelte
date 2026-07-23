@@ -419,11 +419,11 @@
         <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
         <button
           class="commit"
-          class:haswork={session.pendingCount > 0}
+          class:haswork={session.hasCommitWork}
           title="Review & commit pending actions (Ctrl+Enter)"
           onclick={blurring(() => (session.commitDialogOpen = true))}
         >
-          <CheckCheck size={14} /><span>Commit{session.pendingCount > 0 ? ` (${session.pendingCount})` : ""}</span>
+          <CheckCheck size={14} /><span>Commit</span>
         </button>
       </div>
     </header>

@@ -254,6 +254,7 @@ pub fn run() {
             commands::actions::remove_pending_for_files,
             commands::actions::clear_pending,
             commands::actions::list_pending,
+            commands::actions::xmp_dirty_count,
             commands::actions::commit_preview,
             commands::actions::commit_execute,
             commands::actions::commit_execute_section,

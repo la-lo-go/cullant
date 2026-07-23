@@ -226,6 +226,7 @@ export const api = {
   queryItems: (sort: SortKey, media: MediaTab, desc: boolean) =>
     invoke<ItemLite[]>("query_items", { sort, media, desc }),
   mediaCounts: () => invoke<MediaCounts>("media_counts"),
+  xmpDirtyCount: () => invoke<number>("xmp_dirty_count"),
   // File ids that already have a generated loupe preview (drives the grid's
   // per-cell "preview still generating" spinner).
   previewReadyIds: () => invoke<number[]>("preview_ready_ids"),

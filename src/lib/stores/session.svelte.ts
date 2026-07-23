@@ -740,15 +740,24 @@ class SessionStore {
   /** File ids with a queued delete (for grid badges). */
   pendingDeleteIds = $state<Set<number>>(new Set());
   pendingCount = $state(0);
+  /** Photos with a pending XMP sidecar write. Tracked separately because XMP
+   *  dirtiness is a per-file flag, not a pending-actions row — a plain rating or
+   *  label edit leaves nothing in the queue yet still needs a commit. */
+  xmpDirtyCount = $state(0);
   commitDialogOpen = $state(false);
   moveDialogOpen = $state(false);
   /** Result of the most recent commit, surfaced as a popup AFTER the commit
    *  dialog closes (null = nothing to announce). */
   commitDone = $state<{ title: string; message: string } | null>(null);
 
+  /** Whether the commit button should light up: anything queued OR any pending
+   *  XMP write. This is the full set of work a commit would perform. */
+  hasCommitWork = $derived(this.pendingCount > 0 || this.xmpDirtyCount > 0);
+
   async refreshPending() {
-    const pending = await api.listPending();
+    const [pending, xmpDirty] = await Promise.all([api.listPending(), api.xmpDirtyCount()]);
     this.pendingCount = pending.length;
+    this.xmpDirtyCount = xmpDirty;
     this.pendingDeleteIds = new Set(
       pending.filter((p) => p.action === "delete").map((p) => p.fileId)
     );
@@ -875,7 +884,18 @@ $effect.root(() => {
 });
 
 // Multi-window / background changes reconcile through the same merge.
-listen<CullState[]>("state:changed", (e) => session.applyStates(e.payload));
+let workRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+listen<CullState[]>("state:changed", (e) => {
+  session.applyStates(e.payload);
+  // A rating/label edit dirties XMP without queueing a pending action, so the
+  // queue's own `pending:changed` never fires — refresh the commit-work
+  // indicator here too, debounced so a fast-culling key burst is one query.
+  if (workRefreshTimer !== null) clearTimeout(workRefreshTimer);
+  workRefreshTimer = setTimeout(() => {
+    workRefreshTimer = null;
+    void session.refreshPending();
+  }, 250);
+});
 listen("groups:changed", () => catalog.refresh());
 listen("pending:changed", () => session.refreshPending());
 listen("commit:done", () => catalog.refresh());

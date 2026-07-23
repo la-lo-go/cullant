@@ -107,6 +107,21 @@ struct DirtySidecar {
     state: XmpState,
 }
 
+/// Count of photos with a pending XMP export. XMP dirtiness lives on the `files`
+/// row (not the pending-actions queue), so this is the only way the toolbar can
+/// tell the commit button there is XMP work waiting. Cheap: a single COUNT over
+/// the (bounded) files table, run only on commit/classification events.
+pub fn xmp_dirty_count(db: &Arc<Db>) -> AppResult<i64> {
+    db.call_read(|conn| {
+        Ok(conn.query_row(
+            "SELECT COUNT(*) FROM files
+             WHERE status = 0 AND kind IN (0, 1) AND xmp_dirty = 1",
+            [],
+            |r| r.get(0),
+        )?)
+    })
+}
+
 /// Photos (kind 0 = RAW, 1 = image/JPEG) with pending XMP export, deduped by
 /// sidecar path. Videos (kind 2) never get sidecars.
 fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
