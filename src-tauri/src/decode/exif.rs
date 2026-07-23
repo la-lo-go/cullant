@@ -110,7 +110,11 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
         (m, None) => m,
         (None, m) => m,
     };
-    meta.lens = field_str(exif::Tag::LensModel).and_then(clean);
+    // Raw ASCII first component, NOT display_value(): some cameras (e.g. Fuji)
+    // store LensModel as a multi-string ASCII field whose extra components are
+    // empty, and display_value() renders that as `"XF18-55mmF2.8-4 R LM OIS", "",
+    // "", …` — the trailing quoted empties leaked into the stored lens name.
+    meta.lens = field_ascii(exif::Tag::LensModel).and_then(clean);
 
     Ok(meta)
 }

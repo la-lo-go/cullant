@@ -174,6 +174,13 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE files ADD COLUMN exposure_time REAL;
     UPDATE files SET capture_time = NULL WHERE kind IN (0, 1);
     "#,
+    // v7 — force a one-time metadata re-extraction so already-indexed photos pick
+    // up the LensModel parsing fix (multi-string ASCII lens names were stored with
+    // trailing quoted empties). Same capture_time-NULL trick as v5/v6; nothing is
+    // lost. Videos untouched.
+    r#"
+    UPDATE files SET capture_time = NULL WHERE kind IN (0, 1);
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {
