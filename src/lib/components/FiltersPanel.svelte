@@ -8,7 +8,6 @@
     type OrientationFilter,
   } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
-  import { view } from "../stores/view.svelte";
   import {
     APERTURE_BUCKETS,
     FOCAL_BUCKETS,
@@ -221,14 +220,17 @@
     if (rect.right > window.innerWidth - marginR) dx = window.innerWidth - marginR - rect.right;
     if (rect.left + dx < marginL) dx = marginL - rect.left;
     if (dx) panelEl.style.transform = `translateX(${dx}px)`;
-    // Cap the height too: with the toolbar wrapped to several rows the panel
-    // starts far down the screen, and the CSS max-height alone would let it
-    // run past the bottom edge.
+    // Cap the height so the panel always fits between the top safe-area and a
+    // comfortable gap above the bottom safe-area. This keeps a strip of backdrop
+    // tappable to dismiss it, respects the notch/status-bar inset at the top, and
+    // lets the panel scroll internally (its scrollbar stays hidden) past that —
+    // the sections can be far taller than a phone screen once every facet shows.
     panelEl.style.maxHeight = "";
-    const bottom = edge + px("--inset-bottom");
-    const available = window.innerHeight - bottom - panelEl.getBoundingClientRect().top;
+    const top = Math.max(panelEl.getBoundingClientRect().top, px("--inset-top") + edge);
+    const bottomGap = edge + px("--inset-bottom") + 24;
+    const available = window.innerHeight - bottomGap - top;
     if (panelEl.offsetHeight > available)
-      panelEl.style.maxHeight = `${Math.max(available, 96)}px`;
+      panelEl.style.maxHeight = `${Math.max(available, 120)}px`;
   }
 
   $effect(() => {
@@ -273,55 +275,63 @@
 >
   <header>
     <span class="title">Sort & Filter</span>
-    <button
-      class="clear"
-      disabled={!session.hasActiveFilters}
-      onclick={() => session.clearFilters()}
-    >
-      <FilterX size={13} /> Clear
-    </button>
+    <div class="header-actions">
+      <button
+        class="close"
+        aria-label="Close"
+        title="Close"
+        onclick={() => (session.filtersPanelOpen = false)}
+      >
+        <X size={15} />
+      </button>
+      <button
+        class="clear"
+        disabled={!session.hasActiveFilters}
+        onclick={() => session.clearFilters()}
+      >
+        <FilterX size={13} /> Clear
+      </button>
+    </div>
   </header>
 
-  {#if view.mode === "grid"}
-    <section>
-      <span class="lbl">Sort</span>
-      <div class="row">
-        <button
-          class="seg"
-          class:active={catalog.sort === "capture"}
-          title="Sort by capture time (click again to reverse)"
-          onclick={() => void catalog.setSort("capture")}
-        >
-          <span>Date</span>
-          {#if catalog.sort === "capture"}
-            {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
-          {/if}
-        </button>
-        <button
-          class="seg"
-          class:active={catalog.sort === "name"}
-          title="Sort by name (click again to reverse)"
-          onclick={() => void catalog.setSort("name")}
-        >
-          <span>Name</span>
-          {#if catalog.sort === "name"}
-            {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
-          {/if}
-        </button>
-        <button
-          class="seg"
-          class:active={catalog.sort === "size"}
-          title="Sort by file size (click again to reverse)"
-          onclick={() => void catalog.setSort("size")}
-        >
-          <span>Size</span>
-          {#if catalog.sort === "size"}
-            {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
-          {/if}
-        </button>
-      </div>
-    </section>
-  {/if}
+  <section>
+    <span class="lbl">Sort</span>
+    <div class="row">
+      <button
+        class="seg"
+        class:active={catalog.sort === "capture"}
+        title="Sort by capture time (click again to reverse)"
+        onclick={() => void catalog.setSort("capture")}
+      >
+        <span>Date</span>
+        {#if catalog.sort === "capture"}
+          {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
+        {/if}
+      </button>
+      <button
+        class="seg"
+        class:active={catalog.sort === "name"}
+        title="Sort by name (click again to reverse)"
+        onclick={() => void catalog.setSort("name")}
+      >
+        <span>Name</span>
+        {#if catalog.sort === "name"}
+          {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
+        {/if}
+      </button>
+      <button
+        class="seg"
+        class:active={catalog.sort === "size"}
+        title="Sort by file size (click again to reverse)"
+        onclick={() => void catalog.setSort("size")}
+      >
+        <span>Size</span>
+        {#if catalog.sort === "size"}
+          {#if catalog.sortDesc}<ArrowDown size={12} />{:else}<ArrowUp size={12} />{/if}
+        {/if}
+      </button>
+    </div>
+  </section>
 
   <section>
     <span class="lbl">Flag</span>
@@ -662,11 +672,12 @@
     max-width: calc(
       100vw - var(--dialog-edge-margin) * 2 - var(--inset-left) - var(--inset-right)
     );
-    /* Cap height to the viewport and scroll internally if the sections are
-       tall (e.g. many tags/extensions on a short phone screen). The bottom
-       inset keeps the panel clear of the gesture/nav bar; clampToViewport
-       tightens this further when the wrapped toolbar pushes the panel down. */
-    max-height: calc(100vh - 60px - var(--inset-bottom));
+    /* Cap height to the viewport and scroll internally if the sections are tall
+       (e.g. many facets on a short phone screen). Fallback bound only — reserves
+       both safe-area insets and room for the toolbar/tap-gap; clampToViewport
+       computes the exact cap once mounted. dvh (not vh) so mobile browser chrome
+       is excluded. */
+    max-height: calc(100dvh - var(--inset-top) - var(--inset-bottom) - 96px);
     overflow-y: auto;
     scrollbar-width: none;
     display: flex;
@@ -693,6 +704,31 @@
   .title {
     font-weight: 600;
     font-size: 13px;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 24px;
+    background: none;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    color: #bbb;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .close:hover {
+    color: #fff;
+    border-color: var(--border-strong);
   }
 
   .clear {
