@@ -50,6 +50,47 @@ function save(key: string, value: unknown) {
   }
 }
 
+/** The reorderable / hideable groups of the bottom classification bar, in their
+ *  default order. Group-level granularity (not individual stars/swatches) mirrors
+ *  the bar's own visual grouping. The contextual selection/navigation controls
+ *  are not listed here — they appear on their own when relevant. */
+export const BOTTOM_BAR_ITEMS = [
+  { id: "flags", label: "Pick / Reject" },
+  { id: "rating", label: "Star rating" },
+  { id: "labels", label: "Color labels" },
+  { id: "tags", label: "Tags" },
+  { id: "clear", label: "Clear all" },
+] as const;
+
+const BOTTOM_BAR_KEY = "cullant.bottomBar";
+const BAR_IDS: string[] = BOTTOM_BAR_ITEMS.map((i) => i.id);
+
+/** Load the saved bar layout, healing it against the current item set: unknown
+ *  ids are dropped and any known id missing from the saved order is appended
+ *  (shown), so a future bar item still appears by default. */
+function loadBottomBar(): { order: string[]; hidden: string[] } {
+  const fallback = { order: [...BAR_IDS], hidden: [] as string[] };
+  try {
+    const raw = localStorage.getItem(BOTTOM_BAR_KEY);
+    if (raw === null) return fallback;
+    const parsed = JSON.parse(raw) as { order?: unknown; hidden?: unknown };
+    const savedOrder = Array.isArray(parsed.order)
+      ? (parsed.order.filter((x): x is string => typeof x === "string") as string[])
+      : [];
+    const savedHidden = Array.isArray(parsed.hidden)
+      ? (parsed.hidden.filter((x): x is string => typeof x === "string") as string[])
+      : [];
+    const order = savedOrder.filter((id) => BAR_IDS.includes(id));
+    for (const id of BAR_IDS) if (!order.includes(id)) order.push(id);
+    const hidden = savedHidden.filter((id) => BAR_IDS.includes(id));
+    return { order, hidden };
+  } catch {
+    return fallback;
+  }
+}
+
+const initialBottomBar = loadBottomBar();
+
 class SettingsStore {
   /** Paint the cached thumbnail instantly while the sharp preview loads. */
   progressiveLoupe = $state<boolean>(loadBool(PROGRESSIVE_LOUPE_KEY, true));
@@ -152,6 +193,48 @@ class SettingsStore {
   setLockCarousel(on: boolean) {
     this.lockCarousel = on;
     save(LOCK_CAROUSEL_KEY, on);
+  }
+
+  // --- bottom classification bar layout ---
+  /** Order the bar's groups appear in (ids from BOTTOM_BAR_ITEMS). */
+  bottomBarOrder = $state<string[]>(initialBottomBar.order);
+  /** Ids the user has hidden from the bar. */
+  bottomBarHidden = $state<string[]>(initialBottomBar.hidden);
+
+  /** Ordered bar items with resolved label + hidden flag — the shape the
+   *  settings drag list renders. */
+  bottomBarList = $derived(
+    this.bottomBarOrder.map((id) => ({
+      id,
+      label: BOTTOM_BAR_ITEMS.find((m) => m.id === id)?.label ?? id,
+      hidden: this.bottomBarHidden.includes(id),
+    })),
+  );
+
+  private saveBottomBar() {
+    save(BOTTOM_BAR_KEY, { order: this.bottomBarOrder, hidden: this.bottomBarHidden });
+  }
+
+  moveBottomBarItem(from: number, to: number) {
+    const arr = [...this.bottomBarOrder];
+    if (from < 0 || from >= arr.length || to < 0 || to >= arr.length || from === to) return;
+    const [moved] = arr.splice(from, 1);
+    arr.splice(to, 0, moved);
+    this.bottomBarOrder = arr;
+    this.saveBottomBar();
+  }
+
+  toggleBottomBarHidden(id: string) {
+    this.bottomBarHidden = this.bottomBarHidden.includes(id)
+      ? this.bottomBarHidden.filter((x) => x !== id)
+      : [...this.bottomBarHidden, id];
+    this.saveBottomBar();
+  }
+
+  resetBottomBar() {
+    this.bottomBarOrder = [...BAR_IDS];
+    this.bottomBarHidden = [];
+    this.saveBottomBar();
   }
 }
 

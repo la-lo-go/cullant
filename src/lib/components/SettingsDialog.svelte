@@ -1,5 +1,6 @@
 <script lang="ts">
   import { settings } from "../stores/settings.svelte";
+  import DragList from "./DragList.svelte";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import Monitor from "@lucide/svelte/icons/monitor";
   import Film from "@lucide/svelte/icons/film";
@@ -7,6 +8,8 @@
   import History from "@lucide/svelte/icons/history";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Zap from "@lucide/svelte/icons/zap";
+  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import X from "@lucide/svelte/icons/x";
 
   let {
@@ -184,6 +187,41 @@
             <span>Tags</span>
           </label>
         </div>
+      </section>
+
+      <section class="card">
+        <header class="card-head">
+          <PanelBottom size={16} />
+          <span class="card-text">
+            <span class="card-title">Bottom action bar</span>
+            <span class="card-desc">
+              Drag to reorder the touch classification groups; uncheck one to hide it.
+            </span>
+          </span>
+        </header>
+        <div class="bar-list">
+          <DragList
+            items={settings.bottomBarList}
+            keyOf={(it) => it.id}
+            onMove={(from, to) => settings.moveBottomBarItem(from, to)}
+            ariaLabel="Bottom bar groups"
+          >
+            {#snippet row(it)}
+              <label class="bar-row">
+                <span class="bar-name" class:off={it.hidden}>{it.label}</span>
+                <input
+                  type="checkbox"
+                  checked={!it.hidden}
+                  onchange={() => settings.toggleBottomBarHidden(it.id)}
+                />
+              </label>
+            {/snippet}
+          </DragList>
+        </div>
+        <button class="reset" onclick={() => settings.resetBottomBar()}>
+          <RotateCcw size={13} />
+          <span>Reset to default</span>
+        </button>
       </section>
 
       <section class="card">
@@ -503,6 +541,38 @@
 
   .check:hover {
     background: var(--hover);
+  }
+
+  /* Bottom-bar customization: the DragList rows carry the grip; each row here is
+     the item name + a show/hide checkbox. */
+  .bar-list {
+    padding: 2px 6px 6px;
+  }
+
+  .bar-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 40px;
+    padding: 4px 6px;
+    cursor: pointer;
+  }
+
+  .bar-name {
+    font-size: 13px;
+  }
+
+  .bar-name.off {
+    opacity: 0.5;
+  }
+
+  .reset {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 6px 4px;
+    font-size: 12.5px;
   }
 
   .shortcuts {

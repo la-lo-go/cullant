@@ -1,6 +1,7 @@
 <script lang="ts">
   import { session } from "$lib/stores/session.svelte";
   import { catalog } from "$lib/stores/catalog.svelte";
+  import { settings } from "$lib/stores/settings.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
   import { runCommand } from "$lib/keyboard/dispatcher.svelte";
@@ -22,6 +23,13 @@
   // focused item / current selection).
   const focused = $derived(session.focused);
   const hasSelection = $derived(session.selectedIds.size > 0);
+
+  // Configurable classification groups, in the user's chosen order, hidden ones
+  // dropped (Settings → Bottom action bar). The selection/navigation groups
+  // below are contextual and stay outside this list.
+  const visibleBarItems = $derived(
+    settings.bottomBarOrder.filter((id) => !settings.bottomBarHidden.includes(id)),
+  );
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -129,83 +137,87 @@
     </div>
   {/if}
 
-  <div class="group flags">
-    <button
-      class="btn reject"
-      class:active-reject={flagActive(-1)}
-      title="Reject (X) — click again to unflag"
-      aria-label="Reject"
-      onclick={act(() => runCommand(flagActive(-1) ? "flag.unflag" : "flag.reject"))}
-    >
-      <X size={20} />
-    </button>
-    <button
-      class="btn pick"
-      class:active-pick={flagActive(1)}
-      title="Pick (P) — click again to unflag"
-      aria-label="Pick"
-      onclick={act(() => runCommand(flagActive(1) ? "flag.unflag" : "flag.pick"))}
-    >
-      <Check size={20} />
-    </button>
-  </div>
-
-  <div class="group stars">
-    {#each [1, 2, 3, 4, 5] as n (n)}
-      <button
-        class="btn star"
-        class:on={rating >= n}
-        title={`Rate ${n}`}
-        aria-label={`Rate ${n}`}
-        onclick={act(() => rate(n))}
-      >
-        <Star size={18} fill={rating >= n ? "currentColor" : "none"} />
-      </button>
-    {/each}
-  </div>
-
-  <div class="group labels">
-    {#each Object.entries(labelColors) as [name, color] (name)}
-      <button
-        class="btn swatchbtn"
-        class:active={labelActive(name)}
-        title={`${name} label`}
-        aria-label={`${name} label`}
-        style="--c: {color}"
-        onclick={act(() => session.setLabel(labelActive(name) ? null : name))}
-      >
-        <span class="swatch"></span>
-      </button>
-    {/each}
-  </div>
-
-  {#if scopedTags.length > 0}
-    <div class="group tags">
-      {#each scopedTags as tag (tag.id)}
+  {#each visibleBarItems as itemId (itemId)}
+    {#if itemId === "flags"}
+      <div class="group flags">
         <button
-          class="btn tagbtn"
-          class:active={tagActive(tag.id)}
-          title={tag.name}
-          style="--c: {tag.color ?? '#888'}"
-          onclick={act(() => session.toggleTag(tag.id))}
+          class="btn reject"
+          class:active-reject={flagActive(-1)}
+          title="Reject (X) — click again to unflag"
+          aria-label="Reject"
+          onclick={act(() => runCommand(flagActive(-1) ? "flag.unflag" : "flag.reject"))}
         >
-          <span class="tagdot"></span>
-          <span class="taglabel">{tag.name}</span>
+          <X size={20} />
         </button>
-      {/each}
-    </div>
-  {/if}
-
-  <div class="group clear">
-    <button
-      class="btn"
-      title="Clear all classification (rating, flag, label, tags)"
-      aria-label="Clear all classification"
-      onclick={act(() => session.clearClassification())}
-    >
-      <Eraser size={20} />
-    </button>
-  </div>
+        <button
+          class="btn pick"
+          class:active-pick={flagActive(1)}
+          title="Pick (P) — click again to unflag"
+          aria-label="Pick"
+          onclick={act(() => runCommand(flagActive(1) ? "flag.unflag" : "flag.pick"))}
+        >
+          <Check size={20} />
+        </button>
+      </div>
+    {:else if itemId === "rating"}
+      <div class="group stars">
+        {#each [1, 2, 3, 4, 5] as n (n)}
+          <button
+            class="btn star"
+            class:on={rating >= n}
+            title={`Rate ${n}`}
+            aria-label={`Rate ${n}`}
+            onclick={act(() => rate(n))}
+          >
+            <Star size={18} fill={rating >= n ? "currentColor" : "none"} />
+          </button>
+        {/each}
+      </div>
+    {:else if itemId === "labels"}
+      <div class="group labels">
+        {#each Object.entries(labelColors) as [name, color] (name)}
+          <button
+            class="btn swatchbtn"
+            class:active={labelActive(name)}
+            title={`${name} label`}
+            aria-label={`${name} label`}
+            style="--c: {color}"
+            onclick={act(() => session.setLabel(labelActive(name) ? null : name))}
+          >
+            <span class="swatch"></span>
+          </button>
+        {/each}
+      </div>
+    {:else if itemId === "tags"}
+      {#if scopedTags.length > 0}
+        <div class="group tags">
+          {#each scopedTags as tag (tag.id)}
+            <button
+              class="btn tagbtn"
+              class:active={tagActive(tag.id)}
+              title={tag.name}
+              style="--c: {tag.color ?? '#888'}"
+              onclick={act(() => session.toggleTag(tag.id))}
+            >
+              <span class="tagdot"></span>
+              <span class="taglabel">{tag.name}</span>
+            </button>
+          {/each}
+        </div>
+      {/if}
+    {:else if itemId === "clear"}
+      <div class="group clear">
+        <button
+          class="btn"
+          title="Clear all classification (rating, flag, label, tags)"
+          aria-label="Clear all classification"
+          onclick={act(() => session.clearClassification())}
+        >
+          <Eraser size={20} />
+        </button>
+      </div>
+    {/if}
+  {/each}
 </div>
 
 <style>
