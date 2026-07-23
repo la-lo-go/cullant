@@ -432,21 +432,12 @@
     min-width: 0;
   }
 
+  /* Box/chevron come from the app-wide :global(select); keep only the taller
+     touch target and right padding for the chevron. */
   select {
     flex: none;
     min-height: 40px;
-    border-radius: 6px;
-    border: 1px solid var(--border-strong);
-    padding: 6px 8px;
-    font-size: 13px;
-    font-family: inherit;
-    color: #e8e8e8;
-    background-color: var(--control);
-    cursor: pointer;
-  }
-
-  select:hover {
-    border-color: var(--accent);
+    padding: 6px 28px 6px 10px;
   }
 
   .option input {

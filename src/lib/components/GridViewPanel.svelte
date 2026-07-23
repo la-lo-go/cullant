@@ -277,13 +277,8 @@
     cursor: pointer;
   }
 
-  .icon:hover:not(:disabled) {
+  .icon:hover {
     border-color: var(--accent);
     color: #fff;
-  }
-
-  .icon:disabled {
-    opacity: 0.35;
-    cursor: default;
   }
 </style>

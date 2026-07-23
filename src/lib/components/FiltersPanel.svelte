@@ -746,21 +746,10 @@
     flex-wrap: wrap;
   }
 
+  /* Look comes from the app-wide :global(select) rule; only layout here. */
   .metaselect {
     width: 100%;
-    background: var(--control);
-    color: #ddd;
-    border: 1px solid var(--border-strong);
-    border-radius: 4px;
-    padding: 5px 8px;
     font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-  }
-
-  .metaselect:focus {
-    outline: none;
-    border-color: var(--accent);
   }
 
   .seg {

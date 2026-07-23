@@ -705,6 +705,48 @@
     user-select: text;
   }
 
+  /* App-wide native-select restyle: strip the OS default chrome and draw our own
+     control (dark fill, themed border, custom chevron). A component may still
+     add layout (width/flex) via a local class, but the look lives here so every
+     dropdown — group-by, filters, deletion mode, tag scope — matches. */
+  :global(select) {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--control);
+    background-image: var(--select-arrow);
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+    color: #e0e0e0;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    padding: 6px 28px 6px 10px;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  :global(select:hover) {
+    border-color: var(--accent);
+  }
+
+  :global(select:focus),
+  :global(select:focus-visible) {
+    outline: none;
+    border-color: var(--accent);
+  }
+
+  :global(select:disabled) {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  /* The popup list — honored on Windows/Chromium; a no-op where the OS draws
+     the native menu, which is acceptable. */
+  :global(select option) {
+    background: var(--surface-2);
+    color: #e0e0e0;
+  }
+
   /* The single source of truth for the app's theme. Every component references
      these via var(--…); nothing hardcodes a background or accent hex. To
      retheme, change only the values here.
@@ -723,6 +765,10 @@
     --control: #384040;
     --border: #3d4544;
     --border-strong: #495251;
+
+    /* Custom dropdown chevron for the app-wide <select> restyle above (muted
+       grey, matches the theme). Kept as a var so the SVG lives in one place. */
+    --select-arrow: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8a93' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
 
     --accent: #3fdfca;
     --accent-rgb: 63, 223, 202;
