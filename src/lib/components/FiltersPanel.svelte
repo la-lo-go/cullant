@@ -277,19 +277,19 @@
     <span class="title">Sort & Filter</span>
     <div class="header-actions">
       <button
+        class="clear"
+        disabled={!session.hasActiveFilters}
+        onclick={() => session.clearFilters()}
+      >
+        <FilterX size={13} /> Clear
+      </button>
+      <button
         class="close"
         aria-label="Close"
         title="Close"
         onclick={() => (session.filtersPanelOpen = false)}
       >
         <X size={15} />
-      </button>
-      <button
-        class="clear"
-        disabled={!session.hasActiveFilters}
-        onclick={() => session.clearFilters()}
-      >
-        <FilterX size={13} /> Clear
       </button>
     </div>
   </header>
