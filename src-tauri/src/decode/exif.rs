@@ -11,6 +11,12 @@ pub struct ImageMeta {
     pub camera: Option<String>,
     pub lens: Option<String>,
     pub iso: Option<u32>,
+    /// Focal length in millimetres.
+    pub focal_length: Option<f32>,
+    /// Aperture as the bare f-number (e.g. 2.8 for f/2.8).
+    pub f_number: Option<f32>,
+    /// Shutter speed (exposure time) in seconds.
+    pub exposure_time: Option<f32>,
     pub width: Option<u32>,
     pub height: Option<u32>,
 }
@@ -34,6 +40,9 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
         camera: None,
         lens: None,
         iso: None,
+        focal_length: None,
+        f_number: None,
+        exposure_time: None,
         width: None,
         height: None,
     };
@@ -58,6 +67,13 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
         exif.get_field(tag, exif::In::PRIMARY)
             .and_then(|f| f.value.get_uint(0))
     };
+    let field_rational = |tag| {
+        exif.get_field(tag, exif::In::PRIMARY)
+            .and_then(|f| match &f.value {
+                exif::Value::Rational(v) => v.first().map(|r| r.to_f64() as f32),
+                _ => None,
+            })
+    };
     // Raw ASCII bytes, NOT display_value(): kamadak reformats datetime tags
     // for display ("2024-06-15 …"), which silently broke capture-time parsing
     // (it expects the EXIF-native "2024:06:15 …") and made every plain image
@@ -75,6 +91,9 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
         .and_then(|s| parse_exif_datetime(s.trim_end_matches('\0')));
     meta.orientation = field_uint(exif::Tag::Orientation).map(|v| v as u16);
     meta.iso = field_uint(exif::Tag::PhotographicSensitivity);
+    meta.focal_length = field_rational(exif::Tag::FocalLength);
+    meta.f_number = field_rational(exif::Tag::FNumber);
+    meta.exposure_time = field_rational(exif::Tag::ExposureTime);
 
     let clean = |s: String| {
         let s = s.trim().trim_matches('"').trim().to_string();

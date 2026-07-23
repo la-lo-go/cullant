@@ -153,6 +153,27 @@ const MIGRATIONS: &[&str] = &[
       state TEXT NOT NULL DEFAULT '{}'
     );
     "#,
+    // v5 — photographic-settings columns for metadata filtering. focal_length is
+    // in millimetres, f_number is the aperture value (e.g. 2.8). Both are read
+    // during the scan's EXIF pass alongside camera/lens/iso. Existing photos
+    // already have capture_time set — that column is the gate the pass keys on —
+    // so NULL it for photos to force one more pass on the next open, backfilling
+    // the two new columns (and refreshing camera/lens/iso). capture_time is
+    // re-derived from EXIF or falls back to mtime, so nothing is lost; videos are
+    // left untouched.
+    r#"
+    ALTER TABLE files ADD COLUMN focal_length REAL;
+    ALTER TABLE files ADD COLUMN f_number REAL;
+    UPDATE files SET capture_time = NULL WHERE kind IN (0, 1);
+    "#,
+    // v6 — shutter speed (exposure_time, in seconds) for the metadata filter,
+    // read in the same EXIF pass as the v5 columns. Same one-time backfill trick:
+    // NULL the photos' capture_time so the next open re-extracts once and fills
+    // the column (re-derived or mtime fallback, nothing lost; videos untouched).
+    r#"
+    ALTER TABLE files ADD COLUMN exposure_time REAL;
+    UPDATE files SET capture_time = NULL WHERE kind IN (0, 1);
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {

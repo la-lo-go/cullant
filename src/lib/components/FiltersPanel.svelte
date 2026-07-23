@@ -9,6 +9,16 @@
   } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
+  import {
+    APERTURE_BUCKETS,
+    FOCAL_BUCKETS,
+    ISO_BUCKETS,
+    SHUTTER_BUCKETS,
+    apertureBucket,
+    focalBucket,
+    isoBucket,
+    shutterBucket,
+  } from "../metadataFacets";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import FilterX from "@lucide/svelte/icons/filter-x";
@@ -51,6 +61,12 @@
     const exts = new Set<string>();
     const orientations = new Set<OrientationFilter>();
     const labels = new Set<string>();
+    const cameras = new Set<string>();
+    const lenses = new Set<string>();
+    const isoKeys = new Set<string>();
+    const apertureKeys = new Set<string>();
+    const focalKeys = new Set<string>();
+    const shutterKeys = new Set<string>();
     for (const i of catalog.items) {
       const isPair = i.groupSize > 1 && !i.decoupled;
       if (isPair) pair = true;
@@ -58,6 +74,19 @@
       else if (i.kind === 1) jpeg = true;
 
       if (i.ext) exts.add(i.ext.toLowerCase());
+
+      // Photographic-settings facets. camera/lens are exact strings; the numeric
+      // three are collapsed to a bucket so auto-mode variety can't flood the menu.
+      if (i.camera) cameras.add(i.camera);
+      if (i.lens) lenses.add(i.lens);
+      const ib = isoBucket(i.iso);
+      if (ib) isoKeys.add(ib.key);
+      const ab = apertureBucket(i.fNumber);
+      if (ab) apertureKeys.add(ab.key);
+      const fb = focalBucket(i.focalLength);
+      if (fb) focalKeys.add(fb.key);
+      const sb = shutterBucket(i.exposureTime);
+      if (sb) shutterKeys.add(sb.key);
 
       if (i.width != null && i.height != null) {
         // Mirrors the filter's rotation handling: EXIF orientation 5-8 means the
@@ -72,7 +101,18 @@
 
       if (i.label) labels.add(i.label);
     }
-    return { typePresence: { raw, jpeg, pair }, exts, orientations, labels };
+    return {
+      typePresence: { raw, jpeg, pair },
+      exts,
+      orientations,
+      labels,
+      cameras,
+      lenses,
+      isoKeys,
+      apertureKeys,
+      focalKeys,
+      shutterKeys,
+    };
   });
 
   // Which RAW/JPEG composition categories occur among the current photos.
@@ -119,6 +159,20 @@
 
   // Color labels actually applied somewhere in the project.
   const presentLabels = $derived(LABELS.filter((l) => facets.labels.has(l)));
+
+  // Photographic-settings facets present in the current photos. camera/lens are
+  // sorted exact strings shown in a dropdown; the numeric three keep the
+  // canonical low-to-high bucket order (only present buckets survive).
+  const presentCameras = $derived([...facets.cameras].sort());
+  const presentLenses = $derived([...facets.lenses].sort());
+  const presentIsoBuckets = $derived(ISO_BUCKETS.filter((b) => facets.isoKeys.has(b.key)));
+  const presentApertureBuckets = $derived(
+    APERTURE_BUCKETS.filter((b) => facets.apertureKeys.has(b.key)),
+  );
+  const presentFocalBuckets = $derived(FOCAL_BUCKETS.filter((b) => facets.focalKeys.has(b.key)));
+  const presentShutterBuckets = $derived(
+    SHUTTER_BUCKETS.filter((b) => facets.shutterKeys.has(b.key)),
+  );
 
   // Hover-preview state for the minimum-rating star row (0 = not hovering).
   let hovered = $state(0);
@@ -420,6 +474,164 @@
     </section>
   {/if}
 
+  {#if presentCameras.length > 1}
+    <section>
+      <span class="lbl">Camera</span>
+      <select
+        class="metaselect"
+        value={session.cameraFilter ?? ""}
+        onchange={(e) => {
+          session.cameraFilter = e.currentTarget.value || null;
+          session.clampFocus();
+        }}
+      >
+        <option value="">Any</option>
+        {#each presentCameras as cam (cam)}
+          <option value={cam}>{cam}</option>
+        {/each}
+      </select>
+    </section>
+  {/if}
+
+  {#if presentLenses.length > 1}
+    <section>
+      <span class="lbl">Lens</span>
+      <select
+        class="metaselect"
+        value={session.lensFilter ?? ""}
+        onchange={(e) => {
+          session.lensFilter = e.currentTarget.value || null;
+          session.clampFocus();
+        }}
+      >
+        <option value="">Any</option>
+        {#each presentLenses as lens (lens)}
+          <option value={lens}>{lens}</option>
+        {/each}
+      </select>
+    </section>
+  {/if}
+
+  {#if presentIsoBuckets.length > 1}
+    <section>
+      <span class="lbl">ISO</span>
+      <div class="row wrap">
+        <button
+          class="seg"
+          class:active={session.isoFilter === null}
+          onclick={() => {
+            session.isoFilter = null;
+            session.clampFocus();
+          }}
+        >
+          <span>All</span>
+        </button>
+        {#each presentIsoBuckets as b (b.key)}
+          <button
+            class="seg"
+            class:active={session.isoFilter === b.key}
+            onclick={() => {
+              session.isoFilter = session.isoFilter === b.key ? null : b.key;
+              session.clampFocus();
+            }}
+          >
+            <span>{b.label}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if presentApertureBuckets.length > 1}
+    <section>
+      <span class="lbl">Aperture</span>
+      <div class="row wrap">
+        <button
+          class="seg"
+          class:active={session.apertureFilter === null}
+          onclick={() => {
+            session.apertureFilter = null;
+            session.clampFocus();
+          }}
+        >
+          <span>All</span>
+        </button>
+        {#each presentApertureBuckets as b (b.key)}
+          <button
+            class="seg"
+            class:active={session.apertureFilter === b.key}
+            onclick={() => {
+              session.apertureFilter = session.apertureFilter === b.key ? null : b.key;
+              session.clampFocus();
+            }}
+          >
+            <span>{b.label}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if presentFocalBuckets.length > 1}
+    <section>
+      <span class="lbl">Focal length</span>
+      <div class="row wrap">
+        <button
+          class="seg"
+          class:active={session.focalFilter === null}
+          onclick={() => {
+            session.focalFilter = null;
+            session.clampFocus();
+          }}
+        >
+          <span>All</span>
+        </button>
+        {#each presentFocalBuckets as b (b.key)}
+          <button
+            class="seg"
+            class:active={session.focalFilter === b.key}
+            onclick={() => {
+              session.focalFilter = session.focalFilter === b.key ? null : b.key;
+              session.clampFocus();
+            }}
+          >
+            <span>{b.label}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if presentShutterBuckets.length > 1}
+    <section>
+      <span class="lbl">Shutter speed</span>
+      <div class="row wrap">
+        <button
+          class="seg"
+          class:active={session.shutterFilter === null}
+          onclick={() => {
+            session.shutterFilter = null;
+            session.clampFocus();
+          }}
+        >
+          <span>All</span>
+        </button>
+        {#each presentShutterBuckets as b (b.key)}
+          <button
+            class="seg"
+            class:active={session.shutterFilter === b.key}
+            onclick={() => {
+              session.shutterFilter = session.shutterFilter === b.key ? null : b.key;
+              session.clampFocus();
+            }}
+          >
+            <span>{b.label}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
   <footer>{session.filtered.length} shown</footer>
 </div>
 
@@ -524,10 +736,31 @@
     display: flex;
     align-items: center;
     gap: 4px;
+    /* Wrap by default: a section's chips must fall onto a second line rather
+       than squeeze onto one and overflow the fixed-width panel. `.wrap` is kept
+       as an explicit marker on the deliberately-growable groups. */
+    flex-wrap: wrap;
   }
 
   .row.wrap {
     flex-wrap: wrap;
+  }
+
+  .metaselect {
+    width: 100%;
+    background: var(--control);
+    color: #ddd;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .metaselect:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 
   .seg {

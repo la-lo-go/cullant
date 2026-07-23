@@ -83,6 +83,9 @@ struct Extracted {
     camera: Option<String>,
     lens: Option<String>,
     iso: Option<u32>,
+    focal_length: Option<f32>,
+    f_number: Option<f32>,
+    exposure_time: Option<f32>,
     width: Option<u32>,
     height: Option<u32>,
 }
@@ -96,6 +99,9 @@ impl Extracted {
             camera: None,
             lens: None,
             iso: None,
+            focal_length: None,
+            f_number: None,
+            exposure_time: None,
             width: None,
             height: None,
         }
@@ -370,6 +376,9 @@ fn extract_metadata(store: &dyn ProjectStore, p: &MetaPending) -> Extracted {
                     e.camera = meta.camera;
                     e.lens = meta.lens;
                     e.iso = meta.iso;
+                    e.focal_length = meta.focal_length;
+                    e.f_number = meta.f_number;
+                    e.exposure_time = meta.exposure_time;
                 }
             }
             Err(err) => tracing::debug!("metadata could not parse {}: {err}", p.rel_path),
@@ -380,6 +389,9 @@ fn extract_metadata(store: &dyn ProjectStore, p: &MetaPending) -> Extracted {
         e.camera = meta.camera;
         e.lens = meta.lens;
         e.iso = meta.iso;
+        e.focal_length = meta.focal_length;
+        e.f_number = meta.f_number;
+        e.exposure_time = meta.exposure_time;
         e.width = meta.width;
         e.height = meta.height;
     }
@@ -404,6 +416,9 @@ fn write_metadata_batch(db: &Arc<Db>, extracted: Vec<Extracted>) -> AppResult<()
                 e.camera.clone(),
                 e.lens.clone(),
                 e.iso.map(i64::from),
+                e.focal_length,
+                e.f_number,
+                e.exposure_time,
                 e.width.map(i64::from),
                 e.height.map(i64::from),
             )
@@ -419,13 +434,16 @@ fn write_metadata_batch(db: &Arc<Db>, extracted: Vec<Extracted>) -> AppResult<()
                    camera = COALESCE(?4, camera),
                    lens = COALESCE(?5, lens),
                    iso = COALESCE(?6, iso),
-                   width = COALESCE(?7, width),
-                   height = COALESCE(?8, height)
+                   focal_length = COALESCE(?7, focal_length),
+                   f_number = COALESCE(?8, f_number),
+                   exposure_time = COALESCE(?9, exposure_time),
+                   width = COALESCE(?10, width),
+                   height = COALESCE(?11, height)
                  WHERE id = ?1",
             )?;
             for row in &batch {
                 stmt.execute(rusqlite::params![
-                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7
+                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10
                 ])?;
             }
         }

@@ -10,6 +10,7 @@ import {
   type SyncFrom,
   type Targets,
 } from "../api";
+import { apertureBucket, focalBucket, isoBucket, shutterBucket } from "../metadataFacets";
 import { catalog } from "./catalog.svelte";
 import { settings } from "./settings.svelte";
 import { tags } from "./tags.svelte";
@@ -37,6 +38,12 @@ interface SavedSession {
     typeFilter?: TypeFilter;
     extFilter?: string | null;
     orientationFilter?: OrientationFilter;
+    cameraFilter?: string | null;
+    lensFilter?: string | null;
+    isoFilter?: string | null;
+    apertureFilter?: string | null;
+    focalFilter?: string | null;
+    shutterFilter?: string | null;
     folderFilter?: string | null;
   };
   focusKey?: string | null;
@@ -117,6 +124,16 @@ class SessionStore {
   extFilter = $state<string | null>(null);
   /** Displayed-aspect orientation filter. */
   orientationFilter = $state<OrientationFilter>("all");
+  /** Photographic-settings filters (photos only; inert on the videos tab).
+   *  camera/lens hold an exact EXIF string; iso/aperture/focal hold a bucket
+   *  key from `metadataFacets` (a photographic step/range, not a raw value).
+   *  null = any. */
+  cameraFilter = $state<string | null>(null);
+  lensFilter = $state<string | null>(null);
+  isoFilter = $state<string | null>(null);
+  apertureFilter = $state<string | null>(null);
+  focalFilter = $state<string | null>(null);
+  shutterFilter = $state<string | null>(null);
   /** Whether the Filters dropdown panel is open. */
   filtersPanelOpen = $state(false);
 
@@ -130,7 +147,16 @@ class SessionStore {
       this.tagFilter !== null ||
       (this.typeFilter !== "all" && catalog.media === "photos") ||
       this.extFilter !== null ||
-      this.orientationFilter !== "all",
+      this.orientationFilter !== "all" ||
+      // The five photographic-settings filters are photo-only, so they never
+      // badge the button while the videos tab is active (matching typeFilter).
+      ((this.cameraFilter !== null ||
+        this.lensFilter !== null ||
+        this.isoFilter !== null ||
+        this.apertureFilter !== null ||
+        this.focalFilter !== null ||
+        this.shutterFilter !== null) &&
+        catalog.media === "photos"),
   );
 
   /** Reset every filter to its neutral value. */
@@ -142,6 +168,12 @@ class SessionStore {
     this.typeFilter = "all";
     this.extFilter = null;
     this.orientationFilter = "all";
+    this.cameraFilter = null;
+    this.lensFilter = null;
+    this.isoFilter = null;
+    this.apertureFilter = null;
+    this.focalFilter = null;
+    this.shutterFilter = null;
     this.clampFocus();
   }
   /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
@@ -314,6 +346,32 @@ class SessionStore {
         }
       });
     }
+    // Photographic-settings filters. Photo-only (a video carries no camera/lens/
+    // ISO/focal/aperture EXIF), so they are inert on the videos tab. camera/lens
+    // compare the exact EXIF string; iso/aperture/focal compare the item's bucket
+    // key against the picked one, using the very functions the panel built the
+    // chips from. In mirror mode `out` holds one entry per pair, but both halves
+    // of a RAW+JPEG pair share the same shot, so testing the shown member is exact.
+    if (catalog.media === "photos") {
+      if (this.cameraFilter !== null) {
+        out = out.filter((i) => i.camera === this.cameraFilter);
+      }
+      if (this.lensFilter !== null) {
+        out = out.filter((i) => i.lens === this.lensFilter);
+      }
+      if (this.isoFilter !== null) {
+        out = out.filter((i) => isoBucket(i.iso)?.key === this.isoFilter);
+      }
+      if (this.apertureFilter !== null) {
+        out = out.filter((i) => apertureBucket(i.fNumber)?.key === this.apertureFilter);
+      }
+      if (this.focalFilter !== null) {
+        out = out.filter((i) => focalBucket(i.focalLength)?.key === this.focalFilter);
+      }
+      if (this.shutterFilter !== null) {
+        out = out.filter((i) => shutterBucket(i.exposureTime)?.key === this.shutterFilter);
+      }
+    }
     if (this.folderFilter !== null) {
       out = out.filter((i) => isInFolder(i.relPath, this.folderFilter!));
     }
@@ -363,6 +421,12 @@ class SessionStore {
         typeFilter: this.typeFilter,
         extFilter: this.extFilter,
         orientationFilter: this.orientationFilter,
+        cameraFilter: this.cameraFilter,
+        lensFilter: this.lensFilter,
+        isoFilter: this.isoFilter,
+        apertureFilter: this.apertureFilter,
+        focalFilter: this.focalFilter,
+        shutterFilter: this.shutterFilter,
         folderFilter: this.folderFilter,
       },
       focusKey: this.focused?.relPath ?? null,
@@ -398,6 +462,12 @@ class SessionStore {
         if (f.typeFilter) this.typeFilter = f.typeFilter;
         this.extFilter = f.extFilter ?? null;
         if (f.orientationFilter) this.orientationFilter = f.orientationFilter;
+        this.cameraFilter = f.cameraFilter ?? null;
+        this.lensFilter = f.lensFilter ?? null;
+        this.isoFilter = f.isoFilter ?? null;
+        this.apertureFilter = f.apertureFilter ?? null;
+        this.focalFilter = f.focalFilter ?? null;
+        this.shutterFilter = f.shutterFilter ?? null;
         this.folderFilter = f.folderFilter ?? null;
       }
       this.pendingFocusKey = s.focusKey ?? null;

@@ -25,6 +25,15 @@ pub struct ItemLite {
     /// swap of the raw `width`/`height` fields (which are never swapped). The
     /// frontend applies this to classify portrait/landscape.
     pub orientation: Option<i64>,
+    /// Camera body ("Make Model"), lens model, ISO, focal length (mm) and
+    /// aperture (bare f-number). Photographic-settings facets for the filter
+    /// panel; null on videos and on images without the relevant EXIF tag.
+    pub camera: Option<String>,
+    pub lens: Option<String>,
+    pub iso: Option<i64>,
+    pub focal_length: Option<f64>,
+    pub f_number: Option<f64>,
+    pub exposure_time: Option<f64>,
     pub is_primary: bool,
     pub group_size: i64,
     pub decoupled: bool,
@@ -159,7 +168,8 @@ pub fn query_items(
                     EXISTS(SELECT 1 FROM thumbnails th
                       WHERE th.file_id = f.id AND th.kind = 0
                         AND th.failed = 1 AND th.source_mtime = f.mtime) AS thumb_failed,
-                    f.orientation AS orientation
+                    f.orientation AS orientation,
+                    f.camera, f.lens, f.iso, f.focal_length, f.f_number, f.exposure_time
              FROM files f
              JOIN groups g ON g.id = f.group_id
              WHERE f.status = 0 AND {kind_filter}
@@ -182,6 +192,12 @@ pub fn query_items(
                 width: r.get(11)?,
                 height: r.get(12)?,
                 orientation: r.get(18)?,
+                camera: r.get(19)?,
+                lens: r.get(20)?,
+                iso: r.get(21)?,
+                focal_length: r.get(22)?,
+                f_number: r.get(23)?,
+                exposure_time: r.get(24)?,
                 is_primary: r.get::<_, Option<bool>>(13)?.unwrap_or(true),
                 group_size: r.get(14)?,
                 decoupled: r.get(15)?,

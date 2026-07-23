@@ -50,6 +50,17 @@ export interface ItemLite {
    *  rotated 90°, so displayed dims are the swap of `width`/`height` (which are
    *  the un-rotated sensor dims and are never swapped by the backend). */
   orientation: number | null;
+  /** Photographic-settings facets for the filter panel. Null on videos and on
+   *  images missing the relevant EXIF tag. `camera` is "Make Model"; `lens` is
+   *  the lens model; `focalLength` is in mm; `fNumber` is the bare aperture
+   *  value (2.8 for f/2.8). */
+  camera: string | null;
+  lens: string | null;
+  iso: number | null;
+  focalLength: number | null;
+  fNumber: number | null;
+  /** Shutter speed (exposure time) in seconds. */
+  exposureTime: number | null;
   isPrimary: boolean;
   groupSize: number;
   decoupled: boolean;

@@ -52,6 +52,12 @@ impl<'a> RawSession<'a> {
             camera,
             lens: md.exif.lens_model.clone(),
             iso,
+            focal_length: md.exif.focal_length.map(|r| r.as_f32()),
+            f_number: md.exif.fnumber.map(|r| r.as_f32()),
+            exposure_time: md
+                .exif
+                .exposure_time
+                .map(|r| r.n as f32 / r.d.max(1) as f32),
         })
     }
 
@@ -490,6 +496,12 @@ pub struct RawMeta {
     pub camera: Option<String>,
     pub lens: Option<String>,
     pub iso: Option<u32>,
+    /// Focal length in millimetres.
+    pub focal_length: Option<f32>,
+    /// Aperture as the bare f-number (e.g. 2.8 for f/2.8).
+    pub f_number: Option<f32>,
+    /// Shutter speed (exposure time) in seconds.
+    pub exposure_time: Option<f32>,
 }
 
 #[cfg(test)]
