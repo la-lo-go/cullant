@@ -385,11 +385,11 @@
           <button
             class:active={session.viewPanelOpen}
             class:haswork={hasCustomView}
-            title="Grid view — thumbnail size & grouping"
-            aria-label="Grid view"
+            title="View — thumbnail size, grouping & RAW+JPEG pairing"
             onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
           >
             <LayoutGrid size={14} />
+            <span>View</span>
           </button>
           {#if session.viewPanelOpen}
             <GridViewPanel />

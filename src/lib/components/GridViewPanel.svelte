@@ -91,12 +91,12 @@
   class="panel"
   bind:this={panelEl}
   role="dialog"
-  aria-label="Grid view"
+  aria-label="View"
   tabindex="-1"
   onkeydown={onPanelKeydown}
 >
   <header>
-    <span class="title">Grid view</span>
+    <span class="title">View</span>
     <button
       class="close"
       aria-label="Close"
