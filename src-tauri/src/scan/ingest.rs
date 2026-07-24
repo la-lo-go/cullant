@@ -38,7 +38,7 @@ use crate::db::Db;
 use crate::decode;
 use crate::error::AppResult;
 use crate::store::ProjectStore;
-use crate::thumbs::{ThumbKind, ThumbPool, ThumbRequest};
+use crate::thumbs::{CacheVersion, ThumbKind, ThumbPool, ThumbRequest};
 
 /// Files handled per parallel burst; also the metadata write-batch size.
 /// Smaller on Android to bound the number of in-flight decode buffers.
@@ -240,7 +240,7 @@ pub fn run_ingest_inner(
         db,
         thumbs,
         ThumbKind::Thumb,
-        "SELECT f.id, f.mtime
+        "SELECT f.id, f.mtime, f.orientation
          FROM files f
          LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
          WHERE f.status = 0 AND f.kind IN (0, 1)
@@ -255,7 +255,7 @@ pub fn run_ingest_inner(
         ThumbKind::Preview,
         // Previews (2560px loupe) are only ever generated for stills; a video's
         // loupe plays the file itself.
-        "SELECT f.id, f.mtime
+        "SELECT f.id, f.mtime, f.orientation
          FROM files f
          LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
          WHERE f.status = 0 AND f.kind IN (0, 1)
@@ -273,7 +273,7 @@ pub fn run_ingest_inner(
             db,
             thumbs,
             ThumbKind::Thumb,
-            "SELECT f.id, f.mtime
+            "SELECT f.id, f.mtime, f.orientation
              FROM files f
              LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
              WHERE f.status = 0 AND f.kind = 2
@@ -304,9 +304,17 @@ fn generate_pass(
     progress: &mut dyn FnMut(usize, usize),
 ) -> AppResult<()> {
     let select = select_sql.to_string();
-    let pending: Vec<(i64, i64)> = db.call(move |conn| {
+    let pending: Vec<(i64, CacheVersion)> = db.call(move |conn| {
         let mut stmt = conn.prepare(&select)?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                CacheVersion {
+                    mtime: r.get(1)?,
+                    orientation: r.get::<_, Option<i64>>(2)?.unwrap_or(1),
+                },
+            ))
+        })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     })?;
 
@@ -318,12 +326,12 @@ fn generate_pass(
 
     let started = Instant::now();
     let (tx, rx) = mpsc::channel::<()>();
-    for (file_id, mtime) in pending {
+    for (file_id, version) in pending {
         let tx = tx.clone();
         thumbs.enqueue_background(ThumbRequest {
             file_id,
             kind,
-            known_mtime: Some(mtime),
+            known_version: Some(version),
             // The disk cache is the point; the bytes are discarded here.
             respond: Box::new(move |_| {
                 let _ = tx.send(());

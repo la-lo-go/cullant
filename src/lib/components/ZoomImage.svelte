@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { previewUrl, thumbUrl, cullantUrl, type ItemLite } from "../api";
+  import { previewUrl, thumbUrl, cullantUrl, mediaVersion, type ItemLite } from "../api";
   import { view, MAX_SCALE } from "../stores/view.svelte";
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
@@ -184,7 +184,7 @@
   // Fit view uses the 2560px preview; zoomed view swaps in the full-res source
   // (unresized embedded JPEG for RAW, original file for images).
   const fitSrc = $derived(previewUrl(item));
-  const fullSrc = $derived(cullantUrl(`full/${item.id}?v=${item.mtime}`));
+  const fullSrc = $derived(cullantUrl(`full/${item.id}?${mediaVersion(item)}`));
 
   // Double-buffer the fit view: keep showing the previous photo until the new
   // preview has loaded, so rapid arrowing never flashes a blank pane.

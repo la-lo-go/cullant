@@ -24,14 +24,25 @@ pub enum ThumbKind {
     Full = 3,
 }
 
+/// Everything that decides which cached JPEG a request maps to. Orientation
+/// belongs here as much as mtime: rotating a photo changes the rendered pixels
+/// without touching the file on disk, so keying the cache on mtime alone would
+/// keep serving the old rotation forever.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CacheVersion {
+    pub mtime: i64,
+    pub orientation: i64,
+}
+
 pub struct ThumbRequest {
     pub file_id: i64,
     pub kind: ThumbKind,
-    /// mtime carried by the request URL (`?v=`), when present. Lets the worker
-    /// build the cache path and serve a cache hit without a DB round-trip for
-    /// `mtime`. `None` (param absent/unparseable on some platform) falls back to
-    /// the authoritative `file_row` lookup — no behavior change, just no speedup.
-    pub known_mtime: Option<i64>,
+    /// Cache version carried by the request URL (`?v=` and `?o=`), when present.
+    /// Lets the worker build the cache path and serve a cache hit without a DB
+    /// round-trip. `None` (params absent/unparseable on some platform) falls back
+    /// to the authoritative `file_row` lookup — no behavior change, just no
+    /// speedup.
+    pub known_version: Option<CacheVersion>,
     pub respond: Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>,
 }
 
@@ -154,26 +165,27 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             }
         };
 
-        let result = produce_with_mtime(
+        let result = produce_cached(
             &db,
             store.as_ref(),
             &root,
             request.file_id,
             request.kind,
-            request.known_mtime,
+            request.known_version,
         );
         (request.respond)(result);
     }
 }
 
-pub(crate) fn cache_rel_path(file_id: i64, mtime: i64, kind: ThumbKind) -> String {
+pub(crate) fn cache_rel_path(file_id: i64, version: CacheVersion, kind: ThumbKind) -> String {
     let bucket = (file_id % 256) as u8;
     let suffix = match kind {
         ThumbKind::Thumb => "t",
         ThumbKind::Preview => "p",
         ThumbKind::Full => "f",
     };
-    format!("{bucket:02x}/{file_id}_{mtime}_{suffix}.jpg")
+    let CacheVersion { mtime, orientation } = version;
+    format!("{bucket:02x}/{file_id}_{mtime}_{orientation}_{suffix}.jpg")
 }
 
 fn now_secs() -> i64 {
@@ -345,7 +357,7 @@ pub(crate) fn render_to_cache(
     let oriented = apply_orientation(resized, orientation);
     let jpeg = encode_jpeg(&oriented, quality)?;
 
-    let cache_rel = cache_rel_path(file_id, mtime, kind);
+    let cache_rel = cache_rel_path(file_id, CacheVersion { mtime, orientation }, kind);
     let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
     if let Some(parent) = cache_abs.parent() {
         std::fs::create_dir_all(parent)?;
@@ -397,8 +409,8 @@ fn write_thumb_row(conn: &Connection, row: &ThumbRow) -> rusqlite::Result<()> {
 }
 
 /// Resize/orient/encode/cache one thumbnail AND record its row immediately.
-/// Both the on-demand path (`produce_with_mtime`) and the background ingest
-/// pass reach this through [`produce_with_mtime`].
+/// Both the on-demand path (`produce_cached`) and the background ingest
+/// pass reach this through [`produce_cached`].
 pub(crate) fn render_and_store(
     db: &Arc<Db>,
     root: &Path,
@@ -416,27 +428,28 @@ pub(crate) fn render_and_store(
 /// filesystem under `root/.cullant/thumbs` (private app storage on Android).
 /// Also used by the ingest pass's background preview tier — the disk-cache
 /// short-circuit and temp+rename writes make it race-safe with the pool.
-/// With an optional `known_mtime` supplied by the caller (from the request
-/// URL's `?v=`). When present, the disk-cache path is built
+/// With an optional `known` version supplied by the caller (from the request
+/// URL's `?v=` and `?o=`). When present, the disk-cache path is built
 /// from it and read FIRST — a cache hit returns with zero DB access, keeping the
 /// single writer thread out of the hot scroll path. On a miss (or when `None`),
 /// the authoritative `file_row` lookup runs and the full generate path proceeds
-/// exactly as before. `known_mtime` always equals `files.mtime` (the frontend
-/// sources `?v=` from the same column), so the cache path is identical to the
-/// one `render_and_store` wrote — correct even when mtime is 0 (SAF providers).
-pub(crate) fn produce_with_mtime(
+/// exactly as before. `known` always mirrors `files.mtime`/`files.orientation`
+/// (the frontend sources both from the same columns), so the cache path is
+/// identical to the one `render_and_store` wrote — correct even when mtime is 0
+/// (SAF providers).
+pub(crate) fn produce_cached(
     db: &Arc<Db>,
     store: &dyn ProjectStore,
     root: &Path,
     file_id: i64,
     kind: ThumbKind,
-    known_mtime: Option<i64>,
+    known: Option<CacheVersion>,
 ) -> AppResult<Vec<u8>> {
-    // Fast path: a trusted mtime lets us try the cache before touching the DB.
+    // Fast path: a trusted version lets us try the cache before touching the DB.
     // Full-of-plain-image has no cache file, so it's left to the miss path
     // below (it needs rel_path anyway); every other kind can hit here.
-    if let Some(mtime) = known_mtime {
-        let cache_rel = cache_rel_path(file_id, mtime, kind);
+    if let Some(version) = known {
+        let cache_rel = cache_rel_path(file_id, version, kind);
         let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
         if let Ok(bytes) = std::fs::read(&cache_abs) {
             return Ok(bytes);
@@ -444,16 +457,17 @@ pub(crate) fn produce_with_mtime(
     }
 
     let (rel_path, file_kind, mtime, orientation) = file_row(db, file_id)?;
+    let orientation = orientation.unwrap_or(1);
 
     // Full view of a plain image: stream the original, no transcode, no cache.
     if kind == ThumbKind::Full && file_kind == 1 {
         return read_all(store, &rel_path);
     }
 
-    let cache_rel = cache_rel_path(file_id, mtime, kind);
+    let cache_rel = cache_rel_path(file_id, CacheVersion { mtime, orientation }, kind);
     let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
-    // Re-check the cache under the authoritative mtime. Skipped work only when
-    // known_mtime was present AND equal to mtime AND already missed above; the
+    // Re-check the cache under the authoritative version. Skipped work only when
+    // `known` was present AND equal to it AND already missed above; the
     // redundant read is a cheap stat on the cold/miss path.
     if let Ok(bytes) = std::fs::read(&cache_abs) {
         return Ok(bytes);
@@ -486,7 +500,7 @@ pub(crate) fn produce_with_mtime(
     let meta = SourceMeta {
         file_id,
         mtime,
-        orientation: orientation.unwrap_or(1),
+        orientation,
         src_dims,
     };
     render_and_store(db, root, &meta, &decoded, kind)
@@ -637,13 +651,13 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        let bytes = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap();
         assert_eq!(thumb.width(), 384);
         assert_eq!(thumb.height(), 288);
 
         // Second call must hit the disk cache (row exists + same bytes).
-        let again = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        let again = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
         assert_eq!(bytes, again);
         let rows: i64 = db
             .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM thumbnails", [], |r| r.get(0))?))
@@ -652,7 +666,7 @@ mod tests {
     }
 
     #[test]
-    fn known_mtime_serves_cache_fast_path() {
+    fn known_version_serves_cache_fast_path() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let img = image::RgbImage::from_fn(800, 600, |x, _| image::Rgb([(x % 255) as u8, 70, 30]));
@@ -668,20 +682,38 @@ mod tests {
                 })?)
             })
             .unwrap();
+        let version = CacheVersion {
+            mtime,
+            orientation: 1,
+        };
 
         // Generate + cache the thumb.
-        let bytes =
-            produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime)).unwrap();
+        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, Some(version)).unwrap();
 
-        // Fast path with the correct mtime returns the cached bytes.
-        let hit = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime)).unwrap();
+        // Fast path with the correct version returns the cached bytes.
+        let hit = produce_cached(&db, &store, root, id, ThumbKind::Thumb, Some(version)).unwrap();
         assert_eq!(bytes, hit);
 
-        // A wrong mtime misses the fast path and falls back to the authoritative
-        // lookup, which regenerates against the real mtime — still succeeds.
+        // A stale mtime misses the fast path and falls back to the authoritative
+        // lookup, which regenerates against the real version — still succeeds.
+        let stale = CacheVersion {
+            mtime: mtime + 999,
+            orientation: 1,
+        };
         let fallback =
-            produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, Some(mtime + 999)).unwrap();
+            produce_cached(&db, &store, root, id, ThumbKind::Thumb, Some(stale)).unwrap();
         assert_eq!(bytes, fallback);
+
+        // Same file, same mtime, different orientation: the cache must NOT be
+        // reused, because the rendered pixels differ. This is the rotate case.
+        let rotated = CacheVersion {
+            mtime,
+            orientation: 6,
+        };
+        assert_ne!(
+            cache_rel_path(id, version, ThumbKind::Thumb),
+            cache_rel_path(id, rotated, ThumbKind::Thumb)
+        );
     }
 
     #[test]
@@ -710,7 +742,7 @@ mod tests {
         })
         .unwrap();
 
-        let bytes = produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap().to_rgb8();
         // Rotated: landscape 800x600 -> portrait thumb 288x384.
         assert_eq!((thumb.width(), thumb.height()), (288, 384));
@@ -741,7 +773,7 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        produce_with_mtime(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
         let (w, h): (i64, i64) = db
             .call(move |c| {
                 Ok(c.query_row(

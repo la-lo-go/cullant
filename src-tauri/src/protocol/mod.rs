@@ -3,7 +3,7 @@ use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
 
 use crate::commands::recent;
 use crate::error::AppResult;
-use crate::thumbs::{cache_rel_path, ThumbKind, ThumbRequest};
+use crate::thumbs::{cache_rel_path, CacheVersion, ThumbKind, ThumbRequest};
 use crate::AppState;
 
 /// Handler for the `cullant://` scheme (served as `http://cullant.localhost/…`
@@ -29,14 +29,15 @@ pub fn handle<R: Runtime>(
         return;
     }
 
-    // mtime carried by `?v=` (frontend cache-buster == files.mtime). Parsed
-    // defensively: absent/garbled on any platform → None → authoritative lookup.
-    let known_mtime = query_mtime(request.uri().query());
+    // Cache version carried by `?v=` (files.mtime) and `?o=` (files.orientation).
+    // Parsed defensively: absent/garbled on any platform → None → authoritative
+    // lookup.
+    let known = query_version(request.uri().query());
 
     match (route, rest.parse::<i64>()) {
-        ("thumb", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Thumb, known_mtime),
-        ("preview", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Preview, known_mtime),
-        ("full", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Full, known_mtime),
+        ("thumb", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Thumb, known),
+        ("preview", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Preview, known),
+        ("full", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Full, known),
         ("video", Ok(id)) => respond_video(app, responder, id, &request),
         ("test", _) => responder.respond(
             Response::builder()
@@ -53,14 +54,24 @@ pub fn handle<R: Runtime>(
     }
 }
 
-/// Extract the `v=<i64>` mtime from a raw query string (`"v=123&x=y"`), if any.
-/// Returns `None` when the query is absent or `v` is missing/unparseable — the
-/// caller then falls back to the authoritative DB lookup.
-fn query_mtime(query: Option<&str>) -> Option<i64> {
-    query?
-        .split('&')
-        .find_map(|kv| kv.strip_prefix("v="))
-        .and_then(|v| v.parse::<i64>().ok())
+/// Extract the cache version from a raw query string (`"v=123&o=6"`), if any.
+/// Returns `None` when the query is absent or either part is missing or
+/// unparseable — the caller then falls back to the authoritative DB lookup.
+/// Both parts are required: guessing one would build a cache path that
+/// disagrees with what `render_to_cache` wrote, turning every request into a
+/// silent miss.
+fn query_version(query: Option<&str>) -> Option<CacheVersion> {
+    let query = query?;
+    let param = |name: &str| {
+        query
+            .split('&')
+            .find_map(|kv| kv.strip_prefix(name))
+            .and_then(|v| v.parse::<i64>().ok())
+    };
+    Some(CacheVersion {
+        mtime: param("v=")?,
+        orientation: param("o=")?,
+    })
 }
 
 fn respond_thumb<R: Runtime>(
@@ -68,7 +79,7 @@ fn respond_thumb<R: Runtime>(
     responder: UriSchemeResponder,
     file_id: i64,
     kind: ThumbKind,
-    known_mtime: Option<i64>,
+    known: Option<CacheVersion>,
 ) {
     let state = app.state::<AppState>();
     let (thumbs, root) = {
@@ -83,7 +94,7 @@ fn respond_thumb<R: Runtime>(
         (project.thumbs.clone(), project.root.clone())
     };
 
-    // Fast path: an already-cached artifact (with a known mtime) is served
+    // Fast path: an already-cached artifact (with a known version) is served
     // straight from disk by THIS handler thread, without queuing a pool worker.
     // This matters most during the background pregeneration pass: every worker is
     // then busy with a multi-second decode, so an interactive loupe preview that
@@ -91,11 +102,11 @@ fn respond_thumb<R: Runtime>(
     // second to appear. A cache miss falls through to the pool, which generates
     // and caches exactly as before. (temp-file+rename writes make the read
     // race-safe — a cache file is never partially written.)
-    if let Some(mtime) = known_mtime {
+    if let Some(version) = known {
         let cache_abs = root
             .join(".cullant")
             .join("thumbs")
-            .join(cache_rel_path(file_id, mtime, kind));
+            .join(cache_rel_path(file_id, version, kind));
         if let Ok(bytes) = std::fs::read(&cache_abs) {
             responder.respond(jpeg_ok(bytes));
             return;
@@ -105,7 +116,7 @@ fn respond_thumb<R: Runtime>(
     thumbs.enqueue(ThumbRequest {
         file_id,
         kind,
-        known_mtime,
+        known_version: known,
         respond: Box::new(move |result: AppResult<Vec<u8>>| match result {
             Ok(bytes) => responder.respond(jpeg_ok(bytes)),
             Err(e) => {
@@ -289,8 +300,8 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
         .ok()
         .and_then(|conn| {
             conn.query_row(
-                "SELECT id, mtime FROM (
-                   SELECT f.id AS id, f.mtime AS mtime,
+                "SELECT id, mtime, orientation FROM (
+                   SELECT f.id AS id, f.mtime AS mtime, f.orientation AS orientation,
                      ROW_NUMBER() OVER (
                        PARTITION BY f.group_id
                        ORDER BY (t.file_id IS NOT NULL) DESC, f.id ASC
@@ -306,17 +317,27 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
                  ORDER BY group_newest DESC
                  LIMIT 1 OFFSET ?1",
                 [slot as i64],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, Option<i64>>(2)?,
+                    ))
+                },
             )
             .ok()
         });
 
-    let Some((file_id, mtime)) = candidate else {
+    let Some((file_id, mtime, orientation)) = candidate else {
         responder.respond(plain(StatusCode::NOT_FOUND, "no thumb available".into()));
         return;
     };
 
-    let cache_rel = cache_rel_path(file_id, mtime, ThumbKind::Thumb);
+    let version = CacheVersion {
+        mtime,
+        orientation: orientation.unwrap_or(1),
+    };
+    let cache_rel = cache_rel_path(file_id, version, ThumbKind::Thumb);
     let cache_abs = base.join(".cullant").join("thumbs").join(cache_rel);
     match std::fs::read(&cache_abs) {
         Ok(bytes) => responder.respond(
@@ -341,21 +362,26 @@ fn plain(status: StatusCode, message: String) -> Response<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::query_mtime;
+    use super::{query_version, CacheVersion};
+
+    fn v(mtime: i64, orientation: i64) -> Option<CacheVersion> {
+        Some(CacheVersion { mtime, orientation })
+    }
 
     #[test]
-    fn parses_v_param_defensively() {
-        // Present and well-formed.
-        assert_eq!(query_mtime(Some("v=123")), Some(123));
-        assert_eq!(query_mtime(Some("v=0")), Some(0));
-        // Among other params, any order.
-        assert_eq!(query_mtime(Some("x=1&v=456")), Some(456));
-        assert_eq!(query_mtime(Some("v=789&x=1")), Some(789));
-        // Absent query, missing/garbled v, or empty → None (fallback path).
-        assert_eq!(query_mtime(None), None);
-        assert_eq!(query_mtime(Some("")), None);
-        assert_eq!(query_mtime(Some("x=1")), None);
-        assert_eq!(query_mtime(Some("v=")), None);
-        assert_eq!(query_mtime(Some("v=abc")), None);
+    fn parses_version_params_defensively() {
+        // Present and well-formed, in either order and among other params.
+        assert_eq!(query_version(Some("v=123&o=6")), v(123, 6));
+        assert_eq!(query_version(Some("o=1&v=0")), v(0, 1));
+        assert_eq!(query_version(Some("x=1&v=456&y=2&o=8")), v(456, 8));
+        // Absent query, or either part missing/garbled → None (fallback path).
+        assert_eq!(query_version(None), None);
+        assert_eq!(query_version(Some("")), None);
+        assert_eq!(query_version(Some("x=1")), None);
+        assert_eq!(query_version(Some("v=123")), None);
+        assert_eq!(query_version(Some("o=6")), None);
+        assert_eq!(query_version(Some("v=&o=6")), None);
+        assert_eq!(query_version(Some("v=abc&o=6")), None);
+        assert_eq!(query_version(Some("v=123&o=abc")), None);
     }
 }

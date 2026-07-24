@@ -289,12 +289,20 @@ export function cullantUrl(path: string): string {
   return CULLANT_BASE + path;
 }
 
+/** Cache-buster for the rendered artifacts: mtime plus orientation, because
+ *  rotating changes the pixels the backend renders without touching the file.
+ *  Must match `CacheVersion` in the backend — the protocol builds its cache
+ *  path straight from these params, so a mismatch means a permanent miss. */
+export function mediaVersion(item: ItemLite): string {
+  return `v=${item.mtime}&o=${item.orientation ?? 1}`;
+}
+
 export function thumbUrl(item: ItemLite): string {
-  return cullantUrl(`thumb/${item.id}?v=${item.mtime}`);
+  return cullantUrl(`thumb/${item.id}?${mediaVersion(item)}`);
 }
 
 export function previewUrl(item: ItemLite): string {
-  return cullantUrl(`preview/${item.id}?v=${item.mtime}`);
+  return cullantUrl(`preview/${item.id}?${mediaVersion(item)}`);
 }
 
 export function videoUrl(item: ItemLite): string {
