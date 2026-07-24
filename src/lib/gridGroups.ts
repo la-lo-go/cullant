@@ -183,6 +183,16 @@ export function bucketOf(item: ItemLite, dimKey: string): GroupBucket | null {
 /** Order two buckets: the "unknown" sentinel always sorts last, then by `sort`
  *  (numbers numerically, strings by locale). */
 function cmpBucket(a: GroupBucket, b: GroupBucket): number {
+  // Same bucket at this level → equal, so groupCompare falls through to the
+  // next grouping level (or, at the deepest one, preserves the catalog sort).
+  // Essential because several dimensions carry a PER-ITEM `sort` value rather
+  // than a per-bucket one — date sorts by the item's capture_time, ISO/aperture/
+  // focal/shutter by the raw reading — so two items of the SAME bucket have
+  // different `sort`s. Without this short-circuit their non-zero comparison
+  // would make groupCompare return early and never reach the inner level,
+  // leaving sub-groups interleaved (e.g. Date→ISO would stay in pure time order,
+  // scattering each ISO across the day) instead of contiguous.
+  if (a.key === b.key) return 0;
   const au = a.key === UNKNOWN.key;
   const bu = b.key === UNKNOWN.key;
   if (au !== bu) return au ? 1 : -1;
