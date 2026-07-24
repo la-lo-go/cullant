@@ -33,8 +33,6 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Search from "@lucide/svelte/icons/search";
   import Columns2 from "@lucide/svelte/icons/columns-2";
-  import Link from "@lucide/svelte/icons/link";
-  import Unlink from "@lucide/svelte/icons/unlink";
   import Tag from "@lucide/svelte/icons/tag";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import ImageIcon from "@lucide/svelte/icons/image";
@@ -206,13 +204,19 @@
   // tree toggle when there's nothing to scope by.
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
 
-  // Whether the active tab has any RAW files — used to hide the Mirror/Separate
-  // toggle when there are no RAWs to fan actions out to.
+  // Whether the active tab has any RAW files — separate mode only means
+  // something where there are pairs to separate.
   const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
 
-  // The grid view (density/grouping) differs from its defaults — colours the
-  // View toolbar button, the same way active filters colour Sort & Filter.
-  const hasCustomView = $derived(session.groupBy.length > 0 || session.gridDensity !== "medium");
+  // The grid view differs from its defaults — colours the View toolbar button,
+  // the same way active filters colour Sort & Filter. Separate mode counts:
+  // it changes what every cell in the grid stands for, so now that the toggle
+  // lives inside the panel this badge is the only thing left saying so.
+  const hasCustomView = $derived(
+    session.groupBy.length > 0 ||
+      session.gridDensity !== "medium" ||
+      (!session.mirrorMode && hasRaws),
+  );
 
   // Watch the open project's storage while working: if its folder/volume goes
   // away (drive unplugged, folder moved/deleted) warn once, and clear the
@@ -354,17 +358,6 @@
         </div>
       </div>
       <div class="toolbar-right">
-        {#if hasRaws}
-          <button
-            class:active={session.mirrorMode}
-            title={session.mirrorMode
-              ? "Mirror mode: RAW+JPEG pairs act as one photo — click to separate (M)"
-              : "Separate mode: RAW and JPEG act independently — click to mirror (M)"}
-            onclick={blurring(() => session.setMirrorMode(!session.mirrorMode))}
-          >
-            {#if session.mirrorMode}<Link size={14} /><span>Mirror</span>{:else}<Unlink size={14} /><span>Separate</span>{/if}
-          </button>
-        {/if}
         <div class="filters-anchor">
           <button
             class:active={session.filtersPanelOpen}

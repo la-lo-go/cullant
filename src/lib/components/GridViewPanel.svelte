@@ -1,8 +1,14 @@
 <script lang="ts">
   import { session, type GridDensity } from "../stores/session.svelte";
+  import { catalog } from "../stores/catalog.svelte";
   import { GROUP_DIMS } from "../gridGroups";
   import DragList from "./DragList.svelte";
   import X from "@lucide/svelte/icons/x";
+  import Link from "@lucide/svelte/icons/link";
+  import Unlink from "@lucide/svelte/icons/unlink";
+
+  // Pairing only exists where RAWs do; without them the choice is meaningless.
+  const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
 
   const densities: { value: GridDensity; label: string }[] = [
     { value: "small", label: "Small" },
@@ -122,6 +128,33 @@
       <span class="pill"></span>
     </button>
   </section>
+
+  {#if hasRaws}
+    <section>
+      <span class="lbl">RAW + JPEG pairs</span>
+      <div class="row">
+        <button
+          class="seg"
+          class:active={session.mirrorMode}
+          onclick={() => session.setMirrorMode(true)}
+        >
+          <Link size={13} /><span>Mirror</span>
+        </button>
+        <button
+          class="seg"
+          class:active={!session.mirrorMode}
+          onclick={() => session.setMirrorMode(false)}
+        >
+          <Unlink size={13} /><span>Separate</span>
+        </button>
+      </div>
+      <p class="hint">
+        {session.mirrorMode
+          ? "A pair counts as one photo; actions apply to both files."
+          : "RAW and JPEG are listed and acted on independently."}
+      </p>
+    </section>
+  {/if}
 
   <section>
     <div class="lbl-row">
@@ -307,6 +340,10 @@
 
   .seg {
     flex: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
     border: 1px solid transparent;
     background: var(--control);
     color: #bbb;
