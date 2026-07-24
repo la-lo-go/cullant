@@ -127,7 +127,7 @@ pub fn xmp_dirty_count(db: &Arc<Db>) -> AppResult<i64> {
 fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
     db.call(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, rel_path, rating, flag, label FROM files
+            "SELECT id, rel_path, rating, flag, label, orientation FROM files
              WHERE status = 0 AND kind IN (0, 1) AND xmp_dirty = 1
              ORDER BY id",
         )?;
@@ -135,34 +135,29 @@ fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, i64>(3)?,
-                r.get::<_, Option<String>>(4)?,
+                XmpState {
+                    rating: r.get::<_, i64>(2)?,
+                    flag: r.get::<_, i64>(3)?,
+                    label: r.get::<_, Option<String>>(4)?,
+                    orientation: r.get::<_, Option<i64>>(5)?.unwrap_or(1),
+                },
             ))
         })?;
         let mut out: Vec<DirtySidecar> = Vec::new();
         for row in rows {
-            let (id, rel_path, rating, flag, label) = row?;
+            let (id, rel_path, state) = row?;
             let sc_rel = xmp::sidecar_rel(&rel_path);
             match out.iter_mut().find(|d| d.sc_rel == sc_rel) {
                 Some(d) => {
                     d.file_ids.push(id);
                     d.rel_path = rel_path;
-                    d.state = XmpState {
-                        rating,
-                        flag,
-                        label,
-                    };
+                    d.state = state;
                 }
                 None => out.push(DirtySidecar {
                     file_ids: vec![id],
                     rel_path,
                     sc_rel,
-                    state: XmpState {
-                        rating,
-                        flag,
-                        label,
-                    },
+                    state,
                 }),
             }
         }

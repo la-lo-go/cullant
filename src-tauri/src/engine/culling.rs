@@ -165,11 +165,8 @@ fn rotate_orientation(from: i64, steps: i64) -> i64 {
 
 /// Turn photos a quarter turn at a time. This is a Cullant-side edit: it
 /// rewrites `files.orientation` and never touches the file on disk, so the
-/// original bytes stay exactly as the camera wrote them.
-///
-/// It deliberately does NOT set `xmp_dirty`: the sidecar writer does not export
-/// orientation, so marking it would light the commit button to write a sidecar
-/// that carries no rotation.
+/// original bytes stay exactly as the camera wrote them. The rotation reaches
+/// other apps through `tiff:Orientation` in the sidecar, hence `xmp_dirty`.
 pub fn rotate(db: &Arc<Db>, targets: Targets, steps: i64) -> AppResult<Vec<CullState>> {
     apply(db, targets, move |conn, id, now| {
         let current: i64 = conn
@@ -180,7 +177,9 @@ pub fn rotate(db: &Arc<Db>, targets: Targets, steps: i64) -> AppResult<Vec<CullS
             )?
             .unwrap_or(1);
         conn.execute(
-            "UPDATE files SET orientation = ?2, state_updated_at = ?3 WHERE id = ?1",
+            "UPDATE files SET orientation = ?2, state_updated_at = ?3,
+                   xmp_dirty = CASE WHEN kind IN (0, 1) THEN 1 ELSE xmp_dirty END
+             WHERE id = ?1",
             params![id, rotate_orientation(current, steps), now],
         )?;
         Ok(())

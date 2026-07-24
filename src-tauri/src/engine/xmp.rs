@@ -9,10 +9,27 @@ pub struct XmpState {
     pub rating: i64,
     pub flag: i64, // -1 reject, 0 unflagged, 1 pick
     pub label: Option<String>,
+    /// EXIF orientation 1-8, exported as `tiff:Orientation`.
+    pub orientation: i64,
 }
 
 const NS_XMP: &str = "http://ns.adobe.com/xap/1.0/";
 const NS_XMPDM: &str = "http://ns.adobe.com/xmp/1.0/DynamicMedia/";
+const NS_TIFF: &str = "http://ns.adobe.com/tiff/1.0/";
+
+/// Orientation is written unconditionally, unlike rating/label which are
+/// omitted at their neutral value. A sidecar's job here is to OVERRIDE the
+/// orientation embedded in the file, so omitting the normal value would let a
+/// reader fall back to the file's own EXIF — exactly wrong for a photo the user
+/// rotated back upright.
+fn orientation_attr(orientation: i64) -> String {
+    let o = if (1..=8).contains(&orientation) {
+        orientation
+    } else {
+        1
+    };
+    o.to_string()
+}
 
 /// Sidecar rel_path convention both Lightroom and Capture One read:
 /// `IMG_001.CR3` -> `IMG_001.xmp` (basename swap, not name.ext.xmp). Operates on
@@ -97,12 +114,17 @@ fn fresh_sidecar(state: &XmpState) -> String {
     if let Some(good) = good {
         attrs.push_str(&format!("\n    xmpDM:good=\"{good}\""));
     }
+    attrs.push_str(&format!(
+        "\n    tiff:Orientation=\"{}\"",
+        orientation_attr(state.orientation)
+    ));
     format!(
         "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Cullant\">\n \
          <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n  \
          <rdf:Description rdf:about=\"\"\n    \
          xmlns:xmp=\"{NS_XMP}\"\n    \
-         xmlns:xmpDM=\"{NS_XMPDM}\"{attrs}/>\n \
+         xmlns:xmpDM=\"{NS_XMPDM}\"\n    \
+         xmlns:tiff=\"{NS_TIFF}\"{attrs}/>\n \
          </rdf:RDF>\n</x:xmpmeta>\n"
     )
 }
@@ -163,9 +185,11 @@ fn patch_description(el: &BytesStart, state: &XmpState) -> BytesStart<'static> {
         "xmp:Label".as_bytes(),
         "xmpDM:pick".as_bytes(),
         "xmpDM:good".as_bytes(),
+        "tiff:Orientation".as_bytes(),
     ];
     let mut has_xmp_ns = false;
     let mut has_dm_ns = false;
+    let mut has_tiff_ns = false;
 
     for attr in el.attributes().flatten() {
         let key = attr.key.as_ref();
@@ -174,6 +198,9 @@ fn patch_description(el: &BytesStart, state: &XmpState) -> BytesStart<'static> {
         }
         if key == b"xmlns:xmpDM" {
             has_dm_ns = true;
+        }
+        if key == b"xmlns:tiff" {
+            has_tiff_ns = true;
         }
         if ours.contains(&key) {
             continue; // dropped; re-added below with current values
@@ -186,6 +213,9 @@ fn patch_description(el: &BytesStart, state: &XmpState) -> BytesStart<'static> {
     }
     if !has_dm_ns {
         out.push_attribute(("xmlns:xmpDM", NS_XMPDM));
+    }
+    if !has_tiff_ns {
+        out.push_attribute(("xmlns:tiff", NS_TIFF));
     }
     if state.rating != 0 {
         out.push_attribute(("xmp:Rating", state.rating.to_string().as_str()));
@@ -200,6 +230,10 @@ fn patch_description(el: &BytesStart, state: &XmpState) -> BytesStart<'static> {
     if let Some(good) = good {
         out.push_attribute(("xmpDM:good", good));
     }
+    out.push_attribute((
+        "tiff:Orientation",
+        orientation_attr(state.orientation).as_str(),
+    ));
     out.into_owned()
 }
 
@@ -216,6 +250,7 @@ mod tests {
             rating: 4,
             flag: 1,
             label: Some("Red".into()),
+            orientation: 6,
         };
         let sc_rel = write_sidecar(&store, "IMG_1.cr3", &state).unwrap();
         assert_eq!(sc_rel, "IMG_1.xmp");
@@ -224,6 +259,37 @@ mod tests {
         assert!(content.contains("xmp:Label=\"Red\""));
         assert!(content.contains("xmpDM:pick=\"1\""));
         assert!(content.contains("xmpDM:good=\"True\""));
+        assert!(content.contains("tiff:Orientation=\"6\""));
+        assert!(content.contains("xmlns:tiff="));
+    }
+
+    #[test]
+    fn normal_orientation_is_still_written() {
+        // Unlike rating/label, the neutral value must be exported: the sidecar
+        // OVERRIDES the file's embedded EXIF, so omitting it would let a reader
+        // fall back to the original for a photo the user rotated upright.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("IMG_2.cr3"), b"raw").unwrap();
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let state = XmpState {
+            rating: 0,
+            flag: 0,
+            label: None,
+            orientation: 1,
+        };
+        let sc_rel = write_sidecar(&store, "IMG_2.cr3", &state).unwrap();
+        let content = std::fs::read_to_string(dir.path().join(&sc_rel)).unwrap();
+        assert!(content.contains("tiff:Orientation=\"1\""));
+        // Out-of-range values normalise rather than reaching the file.
+        let odd = XmpState {
+            rating: 0,
+            flag: 0,
+            label: None,
+            orientation: 42,
+        };
+        write_sidecar(&store, "IMG_2.cr3", &odd).unwrap();
+        let content = std::fs::read_to_string(dir.path().join(&sc_rel)).unwrap();
+        assert!(content.contains("tiff:Orientation=\"1\""));
     }
 
     #[test]
@@ -233,7 +299,9 @@ mod tests {
   <rdf:Description rdf:about=""
     xmlns:xmp="http://ns.adobe.com/xap/1.0/"
     xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+    xmlns:tiff="http://ns.adobe.com/tiff/1.0/"
     xmp:Rating="1"
+    tiff:Orientation="1"
     crs:Exposure2012="+0.55">
    <crs:Look><rdf:Description crs:Name="Adobe Color"/></crs:Look>
   </rdf:Description>
@@ -245,6 +313,7 @@ mod tests {
                 rating: 5,
                 flag: -1,
                 label: None,
+                orientation: 8,
             },
         )
         .unwrap();
@@ -254,6 +323,11 @@ mod tests {
         assert!(!merged.contains("xmp:Rating=\"1\""));
         assert!(merged.contains("xmpDM:pick=\"-1\""));
         assert!(merged.contains("xmpDM:good=\"False\""));
+        // Ours is replaced, not duplicated, and the existing namespace decl is
+        // reused rather than added a second time.
+        assert!(merged.contains("tiff:Orientation=\"8\""));
+        assert!(!merged.contains("tiff:Orientation=\"1\""));
+        assert_eq!(merged.matches("xmlns:tiff").count(), 1);
         // Only the outer Description got patched, not the nested crs one.
         assert_eq!(merged.matches("xmpDM:pick").count(), 1);
     }
