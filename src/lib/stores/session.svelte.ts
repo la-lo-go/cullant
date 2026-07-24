@@ -183,6 +183,22 @@ class SessionStore {
     this.shutterFilter = null;
     this.clampFocus();
   }
+
+  /** Reset every filter AND the grid view (density/grouping) to their neutral
+   *  defaults. SessionStore is a singleton reused across projects, so without
+   *  this a filter or grouping choice from the PREVIOUS project would leak into
+   *  a new one that doesn't override it (remember-session off, or the new
+   *  project has no saved blob yet) — e.g. a lens filter naming a lens the new
+   *  project's photos never used would silently empty the grid. Call before
+   *  `restoreSessionState()` on every project open; a saved blob then overrides
+   *  these defaults with the new project's own remembered choices. */
+  resetForNewProject() {
+    this.clearFilters();
+    this.groupBy = [];
+    this.gridDensity = "medium";
+    this.stickyGroupHeader = false;
+  }
+
   /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
   folderFilter = $state<string | null>(null);
   folderTreeVisible = $state(initialFolderTreeVisible());
@@ -955,20 +971,47 @@ $effect.root(() => {
   // Persist the per-project session (sort/media/filters/focus) on any change,
   // debounced. Skipped while no project is open, the setting is off, or a
   // restore is in flight (so open-time defaults never clobber the saved blob).
-  let saveTimer: ReturnType<typeof setTimeout> | null = null;
   $effect(() => {
     // Read the snapshot first so every persisted value is a tracked dependency.
     const json = JSON.stringify(session.sessionSnapshot());
+    pendingSaveJson = json;
     if (!catalog.project || !settings.rememberSession || session.restoring) return;
     if (saveTimer !== null) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveTimer = null;
+      pendingSaveJson = null;
       void api.setSessionState(json).catch(() => {
         // persistence is best-effort
       });
     }, 400);
   });
 });
+
+// Debounce state for the persist effect above, kept at module scope so
+// `flushSessionSave` (called right before a project closes or switches) can
+// reach in and write out whatever change is still waiting on its timer —
+// otherwise a view/filter change made just before closing the project (e.g.
+// adding a grouping level, then immediately switching projects) is silently
+// lost: the 400ms debounce never gets a chance to fire once the project's DB
+// connection is gone.
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingSaveJson: string | null = null;
+
+/** Write out a debounced session-state save immediately instead of waiting for
+ *  its timer, if one is pending. Call before anything that ends the current
+ *  project's session (closing it, opening a different one, quitting the app). */
+export async function flushSessionSave() {
+  if (saveTimer === null || pendingSaveJson === null) return;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  const json = pendingSaveJson;
+  pendingSaveJson = null;
+  try {
+    await api.setSessionState(json);
+  } catch {
+    // persistence is best-effort
+  }
+}
 
 // Multi-window / background changes reconcile through the same merge.
 let workRefreshTimer: ReturnType<typeof setTimeout> | null = null;

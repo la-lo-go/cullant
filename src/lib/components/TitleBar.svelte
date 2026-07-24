@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { catalog } from "../stores/catalog.svelte";
+  import { flushSessionSave } from "../stores/session.svelte";
   import { recent } from "../stores/recent.svelte";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
@@ -52,6 +53,20 @@
     void appWindow.isMaximized().then((v) => (maximized = v));
     const unlisten = appWindow.onResized(() => {
       void appWindow.isMaximized().then((v) => (maximized = v));
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  });
+
+  // Flush a still-debounced view/filter save before the window actually closes
+  // (this button, Alt+F4, or the taskbar) — otherwise a change made in the last
+  // 400ms before quitting never reaches the project's DB.
+  $effect(() => {
+    const unlisten = appWindow.onCloseRequested(async (event) => {
+      event.preventDefault();
+      await flushSessionSave();
+      await appWindow.destroy();
     });
     return () => {
       void unlisten.then((f) => f());

@@ -10,7 +10,7 @@ import {
   type ScanProgress,
   type SortKey,
 } from "../api";
-import { session } from "./session.svelte";
+import { flushSessionSave, session } from "./session.svelte";
 import { view } from "./view.svelte";
 
 class CatalogStore {
@@ -78,6 +78,11 @@ class CatalogStore {
 
   async open(path: string) {
     this.error = "";
+    // Switching projects without an explicit "Close project" first (recent-
+    // projects menu, drag-drop) would otherwise abandon whatever view/filter
+    // change is still sitting in the OLD project's persist debounce — flush it
+    // to that project's DB before its connection goes away underneath it.
+    await flushSessionSave();
     // Set the in-flight flags BEFORE awaiting openProject. The scan finishes in a
     // few milliseconds and its scan:progress/scan:done events can arrive before
     // this promise resolves; setting `scanning` after the await would then clobber
@@ -117,6 +122,7 @@ class CatalogStore {
     // Guard the session-persist effect until the restore below has run, so the
     // defaults set here can never overwrite the saved blob before it loads.
     session.restoring = true;
+    session.resetForNewProject();
     view.mode = "grid";
     this.media = "photos";
     await this.refresh();
@@ -145,6 +151,7 @@ class CatalogStore {
   }
 
   async close() {
+    await flushSessionSave();
     await api.closeProject();
     this.project = null;
     this.items = [];
