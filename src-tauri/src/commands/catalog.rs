@@ -41,6 +41,19 @@ pub struct ItemLite {
     /// True when the grid thumbnail could not be decoded (unsupported/corrupt
     /// source), so the UI shows a placeholder instead of requesting an image.
     pub thumb_failed: bool,
+    /// 16-char hex of the thumbnail's 64-bit difference hash, or None until the
+    /// thumbnail has been generated. Used to tell apart consecutive frames of a
+    /// burst from unrelated shots taken moments apart.
+    pub phash: Option<String>,
+}
+
+/// Lowercase hex of exactly 8 bytes.
+fn hex8(bytes: Vec<u8>) -> String {
+    use std::fmt::Write;
+    bytes.iter().fold(String::with_capacity(16), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    })
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -169,9 +182,13 @@ pub fn query_items(
                       WHERE th.file_id = f.id AND th.kind = 0
                         AND th.failed = 1 AND th.source_mtime = f.mtime) AS thumb_failed,
                     f.orientation AS orientation,
-                    f.camera, f.lens, f.iso, f.focal_length, f.f_number, f.exposure_time
+                    f.camera, f.lens, f.iso, f.focal_length, f.f_number, f.exposure_time,
+                    fa.phash
              FROM files f
              JOIN groups g ON g.id = f.group_id
+             -- A plain join, not another correlated subquery: this SELECT
+             -- already carries three of those per row (see the backend audit).
+             LEFT JOIN file_analysis fa ON fa.file_id = f.id
              WHERE f.status = 0 AND {kind_filter}
              ORDER BY {order}"
         );
@@ -206,6 +223,12 @@ pub fn query_items(
                     .map(|csv| csv.split(',').filter_map(|s| s.parse().ok()).collect())
                     .unwrap_or_default(),
                 thumb_failed: r.get::<_, i64>(17)? != 0,
+                // Hex rather than a number: a u64 does not survive the trip
+                // through a JavaScript number intact.
+                phash: r
+                    .get::<_, Option<Vec<u8>>>(25)?
+                    .filter(|b| b.len() == 8)
+                    .map(hex8),
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

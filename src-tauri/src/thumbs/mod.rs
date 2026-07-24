@@ -328,6 +328,33 @@ pub(crate) struct ThumbRow {
     mtime: i64,
     /// ORIGINAL dims to backfill into `files`, when the decode was full-size.
     src_dims: Option<(u32, u32)>,
+    /// Perceptual hash of the rendered thumbnail; `None` for every kind but
+    /// `Thumb`, so one hash is stored per file rather than three.
+    phash: Option<u64>,
+}
+
+/// A 64-bit difference hash of `img`: downscale to 9x8 grey, then record
+/// whether each pixel is brighter than the one to its right. Two frames of the
+/// same burst land within a few bits of each other; an unrelated shot does not.
+///
+/// Computed from the already-resized, already-oriented thumbnail buffer, so it
+/// costs one tiny resize and no extra decode or disk read. Hand-rolled rather
+/// than pulling in `image_hasher`, which would risk a second `image` version
+/// for what amounts to twenty lines.
+fn dhash(img: &DynamicImage) -> u64 {
+    // Grey first, then resample: the filter then runs over one channel instead
+    // of three, and the hash only ever looks at luminance anyway.
+    let small =
+        image::imageops::resize(&img.to_luma8(), 9, 8, image::imageops::FilterType::Triangle);
+    let mut bits = 0u64;
+    for y in 0..8 {
+        for x in 0..8 {
+            let left = small.get_pixel(x, y).0[0];
+            let right = small.get_pixel(x + 1, y).0[0];
+            bits = (bits << 1) | u64::from(left > right);
+        }
+    }
+    bits
 }
 
 /// Resize `decoded` for `kind`, apply orientation (on the small image — 90°
@@ -379,6 +406,7 @@ pub(crate) fn render_to_cache(
         out_h: oriented.height(),
         mtime,
         src_dims,
+        phash: (kind == ThumbKind::Thumb).then(|| dhash(&oriented)),
     };
     Ok((jpeg, row))
 }
@@ -403,6 +431,15 @@ fn write_thumb_row(conn: &Connection, row: &ThumbRow) -> rusqlite::Result<()> {
             "UPDATE files SET width = COALESCE(width, ?2), height = COALESCE(height, ?3)
              WHERE id = ?1",
             params![row.file_id, src_w, src_h],
+        )?;
+    }
+    // Stored big-endian so the BLOB sorts the same way the number does.
+    if let Some(phash) = row.phash {
+        conn.execute(
+            "INSERT INTO file_analysis (file_id, phash, analyzed_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(file_id) DO UPDATE SET
+               phash = excluded.phash, analyzed_at = excluded.analyzed_at",
+            params![row.file_id, phash.to_be_bytes().to_vec(), now_secs()],
         )?;
     }
     Ok(())
@@ -714,6 +751,69 @@ mod tests {
             cache_rel_path(id, version, ThumbKind::Thumb),
             cache_rel_path(id, rotated, ThumbKind::Thumb)
         );
+    }
+
+    #[test]
+    fn dhash_tracks_similarity_not_identity() {
+        let base = image::RgbImage::from_fn(200, 150, |x, y| {
+            image::Rgb([((x * 255) / 200) as u8, ((y * 255) / 150) as u8, 60])
+        });
+        let base = DynamicImage::ImageRgb8(base);
+
+        // The next frame of a burst: the same scene nudged slightly.
+        let shifted = image::RgbImage::from_fn(200, 150, |x, y| {
+            let x = (x + 2).min(199);
+            image::Rgb([((x * 255) / 200) as u8, ((y * 255) / 150) as u8, 60])
+        });
+        let shifted = DynamicImage::ImageRgb8(shifted);
+
+        // A different scene entirely: gradient running the other way.
+        let other = image::RgbImage::from_fn(200, 150, |x, y| {
+            image::Rgb([(255 - (x * 255) / 200) as u8, 30, ((y * 255) / 150) as u8])
+        });
+        let other = DynamicImage::ImageRgb8(other);
+
+        let near = (dhash(&base) ^ dhash(&shifted)).count_ones();
+        let far = (dhash(&base) ^ dhash(&other)).count_ones();
+        assert!(near <= 8, "a nudged frame should stay close, got {near}");
+        assert!(
+            far > near,
+            "an unrelated scene must be further away: near={near} far={far}"
+        );
+    }
+
+    #[test]
+    fn a_thumbnail_records_a_hash_and_a_preview_does_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let img = image::RgbImage::from_fn(800, 600, |x, y| {
+            image::Rgb([(x % 255) as u8, (y % 255) as u8, 10])
+        });
+        img.save(root.join("photo.jpg")).unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let id: i64 = db
+            .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
+            .unwrap();
+
+        produce_cached(&db, &store, root, id, ThumbKind::Preview, None).unwrap();
+        let after_preview: i64 = db
+            .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM file_analysis", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(after_preview, 0, "only the thumb kind is hashed");
+
+        produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        let blob: Vec<u8> = db
+            .call(move |c| {
+                Ok(c.query_row(
+                    "SELECT phash FROM file_analysis WHERE file_id = ?1",
+                    params![id],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(blob.len(), 8, "a 64-bit hash, stored big-endian");
     }
 
     #[test]
