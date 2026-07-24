@@ -482,7 +482,22 @@
               <ChevronRight size={16} />
             </button>
           {/if}
-          <VirtualGrid items={session.filtered} />
+          {#if session.filtered.length === 0 && catalog.items.length > 0}
+            <!-- The active tab has photos/videos, but every filter combined
+                 leaves nothing — a blank grid otherwise reads as a bug/empty
+                 project rather than "your filters excluded everything". -->
+            <div class="empty-filtered">
+              <ListFilter size={28} />
+              <p>No items match the current filters</p>
+              <button
+                onclick={blurring(() => (session.filtersPanelOpen = true))}
+              >
+                <ListFilter size={13} /> Open Sort &amp; Filter
+              </button>
+            </div>
+          {:else}
+            <VirtualGrid items={session.filtered} />
+          {/if}
         </div>
       {:else if view.mode === "viewer"}
         <Viewer />
@@ -1164,6 +1179,42 @@
 
   .grid-area :global(.viewport) {
     flex: 1;
+  }
+
+  .empty-filtered {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: #6a6a72;
+    text-align: center;
+    padding: 24px;
+  }
+
+  .empty-filtered p {
+    margin: 0;
+    font-size: 13px;
+  }
+
+  .empty-filtered button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--control);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    color: #ddd;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  .empty-filtered button:hover {
+    border-color: var(--accent);
+    color: #fff;
   }
 
   /* Anchors the GridViewPanel popover under the View toolbar button. */
