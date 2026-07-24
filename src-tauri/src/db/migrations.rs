@@ -181,6 +181,16 @@ const MIGRATIONS: &[&str] = &[
     r#"
     UPDATE files SET capture_time = NULL WHERE kind IN (0, 1);
     "#,
+    // v8 — reversal bookkeeping for the commit history. `undone_at` marks an
+    // entry whose effect has been rolled back; the commit's own column is set
+    // once nothing reversible is left in it, so a partially undone commit stays
+    // distinguishable from a fully undone one. Both are NULL for every commit
+    // made before undo existed, which reads correctly as "not undone".
+    r#"
+    ALTER TABLE commits ADD COLUMN undone_at INTEGER;
+    ALTER TABLE commit_entries ADD COLUMN undone_at INTEGER;
+    CREATE INDEX idx_commit_entries_commit ON commit_entries(commit_id);
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {

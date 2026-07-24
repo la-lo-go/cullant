@@ -307,6 +307,13 @@ impl UndoInfo {
     fn to_json(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
     }
+
+    /// Unreadable or absent undo info reads as "nothing recorded", which every
+    /// caller already treats as not reversible — better than failing the whole
+    /// history list over one malformed row.
+    pub fn from_json(s: &str) -> UndoInfo {
+        serde_json::from_str(s).unwrap_or_default()
+    }
 }
 
 /// Delete one file (by rel_path) according to the mode, through the store.

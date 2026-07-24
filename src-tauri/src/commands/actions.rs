@@ -6,6 +6,7 @@ use crate::db::Db;
 use crate::engine::actions::{self, ActionKind, PairScope, PendingAction};
 use crate::engine::committer::{self, CommitOutcome, CommitPlan};
 use crate::engine::culling::Targets;
+use crate::engine::undo::{self, CommitEntry, CommitSummary, UndoOutcome};
 use crate::error::{AppError, AppResult};
 use crate::store::ProjectStore;
 use crate::AppState;
@@ -14,6 +15,42 @@ fn project(state: &AppState) -> AppResult<(Arc<Db>, Arc<dyn ProjectStore>)> {
     let guard = state.project.lock().unwrap();
     let p = guard.as_ref().ok_or(AppError::NoProject)?;
     Ok((p.db.clone(), p.store.clone()))
+}
+
+#[tauri::command]
+pub fn list_commits(state: State<'_, AppState>) -> AppResult<Vec<CommitSummary>> {
+    let (db, _) = project(&state)?;
+    undo::list_commits(&db)
+}
+
+#[tauri::command]
+pub fn commit_detail(commit_id: i64, state: State<'_, AppState>) -> AppResult<Vec<CommitEntry>> {
+    let (db, _) = project(&state)?;
+    undo::commit_detail(&db, commit_id)
+}
+
+#[tauri::command]
+pub fn undo_commit(
+    commit_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<UndoOutcome> {
+    let (db, store) = project(&state)?;
+    let outcome = undo::undo_commit(&db, store.as_ref(), commit_id)?;
+    let _ = app.emit("pending:changed", ());
+    Ok(outcome)
+}
+
+#[tauri::command]
+pub fn undo_commit_entry(
+    entry_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<UndoOutcome> {
+    let (db, store) = project(&state)?;
+    let outcome = undo::undo_entry(&db, store.as_ref(), entry_id)?;
+    let _ = app.emit("pending:changed", ());
+    Ok(outcome)
 }
 
 #[tauri::command]
