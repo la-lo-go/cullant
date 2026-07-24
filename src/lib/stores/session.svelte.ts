@@ -244,6 +244,9 @@ class SessionStore {
   selectedIds = $state<Set<number>>(new Set());
   /** Index into `filtered` where the last explicit selection started (Shift ranges). */
   selectionAnchor = $state<number | null>(null);
+  /** Far end of the last Shift range, so a keyboard extension continues from
+   *  where the range ended rather than from the anchor. */
+  private rangeHead = $state<number | null>(null);
 
   // --- grid view (density + grouping) ---
   /** Grid thumbnail size; persisted per project via the session blob. */
@@ -638,13 +641,25 @@ class SessionStore {
       };
       return;
     }
+    this.collapseSelection();
     this.focusedIndex = next;
     this.selectionAnchor = this.focusedIndex;
   }
 
   focusEdge(end: boolean) {
+    this.collapseSelection();
     this.focusedIndex = end ? Math.max(0, this.filtered.length - 1) : 0;
     this.selectionAnchor = this.focusedIndex;
+  }
+
+  /** Plain navigation drops any selection, so the item you moved onto is what
+   *  the next action hits. `targets()` prefers the selection over the focus, so
+   *  a selection left behind would silently send P/X/1-5 to the photos you
+   *  navigated away from — and the grid hides the focus ring while a selection
+   *  exists, so there would be no visible cue either. */
+  private collapseSelection() {
+    if (this.selectedIds.size > 0) this.selectedIds = new Set();
+    this.rangeHead = null;
   }
 
   /** Entering the loupe/compare view with nothing focused would otherwise show
@@ -687,34 +702,90 @@ class SessionStore {
     // kept for a subsequent Shift-range.
     this.focusedIndex = -1;
     this.selectionAnchor = index;
+    this.rangeHead = index;
   }
 
-  /** Shift+click: contiguous range from the anchor. `additive` = Ctrl held. */
-  rangeSelect(index: number, additive = false) {
-    if (this.filtered.length === 0) return;
-    const anchor = this.selectionAnchor ?? this.focusedIndex;
-    const lo = Math.min(anchor, index);
-    const hi = Math.max(anchor, index);
+  /** Select the contiguous run between two indexes. `additive` keeps what was
+   *  already selected (Ctrl held). */
+  private fillRange(anchor: number, head: number, additive = false) {
+    const lo = Math.min(anchor, head);
+    const hi = Math.max(anchor, head);
     const next = additive ? new Set(this.selectedIds) : new Set<number>();
     for (let i = lo; i <= hi; i++) {
       const item = this.filtered[i];
       if (item) next.add(item.id);
     }
     this.selectedIds = next;
+  }
+
+  /** Shift+click: contiguous range from the anchor. `additive` = Ctrl held. */
+  rangeSelect(index: number, additive = false) {
+    if (this.filtered.length === 0) return;
+    const anchor = this.selectionAnchor ?? this.focusedIndex;
+    this.fillRange(anchor, index, additive);
     // Drop focus while a selection exists (see toggleSelect); keep the anchor.
     this.focusedIndex = -1;
     this.selectionAnchor = anchor;
+    this.rangeHead = index;
+  }
+
+  /** Index the next Shift+Arrow grows from. Focus is the head while it is live;
+   *  once a selection has dropped the focus outline, `rangeHead` remembers where
+   *  the range ended so extending continues from there instead of collapsing
+   *  back to the anchor. */
+  private selectionHeadIndex(): number {
+    if (this.focusedIndex >= 0) return this.focusedIndex;
+    return this.rangeHead ?? this.selectionAnchor ?? 0;
+  }
+
+  /** Shift+Arrow: move the head by `delta` and reselect from the anchor, so the
+   *  range grows and shrinks as the head passes back over the anchor. Focus
+   *  tracks the head — the grid only draws the focus ring when nothing is
+   *  selected, so no stray outline appears, and the existing scroll-into-view
+   *  effect keeps the head on screen for free. */
+  extendSelection(delta: number) {
+    if (this.filtered.length === 0) return;
+    const head = this.selectionHeadIndex();
+    const max = this.filtered.length - 1;
+    const next = Math.min(max, Math.max(0, head + delta));
+    if (next === head) return;
+    this.extendTo(next);
+  }
+
+  /** Shift+Home / Shift+End: extend the selection to the first/last item. */
+  extendToEdge(end: boolean) {
+    if (this.filtered.length === 0) return;
+    this.extendTo(end ? this.filtered.length - 1 : 0);
+  }
+
+  private extendTo(head: number) {
+    const anchor = this.selectionAnchor ?? this.selectionHeadIndex();
+    this.selectionAnchor = anchor;
+    this.fillRange(anchor, head);
+    this.focusedIndex = head;
+    this.rangeHead = head;
   }
 
   clearSelection() {
     if (this.selectedIds.size > 0) this.selectedIds = new Set();
     this.selectionAnchor = null;
+    this.rangeHead = null;
   }
 
   selectAll() {
     this.selectedIds = new Set(this.filtered.map((i) => i.id));
     // No focus while a selection exists (see toggleSelect).
     this.focusedIndex = -1;
+  }
+
+  /** Select everything the current selection leaves out. */
+  invertSelection() {
+    const next = new Set<number>();
+    for (const item of this.filtered) {
+      if (!this.selectedIds.has(item.id)) next.add(item.id);
+    }
+    this.selectedIds = next;
+    if (next.size > 0) this.focusedIndex = -1;
   }
 
   /**

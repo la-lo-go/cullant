@@ -6,6 +6,8 @@ export type CommandId =
   | "nav.home"
   | "nav.end"
   | "select.all"
+  | "select.none"
+  | "select.invert"
   | "rate.0"
   | "rate.1"
   | "rate.2"
@@ -73,6 +75,8 @@ export const COMMANDS: CommandMeta[] = [
   { id: "nav.home", title: "First photo", category: "Navigation" },
   { id: "nav.end", title: "Last photo", category: "Navigation" },
   { id: "select.all", title: "Select all", category: "Navigation" },
+  { id: "select.none", title: "Deselect all", category: "Navigation" },
+  { id: "select.invert", title: "Invert selection", category: "Navigation" },
   { id: "rate.0", title: "Clear stars", category: "Rating & flags", classify: true },
   { id: "rate.1", title: "1 star", category: "Rating & flags", classify: true },
   { id: "rate.2", title: "2 stars", category: "Rating & flags", classify: true },
@@ -122,6 +126,8 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "nav.home": ["home"],
   "nav.end": ["end"],
   "select.all": ["ctrl+a"],
+  "select.none": ["ctrl+shift+a"],
+  "select.invert": ["ctrl+i"],
   "rate.0": ["0"],
   "rate.1": ["1"],
   "rate.2": ["2"],

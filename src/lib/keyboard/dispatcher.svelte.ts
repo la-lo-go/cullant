@@ -30,20 +30,31 @@ export const keymap = new KeymapStore();
 
 function execute(id: CommandId, e?: KeyboardEvent) {
   switch (id) {
+    // Shift on a navigation key extends the selection instead of moving focus.
+    // It keeps its auto-advance-inverter meaning on classification keys, which
+    // go through `maybeAdvance` on a separate path.
     case "nav.next":
-      return session.moveFocus(1);
+      return e?.shiftKey ? session.extendSelection(1) : session.moveFocus(1);
     case "nav.prev":
-      return session.moveFocus(-1);
-    case "nav.down":
-      return session.moveFocus(session.gridCols ?? 1);
-    case "nav.up":
-      return session.moveFocus(-(session.gridCols ?? 1));
+      return e?.shiftKey ? session.extendSelection(-1) : session.moveFocus(-1);
+    case "nav.down": {
+      const rows = session.gridCols ?? 1;
+      return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
+    }
+    case "nav.up": {
+      const rows = -(session.gridCols ?? 1);
+      return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
+    }
     case "nav.home":
-      return session.focusEdge(false);
+      return e?.shiftKey ? session.extendToEdge(false) : session.focusEdge(false);
     case "nav.end":
-      return session.focusEdge(true);
+      return e?.shiftKey ? session.extendToEdge(true) : session.focusEdge(true);
     case "select.all":
       return session.selectAll();
+    case "select.none":
+      return session.clearSelection();
+    case "select.invert":
+      return session.invertSelection();
     case "rate.0":
     case "rate.1":
     case "rate.2":
