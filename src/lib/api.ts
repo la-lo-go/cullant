@@ -195,6 +195,47 @@ export interface Targets {
   asGroups: boolean;
 }
 
+/** One past commit, as the history list shows it. */
+export interface CommitSummary {
+  id: number;
+  startedAt: number;
+  finishedAt: number | null;
+  /** 0 = running, 1 = done, 2 = finished with errors. */
+  status: number;
+  deletes: number;
+  moves: number;
+  copies: number;
+  xmp: number;
+  errors: number;
+  /** How many of its entries could still be reversed. */
+  undoable: number;
+  undoneAt: number | null;
+}
+
+/** One file's fate inside a commit. */
+export interface CommitEntry {
+  id: number;
+  fileId: number | null;
+  /** 0 = delete, 1 = move, 2 = copy, 3 = write XMP. */
+  action: number;
+  beforePath: string | null;
+  afterPath: string | null;
+  /** 0 = ok, 2 = error. */
+  result: number;
+  error: string | null;
+  undoneAt: number | null;
+  undoable: boolean;
+  /** Why it cannot be undone. Shown as-is — the backend owns the wording. */
+  blockedReason: string | null;
+}
+
+export interface UndoOutcome {
+  restored: number;
+  skipped: number;
+  errors: number;
+  errorSamples: string[];
+}
+
 export interface CullState {
   id: number;
   rating: number;
@@ -240,6 +281,10 @@ export const api = {
   /** Turn the targets a quarter turn at a time; `steps` is positive clockwise. */
   rotate: (targets: Targets, steps: number) =>
     invoke<CullState[]>("rotate", { targets, steps }),
+  listCommits: () => invoke<CommitSummary[]>("list_commits"),
+  commitDetail: (commitId: number) => invoke<CommitEntry[]>("commit_detail", { commitId }),
+  undoCommit: (commitId: number) => invoke<UndoOutcome>("undo_commit", { commitId }),
+  undoCommitEntry: (entryId: number) => invoke<UndoOutcome>("undo_commit_entry", { entryId }),
   decoupleGroup: (groupId: number) => invoke("decouple_group", { groupId }),
   recoupleGroup: (groupId: number, syncFrom: SyncFrom) =>
     invoke("recouple_group", { groupId, syncFrom }),

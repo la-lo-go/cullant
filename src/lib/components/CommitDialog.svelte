@@ -3,9 +3,11 @@
   import { onMount } from "svelte";
   import {
     api,
+    type CommitEntry,
     type CommitOutcome,
     type CommitPlan,
     type CommitSection,
+    type CommitSummary,
     type DeletionMode,
     type PendingAction,
   } from "../api";
@@ -18,6 +20,8 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Check from "@lucide/svelte/icons/check";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import History from "@lucide/svelte/icons/history";
+  import Undo2 from "@lucide/svelte/icons/undo-2";
   import X from "@lucide/svelte/icons/x";
 
   let plan = $state<CommitPlan | null>(null);
@@ -162,7 +166,10 @@
   // treated as a tap, not a hold, so the two gestures never overlap.
   const HOLD_DELAY_MS = 250;
 
-  let holdSection = $state<CommitSection | null>(null);
+  // Keyed by an arbitrary string so the same gesture drives both the commit
+  // sections ("section:deletes") and the history rows ("commit:12") — one
+  // interaction language for "this is destructive, mean it".
+  let holdKey = $state<string | null>(null);
   let holdFrac = $state(0);
   let holdRaf = 0;
   let holdStart = 0;
@@ -179,30 +186,29 @@
   function resetHold() {
     if (holdRaf) cancelAnimationFrame(holdRaf);
     holdRaf = 0;
-    holdSection = null;
+    holdKey = null;
     holdFrac = 0;
   }
 
-  function onRowPointerDown(section: CommitSection, e: PointerEvent) {
-    if (!plan || running || sectionCount(plan, section) === 0) return;
+  /** Begin a press-and-hold on `key`; `onFire` runs if it reaches the end. */
+  function startHold(key: string, durationMs: number, e: PointerEvent, onFire: () => void) {
     if (e.button !== 0) return; // primary press only
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    holdSection = section;
+    holdKey = key;
     holdFrac = 0;
     holdFired = false;
     holdStart = performance.now();
-    const dur = holdDuration(section);
     const step = () => {
-      if (holdSection !== section) return;
+      if (holdKey !== key) return;
       // The fill only advances AFTER the grace period, so the first HOLD_DELAY_MS
       // of a press show nothing (that window belongs to the tap-to-expand gesture).
       const held = performance.now() - holdStart - HOLD_DELAY_MS;
-      holdFrac = Math.min(1, Math.max(0, held) / dur);
+      holdFrac = Math.min(1, Math.max(0, held) / durationMs);
       if (holdFrac >= 1) {
         holdFired = true;
         resetHold();
-        void executeSection(section);
+        onFire();
         return;
       }
       holdRaf = requestAnimationFrame(step);
@@ -210,17 +216,127 @@
     holdRaf = requestAnimationFrame(step);
   }
 
-  function onRowPointerUp(section: CommitSection) {
-    if (holdSection !== section) return;
+  /** End a press on `key`; `onTap` runs when it was a tap, not a hold. */
+  function endHold(key: string, onTap?: () => void) {
+    if (holdKey !== key) return;
     const elapsed = performance.now() - holdStart;
     const fired = holdFired;
     resetHold();
-    // A release within the grace period is a tap: toggle the detail list of an
-    // expandable section (XMP has no list, so its tap is inert). Past the grace
-    // period it was a hold that just didn't complete — do nothing.
-    if (!fired && elapsed < HOLD_DELAY_MS && section !== "xmp") {
-      expanded = expanded === section ? null : section;
+    // A release within the grace period is a tap. Past it, the hold simply
+    // didn't complete — do nothing.
+    if (!fired && elapsed < HOLD_DELAY_MS) onTap?.();
+  }
+
+  /** Fill width for a row, in percent — 0 unless this row is the one held. */
+  function fillOf(key: string): number {
+    return holdKey === key ? holdFrac * 100 : 0;
+  }
+
+  // --- history ---
+  // Pending stays the default view, so the commit flow is unchanged; History is
+  // here rather than behind its own toolbar button because it is the same
+  // subject seen from the other side.
+  type Tab = "pending" | "history";
+  let tab = $state<Tab>("pending");
+  let commits = $state<CommitSummary[] | null>(null);
+  let openCommit = $state<number | null>(null);
+  let entries = $state<CommitEntry[]>([]);
+  let undoing = $state(false);
+
+  const ACTION_NAMES: Record<number, string> = {
+    0: "Deleted",
+    1: "Moved",
+    2: "Copied",
+    3: "Wrote sidecar",
+  };
+
+  async function showHistory() {
+    tab = "history";
+    error = "";
+    try {
+      commits = await api.listCommits();
+    } catch (e) {
+      error = String(e);
     }
+  }
+
+  async function toggleCommit(id: number) {
+    if (openCommit === id) {
+      openCommit = null;
+      return;
+    }
+    openCommit = id;
+    entries = [];
+    try {
+      entries = await api.commitDetail(id);
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  /** Shared tail for both undo paths: report, then resync grid and queue. */
+  async function runUndo(run: () => Promise<void>) {
+    undoing = true;
+    error = "";
+    try {
+      await run();
+      await catalog.refresh();
+      await session.refreshPending();
+      commits = await api.listCommits();
+      if (openCommit !== null) entries = await api.commitDetail(openCommit);
+    } catch (e) {
+      error = String(e);
+    } finally {
+      undoing = false;
+    }
+  }
+
+  async function undoWholeCommit(id: number) {
+    await runUndo(async () => {
+      const oc = await api.undoCommit(id);
+      // Success needs no popup: the row restyles itself to "Undone" and the
+      // grid behind has already refreshed. Only failures get interrupted for.
+      if (oc.errors > 0) {
+        const samples = oc.errorSamples.map((s) => `· ${s}`).join("\n");
+        session.commitDone = {
+          title: "Undo finished with errors",
+          message:
+            `Restored ${oc.restored}, ${oc.errors} failed.` + (samples ? `\n${samples}` : ""),
+        };
+      }
+    });
+  }
+
+  async function undoOneEntry(entryId: number) {
+    await runUndo(async () => {
+      await api.undoCommitEntry(entryId);
+    });
+  }
+
+  function whenOf(secs: number): string {
+    return new Date(secs * 1000).toLocaleString();
+  }
+
+  /** "3 deleted · 2 moved" — only the parts that happened. */
+  function summaryOf(c: CommitSummary): string {
+    const parts: string[] = [];
+    if (c.deletes) parts.push(`${c.deletes} deleted`);
+    if (c.moves) parts.push(`${c.moves} moved`);
+    if (c.copies) parts.push(`${c.copies} copied`);
+    if (c.xmp) parts.push(`${c.xmp} sidecar${c.xmp === 1 ? "" : "s"}`);
+    return parts.join(" · ") || "nothing";
+  }
+
+  function onRowPointerDown(section: CommitSection, e: PointerEvent) {
+    if (!plan || running || sectionCount(plan, section) === 0) return;
+    startHold(`section:${section}`, holdDuration(section), e, () => void executeSection(section));
+  }
+
+  function onRowPointerUp(section: CommitSection) {
+    // XMP has no detail list, so its tap is inert.
+    endHold(`section:${section}`, () => {
+      if (section !== "xmp") expanded = expanded === section ? null : section;
+    });
   }
 
   async function unqueue(row: PlanRow, isDelete: boolean) {
@@ -382,13 +498,92 @@
     tabindex="-1"
   >
     <header>
-      <h2>Commit pending actions</h2>
+      <h2>{tab === "pending" ? "Commit pending actions" : "Commit history"}</h2>
       <button class="close-x" onclick={close} aria-label="Close" title="Close" disabled={running}>
         <X size={18} />
       </button>
     </header>
 
-    {#if plan}
+    <div class="tabs">
+      <button class="tab" class:on={tab === "pending"} disabled={running} onclick={() => (tab = "pending")}>
+        Pending
+      </button>
+      <button class="tab" class:on={tab === "history"} disabled={running} onclick={() => void showHistory()}>
+        <History size={13} /> History
+      </button>
+    </div>
+
+    {#if tab === "history"}
+      {#if commits === null}
+        <p class="loading">Loading…</p>
+      {:else if commits.length === 0}
+        <p class="loading">Nothing committed in this project yet.</p>
+      {:else}
+        <div class="history">
+          {#each commits as c (c.id)}
+            <div class="hcommit" class:undone={c.undoneAt !== null}>
+              <!-- A commit with something to undo gets the hold gesture, and
+                   its tap is handled on release; one with nothing left to undo
+                   never arms a hold, so a plain click expands it. -->
+              <button
+                class="hrow"
+                onpointerdown={(e) =>
+                  c.undoable > 0 && !undoing
+                    ? startHold(`commit:${c.id}`, HOLD_MS, e, () => void undoWholeCommit(c.id))
+                    : undefined}
+                onpointerup={() => endHold(`commit:${c.id}`, () => void toggleCommit(c.id))}
+                onpointercancel={resetHold}
+                onclick={() => (c.undoable > 0 ? undefined : void toggleCommit(c.id))}
+                title={c.undoable > 0 ? "Tap to expand · hold to undo" : "Tap to expand"}
+              >
+                <span class="hold-fill" style="width: {fillOf(`commit:${c.id}`)}%"></span>
+                <span class="hwhen">{whenOf(c.startedAt)}</span>
+                <span class="hwhat">{summaryOf(c)}</span>
+                {#if c.errors > 0}
+                  <span class="hbadge err"><TriangleAlert size={11} /> {c.errors}</span>
+                {/if}
+                {#if c.undoneAt !== null}
+                  <span class="hbadge done">Undone</span>
+                {:else if c.undoable > 0}
+                  <span class="hbadge"><Undo2 size={11} /> {c.undoable}</span>
+                {/if}
+              </button>
+
+              {#if openCommit === c.id}
+                <ul class="hentries">
+                  {#each entries as e (e.id)}
+                    <li class:gone={e.undoneAt !== null}>
+                      <span class="eaction">{ACTION_NAMES[e.action] ?? "?"}</span>
+                      <span class="epath" title={e.beforePath ?? ""}>{e.beforePath ?? "—"}</span>
+                      {#if e.afterPath && e.action !== 0}
+                        <span class="edest">→ {e.afterPath}</span>
+                      {/if}
+                      {#if e.undoable}
+                        <button
+                          class="eundo"
+                          disabled={undoing}
+                          title="Undo just this one"
+                          onclick={() => void undoOneEntry(e.id)}
+                        >
+                          <Undo2 size={12} />
+                        </button>
+                      {:else}
+                        <!-- Say why, rather than showing a dead button. -->
+                        <span class="ewhy">{e.error ?? e.blockedReason ?? ""}</span>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          {/each}
+        </div>
+        <p class="hint">Tap a commit to see what it did · hold it to undo everything reversible.</p>
+      {/if}
+      {#if error}
+        <p class="error">{error}</p>
+      {/if}
+    {:else if plan}
       {#if running}
         <div class="committing">
           <p class="committing-title">
@@ -444,7 +639,7 @@
             <span
               class="hold-fill"
               class:danger={isDangerHold("deletes")}
-              style="width: {holdSection === 'deletes' ? holdFrac * 100 : 0}%"
+              style="width: {fillOf('section:deletes')}%"
             ></span>
             <span class="icon"><Trash2 size={16} /></span>
             <span class="what">Delete {plan.deletes.length} file(s)</span>
@@ -469,7 +664,7 @@
             onpointercancel={resetHold}
             title="Tap to expand · hold to move"
           >
-            <span class="hold-fill" style="width: {holdSection === 'moves' ? holdFrac * 100 : 0}%"></span>
+            <span class="hold-fill" style="width: {fillOf('section:moves')}%"></span>
             <span class="icon"><FolderInput size={16} /></span>
             <span class="what">Move {plan.moves.length} file(s)</span>
           </button>
@@ -492,7 +687,7 @@
             onpointercancel={resetHold}
             title="Tap to expand · hold to copy"
           >
-            <span class="hold-fill" style="width: {holdSection === 'copies' ? holdFrac * 100 : 0}%"></span>
+            <span class="hold-fill" style="width: {fillOf('section:copies')}%"></span>
             <span class="icon"><Copy size={16} /></span>
             <span class="what">Copy {plan.copies.length} file(s)</span>
           </button>
@@ -515,7 +710,7 @@
             onpointercancel={resetHold}
             title="Hold to write sidecars"
           >
-            <span class="hold-fill" style="width: {holdSection === 'xmp' ? holdFrac * 100 : 0}%"></span>
+            <span class="hold-fill" style="width: {fillOf('section:xmp')}%"></span>
             <span class="icon"><Tag size={16} /></span>
             <span class="what">Write {plan.xmpCount} XMP sidecar(s)</span>
             <span class="how">rating · flag · color label</span>
@@ -880,5 +1075,202 @@
     color: #ff6b6b;
     font-size: 13px;
     margin: 0;
+  }
+
+  /* --- history --- */
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+  }
+
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--control);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: #bbb;
+    padding: 4px 10px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  .tab:hover:not(.on):not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  .tab.on {
+    background: var(--accent-fill);
+    color: #fff;
+  }
+
+  .tab:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  .loading {
+    margin: 0;
+    font-size: 13px;
+    opacity: 0.6;
+  }
+
+  .history {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+  }
+
+  .hrow {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    overflow: hidden;
+    background: var(--control);
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: #ddd;
+    padding: 7px 10px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 12px;
+    text-align: left;
+  }
+
+  .hrow:hover {
+    border-color: var(--accent);
+  }
+
+  .hcommit.undone .hrow {
+    opacity: 0.55;
+  }
+
+  .hwhen,
+  .hwhat,
+  .hbadge {
+    position: relative;
+    z-index: 1;
+  }
+
+  .hwhen {
+    flex: none;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+  }
+
+  .hwhat {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hbadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    flex: none;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 1px 7px;
+    font-size: 11px;
+    opacity: 0.85;
+  }
+
+  .hbadge.err {
+    color: #ff8f8f;
+    border-color: #6b3030;
+  }
+
+  .hbadge.done {
+    opacity: 0.6;
+  }
+
+  .hentries {
+    list-style: none;
+    margin: 2px 0 6px;
+    padding: 0 0 0 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .hentries li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #bbb;
+    padding: 2px 0;
+  }
+
+  .hentries li.gone {
+    opacity: 0.45;
+    text-decoration: line-through;
+  }
+
+  .eaction {
+    flex: none;
+    opacity: 0.65;
+    min-width: 84px;
+  }
+
+  .epath {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .edest {
+    flex: none;
+    opacity: 0.6;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ewhy {
+    flex: none;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.5;
+    font-style: italic;
+  }
+
+  .eundo {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 20px;
+    background: none;
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    color: #bbb;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .eundo:hover:not(:disabled) {
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  .eundo:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 </style>
