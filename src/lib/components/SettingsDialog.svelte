@@ -10,15 +10,19 @@
   import Zap from "@lucide/svelte/icons/zap";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import Tag from "@lucide/svelte/icons/tag";
   import X from "@lucide/svelte/icons/x";
 
   let {
     onclose,
     onshowkeybindings,
+    onshowtags,
   }: {
     onclose: () => void;
     /** Open the keyboard-shortcuts dialog (owned by the page). */
     onshowkeybindings: () => void;
+    /** Open the task-tag editor (owned by the page). */
+    onshowtags: () => void;
   } = $props();
 
   // Touch platform (Android) reaches the manual rescan via pull-to-refresh;
@@ -300,6 +304,20 @@
             <option value={15} selected={settings.autoRescanMinutes === 15}>15 minutes</option>
           </select>
         </div>
+      </section>
+
+      <section class="card">
+        <header class="card-head">
+          <Tag size={16} />
+          <span class="card-text">
+            <span class="card-title">Task tags</span>
+            <span class="card-desc">The to-do labels you can put on a photo or clip.</span>
+          </span>
+        </header>
+        <button class="shortcuts" onclick={onshowtags}>
+          <Tag size={14} />
+          <span>Edit task tags…</span>
+        </button>
       </section>
 
       <section class="card">

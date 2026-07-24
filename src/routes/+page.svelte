@@ -33,7 +33,6 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Search from "@lucide/svelte/icons/search";
   import Columns2 from "@lucide/svelte/icons/columns-2";
-  import Tag from "@lucide/svelte/icons/tag";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
@@ -407,7 +406,6 @@
             <PanelBottom size={14} />
           </button>
         {/if}
-        <button title="Task tags" onclick={blurring(() => (tags.editorOpen = true))}><Tag size={14} /></button>
         <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
         <button
           class="commit"
@@ -616,6 +614,10 @@
       onshowkeybindings={() => {
         showSettings = false;
         showKeybindings = true;
+      }}
+      onshowtags={() => {
+        showSettings = false;
+        tags.editorOpen = true;
       }}
     />
   {/if}
