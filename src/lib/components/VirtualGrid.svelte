@@ -13,6 +13,7 @@
   import Film from "@lucide/svelte/icons/film";
   import FileWarning from "@lucide/svelte/icons/file-warning";
   import Loader from "@lucide/svelte/icons/loader";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import { edgeBounce } from "../anim";
   import { bucketOf } from "../gridGroups";
 
@@ -126,7 +127,60 @@
     return depth === 0 ? HEADER_H0 : HEADER_H1;
   }
 
-  type Header = { depth: number; label: string; count: number; y: number; h: number };
+  type Header = {
+    depth: number;
+    label: string;
+    count: number;
+    y: number;
+    h: number;
+    /** Stable identity for this section (the joined bucket path down to this
+     *  depth) — the collapsed-set key and the DOM #each key. */
+    key: string;
+    /** Index range into `items` this section covers ([start, end)), including
+     *  anything hidden under a collapsed sub-section — used for the group
+     *  select-all checkbox. */
+    start: number;
+    end: number;
+    collapsed: boolean;
+  };
+
+  // Section keys the user has collapsed (component-local — a fresh grid mount,
+  // e.g. reopening a project, starts fully expanded). Keyed by Header.key, so
+  // it survives re-sorts/filters as long as the same bucket path still exists.
+  let collapsedKeys = $state<Set<string>>(new Set());
+
+  function toggleCollapsed(key: string) {
+    const next = new Set(collapsedKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    collapsedKeys = next;
+  }
+
+  /** Whether every item in a header's section is currently selected (the
+   *  checkbox's checked state) — false for an empty range. */
+  function groupAllSelected(h: Header): boolean {
+    if (h.end <= h.start) return false;
+    for (let i = h.start; i < h.end; i++) {
+      if (!session.selectedIds.has(items[i].id)) return false;
+    }
+    return true;
+  }
+
+  /** Select (or, if already fully selected, deselect) every item in a header's
+   *  section. Adds to/subtracts from the existing selection rather than
+   *  replacing it, so group checkboxes compose across sections. */
+  function toggleGroupSelect(h: Header) {
+    const selectAll = !groupAllSelected(h);
+    const next = new Set(session.selectedIds);
+    for (let i = h.start; i < h.end; i++) {
+      const id = items[i].id;
+      if (selectAll) next.add(id);
+      else next.delete(id);
+    }
+    session.selectedIds = next;
+    // No focus while a selection exists (matches toggleSelect/rangeSelect).
+    session.focusedIndex = -1;
+  }
 
   // One pass over `items` places every cell and injects a section header wherever
   // an active grouping level's bucket changes. With no grouping active this
@@ -138,6 +192,7 @@
     const n = items.length;
     const itemX = new Float64Array(n);
     const itemY = new Float64Array(n);
+    const hidden = new Uint8Array(n);
     const headers: Header[] = [];
 
     // Per-item bucket paths + prefix counts (for the header "· N" tallies).
@@ -164,6 +219,12 @@
     let y = MARGIN_TOP;
     let col = 0;
     let prev: string[] | null = null;
+    // Headers currently open at each depth, so a later boundary can close them
+    // (set their `end`) without a second pass over `items`.
+    const openStack: (Header | null)[] = new Array(group.length).fill(null);
+    // Depth of the shallowest collapsed ancestor currently in effect, or -1.
+    // While set, neither sub-headers nor real cell positions are created.
+    let collapsedDepth = -1;
     for (let i = 0; i < n; i++) {
       if (group.length > 0) {
         // First level whose bucket differs from the previous item → a boundary;
@@ -176,21 +237,57 @@
           if (d < group.length) boundary = d;
         }
         if (boundary >= 0) {
-          if (col > 0) {
-            y += CELL;
-            col = 0;
+          for (let d = group.length - 1; d >= boundary; d--) {
+            if (openStack[d]) {
+              openStack[d]!.end = i;
+              openStack[d] = null;
+            }
           }
-          let acc = "";
-          for (let L = 0; L < group.length; L++) {
-            acc += `\u0000${paths[i][L]}`;
-            if (L >= boundary) {
-              headers.push({ depth: L, label: labels[i][L], count: counts.get(acc) ?? 0, y, h: headerH(L) });
+          if (collapsedDepth >= boundary) collapsedDepth = -1;
+          if (collapsedDepth === -1) {
+            if (col > 0) {
+              y += CELL;
+              col = 0;
+            }
+            let acc = "";
+            for (let L = 0; L < group.length; L++) {
+              acc += `\u0000${paths[i][L]}`;
+              if (L < boundary) continue;
+              const key = acc;
+              const isCollapsed = collapsedKeys.has(key);
+              const hdr: Header = {
+                depth: L,
+                label: labels[i][L],
+                count: counts.get(acc) ?? 0,
+                y,
+                h: headerH(L),
+                key,
+                start: i,
+                end: n,
+                collapsed: isCollapsed,
+              };
+              headers.push(hdr);
+              openStack[L] = hdr;
               y += headerH(L);
+              if (isCollapsed) {
+                collapsedDepth = L;
+                break; // deeper sub-headers/items of a collapsed section aren't laid out
+              }
             }
           }
         }
         prev = paths[i];
       }
+
+      if (group.length > 0 && collapsedDepth !== -1) {
+        // Hidden under a collapsed ancestor: park at the header's y, exclude
+        // from rendering/hit-testing (see `visible`/`applyMarquee`/`hitTest`).
+        itemY[i] = y;
+        itemX[i] = NaN;
+        hidden[i] = 1;
+        continue;
+      }
+
       itemX[i] = padX + col * CELL;
       itemY[i] = y;
       col++;
@@ -200,7 +297,8 @@
       }
     }
     if (col > 0) y += CELL;
-    return { itemX, itemY, headers, contentHeight: y + MARGIN_Y };
+    for (const hdr of openStack) if (hdr) hdr.end = n;
+    return { itemX, itemY, hidden, headers, contentHeight: y + MARGIN_Y };
   });
 
   const contentHeight = $derived(layout.contentHeight);
@@ -235,7 +333,7 @@
   // id so each thumbnail owns a stable <img>: scrolling adds/removes cells
   // instead of reassigning `src` on reused nodes.
   const visible = $derived.by(() => {
-    const { itemX, itemY } = layout;
+    const { itemX, itemY, hidden } = layout;
     const n = items.length;
     const top = scrollTop - OVERSCAN_ROWS * CELL;
     const bot = scrollTop + height + OVERSCAN_ROWS * CELL;
@@ -243,6 +341,7 @@
     const out: { item: ItemLite; index: number; x: number; y: number }[] = [];
     for (let i = start; i < n; i++) {
       if (itemY[i] > bot) break;
+      if (hidden[i]) continue; // parked under a collapsed section — not rendered
       out.push({ item: items[i], index: i, x: itemX[i], y: itemY[i] });
     }
     return out;
@@ -328,13 +427,15 @@
     const viewY = e.clientY - rect.top;
     if (x >= viewport.clientWidth) return null; // scrollbar, not the grid
     const y = viewY + viewport.scrollTop;
-    const { itemX, itemY } = layout;
+    const { itemX, itemY, hidden } = layout;
     const n = items.length;
     if (n === 0) return { x, y, index: 0, onCell: false };
     // Greatest index with itemY <= y: the row at or above the point.
     const k = lowerBound(itemY, y + 1e-6) - 1;
     if (k < 0) return { x, y, index: 0, onCell: false };
-    if (y >= itemY[k] + CELL) return { x, y, index: k, onCell: false }; // header / gutter
+    // A collapsed section's parked items share the header's y — landing there
+    // is a dead zone (visually the header/blank space), never a real cell.
+    if (hidden[k] || y >= itemY[k] + CELL) return { x, y, index: k, onCell: false }; // header / gutter
     const rowStart = k - Math.round((itemX[k] - padX) / CELL);
     const targetCol = Math.floor((x - padX) / CELL);
     if (targetCol < 0 || targetCol >= cols) return { x, y, index: k, onCell: false };
@@ -343,7 +444,12 @@
     return { x, y, index: onCell ? idx : k, onCell };
   }
 
+  // Last pointer type seen, so onDblClick (a native MouseEvent) can tell touch
+  // from mouse/pen — see its own comment for why that matters.
+  let lastPointerType = "mouse";
+
   function onPointerDown(e: PointerEvent) {
+    lastPointerType = e.pointerType;
     if (e.button !== 0 || !viewport) return; // marquee/selection: primary button only
     const hit = hitTest(e);
     if (!hit) return;
@@ -477,6 +583,16 @@
    *  onPointerDown) redirects click/dblclick hit-testing to .viewport, so
    *  this can't live on the .cell element — recompute the hit cell instead. */
   function onDblClick(e: MouseEvent) {
+    // Without preventDefault() anywhere in the touch handling, the browser/
+    // WebView still synthesizes compatibility mouse events (click, dblclick)
+    // from touch gestures — including from two ordinary, separate taps that
+    // land close together in time and space (e.g. quickly tapping two adjacent
+    // cells while building a selection). That synthetic dblclick would open the
+    // loupe unconditionally here, bypassing the selection-aware double-tap
+    // logic in endDrag (which only opens on a genuine double-tap of the SAME
+    // cell). Touch already has its own, more precise double-tap-to-open path,
+    // so ignore the native dblclick whenever the last pointer was a touch.
+    if (lastPointerType === "touch") return;
     const hit = hitTest(e);
     if (!hit?.onCell) return;
     // Focus the double-clicked photo before opening so the loupe shows IT. With a
@@ -688,14 +804,40 @@
     bind:this={canvasEl}
     style="height:{contentHeight}px; transform: translateY({pullY}px); transition:{pullDragging ? 'none' : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)'}"
   >
-    {#each visibleHeaders as h (h.depth + ':' + h.y)}
+    {#each visibleHeaders as h (h.key)}
       <div
         class="group-header"
         class:sub={h.depth > 0}
         style="transform: translateY({h.y}px); height:{h.h}px; padding-left:{padX + h.depth * 14}px"
       >
+        <button
+          class="gh-collapse"
+          class:collapsed={h.collapsed}
+          title={h.collapsed ? "Expand" : "Collapse"}
+          aria-label={h.collapsed ? "Expand section" : "Collapse section"}
+          onpointerdown={(e) => e.stopPropagation()}
+          onclick={(e) => {
+            e.stopPropagation();
+            toggleCollapsed(h.key);
+          }}
+        >
+          <ChevronRight size={h.depth > 0 ? 12 : 14} />
+        </button>
         <span class="gh-label">{h.label}</span>
         <span class="gh-count">{h.count}</span>
+        <span class="gh-line"></span>
+        <input
+          class="gh-check"
+          type="checkbox"
+          title="Select all in this section"
+          aria-label="Select all in this section"
+          checked={groupAllSelected(h)}
+          onpointerdown={(e) => e.stopPropagation()}
+          onclick={(e) => {
+            e.stopPropagation();
+            toggleGroupSelect(h);
+          }}
+        />
       </div>
     {/each}
     {#each visible as v (v.item.id)}
@@ -971,7 +1113,15 @@
     left: 0;
     right: 0;
     display: flex;
+    /* Centre every child (chevron, label, count, divider line, checkbox) on one
+       shared midline. Aligning a mix of different-height boxes — a 20px icon
+       button, 14px checkbox, ~14px text line, 1px rule — by any edge instead
+       leaves them visibly off from each other; centring is the one rule under
+       which they all read as sitting on the same line, with no per-element
+       nudging. The label is bottom-padded so the header hugs the row of cells
+       just beneath it rather than floating mid-band. */
     align-items: center;
+    padding-bottom: 8px;
     gap: 8px;
     padding-right: 12px;
     box-sizing: border-box;
@@ -999,11 +1149,53 @@
     font-weight: 500;
   }
 
-  .group-header::after {
-    content: "";
+  .gh-line {
     flex: 1;
     height: 1px;
     background: var(--border);
+  }
+
+  /* Collapse toggle: left of the label. Centred with the row (align-items:
+     center on the header), so no per-element alignment override is needed.
+     Pointer-events restored since the header itself passes clicks through to
+     the grid beneath. */
+  .gh-collapse {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    pointer-events: auto;
+    transform: rotate(90deg); /* expanded: chevron points down */
+    transition: transform 0.12s ease;
+  }
+
+  .gh-collapse.collapsed {
+    transform: rotate(0deg); /* collapsed: chevron points right */
+  }
+
+  .gh-collapse:hover {
+    background: var(--hover);
+  }
+
+  /* Group select-all checkbox: right end of the row, deliberately small (not
+     styled as a big touch target) so it reads as a light-touch bulk-select
+     affordance, not a primary action. */
+  .gh-check {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+    pointer-events: auto;
   }
 
   /* Pinned current-group header (optional). A solid bar at the top of the grid
