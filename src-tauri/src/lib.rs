@@ -241,6 +241,7 @@ pub fn run() {
             commands::culling::set_rating,
             commands::culling::set_flag,
             commands::culling::set_label,
+            commands::culling::rotate,
             commands::groups::decouple_group,
             commands::groups::recouple_group,
             commands::tags::list_task_tags,

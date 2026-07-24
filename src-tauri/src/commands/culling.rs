@@ -40,6 +40,19 @@ pub fn set_flag(
     Ok(changed)
 }
 
+/// Turn the targets a quarter turn at a time; `steps` is positive clockwise.
+#[tauri::command]
+pub fn rotate(
+    targets: Targets,
+    steps: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<CullState>> {
+    let changed = culling::rotate(&project_db(&state)?, targets, steps)?;
+    emit_changed(&app, &changed);
+    Ok(changed)
+}
+
 #[tauri::command]
 pub fn set_label(
     targets: Targets,

@@ -40,6 +40,8 @@ export type CommandId =
   | "delete.pair"
   | "delete.rawOnly"
   | "delete.jpegOnly"
+  | "edit.rotateLeft"
+  | "edit.rotateRight"
   | "action.moveCopy"
   | "commit.open"
   | "info.toggle"
@@ -106,6 +108,8 @@ export const COMMANDS: CommandMeta[] = [
   { id: "delete.pair", title: "Queue delete (whole pair)", category: "Actions", classify: true },
   { id: "delete.rawOnly", title: "Queue delete: RAW only", category: "Actions", classify: true },
   { id: "delete.jpegOnly", title: "Queue delete: JPEG only", category: "Actions", classify: true },
+  { id: "edit.rotateLeft", title: "Rotate anticlockwise", category: "Actions" },
+  { id: "edit.rotateRight", title: "Rotate clockwise", category: "Actions" },
   { id: "action.moveCopy", title: "Queue move/copy to folder…", category: "Actions" },
   { id: "commit.open", title: "Review & commit pending actions", category: "Actions" },
   { id: "ui.toggleFilterBar", title: "Toggle filters panel", category: "UI" },
@@ -162,6 +166,8 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "delete.pair": ["delete"],
   "delete.rawOnly": ["alt+delete"],
   "delete.jpegOnly": ["shift+delete"],
+  "edit.rotateLeft": ["["],
+  "edit.rotateRight": ["]"],
   "action.moveCopy": ["v"],
   "commit.open": ["ctrl+enter"],
   "info.toggle": ["i"],

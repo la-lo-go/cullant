@@ -200,6 +200,7 @@ export interface CullState {
   rating: number;
   flag: number;
   label: string | null;
+  orientation: number;
 }
 
 export const api = {
@@ -236,6 +237,9 @@ export const api = {
     invoke<CullState[]>("set_flag", { targets, flag }),
   setLabel: (targets: Targets, label: string | null) =>
     invoke<CullState[]>("set_label", { targets, label }),
+  /** Turn the targets a quarter turn at a time; `steps` is positive clockwise. */
+  rotate: (targets: Targets, steps: number) =>
+    invoke<CullState[]>("rotate", { targets, steps }),
   decoupleGroup: (groupId: number) => invoke("decouple_group", { groupId }),
   recoupleGroup: (groupId: number, syncFrom: SyncFrom) =>
     invoke("recouple_group", { groupId, syncFrom }),

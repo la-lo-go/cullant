@@ -28,6 +28,9 @@ pub struct CullState {
     pub rating: i64,
     pub flag: i64,
     pub label: Option<String>,
+    /// EXIF orientation 1-8. Part of the authoritative row because rotating
+    /// changes it, and the frontend keys its image URLs on it.
+    pub orientation: i64,
 }
 
 fn now_secs() -> i64 {
@@ -77,8 +80,9 @@ where
         }
         let mut out = Vec::with_capacity(ids.len());
         {
-            let mut stmt =
-                tx.prepare_cached("SELECT id, rating, flag, label FROM files WHERE id = ?1")?;
+            let mut stmt = tx.prepare_cached(
+                "SELECT id, rating, flag, label, orientation FROM files WHERE id = ?1",
+            )?;
             for id in &ids {
                 out.push(stmt.query_row(params![id], |r| {
                     Ok(CullState {
@@ -86,6 +90,7 @@ where
                         rating: r.get(1)?,
                         flag: r.get(2)?,
                         label: r.get(3)?,
+                        orientation: r.get::<_, Option<i64>>(4)?.unwrap_or(1),
                     })
                 })?);
             }
@@ -140,11 +145,75 @@ pub fn set_label(
     })
 }
 
+/// Quarter-turn clockwise steps through the EXIF orientation values. There are
+/// two independent 4-cycles: unmirrored (1 -> 6 -> 3 -> 8) and mirrored
+/// (2 -> 7 -> 4 -> 5). Rotating never crosses between them, so a mirrored scan
+/// stays mirrored.
+const CW_CYCLES: [[i64; 4]; 2] = [[1, 6, 3, 8], [2, 7, 4, 5]];
+
+/// The orientation reached by turning `from` a quarter turn `steps` times
+/// (positive = clockwise). Unknown values fall back to 1 (normal).
+fn rotate_orientation(from: i64, steps: i64) -> i64 {
+    for cycle in CW_CYCLES {
+        if let Some(i) = cycle.iter().position(|&o| o == from) {
+            // rem_euclid keeps the index positive for anticlockwise steps.
+            return cycle[((i as i64 + steps).rem_euclid(4)) as usize];
+        }
+    }
+    CW_CYCLES[0][(steps.rem_euclid(4)) as usize]
+}
+
+/// Turn photos a quarter turn at a time. This is a Cullant-side edit: it
+/// rewrites `files.orientation` and never touches the file on disk, so the
+/// original bytes stay exactly as the camera wrote them.
+///
+/// It deliberately does NOT set `xmp_dirty`: the sidecar writer does not export
+/// orientation, so marking it would light the commit button to write a sidecar
+/// that carries no rotation.
+pub fn rotate(db: &Arc<Db>, targets: Targets, steps: i64) -> AppResult<Vec<CullState>> {
+    apply(db, targets, move |conn, id, now| {
+        let current: i64 = conn
+            .query_row(
+                "SELECT orientation FROM files WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, Option<i64>>(0),
+            )?
+            .unwrap_or(1);
+        conn.execute(
+            "UPDATE files SET orientation = ?2, state_updated_at = ?3 WHERE id = ?1",
+            params![id, rotate_orientation(current, steps), now],
+        )?;
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
+
+    #[test]
+    fn rotation_walks_the_exif_cycles() {
+        // Unmirrored: a full turn clockwise returns to normal.
+        assert_eq!(rotate_orientation(1, 1), 6);
+        assert_eq!(rotate_orientation(6, 1), 3);
+        assert_eq!(rotate_orientation(3, 1), 8);
+        assert_eq!(rotate_orientation(8, 1), 1);
+        // Anticlockwise is the exact inverse.
+        assert_eq!(rotate_orientation(1, -1), 8);
+        assert_eq!(rotate_orientation(6, -1), 1);
+        // Mirrored values stay in their own cycle — rotating never un-mirrors.
+        assert_eq!(rotate_orientation(2, 1), 7);
+        assert_eq!(rotate_orientation(5, 1), 2);
+        assert_eq!(rotate_orientation(2, -1), 5);
+        // Four quarter turns is a no-op; unknown values normalise to 1's cycle.
+        for o in 1..=8 {
+            assert_eq!(rotate_orientation(o, 4), o);
+        }
+        assert_eq!(rotate_orientation(0, 0), 1);
+        assert_eq!(rotate_orientation(99, 1), 6);
+    }
 
     fn setup_pair(root: &Path) -> (Arc<Db>, i64, i64) {
         fs::write(root.join("IMG_001.cr3"), b"raw").unwrap();

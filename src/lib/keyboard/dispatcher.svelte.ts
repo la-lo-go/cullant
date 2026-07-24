@@ -134,6 +134,10 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       return void session.queueDelete("rawonly", e);
     case "delete.jpegOnly":
       return void session.queueDelete("jpegonly", e);
+    case "edit.rotateLeft":
+      return void session.rotate(-1);
+    case "edit.rotateRight":
+      return void session.rotate(1);
     case "action.moveCopy":
       session.moveDialogOpen = true;
       return;

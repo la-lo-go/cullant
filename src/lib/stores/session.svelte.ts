@@ -830,6 +830,7 @@ class SessionStore {
         item.rating = s.rating;
         item.flag = s.flag;
         item.label = s.label;
+        item.orientation = s.orientation;
       }
     }
   }
@@ -915,6 +916,15 @@ class SessionStore {
     await api.removePendingForFiles(t, "delete");
     tags.applyChanges(await api.clearTaskTags(t));
     await this.refreshPending();
+  }
+
+  /** Turn the current targets a quarter turn; positive `steps` is clockwise.
+   *  The new orientation comes back from the backend instead of being guessed
+   *  locally, so the EXIF rotation table lives in exactly one place. */
+  async rotate(steps: number) {
+    const t = this.targets();
+    if (!t) return;
+    this.applyStates(await api.rotate(t, steps));
   }
 
   /** Toggle a task tag on the focused photo (fan-out included). */
@@ -1004,6 +1014,7 @@ class SessionStore {
       rating: patch.rating ?? current?.rating ?? 0,
       flag: patch.flag ?? current?.flag ?? 0,
       label: "label" in patch ? (patch.label ?? null) : (current?.label ?? null),
+      orientation: patch.orientation ?? current?.orientation ?? 1,
     };
   }
 }
