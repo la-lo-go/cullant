@@ -38,6 +38,10 @@ pub struct ScanDone {
     pub file_count: i64,
     pub new_files: usize,
     pub missing_files: usize,
+    /// Photos whose rating/flag/label came from an XMP sidecar this pass.
+    /// Reported once per scan rather than prompting per file — the auto-rescan
+    /// interval would make a prompt unbearable.
+    pub xmp_imported: usize,
 }
 
 const SKIP_DIRS: &[&str] = &[
@@ -136,6 +140,14 @@ pub fn scan_with_store(
     let found = collect_found(store.list_recursive(SKIP_DIRS)?, progress);
     let total_found = found.len();
     progress(total_found);
+
+    // Captured before the scan transaction takes ownership of `found`. Reusing
+    // the listing it already did means the import pass stats nothing itself.
+    let sidecar_mtimes: HashMap<String, i64> = found
+        .iter()
+        .filter(|f| f.kind == FileKind::Sidecar)
+        .map(|f| (f.rel_path.clone(), f.mtime))
+        .collect();
 
     let (new_files, missing_files, file_count) = db.call(move |conn| {
         let now_secs = unix_secs(SystemTime::now());
@@ -246,15 +258,138 @@ pub fn scan_with_store(
         Ok((new_files, missing as usize, count))
     })?;
 
+    let xmp_imported = import_sidecars(db, store, &sidecar_mtimes)?;
+
     tracing::info!(
-        "scan finished: {total_found} on disk, {new_files} new, {missing_files} missing, took {:?}",
+        "scan finished: {total_found} on disk, {new_files} new, {missing_files} missing, \
+         {xmp_imported} imported from XMP, took {:?}",
         started.elapsed()
     );
     Ok(ScanDone {
         file_count,
         new_files,
         missing_files,
+        xmp_imported,
     })
+}
+
+/// A photo whose sidecar has not been read at its current mtime.
+struct SidecarCandidate {
+    file_id: i64,
+    sc_rel: String,
+    sc_mtime: i64,
+    /// When this photo's state was last changed inside Cullant; NULL/0 means
+    /// never, which is the fresh-import case.
+    state_updated_at: i64,
+}
+
+/// Pull rating/flag/label/orientation out of XMP sidecars into the database.
+///
+/// Without this a folder already rated in Lightroom, Bridge or FastRawViewer
+/// opens completely blank, which is the commonest way a real library arrives.
+///
+/// Sidecar mtimes come from the listing the scan already did, so nothing is
+/// stat-ed twice, and `files.xmp_source_mtime` short-circuits sidecars that
+/// have not changed since they were last read — the steady-state cost of this
+/// pass is one query.
+fn import_sidecars(
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+    sidecar_mtimes: &HashMap<String, i64>,
+) -> AppResult<usize> {
+    if sidecar_mtimes.is_empty() {
+        return Ok(0);
+    }
+
+    // Every photo that maps to a sidecar we have, paired with what we know.
+    // Both halves of a RAW+JPEG pair map to the same sidecar, exactly as the
+    // writer does — so exporting and re-importing round-trips instead of
+    // silently applying to only one member.
+    let photos: Vec<(i64, String, i64, Option<i64>)> = db.call_read(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT id, rel_path, COALESCE(state_updated_at, 0), xmp_source_mtime
+             FROM files WHERE status = 0 AND kind IN (0, 1)",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })?;
+
+    let mut todo: Vec<SidecarCandidate> = Vec::new();
+    for (file_id, rel_path, state_updated_at, imported_from) in photos {
+        let sc_rel = crate::engine::xmp::sidecar_rel(&rel_path);
+        let Some(&sc_mtime) = sidecar_mtimes.get(sc_rel.as_str()) else {
+            continue;
+        };
+        if imported_from == Some(sc_mtime) {
+            continue; // this exact version of the sidecar has been read already
+        }
+        todo.push(SidecarCandidate {
+            file_id,
+            sc_rel,
+            sc_mtime,
+            state_updated_at,
+        });
+    }
+    if todo.is_empty() {
+        return Ok(0);
+    }
+
+    // Parse each distinct sidecar once, even when a pair shares it.
+    let mut parsed: HashMap<String, Option<crate::engine::xmp::XmpState>> = HashMap::new();
+    let mut updates: Vec<(i64, i64, Option<crate::engine::xmp::XmpState>)> = Vec::new();
+    for c in todo {
+        let state = parsed.entry(c.sc_rel.clone()).or_insert_with(|| {
+            crate::store::read_all(store, &c.sc_rel)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .as_deref()
+                .and_then(crate::engine::xmp::read_sidecar)
+        });
+        let Some(state) = state else {
+            // Unreadable or not XMP we understand: remember the mtime anyway so
+            // it is not re-parsed every scan, but change nothing.
+            updates.push((c.file_id, c.sc_mtime, None));
+            continue;
+        };
+        // Newer wins. A photo never touched in Cullant has no state to defend,
+        // so the sidecar always wins the first import — the onboarding case,
+        // which needs no prompt.
+        let sidecar_wins = c.state_updated_at == 0 || c.sc_mtime > c.state_updated_at;
+        updates.push((c.file_id, c.sc_mtime, sidecar_wins.then(|| state.clone())));
+    }
+
+    let applied = updates.iter().filter(|(_, _, s)| s.is_some()).count();
+    db.call(move |conn| {
+        let tx = conn.transaction()?;
+        {
+            let mut mark = tx.prepare("UPDATE files SET xmp_source_mtime = ?2 WHERE id = ?1")?;
+            // Importing must NOT set xmp_dirty: marking a file dirty for state
+            // that came out of its own sidecar would queue a write-back of what
+            // was just read, and light the commit button on every scan forever.
+            let mut apply = tx.prepare(
+                "UPDATE files SET rating = ?2, flag = ?3, label = ?4, orientation = ?5,
+                        xmp_source_mtime = ?6
+                 WHERE id = ?1",
+            )?;
+            for (file_id, sc_mtime, state) in &updates {
+                match state {
+                    Some(s) => apply.execute(params![
+                        file_id,
+                        s.rating,
+                        s.flag,
+                        s.label,
+                        s.orientation,
+                        sc_mtime
+                    ])?,
+                    None => mark.execute(params![file_id, sc_mtime])?,
+                };
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    })?;
+
+    Ok(applied)
 }
 
 #[cfg(test)]
@@ -270,6 +405,137 @@ mod tests {
 
     fn scan(db: &Arc<Db>, root: &Path) -> ScanDone {
         scan_project_inner(db, root, &mut |_| {}).unwrap()
+    }
+
+    /// A Lightroom-style sidecar with a rating and a pick flag.
+    fn write_sidecar_file(root: &Path, rel: &str, rating: i64) {
+        fs::write(
+            root.join(rel),
+            format!(
+                r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:xmpDM="http://ns.adobe.com/xmp/1.0/DynamicMedia/"
+    xmp:Rating="{rating}" xmp:Label="Green" xmpDM:pick="1"/>
+ </rdf:RDF>
+</x:xmpmeta>"#
+            ),
+        )
+        .unwrap();
+    }
+
+    fn state_of(db: &Arc<Db>, rel: &str) -> (i64, i64, Option<String>) {
+        let rel = rel.to_string();
+        db.call(move |c| {
+            Ok(c.query_row(
+                "SELECT rating, flag, label FROM files WHERE rel_path = ?1",
+                params![rel],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .unwrap()
+    }
+
+    fn dirty_count(db: &Arc<Db>) -> i64 {
+        db.call(|c| {
+            Ok(
+                c.query_row("SELECT COUNT(*) FROM files WHERE xmp_dirty = 1", [], |r| {
+                    r.get(0)
+                })?,
+            )
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn imports_ratings_from_existing_sidecars_without_queueing_a_writeback() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_1.cr3");
+        write_sidecar_file(root, "IMG_1.xmp", 4);
+        let db = Arc::new(Db::open(root).unwrap());
+
+        let done = scan(&db, root);
+        assert_eq!(done.xmp_imported, 1);
+        assert_eq!(state_of(&db, "IMG_1.cr3"), (4, 1, Some("Green".into())));
+
+        // THE trap: importing must not mark the file dirty, or the commit button
+        // would light up on every scan offering to write back what it just read.
+        assert_eq!(dirty_count(&db), 0, "import must not queue an XMP write");
+
+        // A second scan re-reads nothing: the sidecar's mtime is unchanged.
+        let again = scan(&db, root);
+        assert_eq!(again.xmp_imported, 0);
+        assert_eq!(dirty_count(&db), 0);
+    }
+
+    #[test]
+    fn a_pair_takes_its_shared_sidecar_on_both_halves() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_2.cr3");
+        touch(root, "IMG_2.jpg");
+        write_sidecar_file(root, "IMG_2.xmp", 5);
+        let db = Arc::new(Db::open(root).unwrap());
+
+        let done = scan(&db, root);
+        // Both members map to IMG_2.xmp, exactly as the writer treats them, so
+        // exporting and re-importing round-trips instead of desyncing the pair.
+        assert_eq!(done.xmp_imported, 2);
+        assert_eq!(state_of(&db, "IMG_2.cr3").0, 5);
+        assert_eq!(state_of(&db, "IMG_2.jpg").0, 5);
+    }
+
+    #[test]
+    fn local_state_newer_than_the_sidecar_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_3.cr3");
+        write_sidecar_file(root, "IMG_3.xmp", 2);
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+        assert_eq!(state_of(&db, "IMG_3.cr3").0, 2);
+
+        // Cull it in Cullant, stamped later than the sidecar's mtime, then
+        // pretend the sidecar changed so it is reconsidered at all.
+        db.call(|c| {
+            c.execute(
+                "UPDATE files SET rating = 5, state_updated_at = strftime('%s','now') + 3600,
+                        xmp_source_mtime = NULL",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        let done = scan(&db, root);
+        assert_eq!(done.xmp_imported, 0, "the older sidecar must not win");
+        assert_eq!(state_of(&db, "IMG_3.cr3").0, 5, "our newer rating stands");
+    }
+
+    #[test]
+    fn an_unreadable_sidecar_changes_nothing_and_is_not_reparsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_4.cr3");
+        fs::write(root.join("IMG_4.xmp"), b"this is not xmp").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+
+        let done = scan(&db, root);
+        assert_eq!(done.xmp_imported, 0);
+        assert_eq!(state_of(&db, "IMG_4.cr3"), (0, 0, None), "nothing wiped");
+        // Its mtime is still recorded, so it is not parsed again every scan.
+        let marked: i64 = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM files WHERE xmp_source_mtime IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(marked, 1);
     }
 
     #[test]

@@ -22,6 +22,9 @@ class CatalogStore {
   media = $state<MediaTab>("photos");
   scanning = $state(false);
   scanFound = $state(0);
+  /** Photos that took their state from an XMP sidecar in the last scan; drives
+   *  a one-off notice so an import is never silent. 0 = nothing to say. */
+  xmpImported = $state(0);
   /** True while the initial scan + metadata read blocks the grid. Released on
    *  `metadata:done`, so the grid appears correctly ordered without waiting for
    *  thumbnails (those fill in progressively afterwards). */
@@ -201,8 +204,12 @@ listen<ScanProgress>("scan:progress", (e) => {
   catalog.scanning = true;
   catalog.scanFound = e.payload.found;
 });
-listen<ScanDone>("scan:done", async () => {
+listen<ScanDone>("scan:done", async (e) => {
   catalog.scanning = false;
+  // Reported once per scan, not prompted per photo: the auto-rescan interval
+  // would make a dialog unbearable, but silently rewriting someone's ratings
+  // would be worse.
+  catalog.xmpImported = e.payload.xmpImported ?? 0;
   await catalog.refresh();
 });
 listen<{ done: number; total: number }>("metadata:progress", (e) => {

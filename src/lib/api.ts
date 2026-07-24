@@ -188,6 +188,8 @@ export interface ScanDone {
   fileCount: number;
   newFiles: number;
   missingFiles: number;
+  /** Photos whose rating/flag/label were read out of an XMP sidecar this pass. */
+  xmpImported: number;
 }
 
 export interface Targets {

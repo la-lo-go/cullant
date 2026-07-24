@@ -4,7 +4,8 @@ use quick_xml::{Reader, Writer};
 use crate::error::{AppError, AppResult};
 use crate::store::{read_all, ProjectStore};
 
-/// Culling state to export for one file.
+/// Culling state exchanged with one file's sidecar, in either direction.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct XmpState {
     pub rating: i64,
     pub flag: i64, // -1 reject, 0 unflagged, 1 pick
@@ -172,6 +173,74 @@ fn merge_into_existing(existing: &str, state: &XmpState) -> AppResult<String> {
     String::from_utf8(writer.into_inner()).map_err(|e| AppError::Other(format!("xmp utf8: {e}")))
 }
 
+/// Read the culling state out of a sidecar — the inverse of what the writer
+/// puts in. Returns `None` when the document has no `rdf:Description`, which is
+/// how a sidecar we cannot make sense of is reported (rather than as an empty
+/// state that would then wipe the database).
+///
+/// Absent properties come back at their neutral value, matching the writer:
+/// it omits a rating of 0 and a missing label, so their absence means exactly
+/// that.
+pub fn read_sidecar(xml: &str) -> Option<XmpState> {
+    let mut reader = Reader::from_str(xml);
+    loop {
+        let el = match reader.read_event().ok()? {
+            Event::Eof => return None,
+            Event::Start(el) | Event::Empty(el) if is_description(&el) => el,
+            _ => continue,
+        };
+
+        let mut state = XmpState {
+            rating: 0,
+            flag: 0,
+            label: None,
+            orientation: 1,
+        };
+        // xmpDM:pick is authoritative when present; xmpDM:good is the fallback
+        // for writers that only emit the boolean.
+        let mut saw_pick = false;
+
+        for attr in el.attributes().flatten() {
+            let value = attr
+                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                .ok()?
+                .into_owned();
+            match attr.key.as_ref() {
+                b"xmp:Rating" => {
+                    // Bridge and FastRawViewer write -1 for "rejected". Cullant
+                    // keeps that in the flag, so clamp it out of the rating.
+                    state.rating = value.trim().parse::<i64>().unwrap_or(0).clamp(0, 5);
+                }
+                b"xmp:Label" => {
+                    let label = value.trim();
+                    if !label.is_empty() {
+                        state.label = Some(label.to_string());
+                    }
+                }
+                b"xmpDM:pick" => {
+                    if let Ok(pick) = value.trim().parse::<i64>() {
+                        state.flag = pick.clamp(-1, 1);
+                        saw_pick = true;
+                    }
+                }
+                b"xmpDM:good" if !saw_pick => {
+                    state.flag = match value.trim() {
+                        "True" | "true" => 1,
+                        "False" | "false" => -1,
+                        _ => 0,
+                    };
+                }
+                b"tiff:Orientation" => {
+                    let o = value.trim().parse::<i64>().unwrap_or(1);
+                    state.orientation = if (1..=8).contains(&o) { o } else { 1 };
+                }
+                _ => {}
+            }
+        }
+        return Some(state);
+    }
+}
+
 fn is_description(el: &BytesStart) -> bool {
     let name = el.name();
     let local = name.as_ref();
@@ -290,6 +359,60 @@ mod tests {
         write_sidecar(&store, "IMG_2.cr3", &odd).unwrap();
         let content = std::fs::read_to_string(dir.path().join(&sc_rel)).unwrap();
         assert!(content.contains("tiff:Orientation=\"1\""));
+    }
+
+    #[test]
+    fn reads_back_what_it_writes() {
+        let original = XmpState {
+            rating: 3,
+            flag: -1,
+            label: Some("Blue".into()),
+            orientation: 8,
+        };
+        let parsed = read_sidecar(&fresh_sidecar(&original)).unwrap();
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn reads_a_foreign_sidecar_and_survives_a_useless_one() {
+        // What Bridge/FastRawViewer write: rating -1 for "rejected", and the
+        // boolean flag rather than the numeric pick.
+        let foreign = r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:xmp="http://ns.adobe.com/xap/1.0/"
+    xmlns:xmpDM="http://ns.adobe.com/xmp/1.0/DynamicMedia/"
+    xmp:Rating="-1"
+    xmp:Label="Red"
+    xmpDM:good="False"/>
+ </rdf:RDF>
+</x:xmpmeta>"#;
+        let s = read_sidecar(foreign).unwrap();
+        // The -1 belongs to the flag; the rating clamps rather than going negative.
+        assert_eq!(s.rating, 0);
+        assert_eq!(s.flag, -1);
+        assert_eq!(s.label.as_deref(), Some("Red"));
+        // No tiff:Orientation present: neutral, not a guess.
+        assert_eq!(s.orientation, 1);
+
+        // A document with no rdf:Description reads as None, not as blank state —
+        // blank state would wipe the database on import.
+        assert!(read_sidecar("<x:xmpmeta/>").is_none());
+        assert!(read_sidecar("not xml at all").is_none());
+    }
+
+    #[test]
+    fn pick_wins_over_good_whichever_order_they_appear() {
+        let with_both = |attrs: &str| {
+            format!(
+                r#"<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about="" {attrs}/></rdf:RDF>"#
+            )
+        };
+        let a = read_sidecar(&with_both(r#"xmpDM:pick="1" xmpDM:good="False""#)).unwrap();
+        assert_eq!(a.flag, 1);
+        let b = read_sidecar(&with_both(r#"xmpDM:good="False" xmpDM:pick="1""#)).unwrap();
+        assert_eq!(b.flag, 1, "attribute order must not decide the flag");
     }
 
     #[test]

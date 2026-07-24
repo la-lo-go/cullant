@@ -642,6 +642,17 @@
     />
   {/if}
 
+  {#if catalog.xmpImported > 0}
+    <!-- Shown once per scan that imported anything. Reading someone's existing
+         ratings in silence would leave them wondering where the stars came
+         from — or worse, not notice that Cullant now disagrees with Lightroom. -->
+    <AlertDialog
+      title="Ratings read from XMP"
+      message={`${catalog.xmpImported} photo(s) took their rating, flag or colour label from an XMP sidecar written by another app.`}
+      onclose={() => (catalog.xmpImported = 0)}
+    />
+  {/if}
+
   {#if session.moveDialogOpen}
     <MoveDialog />
   {/if}

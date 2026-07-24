@@ -191,6 +191,14 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE commit_entries ADD COLUMN undone_at INTEGER;
     CREATE INDEX idx_commit_entries_commit ON commit_entries(commit_id);
     "#,
+    // v9 — the sidecar mtime a photo's state was last imported from. A sidecar
+    // edit changes neither the photo's size nor its mtime, so the scan's normal
+    // change detection cannot see it; this column is what makes "has this
+    // sidecar already been read?" answerable without parsing every file on
+    // every scan. NULL means never imported.
+    r#"
+    ALTER TABLE files ADD COLUMN xmp_source_mtime INTEGER;
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {
