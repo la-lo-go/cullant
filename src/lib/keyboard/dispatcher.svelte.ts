@@ -72,6 +72,9 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     case "ui.toggleFilterBar":
       session.filtersPanelOpen = !session.filtersPanelOpen;
       return;
+    case "ui.search":
+      session.searchOpen = !session.searchOpen;
+      return;
     case "ui.toggleFolderTree":
       session.folderTreeVisible = !session.folderTreeVisible;
       return;

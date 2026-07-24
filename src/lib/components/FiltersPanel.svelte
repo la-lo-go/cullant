@@ -334,6 +334,19 @@
   </section>
 
   <section>
+    <span class="lbl">File name</span>
+    <input
+      class="namefield"
+      type="text"
+      placeholder="Any"
+      spellcheck="false"
+      autocomplete="off"
+      bind:value={session.nameFilter}
+      oninput={() => session.clampFocus()}
+    />
+  </section>
+
+  <section>
     <span class="lbl">Flag</span>
     <div class="row">
       {#each flagOptions as opt (opt.value)}
@@ -786,6 +799,27 @@
   .metaselect {
     width: 100%;
     font-size: 12px;
+  }
+
+  .namefield {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--control);
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: #eee;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  .namefield::placeholder {
+    color: #6a6a72;
+  }
+
+  .namefield:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 
   .seg {

@@ -22,6 +22,7 @@ export type CommandId =
   | "label.blue"
   | "label.purple"
   | "ui.toggleFilterBar"
+  | "ui.search"
   | "ui.toggleMirror"
   | "view.grid"
   | "view.viewer"
@@ -104,6 +105,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "action.moveCopy", title: "Queue move/copy to folder…", category: "Actions" },
   { id: "commit.open", title: "Review & commit pending actions", category: "Actions" },
   { id: "ui.toggleFilterBar", title: "Toggle filters panel", category: "UI" },
+  { id: "ui.search", title: "Search by file name", category: "UI" },
   { id: "ui.toggleMirror", title: "Toggle RAW+JPEG mirror mode", category: "UI" },
   { id: "info.toggle", title: "Show/hide camera metadata", category: "UI" },
   { id: "ui.toggleFilmstrip", title: "Show/hide filmstrip", category: "UI" },
@@ -136,6 +138,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "label.blue": ["9"],
   "label.purple": ["-"],
   "ui.toggleFilterBar": ["\\"],
+  "ui.search": ["ctrl+f"],
   "ui.toggleMirror": ["m"],
   "view.grid": ["g"],
   "view.viewer": ["e", "enter"],

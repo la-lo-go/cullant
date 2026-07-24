@@ -25,6 +25,7 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
+  import SearchOverlay from "$lib/components/SearchOverlay.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
   import TitleBar from "$lib/components/TitleBar.svelte";
   import { api } from "$lib/api";
@@ -606,6 +607,10 @@
 
   {#if view.shortcutsOpen}
     <ShortcutsOverlay onclose={() => (view.shortcutsOpen = false)} />
+  {/if}
+
+  {#if session.searchOpen}
+    <SearchOverlay />
   {/if}
 
   {#if showKeybindings}

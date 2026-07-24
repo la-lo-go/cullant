@@ -39,6 +39,7 @@ interface SavedSession {
     minRating?: number;
     labelFilter?: string | null;
     tagFilter?: number | null;
+    nameFilter?: string;
     typeFilter?: TypeFilter;
     extFilter?: string | null;
     orientationFilter?: OrientationFilter;
@@ -124,6 +125,10 @@ class SessionStore {
   minRating = $state(0);
   labelFilter = $state<string | null>(null);
   tagFilter = $state<number | null>(null);
+  /** Case-insensitive substring match on the file name; "" = no filter. Shared
+   *  by the search overlay and the Sort & Filter field, so whichever one the
+   *  user opens shows what the other typed. */
+  nameFilter = $state("");
   /** Photo file-type composition filter; inert on the videos tab. */
   typeFilter = $state<TypeFilter>("all");
   /** Single file-extension filter (lowercased, e.g. "cr3"); null = any. In
@@ -143,6 +148,8 @@ class SessionStore {
   shutterFilter = $state<string | null>(null);
   /** Whether the Filters dropdown panel is open. */
   filtersPanelOpen = $state(false);
+  /** Whether the name-search overlay is open (Ctrl+F). */
+  searchOpen = $state(false);
 
   /** True when any filter narrows the grid (used to badge the Filters button).
    *  The type filter only counts while on the photos tab (it is inert on
@@ -152,6 +159,7 @@ class SessionStore {
       this.minRating > 0 ||
       this.labelFilter !== null ||
       this.tagFilter !== null ||
+      this.nameFilter.trim() !== "" ||
       (this.typeFilter !== "all" && catalog.media === "photos") ||
       this.extFilter !== null ||
       this.orientationFilter !== "all" ||
@@ -172,6 +180,7 @@ class SessionStore {
     this.minRating = 0;
     this.labelFilter = null;
     this.tagFilter = null;
+    this.nameFilter = "";
     this.typeFilter = "all";
     this.extFilter = null;
     this.orientationFilter = "all";
@@ -376,6 +385,10 @@ class SessionStore {
     if (this.tagFilter !== null) {
       out = out.filter((i) => i.tagIds.includes(this.tagFilter!));
     }
+    const query = this.nameFilter.trim().toLowerCase();
+    if (query !== "") {
+      out = out.filter((i) => i.name.toLowerCase().includes(query));
+    }
     // File-type composition (photos only; a video has no RAW/JPEG notion). In
     // mirror mode `out` already holds one entry per group, so groupSize/decoupled
     // read straight off it: a raw+jpeg pair is groupSize > 1 and not decoupled,
@@ -511,6 +524,7 @@ class SessionStore {
         minRating: this.minRating,
         labelFilter: this.labelFilter,
         tagFilter: this.tagFilter,
+        nameFilter: this.nameFilter,
         typeFilter: this.typeFilter,
         extFilter: this.extFilter,
         orientationFilter: this.orientationFilter,
@@ -555,6 +569,7 @@ class SessionStore {
         if (typeof f.minRating === "number") this.minRating = f.minRating;
         this.labelFilter = f.labelFilter ?? null;
         this.tagFilter = f.tagFilter ?? null;
+        this.nameFilter = f.nameFilter ?? "";
         if (f.typeFilter) this.typeFilter = f.typeFilter;
         this.extFilter = f.extFilter ?? null;
         if (f.orientationFilter) this.orientationFilter = f.orientationFilter;
