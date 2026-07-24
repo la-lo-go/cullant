@@ -19,8 +19,58 @@
   const unused = $derived(GROUP_DIMS.filter((d) => !session.groupBy.includes(d.key)));
 
   let panelEl = $state<HTMLDivElement | null>(null);
+
+  // Focus the panel on open. The toolbar toggle blurs its trigger, so without
+  // this nothing inside .panel holds focus and the Escape keydown never reaches
+  // onPanelKeydown; it would fall through to the global keymap instead.
   $effect(() => {
     panelEl?.focus();
+  });
+
+  // Keeps the panel fully on-screen regardless of where the toolbar button
+  // sits (it can be anywhere horizontally once the toolbar wraps on mobile) —
+  // same technique as FiltersPanel: shift via transform when either edge would
+  // overflow, and cap the height so the panel always fits between the top
+  // safe-area and a comfortable gap above the bottom one, scrolling internally
+  // (scrollbar hidden) past that.
+  function clampToViewport() {
+    if (!panelEl) return;
+    panelEl.style.transform = "";
+    const cs = getComputedStyle(document.documentElement);
+    const px = (name: string) => parseFloat(cs.getPropertyValue(name)) || 0;
+    const edge = px("--dialog-edge-margin") || 12;
+    const marginL = edge + px("--inset-left");
+    const marginR = edge + px("--inset-right");
+    const rect = panelEl.getBoundingClientRect();
+    let dx = 0;
+    if (rect.right > window.innerWidth - marginR) dx = window.innerWidth - marginR - rect.right;
+    if (rect.left + dx < marginL) dx = marginL - rect.left;
+    if (dx) panelEl.style.transform = `translateX(${dx}px)`;
+    panelEl.style.maxHeight = "";
+    const top = Math.max(panelEl.getBoundingClientRect().top, px("--inset-top") + edge);
+    const bottomGap = edge + px("--inset-bottom") + 24;
+    const available = window.innerHeight - bottomGap - top;
+    if (panelEl.offsetHeight > available)
+      panelEl.style.maxHeight = `${Math.max(available, 120)}px`;
+  }
+
+  $effect(() => {
+    clampToViewport();
+    // Throttle to one clamp per frame: the raw resize event fires far faster
+    // than a repaint, and each clamp forces synchronous layout.
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        clampToViewport();
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
   });
 
   function onPanelKeydown(e: KeyboardEvent) {
@@ -39,6 +89,18 @@
   tabindex="-1"
   onkeydown={onPanelKeydown}
 >
+  <header>
+    <span class="title">Grid view</span>
+    <button
+      class="close"
+      aria-label="Close"
+      title="Close"
+      onclick={() => (session.viewPanelOpen = false)}
+    >
+      <X size={15} />
+    </button>
+  </header>
+
   <section>
     <span class="lbl">Thumbnail size</span>
     <div class="row">
@@ -144,7 +206,11 @@
     margin-top: 4px;
     width: 288px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2 - var(--inset-left) - var(--inset-right));
-    max-height: calc(100vh - 80px - var(--inset-bottom));
+    /* Fallback bound only — reserves both safe-area insets and room for the
+       toolbar/tap-gap; clampToViewport computes the exact cap once mounted.
+       dvh (not vh) so mobile browser chrome is excluded. Same formula as
+       FiltersPanel, for the same reason. */
+    max-height: calc(100dvh - var(--inset-top) - var(--inset-bottom) - 96px);
     overflow-y: auto;
     scrollbar-width: none;
     display: flex;
@@ -160,6 +226,36 @@
 
   .panel::-webkit-scrollbar {
     display: none;
+  }
+
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .title {
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 24px;
+    background: none;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    color: #bbb;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .close:hover {
+    color: #fff;
+    border-color: var(--border-strong);
   }
 
   section {
