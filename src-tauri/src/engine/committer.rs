@@ -275,21 +275,66 @@ fn sidecar_shared_with_survivor(db: &Arc<Db>, file_id: i64) -> AppResult<bool> {
     })
 }
 
+/// What a commit entry needs in order to be reversed. Serialized into
+/// `commit_entries.undo_info`.
+///
+/// Rows written before this struct existed carry only `mode`/`trashPath`; they
+/// still deserialize, with the newer fields defaulting to "nothing to restore".
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoInfo {
+    /// Deletes: "trash" (the file still exists) or "permanent" (it does not).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    /// Deletes in trash mode: where the file now lives, project-relative.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trash_path: Option<String>,
+    /// Deletes: where the photo's XMP sidecar was put, when it went too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidecar_trash_path: Option<String>,
+    /// Moves: the sidecar travelled with the file. Both of its endpoints derive
+    /// from the entry's own before/after paths, so no path is stored.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sidecar_moved: bool,
+    /// Deletes: the file was its group's primary, and deleting it promoted a
+    /// survivor. The old value is not recoverable from the row afterwards, so
+    /// it is recorded here to be handed back on undo.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub was_primary: bool,
+}
+
+impl UndoInfo {
+    fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap_or_else(|_| "{}".to_string())
+    }
+}
+
 /// Delete one file (by rel_path) according to the mode, through the store.
-/// Returns undo info JSON (with a project-relative trash path when applicable).
-fn delete_via_store(store: &dyn ProjectStore, rel: &str, mode: DeletionMode) -> AppResult<String> {
+/// Returns the undo info describing where it went.
+fn delete_via_store(
+    store: &dyn ProjectStore,
+    rel: &str,
+    mode: DeletionMode,
+) -> AppResult<UndoInfo> {
     match mode {
         DeletionMode::Permanent => {
             store.remove_file(rel)?;
-            Ok(r#"{"mode":"permanent"}"#.to_string())
+            Ok(UndoInfo {
+                mode: Some("permanent".into()),
+                ..Default::default()
+            })
         }
-        DeletionMode::Trash => store_trash(store, rel),
+        DeletionMode::Trash => Ok(UndoInfo {
+            mode: Some("trash".into()),
+            trash_path: Some(store_trash(store, rel)?),
+            ..Default::default()
+        }),
     }
 }
 
 /// Move a file into the project-local `_trash` folder, preserving its relative
-/// directory structure, with `.N` suffixing on collision. Returns undo JSON
-/// carrying the (project-relative) trash path.
+/// directory structure, with `.N` suffixing on collision. Returns the
+/// project-relative path it ended up at.
 fn store_trash(store: &dyn ProjectStore, rel: &str) -> AppResult<String> {
     let (parent, name) = split_parent(rel);
     let trash_parent = if parent.is_empty() {
@@ -313,8 +358,7 @@ fn store_trash(store: &dyn ProjectStore, rel: &str) -> AppResult<String> {
     } else {
         rel.to_string()
     };
-    let final_rel = store.move_to(&src_rel, &trash_parent)?;
-    Ok(serde_json::json!({ "mode": "trash", "trashPath": final_rel }).to_string())
+    store.move_to(&src_rel, &trash_parent)
 }
 
 /// Mutable bookkeeping shared by the commit phases (deletes, moves, copies,
@@ -398,7 +442,7 @@ fn run_deletes(
     }
     run.begin_phase("deletes", deletes.len());
     for p in deletes {
-        let mut result: Result<String, String> = match run.store.exists(&p.rel_path) {
+        let mut result: Result<UndoInfo, String> = match run.store.exists(&p.rel_path) {
             Ok(true) => delete_via_store(run.store, &p.rel_path, mode).map_err(|e| e.to_string()),
             Ok(false) => Err("file missing on disk".into()),
             // A real access error (e.g. a disconnected network project folder)
@@ -410,14 +454,18 @@ fn run_deletes(
         // member (delete-RAW-only, or a per-member reject) must NOT remove the
         // sidecar while the partner survives, or that survivor loses its
         // exported rating/flag/label. Remove it only when no live file maps to it.
-        if result.is_ok() {
+        if let Ok(undo) = &mut result {
             let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
             if sidecar_rel != p.rel_path
                 && run.store.exists(&sidecar_rel).unwrap_or(false)
                 && !sidecar_shared_with_survivor(run.db, p.file_id)?
             {
-                if let Err(e) = delete_via_store(run.store, &sidecar_rel, mode) {
-                    tracing::warn!("sidecar delete failed: {e}");
+                match delete_via_store(run.store, &sidecar_rel, mode) {
+                    // Recorded on the photo's own entry rather than as a row of
+                    // its own, so undoing the photo brings its sidecar back in
+                    // the same step.
+                    Ok(sc) => undo.sidecar_trash_path = sc.trash_path,
+                    Err(e) => tracing::warn!("sidecar delete failed: {e}"),
                 }
             }
         }
@@ -425,7 +473,10 @@ fn run_deletes(
             Ok(undo) => {
                 run.note_ok();
                 let file_id = p.file_id;
-                run.db.call(move |conn| {
+                // Promoting a survivor overwrites `primary_file_id`, and the old
+                // value is exactly this file — but only when the UPDATE actually
+                // matched. Report that back so undo can hand the role over again.
+                let was_primary = run.db.call(move |conn| {
                     let tx = conn.transaction()?;
                     tx.execute(
                         "UPDATE files SET status = 2 WHERE id = ?1",
@@ -435,22 +486,22 @@ fn run_deletes(
                         "DELETE FROM pending_actions WHERE file_id = ?1",
                         params![file_id],
                     )?;
-                    // If it was the group's primary, promote the survivor.
-                    tx.execute(
+                    let promoted = tx.execute(
                         "UPDATE groups SET primary_file_id =
                            (SELECT id FROM files WHERE group_id = groups.id AND status = 0 LIMIT 1)
                          WHERE primary_file_id = ?1",
                         params![file_id],
                     )?;
                     tx.commit()?;
-                    Ok(())
+                    Ok(promoted > 0)
                 })?;
+                undo.was_primary = was_primary;
                 run.record(
                     Some(p.file_id),
                     0,
                     Some(p.rel_path.clone()),
                     None,
-                    Some(undo.clone()),
+                    Some(undo.to_json()),
                     Ok(()),
                 )?;
             }
@@ -510,6 +561,7 @@ fn process_move_copy(run: &mut CommitRun, p: &PendingAction, action_i: i64) -> A
         format!("{dest_dir}/{file_name}")
     };
 
+    let mut undo = UndoInfo::default();
     let result: Result<(), String> = (|| {
         if !run.store.exists(&p.rel_path).map_err(|e| e.to_string())? {
             return Err("file missing on disk".into());
@@ -541,8 +593,11 @@ fn process_move_copy(run: &mut CommitRun, p: &PendingAction, action_i: i64) -> A
             if action_i == 1 {
                 let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
                 if sidecar_rel != p.rel_path && run.store.exists(&sidecar_rel).unwrap_or(false) {
-                    if let Err(e) = run.store.move_to(&sidecar_rel, &dest_dir) {
-                        tracing::warn!("sidecar move failed: {e}");
+                    match run.store.move_to(&sidecar_rel, &dest_dir) {
+                        // Both endpoints derive from the entry's own paths, so
+                        // undo only needs to know that it happened.
+                        Ok(_) => undo.sidecar_moved = true,
+                        Err(e) => tracing::warn!("sidecar move failed: {e}"),
                     }
                 }
             }
@@ -581,12 +636,13 @@ fn process_move_copy(run: &mut CommitRun, p: &PendingAction, action_i: i64) -> A
             run.note_err(&p.rel_path, e);
         }
     }
+    let undo_json = result.is_ok().then(|| undo.to_json());
     run.record(
         Some(p.file_id),
         action_i,
         Some(p.rel_path.clone()),
         Some(dest_rel),
-        None,
+        undo_json,
         result,
     )?;
     run.tick();
@@ -1196,6 +1252,61 @@ mod tests {
             root.join("IMG_1.xmp").exists(),
             "the surviving JPEG's shared sidecar must not be deleted with the RAW"
         );
+    }
+
+    #[test]
+    fn undo_info_records_the_sidecar_and_the_lost_primary() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("IMG_9.cr3"), b"raw").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        set_setting(&db, "deletionMode", "trash").unwrap();
+
+        // Rate then commit so a sidecar exists next to the RAW.
+        rate(&db, &["cr3"], 3);
+        let plan = preview(&db, &store).unwrap();
+        execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
+        assert!(root.join("IMG_9.xmp").exists());
+
+        let raw_id = ids(&db, "cr3");
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![raw_id],
+                as_groups: false,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+        let plan = preview(&db, &store).unwrap();
+        execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
+
+        let raw_undo: String = db
+            .call(move |c| {
+                Ok(c.query_row(
+                    "SELECT undo_info FROM commit_entries WHERE action = 0 AND file_id = ?1",
+                    params![raw_id],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        let undo: UndoInfo = serde_json::from_str(&raw_undo).unwrap();
+
+        assert_eq!(undo.mode.as_deref(), Some("trash"));
+        assert!(undo.trash_path.is_some(), "the file's own trash path");
+        // The sidecar went to the trash too, and the entry says where — without
+        // this an undo would restore the photo and strand its sidecar.
+        let sc = undo
+            .sidecar_trash_path
+            .expect("sidecar trash path must be recorded");
+        assert!(root.join(&sc).exists(), "sidecar really is at {sc}");
+        // The RAW was its singleton group's primary, so the promotion fired and
+        // overwrote the only record of that fact.
+        assert!(undo.was_primary);
     }
 
     #[test]
