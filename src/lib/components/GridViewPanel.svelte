@@ -16,13 +16,22 @@
     { value: "large", label: "Large" },
   ];
 
+  // Offering "Burst" in a project that has none would produce one flat "—"
+  // section — an option that visibly does nothing. It stays offered once
+  // chosen, so an active level never vanishes from under the user.
+  const offered = $derived(
+    GROUP_DIMS.filter(
+      (d) => d.key !== "burst" || session.hasBursts || session.groupBy.includes("burst"),
+    ),
+  );
+
   // Dimensions still free to pick at a given level: any not used elsewhere (the
   // level's own current pick stays selectable so the <select> shows it).
   function available(currentKey?: string) {
-    return GROUP_DIMS.filter((d) => d.key === currentKey || !session.groupBy.includes(d.key));
+    return offered.filter((d) => d.key === currentKey || !session.groupBy.includes(d.key));
   }
 
-  const unused = $derived(GROUP_DIMS.filter((d) => !session.groupBy.includes(d.key)));
+  const unused = $derived(offered.filter((d) => !session.groupBy.includes(d.key)));
 
   let panelEl = $state<HTMLDivElement | null>(null);
 

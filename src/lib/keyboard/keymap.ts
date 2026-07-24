@@ -34,6 +34,8 @@ export type CommandId =
   | "zoom.toggle"
   | "zoom.in"
   | "zoom.out"
+  | "burst.prev"
+  | "burst.next"
   | "pair.toggleShown"
   | "pair.toggleCoupling"
   | "tag.chord"
@@ -102,6 +104,8 @@ export const COMMANDS: CommandMeta[] = [
   { id: "zoom.toggle", title: "Toggle zoom", category: "Zoom" },
   { id: "zoom.in", title: "Zoom in", category: "Zoom" },
   { id: "zoom.out", title: "Zoom out", category: "Zoom" },
+  { id: "burst.prev", title: "Previous shot in burst", category: "Navigation" },
+  { id: "burst.next", title: "Next shot in burst", category: "Navigation" },
   { id: "pair.toggleShown", title: "Show RAW ↔ JPEG half of pair", category: "Pairs" },
   { id: "pair.toggleCoupling", title: "Decouple / recouple pair", category: "Pairs" },
   { id: "tag.chord", title: "Task tag chord (then 1-9)", category: "Actions", classify: true },
@@ -160,6 +164,8 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   // so bind that too. Ctrl+- zooms out.
   "zoom.in": ["ctrl+=", "ctrl++"],
   "zoom.out": ["ctrl+-"],
+  "burst.prev": [","],
+  "burst.next": ["."],
   "pair.toggleShown": ["j"],
   "pair.toggleCoupling": ["ctrl+j"],
   "tag.chord": ["t"],

@@ -8,6 +8,7 @@
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import Scissors from "@lucide/svelte/icons/scissors";
+  import Layers from "@lucide/svelte/icons/layers";
   import Info from "@lucide/svelte/icons/info";
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
@@ -122,6 +123,13 @@
               <span class="tagpill" style="border-color: {c}; background: {c}2e">{t.name}</span>
             {/if}
           {/each}
+          {#if session.focusedBurst}
+            <span class="burst" title="Shot {session.focusedBurst.position} of a burst of
+{session.focusedBurst.total} · step with , and .">
+              <Layers size={11} />
+              {session.focusedBurst.position}/{session.focusedBurst.total}
+            </span>
+          {/if}
           <span class="pos">{session.focusedIndex + 1} / {session.filtered.length}</span>
         </div>
       {/if}
@@ -260,6 +268,18 @@
   .pos {
     margin-left: auto;
     opacity: 0.6;
+  }
+
+  .burst {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.8;
   }
 
   .empty {

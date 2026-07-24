@@ -67,6 +67,9 @@ export interface ItemLite {
   tagIds: number[];
   /** Grid thumbnail could not be decoded (unsupported/corrupt source). */
   thumbFailed: boolean;
+  /** 16-char hex of the thumbnail's perceptual hash, or null until that
+   *  thumbnail has been generated. Used to tell burst frames apart. */
+  phash: string | null;
 }
 
 /** An item's DISPLAYED (post-EXIF-rotation) pixel dimensions, or `null` when

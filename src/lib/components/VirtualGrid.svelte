@@ -205,7 +205,7 @@
         const labs: string[] = [];
         let prefix = "";
         for (let L = 0; L < group.length; L++) {
-          const b = bucketOf(items[i], group[L]);
+          const b = bucketOf(items[i], group[L], session.groupContext);
           keys.push(b?.key ?? "~");
           labs.push(b?.label ?? "—");
           prefix += `\u0000${keys[L]}`;

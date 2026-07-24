@@ -1,9 +1,12 @@
 <script lang="ts">
-  import { settings } from "../stores/settings.svelte";
+  import { settings, BURST_GAP_CHOICES } from "../stores/settings.svelte";
   import { catalog } from "../stores/catalog.svelte";
+  import { session } from "../stores/session.svelte";
   import { api, type DeletionMode } from "../api";
+  import type { BurstMode } from "../bursts";
   import DragList from "./DragList.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Layers from "@lucide/svelte/icons/layers";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import Monitor from "@lucide/svelte/icons/monitor";
   import Film from "@lucide/svelte/icons/film";
@@ -336,6 +339,62 @@
       </section>
 
       {#if catalog.project}
+        <section class="card">
+          <header class="card-head">
+            <Layers size={16} />
+            <span class="card-text">
+              <span class="card-title">Bursts</span>
+              <span class="card-desc">How close together shots must be to count as one burst.</span>
+            </span>
+          </header>
+          <div class="option row">
+            <span class="text">
+              <span class="label">Threshold</span>
+              <span class="description">
+                {#if settings.burstMode === "adaptive"}
+                  {#if session.burstGap.adaptive}
+                    Read from this project's own rhythm: {session.burstGap.seconds}s.
+                  {:else}
+                    This project's intervals show no clear split, so the fixed gap is in use.
+                  {/if}
+                {:else}
+                  Shots separated by less than this belong to the same burst.
+                {/if}
+              </span>
+            </span>
+            <select
+              aria-label="Burst threshold mode"
+              value={settings.burstMode}
+              onchange={(e) => settings.setBurstMode(e.currentTarget.value as BurstMode)}
+            >
+              <option value="fixed">Fixed gap</option>
+              <option value="adaptive">Adaptive</option>
+            </select>
+          </div>
+          <div class="option row">
+            <span class="text">
+              <span class="label">Fixed gap</span>
+              <span class="description">
+                Used directly in fixed mode, and as the fallback when adaptive finds no clear
+                split.
+              </span>
+            </span>
+            <select
+              aria-label="Burst gap in seconds"
+              onchange={(e) => settings.setBurstGapSeconds(Number(e.currentTarget.value))}
+            >
+              {#each BURST_GAP_CHOICES as choice (choice)}
+                <option value={choice} selected={settings.burstGapSeconds === choice}>
+                  {choice} second{choice === 1 ? "" : "s"}
+                </option>
+              {/each}
+            </select>
+          </div>
+          <p class="hint">
+            A burst never spans two cameras, and a RAW+JPEG pair always stays together.
+          </p>
+        </section>
+
         <section class="card">
           <header class="card-head">
             <Trash2 size={16} />

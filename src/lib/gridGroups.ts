@@ -8,6 +8,7 @@
  * while the existing catalog sort is preserved within the deepest bucket.
  */
 import type { ItemLite } from "./api";
+import { NO_BURSTS, type Bursts } from "./bursts";
 import { apertureBucket, focalBucket, isoBucket, shutterBucket } from "./metadataFacets";
 
 /** A photo's bucket under one dimension. `sort` orders the buckets: a number
@@ -18,10 +19,19 @@ export interface GroupBucket {
   sort: number | string;
 }
 
+/** Facts a dimension may need that are not on the item itself. Passed in rather
+ *  than imported, because the burst map lives in `session` and this module is
+ *  imported *by* it — reaching back would be a cycle. */
+export interface GroupContext {
+  bursts: Bursts;
+}
+
+export const EMPTY_GROUP_CONTEXT: GroupContext = { bursts: NO_BURSTS };
+
 export interface GroupDim {
   key: string;
   label: string;
-  of(item: ItemLite): GroupBucket;
+  of(item: ItemLite, ctx: GroupContext): GroupBucket;
 }
 
 /** Items with no value for a dimension collect in one "—" bucket, always last. */
@@ -47,6 +57,18 @@ const LABEL_ORDER: Record<string, number> = {
 };
 
 export const GROUP_DIMS: GroupDim[] = [
+  {
+    key: "burst",
+    label: "Burst",
+    of: (i, ctx) => {
+      const key = ctx.bursts.byFile.get(i.id);
+      // Photos outside any burst share the "—" bucket, which sorts last, so a
+      // grid grouped by burst reads as "the bursts, then everything else".
+      if (!key) return UNKNOWN;
+      const n = ctx.bursts.sizes.get(key) ?? 0;
+      return { key, label: `Burst · ${n} shots`, sort: i.captureTime ?? i.mtime };
+    },
+  },
   {
     key: "date",
     label: "Date",
@@ -176,8 +198,12 @@ export function groupDim(key: string): GroupDim | undefined {
 
 /** The bucket a photo falls into for a given dimension key (or null for an
  *  unknown dimension). Used by the grid to detect section boundaries + labels. */
-export function bucketOf(item: ItemLite, dimKey: string): GroupBucket | null {
-  return DIM_BY_KEY.get(dimKey)?.of(item) ?? null;
+export function bucketOf(
+  item: ItemLite,
+  dimKey: string,
+  ctx: GroupContext = EMPTY_GROUP_CONTEXT,
+): GroupBucket | null {
+  return DIM_BY_KEY.get(dimKey)?.of(item, ctx) ?? null;
 }
 
 /** Order two buckets: the "unknown" sentinel always sorts last, then by `sort`
@@ -203,11 +229,16 @@ function cmpBucket(a: GroupBucket, b: GroupBucket): number {
 /** Stable multi-level comparator: compare each active dimension in order; the
  *  first that differs decides. Equal on every level → 0, so the array's existing
  *  order (the active catalog sort) is preserved within the deepest bucket. */
-export function groupCompare(a: ItemLite, b: ItemLite, dimKeys: string[]): number {
+export function groupCompare(
+  a: ItemLite,
+  b: ItemLite,
+  dimKeys: string[],
+  ctx: GroupContext = EMPTY_GROUP_CONTEXT,
+): number {
   for (const key of dimKeys) {
     const dim = DIM_BY_KEY.get(key);
     if (!dim) continue;
-    const c = cmpBucket(dim.of(a), dim.of(b));
+    const c = cmpBucket(dim.of(a, ctx), dim.of(b, ctx));
     if (c !== 0) return c;
   }
   return 0;

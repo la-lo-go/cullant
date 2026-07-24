@@ -121,6 +121,10 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     case "zoom.out":
       if (view.mode !== "grid") view.requestZoomStep(-1);
       return;
+    case "burst.prev":
+      return session.stepBurst(-1);
+    case "burst.next":
+      return session.stepBurst(1);
     case "pair.toggleShown":
       return session.togglePairHalf();
     case "pair.toggleCoupling":

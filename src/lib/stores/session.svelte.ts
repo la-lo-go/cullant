@@ -10,7 +10,8 @@ import {
   type SyncFrom,
   type Targets,
 } from "../api";
-import { groupCompare } from "../gridGroups";
+import { adaptiveGap, computeBursts } from "../bursts";
+import { groupCompare, type GroupContext } from "../gridGroups";
 import { apertureBucket, focalBucket, isoBucket, shutterBucket } from "../metadataFacets";
 import { catalog } from "./catalog.svelte";
 import { settings } from "./settings.svelte";
@@ -360,6 +361,29 @@ class SessionStore {
     return map;
   });
 
+  /** The gap actually in use, and where it came from. Adaptive detection is
+   *  reported rather than hidden: a threshold you cannot see is impossible to
+   *  argue with when it guesses wrong. */
+  burstGap = $derived.by(() => {
+    if (settings.burstMode !== "adaptive") {
+      return { seconds: settings.burstGapSeconds, adaptive: false };
+    }
+    const derived = adaptiveGap(catalog.items);
+    return derived === null
+      ? { seconds: settings.burstGapSeconds, adaptive: false }
+      : { seconds: derived, adaptive: true };
+  });
+
+  /** file id -> burst key, for files that belong to a multi-shot burst.
+   *  Computed over the whole project rather than the filtered view, so "3 of 8"
+   *  keeps meaning 3 of 8 photos taken, not 3 of 8 currently visible. */
+  bursts = $derived(computeBursts(catalog.items, this.burstGap.seconds));
+
+  hasBursts = $derived(this.bursts.sizes.size > 0);
+
+  /** What the grouping dimensions need beyond the item itself. */
+  groupContext = $derived<GroupContext>({ bursts: this.bursts });
+
   filtered = $derived.by(() => {
     let out: ItemLite[];
     if (this.mirrorMode) {
@@ -479,10 +503,42 @@ class SessionStore {
     // focus/selection index space matches what the grid draws. Copy first: `out`
     // may still alias catalog.items here (separate mode with no active filter).
     if (this.groupBy.length > 0) {
-      out = [...out].sort((a, b) => groupCompare(a, b, this.groupBy));
+      const ctx = this.groupContext;
+      out = [...out].sort((a, b) => groupCompare(a, b, this.groupBy, ctx));
     }
     return out;
   });
+
+  /** Where the focused photo sits in its burst, or null when it is not in one.
+   *  Counted over `filtered`, so the position matches what stepping with , and .
+   *  will actually walk through. */
+  focusedBurst = $derived.by(() => {
+    const item = this.focused;
+    if (!item) return null;
+    const key = this.bursts.byFile.get(item.id);
+    if (!key) return null;
+    const members: number[] = [];
+    let index = -1;
+    for (let i = 0; i < this.filtered.length; i++) {
+      if (this.bursts.byFile.get(this.filtered[i].id) !== key) continue;
+      if (i === this.focusedIndex) index = members.length;
+      members.push(i);
+    }
+    if (index === -1 || members.length < 2) return null;
+    return { position: index + 1, total: members.length, members };
+  });
+
+  /** Step within the focused photo's burst (`,` and `.`), stopping at its own
+   *  ends rather than walking on into the next one. */
+  stepBurst(delta: number) {
+    const burst = this.focusedBurst;
+    if (!burst) return;
+    const next = burst.position - 1 + delta;
+    if (next < 0 || next >= burst.members.length) return;
+    this.collapseSelection();
+    this.focusedIndex = burst.members[next];
+    this.selectionAnchor = this.focusedIndex;
+  }
 
   /** Flip which half of the focused pair is displayed (J). */
   togglePairHalf() {

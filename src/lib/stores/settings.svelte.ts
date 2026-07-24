@@ -1,5 +1,7 @@
 /** App-wide user preferences, persisted in localStorage. */
 
+import type { BurstMode } from "../bursts";
+
 const PROGRESSIVE_LOUPE_KEY = "cullant.progressiveLoupe";
 const REMEMBER_SESSION_KEY = "cullant.rememberSession";
 const GENERATE_VIDEO_THUMBS_KEY = "cullant.generateVideoThumbs";
@@ -17,6 +19,12 @@ const DIM_QUEUED_DELETES_KEY = "cullant.dimQueuedDeletes";
 const AUTO_RESCAN_MINUTES_KEY = "cullant.autoRescanMinutes";
 const FAST_CULLING_KEY = "cullant.fastCulling";
 const LOCK_CAROUSEL_KEY = "cullant.lockCarousel";
+const BURST_MODE_KEY = "cullant.burstMode";
+const BURST_GAP_KEY = "cullant.burstGapSeconds";
+
+/** Allowed burst gaps in seconds — a whitelist for the same reason the
+ *  auto-rescan intervals are one. */
+export const BURST_GAP_CHOICES = [1, 2, 3, 5, 10] as const;
 
 /** Allowed auto-rescan intervals in minutes; 0 means off. Kept as a whitelist
  *  so a stale/garbled stored value can never yield a pathological interval. */
@@ -134,6 +142,24 @@ class SettingsStore {
    *  to whichever cell is centered (a carousel), instead of scrolling
    *  independently of the selection. Off by default. */
   lockCarousel = $state<boolean>(loadBool(LOCK_CAROUSEL_KEY, false));
+
+  /** How the burst threshold is chosen. "adaptive" reads the shoot's own
+   *  rhythm and falls back to `burstGapSeconds` when the intervals show no
+   *  clear split — a sports shoot and a wedding do not photograph alike. */
+  burstMode = $state<BurstMode>(
+    localStorage.getItem(BURST_MODE_KEY) === '"adaptive"' ? "adaptive" : "fixed",
+  );
+  burstGapSeconds = $state<number>(loadChoice(BURST_GAP_KEY, BURST_GAP_CHOICES, 2));
+
+  setBurstMode(mode: BurstMode) {
+    this.burstMode = mode;
+    save(BURST_MODE_KEY, mode);
+  }
+
+  setBurstGapSeconds(seconds: number) {
+    this.burstGapSeconds = seconds;
+    save(BURST_GAP_KEY, seconds);
+  }
 
   setProgressiveLoupe(on: boolean) {
     this.progressiveLoupe = on;
