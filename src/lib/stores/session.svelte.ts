@@ -540,6 +540,106 @@ class SessionStore {
     this.selectionAnchor = this.focusedIndex;
   }
 
+  // --- survey (N-up elimination) ---
+
+  /** Candidate file ids while the survey is open. It SHRINKS as photos are
+   *  eliminated — that is the whole point of the view, and why this is its own
+   *  list rather than a filter over `filtered`. */
+  surveyIds = $state<number[]>([]);
+
+  /** The survey's live items, in filtered order. An id that has left the filter
+   *  (rejected while "Picks only" is on, say) simply drops out. */
+  surveyItems = $derived.by(() => {
+    if (this.surveyIds.length === 0) return [];
+    const wanted = new Set(this.surveyIds);
+    return this.filtered.filter((i) => wanted.has(i.id));
+  });
+
+  /** Ceiling on a survey. Every tile loads a full loupe preview, and past this
+   *  many they are too small to judge anyway. */
+  static readonly MAX_SURVEY = 16;
+
+  /** How many photos were asked for, when that exceeded MAX_SURVEY; 0 when the
+   *  whole set fits. Surfaced in the view rather than truncating in silence. */
+  surveyRequested = $state(0);
+
+  /** Candidates for a survey, in filtered order: an explicit selection first,
+   *  otherwise the focused photo's burst. Returns [] when there is nothing
+   *  worth comparing. */
+  private surveyCandidates(): number[] {
+    if (this.selectedIds.size >= 2) {
+      return this.filtered.filter((i) => this.selectedIds.has(i.id)).map((i) => i.id);
+    }
+    const burst = this.focusedBurst;
+    if (burst) return burst.members.map((idx) => this.filtered[idx].id);
+    return [];
+  }
+
+  /** True when there is something to survey — drives whether the entry points
+   *  offer it at all, so the command is never a silent no-op. */
+  canSurvey = $derived(this.selectedIds.size >= 2 || this.focusedBurst !== null);
+
+  openSurvey() {
+    const all = this.surveyCandidates();
+    if (all.length < 2) return;
+    this.surveyRequested = all.length > SessionStore.MAX_SURVEY ? all.length : 0;
+    const ids = all.slice(0, SessionStore.MAX_SURVEY);
+    this.surveyIds = ids;
+    const first = this.filtered.findIndex((i) => i.id === ids[0]);
+    if (first >= 0) {
+      // Dropping the selection is not tidiness: `targets()` prefers a selection
+      // over the focus, so leaving it would make every reject hit all N at once
+      // — the exact opposite of eliminating one at a time.
+      this.collapseSelection();
+      this.focusedIndex = first;
+      this.selectionAnchor = first;
+    }
+    view.mode = "survey";
+  }
+
+  closeSurvey() {
+    this.surveyIds = [];
+    this.surveyRequested = 0;
+    view.mode = "grid";
+  }
+
+  /** Move focus to the next/previous survey candidate, stopping at the ends. */
+  stepSurvey(delta: number) {
+    const items = this.surveyItems;
+    if (items.length === 0) return;
+    const current = items.findIndex((i) => i.id === this.focused?.id);
+    const next = Math.min(items.length - 1, Math.max(0, current + delta));
+    if (next === current) return;
+    const idx = this.filtered.findIndex((i) => i.id === items[next].id);
+    if (idx >= 0) this.focusedIndex = idx;
+  }
+
+  /** Focus a survey tile directly (click/tap). */
+  focusSurveyItem(id: number) {
+    const idx = this.filtered.findIndex((i) => i.id === id);
+    if (idx >= 0) this.focusedIndex = idx;
+  }
+
+  /** Take a photo out of the running. The survey narrows to the remainder and
+   *  focus lands on a neighbour, so eliminating is a single keystroke that
+   *  leaves you ready for the next one. */
+  eliminateFromSurvey(ids: number[]) {
+    if (this.surveyIds.length === 0) return;
+    const gone = new Set(ids);
+    const before = this.surveyItems;
+    const at = before.findIndex((i) => gone.has(i.id));
+    this.surveyIds = this.surveyIds.filter((id) => !gone.has(id));
+
+    const left = this.surveyItems;
+    if (left.length === 0) {
+      this.closeSurvey();
+      return;
+    }
+    // Prefer whatever slid into the vacated slot, else the new last one.
+    const target = left[Math.min(at < 0 ? 0 : at, left.length - 1)];
+    this.focusSurveyItem(target.id);
+  }
+
   /** Flip which half of the focused pair is displayed (J). */
   togglePairHalf() {
     const item = this.focused;
@@ -922,6 +1022,10 @@ class SessionStore {
     // flag write, so the backend pair fan-out matches.
     if (flag === -1) await api.enqueueAction(t, "delete", null, "both");
     else await api.removePendingForFiles(t, "delete");
+    // In the survey, rejecting is how you eliminate: the photo leaves the
+    // running and the survivors grow. Hooked here rather than in the view so it
+    // holds for every route to a reject — key, action bar or touch.
+    if (flag === -1 && view.mode === "survey") this.eliminateFromSurvey(t.ids);
     // The pending:changed listener refreshes too; this keeps ordering explicit.
     await this.refreshPending();
   }

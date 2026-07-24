@@ -5,6 +5,7 @@
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import Eraser from "@lucide/svelte/icons/eraser";
+  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
 
   const n = $derived(session.selectedIds.size);
 
@@ -89,6 +90,15 @@
       <X size={12} />
     </button>
   </span>
+  {#if session.canSurvey}
+    <!-- The survey acts on a selection, so this bar is its natural home — the
+         top toolbar has no room and this one only exists when there is
+         something to survey. -->
+    <button class="btn survey" title="Survey these side by side (N)" onclick={act(() => session.openSurvey())}>
+      <LayoutGrid size={14} /><span>Survey</span>
+    </button>
+  {/if}
+
   <span class="apply">Apply:</span>
 
   <div class="group">
@@ -226,6 +236,16 @@
     color: #bbb;
     border-radius: 5px;
     cursor: pointer;
+  }
+
+  /* Wider than the icon-only buttons, since it names an action rather than
+     applying a state. */
+  .btn.survey {
+    width: auto;
+    gap: 5px;
+    padding: 0 9px;
+    font-size: 12px;
+    font-family: inherit;
   }
 
   .btn:hover:not(.active) {

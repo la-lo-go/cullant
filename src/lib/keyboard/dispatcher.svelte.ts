@@ -33,15 +33,22 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     // Shift on a navigation key extends the selection instead of moving focus.
     // It keeps its auto-advance-inverter meaning on classification keys, which
     // go through `maybeAdvance` on a separate path.
+    //
+    // In the survey, arrows walk the candidates rather than the whole catalog:
+    // stepping out of the field on show would defeat the point of the view.
     case "nav.next":
+      if (view.mode === "survey") return session.stepSurvey(1);
       return e?.shiftKey ? session.extendSelection(1) : session.moveFocus(1);
     case "nav.prev":
+      if (view.mode === "survey") return session.stepSurvey(-1);
       return e?.shiftKey ? session.extendSelection(-1) : session.moveFocus(-1);
     case "nav.down": {
+      if (view.mode === "survey") return session.stepSurvey(1);
       const rows = session.gridCols ?? 1;
       return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
     }
     case "nav.up": {
+      if (view.mode === "survey") return session.stepSurvey(-1);
       const rows = -(session.gridCols ?? 1);
       return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
     }
@@ -103,9 +110,15 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       session.ensureFocus();
       view.mode = "compare";
       return;
+    case "view.survey":
+      // A no-op without at least two candidates; `canSurvey` is what the entry
+      // points gate on so the key is never offered as a dead end.
+      session.openSurvey();
+      return;
     case "view.back":
       // Esc returns to the grid from loupe/compare; in grid it clears selection.
-      if (view.mode !== "grid") view.mode = "grid";
+      if (view.mode === "survey") session.closeSurvey();
+      else if (view.mode !== "grid") view.mode = "grid";
       else session.clearSelection();
       return;
     case "view.fullscreen":

@@ -29,6 +29,7 @@ export type CommandId =
   | "view.grid"
   | "view.viewer"
   | "view.compare"
+  | "view.survey"
   | "view.back"
   | "view.fullscreen"
   | "zoom.toggle"
@@ -99,6 +100,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "view.grid", title: "Grid view", category: "Views" },
   { id: "view.viewer", title: "Loupe view", category: "Views" },
   { id: "view.compare", title: "Compare view", category: "Views" },
+  { id: "view.survey", title: "Survey the selection or burst", category: "Views" },
   { id: "view.back", title: "Back to grid", category: "Views" },
   { id: "view.fullscreen", title: "Toggle full screen", category: "Views" },
   { id: "zoom.toggle", title: "Toggle zoom", category: "Zoom" },
@@ -157,6 +159,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "view.grid": ["g"],
   "view.viewer": ["e", "enter"],
   "view.compare": ["c"],
+  "view.survey": ["n"],
   "view.back": ["escape"],
   "view.fullscreen": ["f"],
   "zoom.toggle": ["z", "space"],

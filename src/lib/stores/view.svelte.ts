@@ -1,4 +1,4 @@
-export type ViewMode = "grid" | "viewer" | "compare";
+export type ViewMode = "grid" | "viewer" | "compare" | "survey";
 
 /**
  * Hard zoom ceiling: 6x of 1:1 pixel scale (deep pixel-peeping past actual
