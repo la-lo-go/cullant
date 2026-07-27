@@ -83,9 +83,20 @@ impl ThumbPool {
             signal: Condvar::new(),
         });
 
-        let workers = thread::available_parallelism()
-            .map(|n| (n.get().saturating_sub(1)).max(2))
-            .unwrap_or(4);
+        // Mirrors the rayon cap in lib.rs, which this pool was never covered by:
+        // each in-flight decode holds the source bytes plus a full-size decode
+        // plus a resize buffer, so an 8-core phone spawning 7 workers reached
+        // ~400 MB of native allocations in a process with no largeHeap.
+        let workers = if cfg!(target_os = "android") {
+            thread::available_parallelism()
+                .map(|n| n.get().min(3))
+                .unwrap_or(2)
+                .max(2)
+        } else {
+            thread::available_parallelism()
+                .map(|n| (n.get().saturating_sub(1)).max(2))
+                .unwrap_or(4)
+        };
         for i in 0..workers {
             let queue = queue.clone();
             let db = db.clone();
