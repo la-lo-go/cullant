@@ -11,6 +11,8 @@
 
 use crate::error::AppResult;
 
+pub mod stats;
+
 mod local;
 pub use local::LocalFsStore;
 

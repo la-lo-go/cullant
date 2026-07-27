@@ -22,6 +22,13 @@ use crate::store::{read_all, ProjectStore};
 /// `RawSource` derefs to `&[u8]`, so the same source also feeds the EXIF and
 /// plain-JPEG decode paths without another read.
 pub fn open_source(store: &dyn ProjectStore, rel: &str) -> AppResult<RawSource> {
+    let started = std::time::Instant::now();
+    let source = open_source_inner(store, rel)?;
+    crate::store::stats::source_opened(source.buf().len(), started.elapsed());
+    Ok(source)
+}
+
+fn open_source_inner(store: &dyn ProjectStore, rel: &str) -> AppResult<RawSource> {
     if let Some(path) = store.local_path(rel) {
         if let Ok(source) = RawSource::new(&path) {
             return Ok(source);

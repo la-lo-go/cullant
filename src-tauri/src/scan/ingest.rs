@@ -199,6 +199,7 @@ pub fn run_ingest_inner(
     // Announce the total up front so the preload panel shows `0 / N` immediately
     // instead of `0 / ?` for the whole first-chunk window.
     meta_progress(0, total);
+    crate::store::stats::reset();
 
     let mut meta_updated = 0usize;
     let done = AtomicUsize::new(0);
@@ -230,8 +231,9 @@ pub fn run_ingest_inner(
         write_metadata_batch(db, extracted)?;
     }
     tracing::info!(
-        "ingest metadata: {total} files in {:.1?}",
-        started.elapsed()
+        "ingest metadata: {total} files in {:.1?} [{}]",
+        started.elapsed(),
+        crate::store::stats::report()
     );
     meta_done(meta_updated);
 
@@ -359,7 +361,11 @@ fn generate_pass(
             progress(done, total);
         }
     }
-    tracing::info!("ingest {total} artifacts in {:.1?}", started.elapsed());
+    tracing::info!(
+        "ingest {total} artifacts in {:.1?} [{}]",
+        started.elapsed(),
+        crate::store::stats::report()
+    );
     Ok(())
 }
 

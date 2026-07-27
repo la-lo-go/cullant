@@ -113,6 +113,7 @@ impl SafStore {
                 prefix = child_rel;
                 continue;
             }
+            super::stats::backend_call();
             let entries = self
                 .saf()
                 .list_children(&self.tree_uri, &parent_doc)
@@ -130,6 +131,7 @@ impl SafStore {
 
     fn open_mode(&self, rel: &str, mode: &str) -> AppResult<std::fs::File> {
         let doc = self.resolve(rel)?;
+        super::stats::backend_call();
         self.saf()
             .open_file(&self.tree_uri, &doc, mode)
             .map_err(Self::err)
@@ -147,6 +149,7 @@ impl ProjectStore for SafStore {
         let mut stack: Vec<(String, String)> = vec![(String::new(), self.root_document_id.clone())];
 
         while let Some((prefix, parent_doc)) = stack.pop() {
+            super::stats::backend_call();
             let entries: Vec<SafEntry> = self
                 .saf()
                 .list_children(&self.tree_uri, &parent_doc)
