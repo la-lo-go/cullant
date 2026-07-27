@@ -61,7 +61,7 @@ fn unix_secs(t: SystemTime) -> i64 {
 /// deriving ext/basename/dir from the `/`-separated rel_path (so it works the
 /// same for a real filesystem and a SAF tree). Non-media and extension-less
 /// files are dropped, matching the previous `WalkDir`-based behavior.
-fn collect_found(entries: Vec<StoreEntry>, progress: &mut dyn FnMut(usize)) -> Vec<FoundFile> {
+fn collect_found(entries: Vec<StoreEntry>) -> Vec<FoundFile> {
     let mut found = Vec::new();
     for entry in entries {
         let last = entry.rel_path.rsplit('/').next().unwrap_or(&entry.rel_path);
@@ -92,10 +92,6 @@ fn collect_found(entries: Vec<StoreEntry>, progress: &mut dyn FnMut(usize)) -> V
             size: entry.size,
             mtime: entry.mtime,
         });
-
-        if found.len() % 500 == 0 {
-            progress(found.len());
-        }
     }
     found
 }
@@ -137,7 +133,10 @@ pub fn scan_with_store(
     progress: &mut dyn FnMut(usize),
 ) -> AppResult<ScanDone> {
     let started = std::time::Instant::now();
-    let found = collect_found(store.list_recursive(SKIP_DIRS)?, progress);
+    // Reported from inside the walk, not after it: classifying the listing is
+    // pure in-memory work, so the walk is the only part worth a progress count.
+    let entries = store.list_recursive(SKIP_DIRS, progress)?;
+    let found = collect_found(entries);
     let total_found = found.len();
     progress(total_found);
 

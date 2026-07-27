@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use walkdir::WalkDir;
 
-use super::{split_parent, ProjectStore, StoreEntry};
+use super::{split_parent, ProjectStore, StoreEntry, WALK_PROGRESS_EVERY};
 use crate::error::AppResult;
 
 pub struct LocalFsStore {
@@ -32,7 +32,11 @@ fn unix_secs(t: SystemTime) -> i64 {
 }
 
 impl ProjectStore for LocalFsStore {
-    fn list_recursive(&self, skip_dirs: &[&str]) -> AppResult<Vec<StoreEntry>> {
+    fn list_recursive(
+        &self,
+        skip_dirs: &[&str],
+        progress: &mut dyn FnMut(usize),
+    ) -> AppResult<Vec<StoreEntry>> {
         let mut out = Vec::new();
         let walker = WalkDir::new(&self.root)
             .follow_links(false)
@@ -61,6 +65,9 @@ impl ProjectStore for LocalFsStore {
                 size: meta.len() as i64,
                 mtime: meta.modified().map(unix_secs).unwrap_or(0),
             });
+            if out.len() % WALK_PROGRESS_EVERY == 0 {
+                progress(out.len());
+            }
         }
         Ok(out)
     }
@@ -137,7 +144,7 @@ mod tests {
 
         let store = LocalFsStore::new(root);
         let mut rels: Vec<String> = store
-            .list_recursive(&["_trash"])
+            .list_recursive(&["_trash"], &mut |_| {})
             .unwrap()
             .into_iter()
             .map(|e| e.rel_path)

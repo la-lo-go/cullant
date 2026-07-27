@@ -34,12 +34,25 @@ pub struct StoreEntry {
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub const MIME_DIRECTORY: &str = "vnd.android.document/directory";
 
+/// How often a walk reports its running count. Frequent enough to look alive on
+/// slow storage, rare enough that the emit itself costs nothing.
+pub const WALK_PROGRESS_EVERY: usize = 200;
+
 /// Backend-agnostic operations on a project's files. All paths are
 /// project-root-relative, `/`-separated.
 pub trait ProjectStore: Send + Sync {
     /// Every media file anywhere under the root, skipping any directory whose
     /// name is in `skip_dirs` or begins with `.`. Directories are not returned.
-    fn list_recursive(&self, skip_dirs: &[&str]) -> AppResult<Vec<StoreEntry>>;
+    ///
+    /// `progress` is called with the running entry count as the walk proceeds.
+    /// The walk is the longest silent stretch of opening a project — on SAF it
+    /// is one binder round-trip per directory — so it has to report from inside
+    /// rather than only once it returns.
+    fn list_recursive(
+        &self,
+        skip_dirs: &[&str],
+        progress: &mut dyn FnMut(usize),
+    ) -> AppResult<Vec<StoreEntry>>;
 
     /// Open a file for reading. Returns a real `std::fs::File` on every backend
     /// (on SAF via a detached ParcelFileDescriptor), so callers get normal

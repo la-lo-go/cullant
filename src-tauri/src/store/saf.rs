@@ -15,7 +15,7 @@ use rusqlite::{params, OptionalExtension};
 use tauri::AppHandle;
 use tauri_plugin_saf::{SafEntry, SafExt};
 
-use super::{split_parent, ProjectStore, StoreEntry, MIME_DIRECTORY};
+use super::{split_parent, ProjectStore, StoreEntry, MIME_DIRECTORY, WALK_PROGRESS_EVERY};
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
 
@@ -137,7 +137,11 @@ impl SafStore {
 }
 
 impl ProjectStore for SafStore {
-    fn list_recursive(&self, skip_dirs: &[&str]) -> AppResult<Vec<StoreEntry>> {
+    fn list_recursive(
+        &self,
+        skip_dirs: &[&str],
+        progress: &mut dyn FnMut(usize),
+    ) -> AppResult<Vec<StoreEntry>> {
         let mut files = Vec::new();
         // (rel_prefix, document_id) worklist, starting at the root.
         let mut stack: Vec<(String, String)> = vec![(String::new(), self.root_document_id.clone())];
@@ -166,6 +170,9 @@ impl ProjectStore for SafStore {
                         // SAF reports last-modified in milliseconds.
                         mtime: e.mtime / 1000,
                     });
+                    if files.len() % WALK_PROGRESS_EVERY == 0 {
+                        progress(files.len());
+                    }
                 }
             }
         }
