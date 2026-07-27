@@ -68,6 +68,41 @@ Key flags:
 | `--split-per-abi` | With multiple targets, emit one APK/AAB per ABI instead of a single fat one. |
 | (no target flags) | Builds all 4 ABIs (`aarch64`, `armv7`, `i686`, `x86_64`) into one **universal** artifact bundling every `.so`. |
 
+### Type-checking the Android target without a full build
+
+Anything behind `#[cfg(target_os = "android")]` — the whole SAF store, the
+thread-pool caps, the logcat setup — is invisible to `cargo clippy` on Windows,
+so it can break without any local check failing. A `cargo check` against the
+target catches that in ~20 s instead of a ~10 min build.
+
+`rusqlite` is bundled, so it needs the NDK's C compiler on `PATH`:
+
+```sh
+NDK="/c/Android/sdk/ndk/27.2.12479018/toolchains/llvm/prebuilt/windows-x86_64/bin"
+export PATH="$NDK:$PATH"
+export ANDROID_NDK_HOME="C:\Android\sdk\ndk\27.2.12479018"
+export CC_aarch64_linux_android="$NDK/aarch64-linux-android24-clang.cmd"
+export AR_aarch64_linux_android="$NDK/llvm-ar.exe"
+cd src-tauri && cargo check --target aarch64-linux-android --lib
+```
+
+Without the `CC_*`/`PATH` exports it fails at `cc-rs: failed to find tool
+"clang.exe"` while building `libsqlite3-sys`, not at anything in this codebase.
+
+### Reading the app's logs on a device
+
+Android discards a native library's stdout, so `tracing_subscriber::fmt()` shows
+nothing there. The app installs `android_logger` instead (see `run()` in
+`src-tauri/src/lib.rs`), so every `tracing::info!` reaches logcat under one tag:
+
+```sh
+adb logcat -s cullant
+```
+
+That is where the ingest reports its per-phase timings and its storage counters
+(`N sources, X GB, Ys in opens, Z backend calls`) — the numbers that say whether
+an import is bound by reading files or by something else.
+
 ### Launch (splash) screen
 
 The launch screen is customized: the app theme's `windowBackground` is a
