@@ -40,6 +40,11 @@
   // status lives here — the top bar never shows these messages.
   const bgStatus = $derived.by(() => {
     if (catalog.scanning) return `Scanning… ${catalog.scanFound || 0}`;
+    // Highest priority after the scan: until this finishes the grid is ordered
+    // by file date rather than capture time, so say so rather than leaving the
+    // reorder unexplained.
+    const m = catalog.metaProgress;
+    if (m.total > 0) return `Reading photo info ${m.done} / ${m.total}`;
     const t = catalog.thumbProgress;
     if (t.total > 0) return `Thumbnails ${t.done} / ${t.total}`;
     const p = catalog.previewProgress;

@@ -25,11 +25,13 @@ class CatalogStore {
   /** Photos that took their state from an XMP sidecar in the last scan; drives
    *  a one-off notice so an import is never silent. 0 = nothing to say. */
   xmpImported = $state(0);
-  /** True while the initial scan + metadata read blocks the grid. Released on
-   *  `metadata:done`, so the grid appears correctly ordered without waiting for
-   *  thumbnails (those fill in progressively afterwards). */
+  /** True while the folder walk still has no file list to show. Released on
+   *  `scan:done`, the moment `items` is first populated — the grid then appears
+   *  in mtime order and re-sorts by capture time on `metadata:done`. Everything
+   *  after the walk (metadata, thumbnails, previews) reports in the grid's own
+   *  status pill instead of blocking it. */
   preloading = $state(false);
-  /** Gated metadata read (metadata:progress) — drives the preload screen. */
+  /** Background metadata read (metadata:progress); total 0 = idle. */
   metaProgress = $state({ done: 0, total: 0 });
   /** Background thumbnail pregeneration (thumbs:progress); total 0 = idle. */
   thumbProgress = $state({ done: 0, total: 0 });
@@ -63,13 +65,10 @@ class CatalogStore {
       this.preloading = true;
       this.metaProgress = { done: 0, total: 0 };
       await this.refreshForOpen();
-      // Recover the gate if the backend finished ingesting before these event
-      // listeners existed (startup auto-open of an already-ingested project):
-      // no metadata:done would ever arrive. With files present and nothing left
-      // to read, it's safe to show the grid now.
-      if (info.fileCount > 0 && (await api.ingestPending()) === 0) {
-        this.preloading = false;
-      }
+      // This path adopts a project the backend already opened, so the catalog is
+      // populated by the line above and no scan:done of THIS session will ever
+      // arrive to release the gate. There is nothing left to wait for.
+      this.preloading = false;
       // Same recovery for previewReady: this path adopts a project the backend
       // already had open (no fresh scan of THIS session will emit metadata:done
       // or previews:progress to seed it), so every already-generated preview
@@ -211,13 +210,21 @@ listen<ScanDone>("scan:done", async (e) => {
   // would be worse.
   catalog.xmpImported = e.payload.xmpImported ?? 0;
   await catalog.refresh();
+  // The file list exists now, so show it. Ordering is by mtime until the
+  // metadata read finishes and re-sorts by capture time — on a camera card the
+  // two orders match, and waiting for the read means staring at a progress bar
+  // instead of at the photos.
+  catalog.preloading = false;
 });
 listen<{ done: number; total: number }>("metadata:progress", (e) => {
-  catalog.metaProgress = e.payload;
+  // Non-blocking pill. Reset to idle once the read completes.
+  catalog.metaProgress =
+    e.payload.done >= e.payload.total ? { done: 0, total: 0 } : e.payload;
 });
 listen("metadata:done", async () => {
-  // Metadata is in, so the grid can show correctly ordered by capture time.
-  // Release the gate; thumbnails fill in progressively (on-demand + background).
+  catalog.metaProgress = { done: 0, total: 0 };
+  // Capture times are in, so re-sort. Safety net for the gate too: a project
+  // opened before the scan:done listener existed still gets released here.
   catalog.preloading = false;
   await catalog.refresh();
   // Seed which items already have previews (e.g. from a previous session), so

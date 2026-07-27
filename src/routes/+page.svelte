@@ -421,37 +421,14 @@
     {/if}
 
     {#if catalog.preloading}
+      <!-- The only full-screen wait left: until the walk reports back there is
+           genuinely no file list to render. Everything after it (metadata,
+           thumbnails, previews) fills in behind the grid's status pill. -->
       <div class="preload">
-        {#if catalog.scanning}
-          <p class="phase">Scanning…{catalog.scanFound ? ` ${catalog.scanFound} found` : ""}</p>
-          <div class="pbar indeterminate" role="progressbar" aria-label="Scanning project folder">
-            <div class="pbar-fill"></div>
-          </div>
-        {:else}
-          {@const pdone = catalog.metaProgress.done}
-          {@const ptotal = catalog.metaProgress.total}
-          {@const ppct = ptotal > 0 ? Math.round((pdone / ptotal) * 100) : 0}
-          <p class="phase">
-            Reading photo info… <span class="count">{pdone} / {ptotal > 0 ? ptotal : "?"}</span>
-          </p>
-          {#if ptotal > 0}
-            <div
-              class="pbar"
-              role="progressbar"
-              aria-label="Reading photo info"
-              aria-valuemin="0"
-              aria-valuemax={ptotal}
-              aria-valuenow={pdone}
-            >
-              <div class="pbar-fill" style="width:{ppct}%"></div>
-            </div>
-            <p class="pct">{ppct}%</p>
-          {:else}
-            <div class="pbar indeterminate" role="progressbar" aria-label="Reading photo info">
-              <div class="pbar-fill"></div>
-            </div>
-          {/if}
-        {/if}
+        <p class="phase">Scanning…{catalog.scanFound ? ` ${catalog.scanFound} found` : ""}</p>
+        <div class="pbar indeterminate" role="progressbar" aria-label="Scanning project folder">
+          <div class="pbar-fill"></div>
+        </div>
       </div>
     {:else}
       {#if view.mode === "grid"}
@@ -987,11 +964,6 @@
     opacity: 0.8;
   }
 
-  .preload .count {
-    font-variant-numeric: tabular-nums;
-    opacity: 0.95;
-  }
-
   /* Custom progress bar: a track + an accent fill, replacing the native
      <progress> element (which ignored the theme and looked out of place). */
   .preload .pbar {
@@ -1026,14 +998,6 @@
       transform: translateX(320%);
     }
   }
-
-  .preload .pct {
-    margin: 0;
-    font-size: 12px;
-    opacity: 0.6;
-    font-variant-numeric: tabular-nums;
-  }
-
 
   button.active {
     background: var(--accent-fill);
