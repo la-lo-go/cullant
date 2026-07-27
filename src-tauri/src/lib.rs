@@ -174,6 +174,19 @@ pub mod bench {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Android discards a native library's stdout, so the fmt subscriber writes
+    // into nothing there and every timing the ingest logs is invisible on the
+    // one platform whose numbers we cannot otherwise get. `tracing`'s `log`
+    // feature forwards its events to the `log` facade whenever no tracing
+    // subscriber is installed, which android_logger puts on logcat:
+    //   adb logcat -s cullant
+    #[cfg(target_os = "android")]
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Info)
+            .with_tag("cullant"),
+    );
+    #[cfg(not(target_os = "android"))]
     tracing_subscriber::fmt().init();
 
     // Mobile: cap the decode pool. Phones report 8 cores but sustain far
