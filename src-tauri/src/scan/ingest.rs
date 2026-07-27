@@ -47,7 +47,16 @@ const CHUNK: usize = if cfg!(target_os = "android") { 8 } else { 32 };
 /// Minimum gap between metadata progress emits. Progress is counted per file
 /// (inside the parallel burst); this throttle coalesces the emits so a fast
 /// parse can't flood IPC. The final item always emits regardless.
-const PROGRESS_THROTTLE_MS: u64 = 30;
+///
+/// A progress bar does not need more than a few updates a second, and on Android
+/// every emit is an `evaluateJavascript` job on the main-thread looper — the same
+/// one every SAF file open is queued on, so the emits compete directly with the
+/// work they are reporting.
+const PROGRESS_THROTTLE_MS: u64 = if cfg!(target_os = "android") {
+    250
+} else {
+    100
+};
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
