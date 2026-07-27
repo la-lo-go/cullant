@@ -151,6 +151,10 @@
       session.filtersPanelOpen = false;
       return;
     }
+    if (session.viewPanelOpen) {
+      session.viewPanelOpen = false;
+      return;
+    }
     if (view.mode !== "grid") {
       view.mode = "grid";
       return;
