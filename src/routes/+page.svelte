@@ -1113,10 +1113,18 @@
     animation: pill-pop 0.15s ease;
   }
 
+  /* The counts arrive as the scan progresses, so `0` becomes `1247` under the
+     user's finger. Tabular digits plus a reserved width keep the button — and
+     therefore the whole wrapping toolbar, and the popovers anchored to it —
+     from reflowing while someone is aiming at it. */
   .media-btn .count {
     font-weight: 400;
     opacity: 0.65;
     font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    display: inline-block;
+    min-width: 3ch;
+    text-align: right;
   }
 
   .media-btn:disabled {
