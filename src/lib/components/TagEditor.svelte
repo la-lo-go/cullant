@@ -3,8 +3,11 @@
   import { tags } from "../stores/tags.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
+  import { backdropDismiss } from "../backdrop";
 
   let { onclose }: { onclose: () => void } = $props();
+
+  const dismiss = backdropDismiss(() => onclose());
 
   let newName = $state("");
   let newScope = $state(2);
@@ -92,7 +95,7 @@
 
 <div
   class="backdrop"
-  onclick={onclose}
+  {...dismiss}
   onkeydown={(e) => e.key === "Escape" && recording === null && onclose()}
   role="presentation"
 >

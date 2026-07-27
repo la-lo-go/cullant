@@ -1,11 +1,14 @@
 <script lang="ts">
   import { session, type GridDensity } from "../stores/session.svelte";
   import { catalog } from "../stores/catalog.svelte";
+  import { backdropDismiss } from "../backdrop";
   import { GROUP_DIMS } from "../gridGroups";
   import DragList from "./DragList.svelte";
   import X from "@lucide/svelte/icons/x";
   import Link from "@lucide/svelte/icons/link";
   import Unlink from "@lucide/svelte/icons/unlink";
+
+  const dismiss = backdropDismiss(() => (session.viewPanelOpen = false));
 
   // Pairing only exists where RAWs do; without them the choice is meaningless.
   const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
@@ -94,7 +97,7 @@
   }
 </script>
 
-<div class="backdrop" role="presentation" onclick={() => (session.viewPanelOpen = false)}></div>
+<div class="backdrop" role="presentation" {...dismiss}></div>
 
 <div
   class="panel"

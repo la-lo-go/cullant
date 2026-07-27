@@ -2,12 +2,15 @@
   import { keymap } from "../keyboard/dispatcher.svelte";
   import { COMMANDS, DEFAULT_BINDINGS, normalizeKey } from "../keyboard/keymap";
   import X from "@lucide/svelte/icons/x";
+  import { backdropDismiss } from "../backdrop";
 
   let { onclose }: { onclose: () => void } = $props();
 
   function currentKeys(id: (typeof COMMANDS)[number]["id"]): string {
     return (keymap.overrides[id] ?? DEFAULT_BINDINGS[id]).join(", ");
   }
+
+  const dismiss = backdropDismiss(() => onclose());
 
   let panel = $state<HTMLDivElement | null>(null);
 
@@ -37,7 +40,7 @@
 
 <div
   class="backdrop"
-  onclick={onclose}
+  {...dismiss}
   onkeydown={(e) => e.key === "Escape" && onclose()}
   role="presentation"
 >

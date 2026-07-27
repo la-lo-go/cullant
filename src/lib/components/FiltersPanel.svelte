@@ -1,5 +1,6 @@
 <script lang="ts">
   import { catalog } from "../stores/catalog.svelte";
+  import { backdropDismiss } from "../backdrop";
   import {
     session,
     LABELS,
@@ -192,6 +193,8 @@
 
   let panelEl = $state<HTMLDivElement | null>(null);
 
+  const dismiss = backdropDismiss(() => (session.filtersPanelOpen = false));
+
   // Focus the panel on open. The toolbar toggle blurs its trigger, so without
   // this nothing inside .panel holds focus and the Escape keydown never reaches
   // onPanelKeydown; it would fall through to the global keymap instead.
@@ -259,11 +262,7 @@
 </script>
 
 <!-- Backdrop closes the panel on an outside click. -->
-<div
-  class="backdrop"
-  role="presentation"
-  onclick={() => (session.filtersPanelOpen = false)}
-></div>
+<div class="backdrop" role="presentation" {...dismiss}></div>
 
 <div
   class="panel"

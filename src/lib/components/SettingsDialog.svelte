@@ -3,6 +3,7 @@
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { api, type DeletionMode } from "../api";
+  import { backdropDismiss } from "../backdrop";
   import type { BurstMode } from "../bursts";
   import DragList from "./DragList.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -35,6 +36,8 @@
   // desktop uses the title-bar menu. The auto-rescan help text reflects whichever
   // one this device actually has.
   const isTouch = navigator.userAgent.includes("Android");
+
+  const dismiss = backdropDismiss(() => onclose());
 
   let panel = $state<HTMLDivElement | null>(null);
 
@@ -77,7 +80,7 @@
 
 <div
   class="backdrop"
-  onclick={onclose}
+  {...dismiss}
   onkeydown={(e) => e.key === "Escape" && onclose()}
   role="presentation"
 >

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { session } from "../stores/session.svelte";
+  import { backdropDismiss } from "../backdrop";
   import { keymap } from "../keyboard/dispatcher.svelte";
   import { normalizeKey } from "../keyboard/keymap";
   import SearchIcon from "@lucide/svelte/icons/search";
@@ -19,6 +20,8 @@
   function close() {
     session.searchOpen = false;
   }
+
+  const dismiss = backdropDismiss(close);
 
   function clear() {
     session.nameFilter = "";
@@ -45,7 +48,7 @@
   }
 </script>
 
-<div class="backdrop" role="presentation" onclick={close}></div>
+<div class="backdrop" role="presentation" {...dismiss}></div>
 
 <div
   class="panel"

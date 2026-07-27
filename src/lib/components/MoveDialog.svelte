@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "../api";
   import { session } from "../stores/session.svelte";
+  import { backdropDismiss } from "../backdrop";
 
   let dest = $state("selects");
   let input = $state<HTMLInputElement | null>(null);
@@ -39,6 +40,8 @@
     session.moveDialogOpen = false;
   }
 
+  const dismiss = backdropDismiss(close);
+
   async function queue(action: "move" | "copy") {
     if (busy) return;
     const targets = moveTargets();
@@ -63,7 +66,7 @@
   }
 </script>
 
-<div class="backdrop" onclick={close} onkeydown={(e) => e.key === "Escape" && close()} role="presentation">
+<div class="backdrop" {...dismiss} onkeydown={(e) => e.key === "Escape" && close()} role="presentation">
   <div
     class="dialog"
     onclick={(e) => e.stopPropagation()}

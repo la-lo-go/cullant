@@ -1,6 +1,10 @@
 <script lang="ts">
+  import { backdropDismiss } from "../backdrop";
+
   let { title = "Notice", message, onclose }: { title?: string; message: string; onclose: () => void } =
     $props();
+
+  const dismiss = backdropDismiss(() => onclose());
 
   let panel = $state<HTMLDivElement | null>(null);
 
@@ -17,7 +21,7 @@
 
 <div
   class="backdrop"
-  onclick={onclose}
+  {...dismiss}
   onkeydown={(e) => e.key === "Escape" && onclose()}
   role="presentation"
 >

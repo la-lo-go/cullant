@@ -23,6 +23,7 @@
   import History from "@lucide/svelte/icons/history";
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import X from "@lucide/svelte/icons/x";
+  import { backdropDismiss } from "../backdrop";
 
   let plan = $state<CommitPlan | null>(null);
   let running = $state(false);
@@ -436,6 +437,8 @@
     session.commitDialogOpen = false;
   }
 
+  const dismiss = backdropDismiss(close);
+
   let panel = $state<HTMLDivElement | null>(null);
 
   // Focus the panel so keys (e.g. X) land here and stop, instead of flagging the
@@ -485,7 +488,7 @@
 
 <div
   class="backdrop"
-  onclick={close}
+  {...dismiss}
   onkeydown={(e) => e.key === "Escape" && close()}
   role="presentation"
 >

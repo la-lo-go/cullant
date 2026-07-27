@@ -1,7 +1,10 @@
 <script lang="ts">
   import { session } from "../stores/session.svelte";
+  import { backdropDismiss } from "../backdrop";
 
   let { groupId }: { groupId: number } = $props();
+
+  const dismiss = backdropDismiss(() => (session.recoupleDialogFor = null));
 
   let panel = $state<HTMLDivElement | null>(null);
 
@@ -18,7 +21,7 @@
 
 <div
   class="backdrop"
-  onclick={() => (session.recoupleDialogFor = null)}
+  {...dismiss}
   onkeydown={(e) => e.key === "Escape" && (session.recoupleDialogFor = null)}
   role="presentation"
 >
