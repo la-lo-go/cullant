@@ -233,14 +233,24 @@
       return;
     }
     let wasOk = true;
+    // A single bad verdict is not enough to put a blocking panel over the app.
+    // On Android the probe resolves through SAF on the same thread the import
+    // saturates, so one lost race reports "not found" for a folder that is
+    // perfectly fine — and the panel sits above every dialog and swallows all
+    // keys until the next tick clears it.
+    let failures = 0;
     const check = async () => {
+      // Nothing can move the folder mid-import, and probing while the storage
+      // backend is already saturated is exactly when the answer is worthless.
+      if (catalog.ingesting) return;
       try {
         const info = await api.probeStorage(proj.rootPath);
         storageOk = info.state === "ok";
         if (info.state === "ok") {
+          failures = 0;
           wasOk = true;
           folderLostMsg = ""; // reconnected → let the user carry on
-        } else if (wasOk) {
+        } else if (++failures >= 2 && wasOk) {
           wasOk = false;
           folderLostMsg =
             info.state === "disconnected"

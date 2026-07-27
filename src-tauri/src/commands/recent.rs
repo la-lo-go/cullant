@@ -127,7 +127,11 @@ pub fn list_recent_projects(app: AppHandle) -> Vec<RecentProject> {
 /// Probe the storage backing an arbitrary project identifier — used to watch the
 /// currently-open project's folder/volume while it's in use, so the UI can warn
 /// when it's disconnected or removed.
-#[tauri::command]
+///
+/// `async` puts it on the sync threadpool instead of running inline on the IPC
+/// handler: on Android the probe makes two blocking JNI calls, and every other
+/// command would otherwise queue behind them on a timer, forever.
+#[tauri::command(async)]
 pub fn probe_storage(app: AppHandle, id: String) -> crate::storage::StorageInfo {
     crate::storage::probe(&app, &id)
 }

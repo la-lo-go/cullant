@@ -55,6 +55,20 @@ class CatalogStore {
   /** Total present-file counts per kind, independent of the active tab. */
   mediaCounts = $state<MediaCounts>({ photos: 0, videos: 0 });
 
+  /** True while any part of opening a project is still running — the walk, the
+   *  metadata read, or either background artifact pass. Callers use it to keep
+   *  off the storage backend while it is already saturated. */
+  get ingesting() {
+    return (
+      this.scanning ||
+      this.preloading ||
+      this.metaProgress.total > 0 ||
+      this.thumbProgress.total > 0 ||
+      this.previewProgress.total > 0 ||
+      this.videoProgress.total > 0
+    );
+  }
+
   /// Adopt a project the backend already opened (CULLANT_OPEN_PROJECT).
   async adoptCurrent() {
     const info = await api.currentProject();
