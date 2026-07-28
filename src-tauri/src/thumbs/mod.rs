@@ -193,10 +193,12 @@ impl ThumbPool {
                 in_flight: HashMap::new(),
             })),
             signal: Condvar::new(),
-            // Deep enough that every worker has work queued behind it plus a
-            // screenful of slack, shallow enough that a flick-scroll cannot
-            // bank minutes of decoding.
-            max_interactive: (workers * 4).max(16),
+            // The floor has to exceed a screenful, or eviction starts dropping
+            // cells the user is looking at right now: a dense grid on a large
+            // display can ask for well over a hundred at once, and they all
+            // arrive before any of them completes. A flick-scroll generates
+            // thousands, so this still bounds the thing it is meant to bound.
+            max_interactive: (workers * 4).max(128),
         });
 
         for i in 0..workers {

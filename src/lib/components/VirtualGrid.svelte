@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, thumbUrl, displayDims, type ItemLite } from "../api";
+  import { SvelteMap } from "svelte/reactivity";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
@@ -61,6 +62,26 @@
     Blue: "#5588e0",
     Purple: "#9a66d6",
   };
+
+  // A thumbnail request the backend refused -- almost always because the pool
+  // evicted it to keep a fast scroll from banking minutes of decoding. The cell
+  // is still on screen, so ask again rather than leaving a skeleton there
+  // forever. Capped, so a genuinely broken file cannot spin.
+  const MAX_THUMB_RETRIES = 3;
+  const RETRY_DELAY_MS = 400;
+  const thumbRetry = new SvelteMap<number, number>();
+
+  function retryThumb(id: number) {
+    const n = thumbRetry.get(id) ?? 0;
+    if (n >= MAX_THUMB_RETRIES) return;
+    setTimeout(() => thumbRetry.set(id, n + 1), RETRY_DELAY_MS);
+  }
+
+  /** Thumbnail URL, re-minted on each retry so the browser refetches it. */
+  function thumbSrc(item: ItemLite): string {
+    const n = thumbRetry.get(item.id);
+    return n ? `${thumbUrl(item)}&retry=${n}` : thumbUrl(item);
+  }
 
   // Video ids whose pregenerated poster couldn't be served (ffmpeg absent or
   // the clip was undecodable → 404). Those cells fall back to a live <video>.
@@ -905,12 +926,13 @@
               </div>
             {:else}
               <img
-                src={thumbUrl(v.item)}
+                src={thumbSrc(v.item)}
                 alt=""
                 decoding="async"
                 draggable="false"
                 loading="eager"
                 onload={() => loaded.add(v.item.id)}
+                onerror={() => retryThumb(v.item.id)}
               />
             {/if}
             {#if v.item.kind !== 2 && !v.item.thumbFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id) && catalog.previewProgress.total > 0}
