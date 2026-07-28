@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use image::DynamicImage;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::db::Db;
 use crate::decode;
@@ -444,6 +444,37 @@ fn file_row(db: &Arc<Db>, file_id: i64) -> AppResult<(String, i64, i64, Option<i
     })
 }
 
+/// The JPEG half of a live RAW+JPEG pair, when `file_id` is the RAW.
+///
+/// Cullant's RAW fast path already renders the embedded JPEG rather than
+/// demosaicing, and a camera's sibling JPEG is that same frame — so for a thumb
+/// or a preview the two are visually equivalent, while the JPEG is a fraction of
+/// the bytes and needs no container parse. That is worth little where a file can
+/// be memory-mapped and decisive where it cannot, which is every file on Android
+/// SAF.
+///
+/// Deliberately a fact about the database, not about the mirror-mode view: a
+/// decoupled pair is excluded because the user has said those two files are to
+/// be treated as separate photos.
+fn paired_jpeg(db: &Arc<Db>, file_id: i64) -> Option<String> {
+    db.call_read(move |conn| {
+        Ok(conn
+            .query_row(
+                "SELECT s.rel_path
+                 FROM files f
+                 JOIN groups g ON g.id = f.group_id
+                 JOIN files s ON s.group_id = f.group_id AND s.kind = 1 AND s.status = 0
+                 WHERE f.id = ?1 AND f.kind = 0 AND f.status = 0 AND g.decoupled = 0
+                 LIMIT 1",
+                params![file_id],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()?)
+    })
+    .ok()
+    .flatten()
+}
+
 /// Decode a source image with a long edge of at least `min_long_edge`,
 /// reading as little as possible (mmap + scaled/adequate-size decodes).
 /// Also returns the ORIGINAL pixel dimensions when they are reliably known
@@ -779,19 +810,37 @@ pub(crate) fn produce_cached(
         )));
     }
 
-    let (decoded, src_dims) = match decode_for(store, &rel_path, file_kind, min_long_edge_for(kind))
-    {
-        Ok(d) => d,
-        Err(e) => {
-            record_decode_failure(db, file_id, mtime, kind)?;
-            return Err(e);
-        }
+    // A grid thumbnail or a loupe preview of a paired RAW is rendered from the
+    // JPEG half instead: same frame, a fraction of the bytes. `Full` is
+    // excluded — zooming in is exactly when the RAW's own pixels are the point.
+    let (source_rel, source_kind) = match kind {
+        ThumbKind::Full => (rel_path.clone(), file_kind),
+        _ => match paired_jpeg(db, file_id) {
+            Some(sibling) => (sibling, 1),
+            None => (rel_path.clone(), file_kind),
+        },
     };
+
+    let (decoded, src_dims) =
+        match decode_for(store, &source_rel, source_kind, min_long_edge_for(kind)) {
+            Ok(d) => d,
+            Err(e) => {
+                record_decode_failure(db, file_id, mtime, kind)?;
+                return Err(e);
+            }
+        };
     let meta = SourceMeta {
         file_id,
         mtime,
         orientation,
-        src_dims,
+        // Dimensions describe whatever was decoded. Backfilling a RAW's row
+        // from its JPEG would record the wrong numbers, so only a decode of the
+        // file itself may claim them.
+        src_dims: if source_rel == rel_path {
+            src_dims
+        } else {
+            None
+        },
     };
     render_and_store(db, root, &meta, &decoded, kind)
 }
