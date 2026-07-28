@@ -215,9 +215,9 @@
     const alt = item.name;
     const progressive = settings.progressiveLoupe;
     const thumb = thumbUrl(item);
-    // Read cache membership UNTRACKED: the ~600ms previewReady refresh must not
-    // reset the dwell timer below (a preview that becomes cached mid-dwell simply
-    // loads instantly once the dwell elapses).
+    // Whether the sharp preview ALREADY EXISTS on disk. Read untracked so the
+    // preview pass reporting progress cannot restart the dwell below.
+    const alreadyGenerated = untrack(() => catalog.previewReady.has(item.id));
     if (target === untrack(() => displayedSrc)) return;
 
     let softTimer: ReturnType<typeof setTimeout> | undefined;
@@ -246,13 +246,25 @@
       if (progressive) softTimer = setTimeout(showSoftThumb, 80);
     };
 
-    // One path for cached and uncached alike. The old fork branched on
-    // catalog.previewReady, which lags by up to 600ms, so an already-generated
-    // preview routinely took the slow branch anyway. An actually-cached preview
-    // is served by the protocol's disk-cache fast path with no pool work at
-    // all, so it lands within a frame of the dwell elapsing.
-    showSoftThumb();
-    dwellTimer = setTimeout(loadPreview, PREVIEW_DWELL_MS);
+    // DO NOT COLLAPSE THESE TWO BRANCHES. This has now been broken twice.
+    //
+    // "Progressive loading" exists to cover the latency of GENERATING a preview.
+    // When the preview already exists there is no latency to cover: the protocol
+    // serves it from the disk cache with no pool work at all, so it lands within
+    // a frame. Showing the blurred thumbnail first in that case puts a
+    // deliberate blur in front of an image that is already sitting on disk --
+    // it is not a nicety, it changes the whole feel of the app.
+    //
+    // The previous removal argued that `previewReady` lagged by up to 600ms and
+    // so the branch misfired anyway. That was true when readiness came from a
+    // polled refetch; `previews:progress` now carries the ids as they complete,
+    // so this is accurate the moment a preview exists.
+    if (alreadyGenerated) {
+      loadPreview();
+    } else {
+      showSoftThumb();
+      dwellTimer = setTimeout(loadPreview, PREVIEW_DWELL_MS);
+    }
 
     return () => {
       // A newer target superseded this load; drop it so swaps stay in order.
