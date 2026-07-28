@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,7 +14,40 @@ use crate::error::{AppError, AppResult};
 use crate::store::{read_all, ProjectStore};
 
 pub const THUMB_LONG_EDGE: u32 = 384;
-pub const PREVIEW_LONG_EDGE: u32 = 2560;
+
+/// Loupe preview long edge, and the only artifact size the user can choose.
+///
+/// It matters beyond sharpness: `decode_scaled` only engages the IDCT fast path
+/// when the source long edge is at least twice the target (`decode/jpeg.rs`), so
+/// 2560 makes a 4000px JPEG take a full decode while 1600 takes the 1/2 path —
+/// roughly four times fewer decoded pixels, and a proportionally smaller peak per
+/// in-flight worker. That is the trade the setting exposes.
+///
+/// Runtime state rather than a `const` because of that, but the default is
+/// unchanged on every platform: nobody gets worse previews without asking.
+pub const PREVIEW_LONG_EDGE_DEFAULT: u32 = 2560;
+
+/// Preview sizes offered in Settings. Anything else is rejected, so a stale or
+/// hand-edited localStorage value can never put the cache in a state the ingest
+/// will not converge on.
+pub const PREVIEW_LONG_EDGE_CHOICES: [u32; 3] = [1600, 2560, 3840];
+
+static PREVIEW_LONG_EDGE: AtomicU32 = AtomicU32::new(PREVIEW_LONG_EDGE_DEFAULT);
+
+/// The configured preview long edge.
+pub fn preview_long_edge() -> u32 {
+    PREVIEW_LONG_EDGE.load(Ordering::Relaxed)
+}
+
+/// Apply a preview long edge. Returns the value actually in force, which is the
+/// old one when `value` is not an offered choice.
+pub fn set_preview_long_edge(value: u32) -> u32 {
+    if !PREVIEW_LONG_EDGE_CHOICES.contains(&value) {
+        return preview_long_edge();
+    }
+    PREVIEW_LONG_EDGE.store(value, Ordering::Relaxed);
+    value
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ThumbKind {
@@ -190,10 +224,14 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
 
 pub(crate) fn cache_rel_path(file_id: i64, version: CacheVersion, kind: ThumbKind) -> String {
     let bucket = (file_id % 256) as u8;
+    // The preview's target size is a user setting, so it belongs in the path:
+    // two sizes then occupy different files instead of one overwriting the
+    // other, and a project last opened under a different setting can never be
+    // served the wrong one from a cache hit.
     let suffix = match kind {
-        ThumbKind::Thumb => "t",
-        ThumbKind::Preview => "p",
-        ThumbKind::Full => "f",
+        ThumbKind::Thumb => "t".to_string(),
+        ThumbKind::Preview => format!("p{}", preview_long_edge()),
+        ThumbKind::Full => "f".to_string(),
     };
     let CacheVersion { mtime, orientation } = version;
     format!("{bucket:02x}/{file_id}_{mtime}_{orientation}_{suffix}.jpg")
@@ -210,7 +248,7 @@ fn now_secs() -> i64 {
 fn min_long_edge_for(kind: ThumbKind) -> u32 {
     match kind {
         ThumbKind::Thumb => THUMB_LONG_EDGE,
-        ThumbKind::Preview => PREVIEW_LONG_EDGE,
+        ThumbKind::Preview => preview_long_edge(),
         // Unresized: u32::MAX long edge means "never scale down".
         // TODO(post-MVP): true demosaic via rawler develop as a fallback for
         // cameras whose embedded preview is smaller than the sensor.
@@ -342,6 +380,10 @@ pub(crate) struct ThumbRow {
     /// Perceptual hash of the rendered thumbnail; `None` for every kind but
     /// `Thumb`, so one hash is stored per file rather than three.
     phash: Option<u64>,
+    /// Target long edge this artifact was rendered for. Only meaningful for
+    /// `Preview`, whose target is a user setting: a row generated for a
+    /// different one is stale even though its source never changed.
+    long_edge: u32,
 }
 
 /// A 64-bit difference hash of `img`: downscale to 9x8 grey, then record
@@ -388,7 +430,7 @@ pub(crate) fn render_to_cache(
     } = *meta;
     let (long_edge, quality) = match kind {
         ThumbKind::Thumb => (THUMB_LONG_EDGE, 80),
-        ThumbKind::Preview => (PREVIEW_LONG_EDGE, 80),
+        ThumbKind::Preview => (preview_long_edge(), 80),
         ThumbKind::Full => (u32::MAX, 90),
     };
     let resized = resize_long_edge(decoded, long_edge)?;
@@ -418,6 +460,7 @@ pub(crate) fn render_to_cache(
         mtime,
         src_dims,
         phash: (kind == ThumbKind::Thumb).then(|| dhash(&oriented)),
+        long_edge,
     };
     Ok((jpeg, row))
 }
@@ -425,14 +468,16 @@ pub(crate) fn render_to_cache(
 /// Apply one rendered thumbnail's row writes on the DB thread's connection.
 fn write_thumb_row(conn: &Connection, row: &ThumbRow) -> rusqlite::Result<()> {
     conn.execute(
-        "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at, failed)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
+        "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at, failed, long_edge)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
          ON CONFLICT(file_id, kind) DO UPDATE SET
            cache_path = excluded.cache_path, width = excluded.width,
            height = excluded.height, source_mtime = excluded.source_mtime,
-           generated_at = excluded.generated_at, failed = 0",
+           generated_at = excluded.generated_at, failed = 0,
+           long_edge = excluded.long_edge",
         params![
-            row.file_id, row.kind_i, row.cache_rel, row.out_w, row.out_h, row.mtime, now_secs()
+            row.file_id, row.kind_i, row.cache_rel, row.out_w, row.out_h, row.mtime, now_secs(),
+            row.long_edge
         ],
     )?;
     // Original dimensions come for free when the decode was full-size;

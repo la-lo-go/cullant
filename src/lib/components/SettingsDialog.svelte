@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { settings, BURST_GAP_CHOICES } from "../stores/settings.svelte";
+  import {
+    settings,
+    BURST_GAP_CHOICES,
+    PREVIEW_QUALITY_CHOICES,
+    PREVIEW_QUALITY_LABELS,
+  } from "../stores/settings.svelte";
+  import ConfirmDialog from "./ConfirmDialog.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { api, type DeletionMode } from "../api";
@@ -64,6 +70,47 @@
       () => {},
     );
   });
+
+  // Preview quality invalidates every generated preview, so the select never
+  // applies straight away: it parks the choice here and waits for a confirm.
+  let pendingQuality = $state<number | null>(null);
+  let previewBusy = $state(false);
+  let previewMsg = $state("");
+
+  function changePreviewQuality(e: Event) {
+    const select = e.currentTarget as HTMLSelectElement;
+    const next = Number(select.value);
+    if (next === settings.previewQuality) return;
+    // Keep showing the value still in force until the change is confirmed.
+    select.value = String(settings.previewQuality);
+    pendingQuality = next;
+  }
+
+  async function applyPreviewQuality() {
+    const next = pendingQuality;
+    pendingQuality = null;
+    if (next === null) return;
+    previewBusy = true;
+    previewMsg = "";
+    try {
+      settings.setPreviewQuality(next);
+      await api.setPreviewQuality(next);
+      if (!catalog.project) {
+        previewMsg = "Saved. Previews are rebuilt the next time you open a project.";
+        return;
+      }
+      // Best-effort: if this fails (a scan is running), the previews are merely
+      // left on disk. The ingest regenerates them anyway, because a row whose
+      // long_edge no longer matches the setting counts as missing.
+      await api.discardPreviews();
+      await api.rescanProject();
+      previewMsg = "Rebuilding previews at the new size…";
+    } catch (err) {
+      previewMsg = String(err);
+    } finally {
+      previewBusy = false;
+    }
+  }
 
   async function changeDeletionMode(e: Event) {
     const previous = deletionMode;
@@ -134,6 +181,28 @@
             </span>
           </span>
         </label>
+        <div class="option row">
+          <span class="text">
+            <span class="label">Preview quality</span>
+            <span class="description">
+              How sharp the loupe preview is. Lower is faster to generate and uses far less
+              memory — worth it on a phone. Changing this regenerates every preview.
+            </span>
+          </span>
+          <select
+            aria-label="Preview quality"
+            disabled={previewBusy}
+            value={settings.previewQuality}
+            onchange={changePreviewQuality}
+          >
+            {#each PREVIEW_QUALITY_CHOICES as choice (choice)}
+              <option value={choice}>{choice} px · {PREVIEW_QUALITY_LABELS[choice]}</option>
+            {/each}
+          </select>
+        </div>
+        {#if previewMsg}
+          <p class="hint">{previewMsg}</p>
+        {/if}
       </section>
 
       <section class="card">
@@ -461,6 +530,18 @@
     </div>
   </div>
 </div>
+
+{#if pendingQuality !== null}
+  <ConfirmDialog
+    title="Rebuild every preview?"
+    message={catalog.project
+      ? `Loupe previews will be regenerated at ${pendingQuality} px. The ones built at ${settings.previewQuality} px are deleted first, so photos you open before this finishes show their grid thumbnail for a moment. Your photos are not touched.`
+      : `Previews will be generated at ${pendingQuality} px from now on. Existing projects rebuild theirs the next time you open them.`}
+    confirmLabel="Rebuild previews"
+    onconfirm={() => void applyPreviewQuality()}
+    oncancel={() => (pendingQuality = null)}
+  />
+{/if}
 
 <style>
   .backdrop {

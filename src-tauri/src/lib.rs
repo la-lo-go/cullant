@@ -39,6 +39,10 @@ pub struct AppState {
     /// gates *background* pregeneration — a video's poster is still made on demand
     /// when its cell scrolls into view.
     pub generate_video_thumbs: AtomicBool,
+    /// True while a scanner thread is walking or ingesting. Commands that would
+    /// race that pass -- discarding the very rows it is writing -- refuse rather
+    /// than interleave with it.
+    pub scan_active: AtomicBool,
 }
 
 impl Default for AppState {
@@ -46,6 +50,7 @@ impl Default for AppState {
         Self {
             project: Mutex::new(None),
             generate_video_thumbs: AtomicBool::new(true),
+            scan_active: AtomicBool::new(false),
         }
     }
 }
@@ -245,6 +250,9 @@ pub fn run() {
             commands::project::rescan_project,
             commands::project::close_project,
             commands::project::set_generate_video_thumbs,
+            commands::project::set_preview_quality,
+            commands::project::preview_quality_choices,
+            commands::project::discard_previews,
             commands::recent::list_recent_projects,
             commands::recent::probe_storage,
             commands::recent::delete_project_data,

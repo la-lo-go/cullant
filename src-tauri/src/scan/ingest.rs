@@ -266,12 +266,20 @@ pub fn run_ingest_inner(
         ThumbKind::Preview,
         // Previews (2560px loupe) are only ever generated for stills; a video's
         // loupe plays the file itself.
-        "SELECT f.id, f.mtime, f.orientation
-         FROM files f
-         LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
-         WHERE f.status = 0 AND f.kind IN (0, 1)
-           AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime)
-         ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
+        // A preview is also stale when it was generated for a different long
+        // edge than the one now configured. `long_edge = 0` means "generated
+        // before the column existed", which counts as matching so upgrading
+        // never regrinds a library that is perfectly fine.
+        &format!(
+            "SELECT f.id, f.mtime, f.orientation
+             FROM files f
+             LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
+             WHERE f.status = 0 AND f.kind IN (0, 1)
+               AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime
+                    OR (tp.long_edge <> 0 AND tp.long_edge <> {}))
+             ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
+            crate::thumbs::preview_long_edge()
+        ),
         preview_progress,
     )?;
 
@@ -481,6 +489,7 @@ mod tests {
     use crate::store::LocalFsStore;
     use rusqlite::params;
     use std::path::Path;
+    use std::sync::Mutex;
 
     fn project_with_jpegs(root: &Path, n: u32) -> Arc<Db> {
         for i in 0..n {
@@ -512,6 +521,15 @@ mod tests {
         (store, pool)
     }
 
+    /// The configured preview size is global process state, so a test that
+    /// changes it would otherwise restage another test's previews mid-run.
+    /// Every test that runs a pass takes this first.
+    static INGEST: Mutex<()> = Mutex::new(());
+
+    fn ingest_guard() -> std::sync::MutexGuard<'static, ()> {
+        INGEST.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Run the whole pass, returning `(meta_updated, thumbs_done, previews_done)`.
     fn run_all(db: &Arc<Db>, root: &Path) -> (usize, usize, usize) {
         let (store, pool) = store_and_pool(db, root);
@@ -535,6 +553,7 @@ mod tests {
 
     #[test]
     fn metadata_gate_fires_before_any_thumbnail() {
+        let _guard = ingest_guard();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let db = project_with_jpegs(root, 3);
@@ -560,6 +579,7 @@ mod tests {
 
     #[test]
     fn background_phase_generates_thumbs_then_previews() {
+        let _guard = ingest_guard();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let db = project_with_jpegs(root, 3);
@@ -586,6 +606,7 @@ mod tests {
 
     #[test]
     fn reopening_an_ingested_project_is_a_noop() {
+        let _guard = ingest_guard();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let db = project_with_jpegs(root, 3);
@@ -596,7 +617,44 @@ mod tests {
     }
 
     #[test]
+    fn changing_the_preview_size_restages_only_the_previews() {
+        let _guard = ingest_guard();
+        use crate::thumbs::{set_preview_long_edge, PREVIEW_LONG_EDGE_DEFAULT};
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db = project_with_jpegs(root, 3);
+
+        assert_eq!(run_all(&db, root), (3, 3, 3));
+
+        // Same size: still a no-op, so an upgrade never regrinds a good library.
+        assert_eq!(run_all(&db, root), (0, 0, 0));
+
+        // A different size makes every preview stale — and nothing else.
+        set_preview_long_edge(1600);
+        let (meta, thumbs, previews) = run_all(&db, root);
+        assert_eq!((meta, thumbs), (0, 0));
+        assert_eq!(previews, 3);
+
+        // Regenerated at the new size, so a third pass settles again.
+        assert_eq!(run_all(&db, root), (0, 0, 0));
+
+        // Rows built before the column existed (long_edge = 0) count as current,
+        // whatever the setting is, so upgrading does not restage them.
+        db.call(|c| {
+            c.execute("UPDATE thumbnails SET long_edge = 0 WHERE kind = 1", [])?;
+            Ok(())
+        })
+        .unwrap();
+        set_preview_long_edge(3840);
+        assert_eq!(run_all(&db, root), (0, 0, 0));
+
+        set_preview_long_edge(PREVIEW_LONG_EDGE_DEFAULT);
+    }
+
+    #[test]
     fn exif_metadata_flows_through_ingest() {
+        let _guard = ingest_guard();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
@@ -653,6 +711,7 @@ mod tests {
 
     #[test]
     fn undecodable_source_is_tombstoned_not_retried() {
+        let _guard = ingest_guard();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
@@ -682,6 +741,7 @@ mod tests {
 
     #[test]
     fn video_is_ingested_without_preview_and_never_panics() {
+        let _guard = ingest_guard();
         // Exercises the video branch end-to-end. The .mp4 bytes are not a real
         // video, so the outcome depends on whether ffmpeg is installed:
         //   - ffmpeg present: extraction fails -> thumbnail tombstoned;

@@ -199,6 +199,15 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE files ADD COLUMN xmp_source_mtime INTEGER;
     "#,
+    // v10 — the long edge a thumbnail was generated at. Preview size is now a
+    // user setting, so "this row is up to date" stops being a question about
+    // mtime alone: a preview built for a different target is stale even though
+    // the source never changed. 0 means "generated before this column existed",
+    // which the ingest treats as matching whatever is configured, so upgrading
+    // does not regrind a library that is perfectly fine.
+    r#"
+    ALTER TABLE thumbnails ADD COLUMN long_edge INTEGER NOT NULL DEFAULT 0;
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {

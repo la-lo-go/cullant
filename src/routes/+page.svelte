@@ -84,6 +84,13 @@
     void api.setGenerateVideoThumbs(settings.generateVideoThumbs);
   });
 
+  // Same for the preview size. Pushing it is idempotent and never deletes
+  // anything, so running on mount (and on every change) is safe — Settings owns
+  // the destructive half, after the user has confirmed it.
+  $effect(() => {
+    void api.setPreviewQuality(settings.previewQuality);
+  });
+
   // Load the project's tag list + pending queue whenever a project opens.
   $effect(() => {
     if (catalog.project) {

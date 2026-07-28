@@ -97,6 +97,19 @@ fn unix_now() -> i64 {
 /// project is rolled back entirely (closed, forgotten from recents, its
 /// freshly-created `.cullant` sidecar removed) rather than left open on an
 /// empty grid, and `scan:empty` fires instead of running the ingest pass.
+/// Clears `AppState::scan_active` however the scanner thread ends — including
+/// the early returns for a failed scan and an empty folder.
+struct ScanActive(AppHandle);
+
+impl Drop for ScanActive {
+    fn drop(&mut self) {
+        self.0
+            .state::<AppState>()
+            .scan_active
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 fn spawn_scan(
     app: AppHandle,
     db: Arc<Db>,
@@ -105,9 +118,14 @@ fn spawn_scan(
     thumbs: Arc<ThumbPool>,
     initial_open_id: Option<String>,
 ) {
+    app.state::<AppState>()
+        .scan_active
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     std::thread::Builder::new()
         .name("scanner".into())
         .spawn(move || {
+            // Cleared on every exit path below, including the early returns.
+            let _active = ScanActive(app.clone());
             let done = match scan::scan_project(&app, &db, store.as_ref()) {
                 Ok(done) => done,
                 Err(e) => {
@@ -421,6 +439,67 @@ pub fn close_project(state: State<'_, AppState>) {
     if let Some(prev) = state.project.lock().unwrap().take() {
         prev.thumbs.shutdown();
     }
+}
+
+/// Frontend push of the preview-quality preference (localStorage on the UI
+/// side). Idempotent and non-destructive, so the startup push costs nothing:
+/// throwing the old previews away is [`discard_previews`], a separate step the
+/// user confirms. Returns the value actually in force, which is the previous one
+/// if `long_edge` is not an offered choice.
+#[tauri::command]
+pub fn set_preview_quality(long_edge: u32) -> u32 {
+    crate::thumbs::set_preview_long_edge(long_edge)
+}
+
+/// The sizes Settings may offer, so the UI never invents one the backend
+/// rejects.
+#[tauri::command]
+pub fn preview_quality_choices() -> Vec<u32> {
+    crate::thumbs::PREVIEW_LONG_EDGE_CHOICES.to_vec()
+}
+
+/// Throw away every generated loupe preview for the open project: the cached
+/// JPEGs first, then the rows pointing at them. Grid thumbnails, video posters
+/// and `Full` renders are untouched, and no user file is ever involved.
+///
+/// Called after the user confirms a preview-quality change; the following
+/// rescan regenerates at the new size. Refuses while a scan is running rather
+/// than deleting rows the ingest pass is in the middle of writing.
+#[tauri::command]
+pub fn discard_previews(state: State<'_, AppState>) -> AppResult<usize> {
+    if state.scan_active.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Other(
+            "Cullant is still reading this project. Wait for it to finish, then try again.".into(),
+        ));
+    }
+    let (db, root) = {
+        let guard = state.project.lock().unwrap();
+        let project = guard.as_ref().ok_or(AppError::NoProject)?;
+        (project.db.clone(), project.root.clone())
+    };
+
+    let paths: Vec<String> = db.call_read(|conn| {
+        let mut stmt =
+            conn.prepare("SELECT cache_path FROM thumbnails WHERE kind = 1 AND cache_path <> ''")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    })?;
+
+    // Files first: a row that outlives its file is regenerated, a file that
+    // outlives its row leaks until the project is deleted.
+    let thumbs_dir = root.join(".cullant").join("thumbs");
+    let mut removed = 0usize;
+    for rel in &paths {
+        if std::fs::remove_file(thumbs_dir.join(rel)).is_ok() {
+            removed += 1;
+        }
+    }
+    db.call(|conn| {
+        conn.execute("DELETE FROM thumbnails WHERE kind = 1", [])?;
+        Ok(())
+    })?;
+    tracing::info!("discarded {removed} of {} cached previews", paths.len());
+    Ok(removed)
 }
 
 /// Frontend push of the "generate video thumbnails" preference (localStorage on

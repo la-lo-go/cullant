@@ -21,6 +21,7 @@ const FAST_CULLING_KEY = "cullant.fastCulling";
 const LOCK_CAROUSEL_KEY = "cullant.lockCarousel";
 const BURST_MODE_KEY = "cullant.burstMode";
 const BURST_GAP_KEY = "cullant.burstGapSeconds";
+const PREVIEW_QUALITY_KEY = "cullant.previewQuality";
 
 /** Allowed burst gaps in seconds — a whitelist for the same reason the
  *  auto-rescan intervals are one. */
@@ -29,6 +30,22 @@ export const BURST_GAP_CHOICES = [1, 2, 3, 5, 10] as const;
 /** Allowed auto-rescan intervals in minutes; 0 means off. Kept as a whitelist
  *  so a stale/garbled stored value can never yield a pathological interval. */
 export const AUTO_RESCAN_CHOICES = [0, 1, 5, 15] as const;
+
+/** Loupe preview long edge in pixels. Mirrors PREVIEW_LONG_EDGE_CHOICES in the
+ *  backend, which rejects anything else. Beyond sharpness this is a memory
+ *  lever: the scaled-decode fast path only engages when the source is at least
+ *  twice the target, so 1600 halves a 4000px JPEG's decode where 2560 does not. */
+export const PREVIEW_QUALITY_CHOICES = [1600, 2560, 3840] as const;
+
+/** Unchanged from when the size was a constant: nobody gets worse previews
+ *  without asking for them. */
+export const PREVIEW_QUALITY_DEFAULT = 2560;
+
+export const PREVIEW_QUALITY_LABELS: Record<number, string> = {
+  1600: "Balanced",
+  2560: "Standard",
+  3840: "High",
+};
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
@@ -112,6 +129,11 @@ class SettingsStore {
    *  off skips their background pregeneration entirely. Mirrored to the backend
    *  (see the sync effect in +page.svelte) since the ingest pass reads it. */
   generateVideoThumbs = $state<boolean>(loadBool(GENERATE_VIDEO_THUMBS_KEY, true));
+  /** Loupe preview long edge. Changing it invalidates every generated preview,
+   *  so the UI confirms first and then discards + regenerates them. */
+  previewQuality = $state<number>(
+    loadChoice(PREVIEW_QUALITY_KEY, PREVIEW_QUALITY_CHOICES, PREVIEW_QUALITY_DEFAULT),
+  );
 
   /** Filmstrip badge visibility (see the keys above for why these exist
    *  separately from the grid, which never lets a badge leave the photo). */
@@ -174,6 +196,16 @@ class SettingsStore {
   setGenerateVideoThumbs(on: boolean) {
     this.generateVideoThumbs = on;
     save(GENERATE_VIDEO_THUMBS_KEY, on);
+  }
+
+  /** Persist only. Discarding the previews built for the old size and
+   *  regenerating them is the caller's job, after the user has confirmed. */
+  setPreviewQuality(longEdge: number) {
+    if (!PREVIEW_QUALITY_CHOICES.includes(longEdge as (typeof PREVIEW_QUALITY_CHOICES)[number])) {
+      return;
+    }
+    this.previewQuality = longEdge;
+    save(PREVIEW_QUALITY_KEY, longEdge);
   }
 
   setFilmstripShowType(on: boolean) {
