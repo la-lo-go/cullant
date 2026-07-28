@@ -1,3 +1,5 @@
+pub mod memcache;
+
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};

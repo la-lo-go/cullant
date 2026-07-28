@@ -3,7 +3,7 @@ use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
 
 use crate::commands::recent;
 use crate::error::AppResult;
-use crate::thumbs::{cache_rel_path, CacheVersion, ThumbKind, ThumbRequest};
+use crate::thumbs::{cache_rel_path, memcache, CacheVersion, ThumbKind, ThumbRequest};
 use crate::AppState;
 
 /// Handler for the `cullant://` scheme (served as `http://cullant.localhost/…`
@@ -103,11 +103,23 @@ fn respond_thumb<R: Runtime>(
     // and caches exactly as before. (temp-file+rename writes make the read
     // race-safe — a cache file is never partially written.)
     if let Some(version) = known {
-        let cache_abs = root
-            .join(".cullant")
-            .join("thumbs")
-            .join(cache_rel_path(file_id, version, kind));
+        let cache_rel = cache_rel_path(file_id, version, kind);
+        // Memory first. On Android the WebView is forbidden from caching these
+        // (wry rewrites the header to `no-store`), so a cell that scrolls out
+        // and back asks again from scratch -- and during an import that wait is
+        // long enough to leave a hole where a painted thumbnail used to be.
+        if let Some(bytes) = memcache::get(&cache_rel) {
+            responder.respond(jpeg_ok(bytes.as_ref().clone()));
+            return;
+        }
+        let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
         if let Ok(bytes) = std::fs::read(&cache_abs) {
+            // Only grid thumbnails are worth holding: hundreds are on screen at
+            // once and each is tens of kilobytes, where a preview is hundreds
+            // and is looked at one at a time.
+            if kind == ThumbKind::Thumb {
+                memcache::put(&cache_rel, std::sync::Arc::new(bytes.clone()));
+            }
             responder.respond(jpeg_ok(bytes));
             return;
         }

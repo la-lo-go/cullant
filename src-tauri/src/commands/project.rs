@@ -85,18 +85,6 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// Kick off scan + the two-phase ingest pass (metadata gate, then background
-/// thumbnails + previews) on a background thread; the UI is notified through
-/// scan:progress / scan:done / scan:empty / metadata:progress / metadata:done /
-/// thumbs:progress / thumbs:done / previews:progress events.
-///
-/// `initial_open_id` is `Some(identifier)` (the desktop path or Android SAF
-/// tree URI used by the recent-projects list) only when this scan is the
-/// first one right after opening a project — never on a plain rescan. When
-/// set and the scan finds zero recognized photos/videos, the just-opened
-/// project is rolled back entirely (closed, forgotten from recents, its
-/// freshly-created `.cullant` sidecar removed) rather than left open on an
-/// empty grid, and `scan:empty` fires instead of running the ingest pass.
 /// Clears `AppState::scan_active` however the scanner thread ends — including
 /// the early returns for a failed scan and an empty folder.
 struct ScanActive(AppHandle);
@@ -110,6 +98,18 @@ impl Drop for ScanActive {
     }
 }
 
+/// Kick off scan + the two-phase ingest pass (metadata gate, then background
+/// thumbnails + previews) on a background thread; the UI is notified through
+/// scan:progress / scan:done / scan:empty / metadata:progress / metadata:done /
+/// thumbs:progress / thumbs:done / previews:progress events.
+///
+/// `initial_open_id` is `Some(identifier)` (the desktop path or Android SAF
+/// tree URI used by the recent-projects list) only when this scan is the
+/// first one right after opening a project — never on a plain rescan. When
+/// set and the scan finds zero recognized photos/videos, the just-opened
+/// project is rolled back entirely (closed, forgotten from recents, its
+/// freshly-created `.cullant` sidecar removed) rather than left open on an
+/// empty grid, and `scan:empty` fires instead of running the ingest pass.
 fn spawn_scan(
     app: AppHandle,
     db: Arc<Db>,
@@ -439,6 +439,9 @@ pub fn close_project(state: State<'_, AppState>) {
     if let Some(prev) = state.project.lock().unwrap().take() {
         prev.thumbs.shutdown();
     }
+    // Cache keys embed file ids, which are only unique within one project's
+    // database, so the next project must not inherit any of them.
+    crate::thumbs::memcache::clear();
 }
 
 /// Frontend push of the preview-quality preference (localStorage on the UI
