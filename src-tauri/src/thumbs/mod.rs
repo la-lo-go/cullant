@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -950,8 +951,11 @@ fn scaled_dims(w: u32, h: u32, long_edge: u32) -> (u32, u32) {
     )
 }
 
-fn apply_orientation(img: DynamicImage, orientation: i64) -> DynamicImage {
-    match orientation {
+/// Apply an EXIF orientation. Takes a `Cow` so the overwhelmingly common
+/// neutral orientation costs nothing: every rotation allocates a new buffer
+/// anyway, but orientation 1 hands back exactly what it was given.
+fn apply_orientation(img: Cow<'_, DynamicImage>, orientation: i64) -> Cow<'_, DynamicImage> {
+    let rotated = match orientation {
         2 => img.fliph(),
         3 => img.rotate180(),
         4 => img.flipv(),
@@ -959,21 +963,24 @@ fn apply_orientation(img: DynamicImage, orientation: i64) -> DynamicImage {
         6 => img.rotate90(),
         7 => img.rotate270().fliph(),
         8 => img.rotate270(),
-        _ => img,
-    }
+        _ => return img,
+    };
+    Cow::Owned(rotated)
 }
 
 /// Downscale with SIMD (fast_image_resize) so the long edge is `long_edge`.
-/// Borrows the source so multiple targets can be rendered from one decode;
-/// only clones when no resize is needed (i.e. the image is already small, or
-/// the Full kind's "never scale down").
-fn resize_long_edge(img: &DynamicImage, long_edge: u32) -> AppResult<DynamicImage> {
+/// Borrows the source so multiple targets can be rendered from one decode.
+///
+/// Returns a `Cow` because "no resize needed" is not a rare case: it is ALWAYS
+/// true for `ThumbKind::Full`, whose long edge is `u32::MAX`. Cloning there cost
+/// a full second copy of the image -- around 72 MB on a 6000x4000 RAW, on every
+/// zoom-in, immediately before the encode copied it again.
+fn resize_long_edge(img: &DynamicImage, long_edge: u32) -> AppResult<Cow<'_, DynamicImage>> {
     use fast_image_resize::{ResizeAlg, ResizeOptions, Resizer};
-    use std::borrow::Cow;
 
     let (dst_w, dst_h) = scaled_dims(img.width(), img.height(), long_edge);
     if (dst_w, dst_h) == (img.width(), img.height()) {
-        return Ok(img.clone());
+        return Ok(Cow::Borrowed(img));
     }
 
     // fast_image_resize works on 8/16-bit buffers; normalize exotic formats.
@@ -995,7 +1002,7 @@ fn resize_long_edge(img: &DynamicImage, long_edge: u32) -> AppResult<DynamicImag
             )),
         )
         .map_err(|e| AppError::Decode(format!("resize: {e}")))?;
-    Ok(dst)
+    Ok(Cow::Owned(dst))
 }
 
 fn encode_jpeg(img: &DynamicImage, quality: u8) -> AppResult<Vec<u8>> {
