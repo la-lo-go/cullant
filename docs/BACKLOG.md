@@ -51,6 +51,14 @@ is kept as the record of what was decided and why, plus what is still open.
 - **No frontend test harness.** The backend has 76 tests; the frontend has
   none. `src/lib/bursts.ts` was verified by transpiling it with esbuild and
   exercising it outside the repo — worth making permanent with vitest.
+- **Cold-import numbers (2026-07-28), same build, same corpus.** The ingest now
+  reports its own storage counters (`adb logcat -s cullant` on device), so this
+  is measured rather than inferred. 600 synthetic JPEGs: **1800 → 1260 source
+  reads**. 60 RAW+JPEG pairs: **360 → 180**, and every read is the small JPEG
+  half — a paired RAW is not opened at all until someone zooms in. Desktop wall
+  clock is a wash (74 s vs 70 s): a memory-mapped read costs almost nothing
+  there, and the fused pass re-renders the lead window's thumbnails. The reads
+  are the point on Android SAF, which cannot memory-map at all.
 - **Ingest benchmark is not a same-session A/B.** With pHash: 600 files in
   5.15 s, against the ~7.44 s recorded in `backend-optimization-audit.md`. No
   regression is apparent, but each release build costs ~10 minutes so the two

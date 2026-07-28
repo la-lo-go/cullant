@@ -17,6 +17,18 @@ well-optimized (see "What's already good" at the end)._
 > with `Db::call_read` after the read-your-writes consistency was confirmed and
 > tested.
 
+> **Update (2026-07-28).** A later pass (`docs/PLAN.md` stream "cold import v2")
+> revisited three of these. **#3 was undone** by the Phase-A/B refactor
+> (`59fce69`) and has now been **deliberately dropped**, not restored: the pass
+> writes ~1200 small rows over ~75 s — about 16 commits a second on a WAL
+> database whose writer thread no longer serves any reads — so it is not a
+> bottleneck, and batching would mean plumbing a row sink through the thumbnail
+> pool for every background request. Revisit if a real 50k-file library says
+> otherwise. **#4's "related, smaller"** item (the full-image clone in
+> `resize_long_edge`) **is done**. **#2's read pool** now also serves the SAF
+> document-id cache, which had been issuing a `SELECT` per file on the *writer*
+> thread.
+
 Legend: 🔴 high impact · 🟡 medium · ⚪ low / measure-first.
 
 ---
