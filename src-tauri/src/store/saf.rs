@@ -53,7 +53,11 @@ impl SafStore {
 
     fn cache_get(&self, rel: &str) -> AppResult<Option<String>> {
         let rel = rel.to_string();
-        self.db.call(move |conn| {
+        // A pure read, and one that happens once per file the ingest touches --
+        // so it goes to the reader pool. On the writer thread it queued behind
+        // whatever the ingest was committing, serialising the decode workers on
+        // a lookup that never writes anything.
+        self.db.call_read(move |conn| {
             Ok(conn
                 .query_row(
                     "SELECT document_id FROM saf_documents WHERE rel_path = ?1",
@@ -65,14 +69,31 @@ impl SafStore {
     }
 
     fn cache_put(&self, rel: &str, doc_id: &str, is_dir: bool) -> AppResult<()> {
-        let (rel, doc_id) = (rel.to_string(), doc_id.to_string());
+        self.cache_put_many(vec![(rel.to_string(), doc_id.to_string(), is_dir)])
+    }
+
+    /// Upsert a batch of cache entries in one transaction.
+    ///
+    /// The walk discovers a whole directory at a time, and inserting each entry
+    /// on its own meant one writer round-trip and one autocommit transaction per
+    /// file in the project before a single photo had been read.
+    fn cache_put_many(&self, entries: Vec<(String, String, bool)>) -> AppResult<()> {
+        if entries.is_empty() {
+            return Ok(());
+        }
         self.db.call(move |conn| {
-            conn.execute(
-                "INSERT INTO saf_documents (rel_path, document_id, is_dir) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(rel_path) DO UPDATE SET document_id = excluded.document_id,
-                                                     is_dir = excluded.is_dir",
-                params![rel, doc_id, is_dir as i64],
-            )?;
+            let tx = conn.transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT INTO saf_documents (rel_path, document_id, is_dir) VALUES (?1, ?2, ?3)
+                     ON CONFLICT(rel_path) DO UPDATE SET document_id = excluded.document_id,
+                                                         is_dir = excluded.is_dir",
+                )?;
+                for (rel, doc_id, is_dir) in &entries {
+                    stmt.execute(params![rel, doc_id, *is_dir as i64])?;
+                }
+            }
+            tx.commit()?;
             Ok(())
         })
     }
@@ -154,13 +175,15 @@ impl ProjectStore for SafStore {
                 .saf()
                 .list_children(&self.tree_uri, &parent_doc)
                 .map_err(Self::err)?;
+            // One transaction per directory rather than one per entry.
+            let mut cache_batch: Vec<(String, String, bool)> = Vec::with_capacity(entries.len());
             for e in entries {
                 let rel = if prefix.is_empty() {
                     e.name.clone()
                 } else {
                     format!("{prefix}/{}", e.name)
                 };
-                self.cache_put(&rel, &e.document_id, e.is_dir)?;
+                cache_batch.push((rel.clone(), e.document_id.clone(), e.is_dir));
                 if e.is_dir {
                     let skip = skip_dirs.contains(&e.name.as_str()) || e.name.starts_with('.');
                     if !skip {
@@ -178,6 +201,7 @@ impl ProjectStore for SafStore {
                     }
                 }
             }
+            self.cache_put_many(cache_batch)?;
         }
         Ok(files)
     }
