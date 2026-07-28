@@ -8,7 +8,12 @@
 
   /** Dwell before requesting an *uncached* preview, so arrowing quickly through
    *  photos never enqueues a decode for ones merely passed over. */
-  const PREVIEW_DWELL_MS = 1000;
+  // Long enough to absorb the IPC churn of a key held down, short enough that
+  // stopping on a photo sharpens it before you notice. It used to be 1000ms to
+  // protect an unbounded decode queue from rapid arrowing; the pool now
+  // coalesces duplicates and evicts stale requests, so the dwell no longer has
+  // to do that job.
+  const PREVIEW_DWELL_MS = 150;
 
   let {
     item,
@@ -213,7 +218,6 @@
     // Read cache membership UNTRACKED: the ~600ms previewReady refresh must not
     // reset the dwell timer below (a preview that becomes cached mid-dwell simply
     // loads instantly once the dwell elapses).
-    const cached = untrack(() => catalog.previewReady.has(item.id));
     if (target === untrack(() => displayedSrc)) return;
 
     let softTimer: ReturnType<typeof setTimeout> | undefined;
@@ -242,25 +246,23 @@
       if (progressive) softTimer = setTimeout(showSoftThumb, 80);
     };
 
-    if (cached) {
-      // Already generated → served straight from the disk cache by the protocol
-      // (no pool work), so load it right away for instant sharpness. No thumb
-      // stand-in: swapping in the sharp preview directly is what avoids the
-      // brief small/blurry flash before the full image (the previous
-      // lock-carousel instant-thumb forced that flash even when cached, and
-      // regardless of the progressive-loupe setting).
-      loadPreview();
-    } else {
-      // Not generated yet → requesting it would enqueue an expensive decode.
-      // Show the thumb now and only request the preview after a dwell, so rapid
-      // arrowing never enqueues previews for photos merely passed over.
-      showSoftThumb();
-      dwellTimer = setTimeout(loadPreview, PREVIEW_DWELL_MS);
-    }
+    // One path for cached and uncached alike. The old fork branched on
+    // catalog.previewReady, which lags by up to 600ms, so an already-generated
+    // preview routinely took the slow branch anyway. An actually-cached preview
+    // is served by the protocol's disk-cache fast path with no pool work at
+    // all, so it lands within a frame of the dwell elapsing.
+    showSoftThumb();
+    dwellTimer = setTimeout(loadPreview, PREVIEW_DWELL_MS);
 
     return () => {
       // A newer target superseded this load; drop it so swaps stay in order.
-      if (loader) loader.onload = loader.onerror = null;
+      if (loader) {
+        loader.onload = loader.onerror = null;
+        // Detaching the handlers leaves the request in flight. Clearing src
+        // tells the WebView to cancel it, so a fast arrow-through does not
+        // leave a dozen preview fetches competing with the one that matters.
+        loader.src = "";
+      }
       if (softTimer !== undefined) clearTimeout(softTimer);
       if (dwellTimer !== undefined) clearTimeout(dwellTimer);
     };
@@ -834,6 +836,7 @@
   img.fit.soft {
     filter: blur(4px);
   }
+
 
   img.full {
     position: absolute;

@@ -12,10 +12,8 @@
   import Info from "@lucide/svelte/icons/info";
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
-  import { untrack } from "svelte";
   import { edgeBounce } from "../anim";
   import { previewUrl } from "../api";
-  import { catalog } from "../stores/catalog.svelte";
   import { tags } from "../stores/tags.svelte";
 
   const item = $derived(session.focused);
@@ -28,19 +26,23 @@
     Purple: "#9a66d6",
   };
 
-  // Warm just the immediate neighbours so arrowing doesn't wait on a cold decode.
-  // Kept deliberately small, and gated two ways so fast flipping never floods the
-  // pool: (1) a 1s dwell — arrowing quickly past a photo never prefetches its
-  // neighbours; (2) skip neighbours whose preview is already cached (nothing to
-  // warm — the protocol serves those straight from disk).
-  const WARM_OFFSETS = [1, -1, 2];
-  const WARM_DWELL_MS = 1000;
+  // Warm the neighbours so arrowing doesn't wait on a cold decode. Both the
+  // window and the dwell used to be small because the pool had no bound: a
+  // burst of warm requests would each be decoded in full however stale they got.
+  // Duplicates now coalesce and overflow evicts oldest-first, so warming wider
+  // and sooner costs nothing when the user keeps moving.
+  //
+  // The previewReady check is gone with it — it lags by up to 600ms, so it
+  // mostly skipped neighbours that were NOT cached. A warm request for one that
+  // is cached is served from disk with no pool work anyway.
+  const WARM_OFFSETS = [1, -1, 2, -2, 3];
+  const WARM_DWELL_MS = 300;
   $effect(() => {
     const idx = session.focusedIndex;
     const timer = setTimeout(() => {
       for (const off of WARM_OFFSETS) {
         const n = session.filtered[idx + off];
-        if (n && n.kind !== 2 && !untrack(() => catalog.previewReady.has(n.id))) {
+        if (n && n.kind !== 2) {
           new Image().src = previewUrl(n);
         }
       }
