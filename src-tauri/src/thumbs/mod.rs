@@ -77,6 +77,13 @@ pub struct ThumbRequest {
     /// to the authoritative `file_row` lookup — no behavior change, just no
     /// speedup.
     pub known_version: Option<CacheVersion>,
+    /// Render the grid thumbnail from the same decode as this request's
+    /// artifact. Only meaningful with `kind: Preview`, whose decode is already
+    /// at least as large as a thumbnail needs — so the thumbnail costs one more
+    /// resize and encode of a buffer already in hand, and no second read of the
+    /// source. Used by the pregeneration pass; interactive requests want one
+    /// artifact and leave it false.
+    pub also_thumb: bool,
     pub respond: Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>,
 }
 
@@ -88,6 +95,7 @@ type Responder = Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>;
 struct Pending {
     key: (i64, u8),
     kind: ThumbKind,
+    also_thumb: bool,
     known_version: Option<CacheVersion>,
     responders: Vec<Responder>,
     /// Set when the pregeneration pass asked for this artifact. The pass only
@@ -237,6 +245,7 @@ impl ThumbPool {
             None => Pending {
                 key,
                 kind: request.kind,
+                also_thumb: request.also_thumb,
                 known_version: request.known_version,
                 responders: vec![request.respond],
                 needs_row: false,
@@ -294,6 +303,7 @@ impl ThumbPool {
             q.background.push_back(Pending {
                 key,
                 kind: request.kind,
+                also_thumb: request.also_thumb,
                 known_version: request.known_version,
                 responders: vec![request.respond],
                 needs_row: true,
@@ -362,10 +372,13 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             &db,
             store.as_ref(),
             &root,
-            pending.key.0,
-            pending.kind,
-            pending.known_version,
-            pending.needs_row,
+            Produce {
+                file_id: pending.key.0,
+                kind: pending.kind,
+                known: pending.known_version,
+                record_hit: pending.needs_row,
+                also_thumb: pending.also_thumb,
+            },
         );
 
         let mut responders = pending.responders;
@@ -716,6 +729,34 @@ pub(crate) fn render_and_store(
     Ok(jpeg)
 }
 
+/// What one worker was asked to produce.
+#[derive(Clone, Copy)]
+pub(crate) struct Produce {
+    pub file_id: i64,
+    pub kind: ThumbKind,
+    /// Cache version from the request URL, when the caller could supply one.
+    pub known: Option<CacheVersion>,
+    /// Write the `thumbnails` row even on a disk-cache hit. Only the
+    /// pregeneration pass sets this; see [`Pending::needs_row`].
+    pub record_hit: bool,
+    /// Also render the grid thumbnail from this decode.
+    pub also_thumb: bool,
+}
+
+impl Produce {
+    /// A plain interactive request: one artifact, no row on a cache hit.
+    #[cfg(test)]
+    fn interactive(file_id: i64, kind: ThumbKind, known: Option<CacheVersion>) -> Produce {
+        Produce {
+            file_id,
+            kind,
+            known,
+            record_hit: false,
+            also_thumb: false,
+        }
+    }
+}
+
 /// Return cached bytes for a thumbnail, generating (and caching) on miss.
 /// Source media is read through `store`; the JPEG cache lives on the real
 /// filesystem under `root/.cullant/thumbs` (private app storage on Android).
@@ -734,11 +775,15 @@ pub(crate) fn produce_cached(
     db: &Arc<Db>,
     store: &dyn ProjectStore,
     root: &Path,
-    file_id: i64,
-    kind: ThumbKind,
-    known: Option<CacheVersion>,
-    record_hit: bool,
+    req: Produce,
 ) -> AppResult<Vec<u8>> {
+    let Produce {
+        file_id,
+        kind,
+        known,
+        record_hit,
+        also_thumb,
+    } = req;
     // Fast path: a trusted version lets us try the cache before touching the DB.
     // Full-of-plain-image has no cache file, so it's left to the miss path
     // below (it needs rel_path anyway); every other kind can hit here.
@@ -842,6 +887,16 @@ pub(crate) fn produce_cached(
             None
         },
     };
+    // The preview decode is at least as large as a thumbnail needs, so the grid
+    // thumbnail is one more resize and encode of a buffer already in hand --
+    // against a whole second read and decode of the source if it were left to
+    // its own pass. A failure here is not fatal: the straggler thumbnail pass
+    // picks it up.
+    if also_thumb && kind == ThumbKind::Preview {
+        if let Err(err) = render_and_store(db, root, &meta, &decoded, ThumbKind::Thumb) {
+            tracing::debug!("fused thumbnail for {rel_path} failed: {err}");
+        }
+    }
     render_and_store(db, root, &meta, &decoded, kind)
 }
 
@@ -987,6 +1042,7 @@ mod tests {
             q.interactive.push_back(Pending {
                 key,
                 kind: ThumbKind::Thumb,
+                also_thumb: false,
                 known_version: None,
                 responders: vec![respond],
                 needs_row: false,
@@ -1115,13 +1171,25 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
+        let bytes = produce_cached(
+            &db,
+            &store,
+            root,
+            Produce::interactive(id, ThumbKind::Thumb, None),
+        )
+        .unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap();
         assert_eq!(thumb.width(), 384);
         assert_eq!(thumb.height(), 288);
 
         // Second call must hit the disk cache (row exists + same bytes).
-        let again = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
+        let again = produce_cached(
+            &db,
+            &store,
+            root,
+            Produce::interactive(id, ThumbKind::Thumb, None),
+        )
+        .unwrap();
         assert_eq!(bytes, again);
         let rows: i64 = db
             .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM thumbnails", [], |r| r.get(0))?))
@@ -1156,10 +1224,7 @@ mod tests {
             &db,
             &store,
             root,
-            id,
-            ThumbKind::Thumb,
-            Some(version),
-            false,
+            Produce::interactive(id, ThumbKind::Thumb, Some(version)),
         )
         .unwrap();
 
@@ -1168,10 +1233,7 @@ mod tests {
             &db,
             &store,
             root,
-            id,
-            ThumbKind::Thumb,
-            Some(version),
-            false,
+            Produce::interactive(id, ThumbKind::Thumb, Some(version)),
         )
         .unwrap();
         assert_eq!(bytes, hit);
@@ -1182,8 +1244,13 @@ mod tests {
             mtime: mtime + 999,
             orientation: 1,
         };
-        let fallback =
-            produce_cached(&db, &store, root, id, ThumbKind::Thumb, Some(stale), false).unwrap();
+        let fallback = produce_cached(
+            &db,
+            &store,
+            root,
+            Produce::interactive(id, ThumbKind::Thumb, Some(stale)),
+        )
+        .unwrap();
         assert_eq!(bytes, fallback);
 
         // Same file, same mtime, different orientation: the cache must NOT be
@@ -1242,13 +1309,25 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        produce_cached(&db, &store, root, id, ThumbKind::Preview, None, false).unwrap();
+        produce_cached(
+            &db,
+            &store,
+            root,
+            Produce::interactive(id, ThumbKind::Preview, None),
+        )
+        .unwrap();
         let after_preview: i64 = db
             .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM file_analysis", [], |r| r.get(0))?))
             .unwrap();
         assert_eq!(after_preview, 0, "only the thumb kind is hashed");
 
-        produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
+        produce_cached(
+            &db,
+            &store,
+            root,
+            Produce::interactive(id, ThumbKind::Thumb, None),
+        )
+        .unwrap();
         let blob: Vec<u8> = db
             .call(move |c| {
                 Ok(c.query_row(
@@ -1287,7 +1366,13 @@ mod tests {
         })
         .unwrap();
 
-        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
+        let bytes = produce_cached(
+            &db,
+            &store,
+            root,
+            Produce::interactive(id, ThumbKind::Thumb, None),
+        )
+        .unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap().to_rgb8();
         // Rotated: landscape 800x600 -> portrait thumb 288x384.
         assert_eq!((thumb.width(), thumb.height()), (288, 384));
@@ -1318,7 +1403,13 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
+        produce_cached(
+            &db,
+            &store,
+            root,
+            Produce::interactive(id, ThumbKind::Thumb, None),
+        )
+        .unwrap();
         let (w, h): (i64, i64) = db
             .call(move |c| {
                 Ok(c.query_row(

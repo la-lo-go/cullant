@@ -48,6 +48,11 @@ use crate::thumbs::{CacheVersion, ThumbKind, ThumbPool, ThumbRequest};
 /// Smaller on Android to bound the number of in-flight decode buffers.
 const CHUNK: usize = if cfg!(target_os = "android") { 8 } else { 32 };
 
+/// Photos whose grid thumbnail is generated before the fused pass starts.
+/// Roughly the first two or three screens: enough that the grid stops looking
+/// empty immediately, few enough that paying a second read for them is noise.
+const LEAD_WINDOW: usize = 60;
+
 /// Minimum gap between metadata progress emits. Progress is counted per file
 /// (inside the parallel burst); this throttle coalesces the emits so a fast
 /// parse can't flood IPC. The final item always emits regardless.
@@ -304,46 +309,60 @@ pub fn run_ingest_inner(
     );
     meta_done(meta_updated);
 
-    // --- Phase B: photos first, videos last, all background (gate already open) ---
+    // --- Phase B: photos first, videos last, all background ---
     // Submitted to the shared ThumbPool as *background* work: interactive
     // requests (the cells/photo the user is looking at) always preempt it, and
     // there is no second thread pool to oversubscribe the CPU.
     //
-    // Order matters: photo grid thumbnails, then photo loupe previews, and only
-    // THEN video poster thumbnails. Video posters go through ffmpeg (a separate
-    // process spawn + frame extraction per file) — much slower per item than a
-    // JPEG/RAW decode — so deferring them keeps the whole photo library sharp and
-    // browsable before the video tier starts competing for the pool.
+    // Three passes, in this order for a reason:
+    //
+    // 1. A short thumbnails-only lead, so the first screens of the grid fill
+    //    within a second instead of waiting behind full-size preview decodes.
+    // 2. The fused pass: one read and one decode per photo, producing the loupe
+    //    preview AND the grid thumbnail. This is where the whole library gets
+    //    done, at one read each instead of two.
+    // 3. A thumbnails straggler pass, normally empty -- it only catches photos
+    //    whose preview was already cached (so the fused pass short-circuited
+    //    before rendering anything) but whose thumbnail was not.
+    //
+    // Video posters come last: ffmpeg spawns a process per file, so deferring
+    // them keeps the whole photo library browsable before that tier competes.
+    let thumb_sql = |extra: &str| {
+        format!(
+            "SELECT f.id, f.mtime, f.orientation
+             FROM files f
+             JOIN groups g ON g.id = f.group_id
+             LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
+             WHERE f.status = 0 AND f.kind IN (0, 1)
+           AND (g.primary_file_id = f.id OR g.decoupled = 1)
+               AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
+             ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC
+             {extra}"
+        )
+    };
+
+    // 1. Lead window. Small on purpose: every file here is read twice (once for
+    //    its thumbnail, once by the fused pass for its preview), which is a fine
+    //    price for two or three screens and a bad one for a whole library.
     generate_pass(
         db,
         thumbs,
         ThumbKind::Thumb,
-        // Only what the grid actually shows. In mirror mode -- the default --
-        // a live RAW+JPEG pair is one cell, its primary, so pregenerating the
-        // other half doubles the work for something nobody looks at. A
-        // decoupled pair shows both, so both qualify. The hidden half is still
-        // generated on demand the moment it IS shown.
-        "SELECT f.id, f.mtime, f.orientation
-         FROM files f
-         JOIN groups g ON g.id = f.group_id
-         LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
-         WHERE f.status = 0 AND f.kind IN (0, 1)
-           AND (g.primary_file_id = f.id OR g.decoupled = 1)
-           AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
-         ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
+        false,
+        &thumb_sql(&format!("LIMIT {LEAD_WINDOW}")),
         thumb_progress,
     )?;
 
+    // 2. The fused pass. Previews are only ever generated for stills; a video's
+    //    loupe plays the file itself. A preview is stale when it was generated
+    //    for a different long edge than the one now configured; `long_edge = 0`
+    //    means "generated before the column existed" and counts as matching, so
+    //    upgrading never regrinds a library that is perfectly fine.
     generate_pass(
         db,
         thumbs,
         ThumbKind::Preview,
-        // Previews (2560px loupe) are only ever generated for stills; a video's
-        // loupe plays the file itself.
-        // A preview is also stale when it was generated for a different long
-        // edge than the one now configured. `long_edge = 0` means "generated
-        // before the column existed", which counts as matching so upgrading
-        // never regrinds a library that is perfectly fine.
+        true,
         &format!(
             "SELECT f.id, f.mtime, f.orientation
              FROM files f
@@ -359,6 +378,16 @@ pub fn run_ingest_inner(
         preview_progress,
     )?;
 
+    // 3. Stragglers.
+    generate_pass(
+        db,
+        thumbs,
+        ThumbKind::Thumb,
+        false,
+        &thumb_sql(""),
+        thumb_progress,
+    )?;
+
     // Video poster thumbnails last, and only when enabled (the ffmpeg tier is the
     // slow one — see AppState::generate_video_thumbs). Skipping here only skips
     // *pregeneration*; a poster is still produced on demand when a video's cell
@@ -368,6 +397,7 @@ pub fn run_ingest_inner(
             db,
             thumbs,
             ThumbKind::Thumb,
+            false,
             "SELECT f.id, f.mtime, f.orientation
              FROM files f
              LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
@@ -395,6 +425,7 @@ fn generate_pass(
     db: &Arc<Db>,
     thumbs: &ThumbPool,
     kind: ThumbKind,
+    also_thumb: bool,
     select_sql: &str,
     progress: &mut dyn FnMut(usize, usize),
 ) -> AppResult<()> {
@@ -430,6 +461,7 @@ fn generate_pass(
             ThumbRequest {
                 file_id,
                 kind,
+                also_thumb,
                 known_version: Some(version),
                 // The disk cache is the point; the bytes are discarded here.
                 respond: Box::new(move |_| {
@@ -634,10 +666,15 @@ mod tests {
     }
 
     /// Run the whole pass, returning `(meta_updated, thumbs_done, previews_done)`.
+    ///
+    /// Thumbnails are reported by more than one pass (the lead window and the
+    /// straggler sweep), and each pass opens by reporting 0 — so bank the
+    /// previous pass's final count whenever that happens, and sum them.
     fn run_all(db: &Arc<Db>, root: &Path) -> (usize, usize, usize) {
         let (store, pool) = store_and_pool(db, root);
         let mut meta = 0usize;
         let mut thumbs = 0usize;
+        let mut thumb_pass = 0usize;
         let mut previews = 0usize;
         run_ingest_inner(
             db,
@@ -645,13 +682,20 @@ mod tests {
             &pool,
             &|_, _| {},
             &mut |u| meta = u,
-            &mut |d, _| thumbs = d,
+            &mut |d, _| {
+                if d == 0 {
+                    thumbs += thumb_pass;
+                    thumb_pass = 0;
+                } else {
+                    thumb_pass = d;
+                }
+            },
             &mut |d, _| previews = d,
             &mut |_, _| {},
             true,
         )
         .unwrap();
-        (meta, thumbs, previews)
+        (meta, thumbs + thumb_pass, previews)
     }
 
     #[test]
