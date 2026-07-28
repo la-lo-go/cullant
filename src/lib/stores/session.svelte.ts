@@ -1128,8 +1128,13 @@ class SessionStore {
    *  media tabs (the full catalog) rather than the currently loaded one. */
   async syncRejectedToQueue() {
     const ids: number[] = [];
-    for (const media of ["photos", "videos"] as const) {
-      const items = await api.queryItems("capture", media, false);
+    // The active tab is already loaded, and this runs during the open, when the
+    // storage and the DB are at their busiest — so read the flags off what is
+    // in hand rather than pulling the whole catalogue back over IPC.
+    for (const i of catalog.items) if (i.flag === -1) ids.push(i.id);
+    const other = catalog.media === "photos" ? "videos" : "photos";
+    if (catalog.mediaCounts[other] > 0) {
+      const items = await api.queryItems("capture", other, false);
       for (const i of items) if (i.flag === -1) ids.push(i.id);
     }
     if (ids.length === 0) return;
