@@ -345,18 +345,24 @@ fn generate_pass(
 
     let started = Instant::now();
     let (tx, rx) = mpsc::channel::<()>();
-    for (file_id, version) in pending {
-        let tx = tx.clone();
-        thumbs.enqueue_background(ThumbRequest {
-            file_id,
-            kind,
-            known_version: Some(version),
-            // The disk cache is the point; the bytes are discarded here.
-            respond: Box::new(move |_| {
-                let _ = tx.send(());
-            }),
-        });
-    }
+    // Submitted in one batch: one lock and one wake for the whole tier, rather
+    // than both per file for the entire library.
+    let requests: Vec<ThumbRequest> = pending
+        .into_iter()
+        .map(|(file_id, version)| {
+            let tx = tx.clone();
+            ThumbRequest {
+                file_id,
+                kind,
+                known_version: Some(version),
+                // The disk cache is the point; the bytes are discarded here.
+                respond: Box::new(move |_| {
+                    let _ = tx.send(());
+                }),
+            }
+        })
+        .collect();
+    thumbs.enqueue_background_batch(requests);
     drop(tx);
 
     let mut done = 0usize;

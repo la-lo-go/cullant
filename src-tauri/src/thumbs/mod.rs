@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -80,6 +80,46 @@ pub struct ThumbRequest {
     pub respond: Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>,
 }
 
+type Responder = Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>;
+
+/// One unit of work — a `(file, kind)` pair — plus everyone waiting on it.
+/// Requests are coalesced into these, so the same artifact is never decoded
+/// twice concurrently no matter how many callers ask for it.
+struct Pending {
+    key: (i64, u8),
+    kind: ThumbKind,
+    known_version: Option<CacheVersion>,
+    responders: Vec<Responder>,
+    /// Set when the pregeneration pass asked for this artifact. The pass only
+    /// selects files whose `thumbnails` row is missing or stale, so a disk-cache
+    /// hit here means the cache outlived the row -- and the row has to be
+    /// written, or every future open re-enqueues the same file forever.
+    /// Interactive requests leave it false: they are the hot scroll path and
+    /// must not touch the DB on a hit.
+    needs_row: bool,
+}
+
+/// Deliver one result to every waiter. `AppResult<Vec<u8>>` is not `Clone`, so
+/// all but the last waiter get a copy of the bytes (or a rebuilt error) and the
+/// last is handed the original.
+fn fan_out(result: AppResult<Vec<u8>>, mut responders: Vec<Responder>) {
+    let Some(last) = responders.pop() else { return };
+    match &result {
+        Ok(bytes) => {
+            for r in responders {
+                r(Ok(bytes.clone()));
+            }
+        }
+        Err(err) => {
+            let msg = err.to_string();
+            for r in responders {
+                r(Err(AppError::Other(msg.clone())));
+            }
+        }
+    }
+    last(result);
+}
+
 /// Two priority tiers sharing one worker pool, so interactive and background
 /// work never fight over separate thread pools (which oversubscribes the CPU and
 /// scatters completion order).
@@ -87,16 +127,26 @@ struct Queues {
     /// Interactive requests from the `cullant://` protocol (the cells/photo the
     /// user is looking at). LIFO: the most recently requested is what's on screen
     /// right now, so it goes first — a fast scroll never waits on stale cells.
-    interactive: Vec<ThumbRequest>,
+    interactive: VecDeque<Pending>,
     /// Bulk pregeneration (ingest Phase B). FIFO, so thumbnails are produced in
     /// the grid's display order (top first), and only ever served when no
     /// interactive request is waiting.
-    background: VecDeque<ThumbRequest>,
+    background: VecDeque<Pending>,
+    /// Keys a worker is decoding right now, holding the responders that arrived
+    /// after the decode started. The worker drains this when it finishes, so a
+    /// late caller adopts the in-flight result instead of starting a second one.
+    in_flight: HashMap<(i64, u8), Vec<Responder>>,
 }
 
 struct Queue {
     items: Mutex<Option<Queues>>,
     signal: Condvar,
+    /// Ceiling on the interactive queue. A fast scroll can ask for hundreds of
+    /// cells; without a bound every stale one is still decoded in full long
+    /// after it left the screen, which is how a phone ends up minutes behind
+    /// the user. Overflow drops the OLDEST — the least likely to still be
+    /// visible — and the frontend re-requests it if it is.
+    max_interactive: usize,
 }
 
 /// Worker pool that turns thumbnail requests (from the cullant:// protocol AND
@@ -109,14 +159,6 @@ pub struct ThumbPool {
 
 impl ThumbPool {
     pub fn start(db: Arc<Db>, store: Arc<dyn ProjectStore>, root: PathBuf) -> ThumbPool {
-        let queue = Arc::new(Queue {
-            items: Mutex::new(Some(Queues {
-                interactive: Vec::new(),
-                background: VecDeque::new(),
-            })),
-            signal: Condvar::new(),
-        });
-
         // Mirrors the rayon cap in lib.rs, which this pool was never covered by:
         // each in-flight decode holds the source bytes plus a full-size decode
         // plus a resize buffer, so an 8-core phone spawning 7 workers reached
@@ -131,6 +173,20 @@ impl ThumbPool {
                 .map(|n| (n.get().saturating_sub(1)).max(2))
                 .unwrap_or(4)
         };
+
+        let queue = Arc::new(Queue {
+            items: Mutex::new(Some(Queues {
+                interactive: VecDeque::new(),
+                background: VecDeque::new(),
+                in_flight: HashMap::new(),
+            })),
+            signal: Condvar::new(),
+            // Deep enough that every worker has work queued behind it plus a
+            // screenful of slack, shallow enough that a flick-scroll cannot
+            // bank minutes of decoding.
+            max_interactive: (workers * 4).max(16),
+        });
+
         for i in 0..workers {
             let queue = queue.clone();
             let db = db.clone();
@@ -146,26 +202,105 @@ impl ThumbPool {
     }
 
     /// Enqueue an interactive request (served before any background work, LIFO).
+    ///
+    /// Coalescing happens here: if the same artifact is already being decoded,
+    /// or is already queued anywhere, this caller joins it rather than adding a
+    /// second decode. A request already sitting in the background tier is
+    /// *promoted* — the user is looking at it now.
     pub fn enqueue(&self, request: ThumbRequest) {
         let mut guard = self.queue.items.lock().unwrap();
-        if let Some(q) = guard.as_mut() {
-            q.interactive.push(request);
-            self.queue.signal.notify_one();
-        } else {
+        let Some(q) = guard.as_mut() else {
             (request.respond)(Err(AppError::Other("thumb pool shut down".into())));
+            return;
+        };
+        let key = (request.file_id, request.kind as u8);
+
+        if let Some(waiters) = q.in_flight.get_mut(&key) {
+            waiters.push(request.respond);
+            return;
         }
+        if let Some(i) = q.interactive.iter().position(|p| p.key == key) {
+            // Re-requested, so it is the freshest thing on screen: move it to
+            // the front of the line (the LIFO end) instead of leaving it where
+            // it was.
+            let mut pending = q.interactive.remove(i).expect("index from position");
+            pending.responders.push(request.respond);
+            q.interactive.push_back(pending);
+            return;
+        }
+        let pending = match q.background.iter().position(|p| p.key == key) {
+            Some(i) => {
+                let mut pending = q.background.remove(i).expect("index from position");
+                pending.responders.push(request.respond);
+                pending
+            }
+            None => Pending {
+                key,
+                kind: request.kind,
+                known_version: request.known_version,
+                responders: vec![request.respond],
+                needs_row: false,
+            },
+        };
+        q.interactive.push_back(pending);
+
+        if q.interactive.len() > self.queue.max_interactive {
+            if let Some(dropped) = q.interactive.pop_front() {
+                fan_out(
+                    Err(AppError::Other("thumbnail request superseded".into())),
+                    dropped.responders,
+                );
+            }
+        }
+        self.queue.signal.notify_one();
     }
 
     /// Enqueue a background pregeneration request (served only when no
     /// interactive request is waiting, FIFO / in submission order).
     pub fn enqueue_background(&self, request: ThumbRequest) {
+        self.enqueue_background_batch(vec![request]);
+    }
+
+    /// Submit a whole pregeneration tier at once: one lock acquisition and one
+    /// `notify_all`, instead of both per request for the entire library.
+    ///
+    /// Background work is exempt from `max_interactive` — it is already bounded
+    /// by the size of the pass — but not from coalescing, so a file the user has
+    /// already looked at is not decoded a second time here.
+    pub fn enqueue_background_batch(&self, requests: Vec<ThumbRequest>) {
         let mut guard = self.queue.items.lock().unwrap();
-        if let Some(q) = guard.as_mut() {
-            q.background.push_back(request);
-            self.queue.signal.notify_one();
-        } else {
-            (request.respond)(Err(AppError::Other("thumb pool shut down".into())));
+        let Some(q) = guard.as_mut() else {
+            for request in requests {
+                (request.respond)(Err(AppError::Other("thumb pool shut down".into())));
+            }
+            return;
+        };
+        for request in requests {
+            let key = (request.file_id, request.kind as u8);
+            if let Some(waiters) = q.in_flight.get_mut(&key) {
+                waiters.push(request.respond);
+                continue;
+            }
+            if let Some(p) = q
+                .interactive
+                .iter_mut()
+                .chain(q.background.iter_mut())
+                .find(|p| p.key == key)
+            {
+                p.responders.push(request.respond);
+                p.needs_row = true;
+                continue;
+            }
+            q.background.push_back(Pending {
+                key,
+                kind: request.kind,
+                known_version: request.known_version,
+                responders: vec![request.respond],
+                needs_row: true,
+            });
         }
+        drop(guard);
+        self.queue.signal.notify_all();
     }
 
     /// Stop accepting work and unblock all workers (they exit). Draining calls
@@ -175,8 +310,16 @@ impl ThumbPool {
         let mut guard = self.queue.items.lock().unwrap();
         if let Some(dropped) = guard.take() {
             drop(guard);
-            for req in dropped.interactive.into_iter().chain(dropped.background) {
-                (req.respond)(Err(AppError::Other("thumb pool shut down".into())));
+            for pending in dropped.interactive.into_iter().chain(dropped.background) {
+                fan_out(
+                    Err(AppError::Other("thumb pool shut down".into())),
+                    pending.responders,
+                );
+            }
+            // Callers that joined a decode already in progress are released
+            // here too; the worker itself finds its key gone and drops its own.
+            for (_, waiters) in dropped.in_flight {
+                fan_out(Err(AppError::Other("thumb pool shut down".into())), waiters);
             }
             self.queue.signal.notify_all();
         }
@@ -191,18 +334,23 @@ impl Drop for ThumbPool {
 
 fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, root: PathBuf) {
     loop {
-        let request = {
+        let pending = {
             let mut guard = queue.items.lock().unwrap();
             loop {
                 match guard.as_mut() {
                     None => return, // pool shut down
                     Some(q) => {
                         // Interactive first (LIFO), then background (FIFO).
-                        if let Some(req) = q.interactive.pop() {
-                            break req;
-                        }
-                        if let Some(req) = q.background.pop_front() {
-                            break req;
+                        if let Some(p) = q
+                            .interactive
+                            .pop_back()
+                            .or_else(|| q.background.pop_front())
+                        {
+                            // Claim the key before releasing the lock, so anyone
+                            // asking for it while this decode runs waits on it
+                            // instead of starting a second one.
+                            q.in_flight.insert(p.key, Vec::new());
+                            break p;
                         }
                         guard = queue.signal.wait(guard).unwrap();
                     }
@@ -214,11 +362,23 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             &db,
             store.as_ref(),
             &root,
-            request.file_id,
-            request.kind,
-            request.known_version,
+            pending.key.0,
+            pending.kind,
+            pending.known_version,
+            pending.needs_row,
         );
-        (request.respond)(result);
+
+        let mut responders = pending.responders;
+        {
+            let mut guard = queue.items.lock().unwrap();
+            if let Some(q) = guard.as_mut() {
+                if let Some(late) = q.in_flight.remove(&pending.key) {
+                    responders.extend(late);
+                }
+            }
+            // On shutdown the drain already answered the late waiters.
+        }
+        fan_out(result, responders);
     }
 }
 
@@ -235,6 +395,15 @@ pub(crate) fn cache_rel_path(file_id: i64, version: CacheVersion, kind: ThumbKin
     };
     let CacheVersion { mtime, orientation } = version;
     format!("{bucket:02x}/{file_id}_{mtime}_{orientation}_{suffix}.jpg")
+}
+
+/// Pixel dimensions from an encoded image's header, without decoding it.
+fn jpeg_dims(bytes: &[u8]) -> Option<(u32, u32)> {
+    image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
 }
 
 fn now_secs() -> i64 {
@@ -537,6 +706,7 @@ pub(crate) fn produce_cached(
     file_id: i64,
     kind: ThumbKind,
     known: Option<CacheVersion>,
+    record_hit: bool,
 ) -> AppResult<Vec<u8>> {
     // Fast path: a trusted version lets us try the cache before touching the DB.
     // Full-of-plain-image has no cache file, so it's left to the miss path
@@ -545,6 +715,33 @@ pub(crate) fn produce_cached(
         let cache_rel = cache_rel_path(file_id, version, kind);
         let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
         if let Ok(bytes) = std::fs::read(&cache_abs) {
+            // Only the pregeneration pass gets here with `record_hit`, and only
+            // for a file it already established has no usable row. Rebuilding a
+            // project's DB while `.cullant/thumbs` survives would otherwise
+            // re-enqueue every file on every open, forever, because the cache
+            // hit satisfied the request without ever writing the row back.
+            if record_hit {
+                if let Some((w, h)) = jpeg_dims(&bytes) {
+                    let row = ThumbRow {
+                        file_id,
+                        kind_i: kind as i64,
+                        cache_rel,
+                        out_w: w,
+                        out_h: h,
+                        mtime: version.mtime,
+                        // Both come from decoding the source, which is exactly
+                        // what this path skipped.
+                        src_dims: None,
+                        phash: None,
+                        long_edge: match kind {
+                            ThumbKind::Thumb => THUMB_LONG_EDGE,
+                            ThumbKind::Preview => preview_long_edge(),
+                            ThumbKind::Full => 0,
+                        },
+                    };
+                    db.call(move |conn| Ok(write_thumb_row(conn, &row)?))?;
+                }
+            }
             return Ok(bytes);
         }
     }
@@ -719,6 +916,131 @@ fn encode_jpeg(img: &DynamicImage, quality: u8) -> AppResult<Vec<u8>> {
 mod tests {
     use super::*;
 
+    /// The queue's coalescing/bounding logic, exercised directly against
+    /// `Queues` so it needs neither worker threads nor real image files.
+    mod queue {
+        use super::*;
+        use std::sync::mpsc;
+
+        /// Stand-in for `ThumbPool::enqueue`, minus the pool plumbing.
+        fn enqueue(q: &mut Queues, max: usize, key_id: i64, respond: Responder) {
+            let key = (key_id, ThumbKind::Thumb as u8);
+            if let Some(waiters) = q.in_flight.get_mut(&key) {
+                waiters.push(respond);
+                return;
+            }
+            if let Some(i) = q.interactive.iter().position(|p| p.key == key) {
+                let mut pending = q.interactive.remove(i).unwrap();
+                pending.responders.push(respond);
+                q.interactive.push_back(pending);
+                return;
+            }
+            q.interactive.push_back(Pending {
+                key,
+                kind: ThumbKind::Thumb,
+                known_version: None,
+                responders: vec![respond],
+                needs_row: false,
+            });
+            if q.interactive.len() > max {
+                if let Some(dropped) = q.interactive.pop_front() {
+                    fan_out(
+                        Err(AppError::Other("superseded".into())),
+                        dropped.responders,
+                    );
+                }
+            }
+        }
+
+        fn empty() -> Queues {
+            Queues {
+                interactive: VecDeque::new(),
+                background: VecDeque::new(),
+                in_flight: HashMap::new(),
+            }
+        }
+
+        #[test]
+        fn two_requests_for_one_artifact_share_a_single_decode() {
+            let mut q = empty();
+            let (tx, rx) = mpsc::channel();
+            let tx2 = tx.clone();
+            enqueue(
+                &mut q,
+                16,
+                7,
+                Box::new(move |r| tx.send(r.is_ok()).unwrap()),
+            );
+            enqueue(
+                &mut q,
+                16,
+                7,
+                Box::new(move |r| tx2.send(r.is_ok()).unwrap()),
+            );
+
+            // One unit of work, two waiters on it.
+            assert_eq!(q.interactive.len(), 1);
+            assert_eq!(q.interactive[0].responders.len(), 2);
+
+            let pending = q.interactive.pop_back().unwrap();
+            fan_out(Ok(vec![1, 2, 3]), pending.responders);
+            assert!(rx.recv().unwrap());
+            assert!(rx.recv().unwrap());
+        }
+
+        #[test]
+        fn re_requesting_moves_it_to_the_front_of_the_line() {
+            let mut q = empty();
+            for id in [1, 2, 3] {
+                enqueue(&mut q, 16, id, Box::new(|_| {}));
+            }
+            enqueue(&mut q, 16, 1, Box::new(|_| {}));
+            // LIFO pops the back, so the re-requested one is served next.
+            assert_eq!(q.interactive.back().unwrap().key.0, 1);
+            assert_eq!(q.interactive.len(), 3);
+        }
+
+        #[test]
+        fn overflow_drops_the_oldest_never_the_newest() {
+            let mut q = empty();
+            let (tx, rx) = mpsc::channel();
+            // Capacity 2. The third request evicts the first.
+            enqueue(&mut q, 2, 1, Box::new(move |r| tx.send(r.is_ok()).unwrap()));
+            enqueue(&mut q, 2, 2, Box::new(|_| {}));
+            enqueue(&mut q, 2, 3, Box::new(|_| {}));
+
+            assert!(!rx.recv().unwrap(), "evicted request must be answered");
+            assert_eq!(q.interactive.len(), 2);
+            let ids: Vec<i64> = q.interactive.iter().map(|p| p.key.0).collect();
+            assert_eq!(ids, vec![2, 3]);
+        }
+
+        #[test]
+        fn a_late_caller_adopts_the_decode_already_running() {
+            let mut q = empty();
+            let key = (9, ThumbKind::Thumb as u8);
+            // A worker has claimed this key and is decoding it.
+            q.in_flight.insert(key, Vec::new());
+
+            let (tx, rx) = mpsc::channel();
+            enqueue(
+                &mut q,
+                16,
+                9,
+                Box::new(move |r| tx.send(r.is_ok()).unwrap()),
+            );
+
+            // No second unit of work was queued.
+            assert!(q.interactive.is_empty());
+            assert_eq!(q.in_flight[&key].len(), 1);
+
+            // The worker finishes and drains the late waiter.
+            let late = q.in_flight.remove(&key).unwrap();
+            fan_out(Ok(vec![0]), late);
+            assert!(rx.recv().unwrap());
+        }
+    }
+
     #[test]
     fn scales_down_long_edge_only() {
         assert_eq!(scaled_dims(4000, 3000, 384), (384, 288));
@@ -744,13 +1066,13 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap();
         assert_eq!(thumb.width(), 384);
         assert_eq!(thumb.height(), 288);
 
         // Second call must hit the disk cache (row exists + same bytes).
-        let again = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        let again = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
         assert_eq!(bytes, again);
         let rows: i64 = db
             .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM thumbnails", [], |r| r.get(0))?))
@@ -781,10 +1103,28 @@ mod tests {
         };
 
         // Generate + cache the thumb.
-        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, Some(version)).unwrap();
+        let bytes = produce_cached(
+            &db,
+            &store,
+            root,
+            id,
+            ThumbKind::Thumb,
+            Some(version),
+            false,
+        )
+        .unwrap();
 
         // Fast path with the correct version returns the cached bytes.
-        let hit = produce_cached(&db, &store, root, id, ThumbKind::Thumb, Some(version)).unwrap();
+        let hit = produce_cached(
+            &db,
+            &store,
+            root,
+            id,
+            ThumbKind::Thumb,
+            Some(version),
+            false,
+        )
+        .unwrap();
         assert_eq!(bytes, hit);
 
         // A stale mtime misses the fast path and falls back to the authoritative
@@ -794,7 +1134,7 @@ mod tests {
             orientation: 1,
         };
         let fallback =
-            produce_cached(&db, &store, root, id, ThumbKind::Thumb, Some(stale)).unwrap();
+            produce_cached(&db, &store, root, id, ThumbKind::Thumb, Some(stale), false).unwrap();
         assert_eq!(bytes, fallback);
 
         // Same file, same mtime, different orientation: the cache must NOT be
@@ -853,13 +1193,13 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        produce_cached(&db, &store, root, id, ThumbKind::Preview, None).unwrap();
+        produce_cached(&db, &store, root, id, ThumbKind::Preview, None, false).unwrap();
         let after_preview: i64 = db
             .call(|c| Ok(c.query_row("SELECT COUNT(*) FROM file_analysis", [], |r| r.get(0))?))
             .unwrap();
         assert_eq!(after_preview, 0, "only the thumb kind is hashed");
 
-        produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
         let blob: Vec<u8> = db
             .call(move |c| {
                 Ok(c.query_row(
@@ -898,7 +1238,7 @@ mod tests {
         })
         .unwrap();
 
-        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        let bytes = produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap().to_rgb8();
         // Rotated: landscape 800x600 -> portrait thumb 288x384.
         assert_eq!((thumb.width(), thumb.height()), (288, 384));
@@ -929,7 +1269,7 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
 
-        produce_cached(&db, &store, root, id, ThumbKind::Thumb, None).unwrap();
+        produce_cached(&db, &store, root, id, ThumbKind::Thumb, None, false).unwrap();
         let (w, h): (i64, i64) = db
             .call(move |c| {
                 Ok(c.query_row(
