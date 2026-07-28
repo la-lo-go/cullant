@@ -72,6 +72,10 @@ const PROGRESS_THROTTLE_MS: u64 = if cfg!(target_os = "android") {
 struct Progress {
     done: usize,
     total: usize,
+    /// Files finished since the previous emit. Lets the frontend learn which
+    /// previews exist without re-querying the whole catalogue on a timer.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    ids: Vec<i64>,
 }
 
 #[derive(Serialize, Clone)]
@@ -165,22 +169,50 @@ pub fn run_ingest_pass(
         // Metadata progress is reported per file from inside the parallel burst,
         // so it must be Sync; `app.emit` already is.
         &|done, total| {
-            let _ = app.emit("metadata:progress", Progress { done, total });
+            let _ = app.emit(
+                "metadata:progress",
+                Progress {
+                    done,
+                    total,
+                    ids: Vec::new(),
+                },
+            );
         },
         &mut |updated| {
             let _ = app.emit("metadata:done", MetadataDone { updated });
         },
-        &mut |done, total| {
-            let _ = app.emit("thumbs:progress", Progress { done, total });
+        &mut |done, total, _ids| {
+            let _ = app.emit(
+                "thumbs:progress",
+                Progress {
+                    done,
+                    total,
+                    ids: Vec::new(),
+                },
+            );
             if done >= total {
                 let _ = app.emit("thumbs:done", ThumbsDone { total });
             }
         },
-        &mut |done, total| {
-            let _ = app.emit("previews:progress", Progress { done, total });
+        &mut |done, total, ids: &[i64]| {
+            let _ = app.emit(
+                "previews:progress",
+                Progress {
+                    done,
+                    total,
+                    ids: ids.to_vec(),
+                },
+            );
         },
-        &mut |done, total| {
-            let _ = app.emit("videos:progress", Progress { done, total });
+        &mut |done, total, _ids| {
+            let _ = app.emit(
+                "videos:progress",
+                Progress {
+                    done,
+                    total,
+                    ids: Vec::new(),
+                },
+            );
         },
         generate_videos,
     )
@@ -199,9 +231,9 @@ pub fn run_ingest_inner(
     // parallel burst, so this may be called concurrently from rayon workers.
     meta_progress: &(dyn Fn(usize, usize) + Sync),
     meta_done: &mut dyn FnMut(usize),
-    thumb_progress: &mut dyn FnMut(usize, usize),
-    preview_progress: &mut dyn FnMut(usize, usize),
-    video_progress: &mut dyn FnMut(usize, usize),
+    thumb_progress: &mut dyn FnMut(usize, usize, &[i64]),
+    preview_progress: &mut dyn FnMut(usize, usize, &[i64]),
+    video_progress: &mut dyn FnMut(usize, usize, &[i64]),
     generate_videos: bool,
 ) -> AppResult<()> {
     // --- Phase A: metadata ---
@@ -427,7 +459,7 @@ fn generate_pass(
     kind: ThumbKind,
     also_thumb: bool,
     select_sql: &str,
-    progress: &mut dyn FnMut(usize, usize),
+    progress: &mut dyn FnMut(usize, usize, &[i64]),
 ) -> AppResult<()> {
     let select = select_sql.to_string();
     let pending: Vec<(i64, CacheVersion)> = db.call(move |conn| {
@@ -445,13 +477,15 @@ fn generate_pass(
     })?;
 
     let total = pending.len();
-    progress(0, total);
+    progress(0, total, &[]);
     if total == 0 {
         return Ok(());
     }
 
     let started = Instant::now();
-    let (tx, rx) = mpsc::channel::<()>();
+    // The channel carries which file finished, so the emit can tell the frontend
+    // exactly what became available rather than making it re-read the catalogue.
+    let (tx, rx) = mpsc::channel::<i64>();
     // Submitted in one batch: one lock and one wake for the whole tier, rather
     // than both per file for the entire library.
     let requests: Vec<ThumbRequest> = pending
@@ -465,7 +499,7 @@ fn generate_pass(
                 known_version: Some(version),
                 // The disk cache is the point; the bytes are discarded here.
                 respond: Box::new(move |_| {
-                    let _ = tx.send(());
+                    let _ = tx.send(file_id);
                 }),
             }
         })
@@ -475,12 +509,15 @@ fn generate_pass(
 
     let mut done = 0usize;
     let mut last_emit_ms = 0u64;
-    while rx.recv().is_ok() {
+    let mut since_emit: Vec<i64> = Vec::new();
+    while let Ok(file_id) = rx.recv() {
         done += 1;
+        since_emit.push(file_id);
         let now = started.elapsed().as_millis() as u64;
         if done == total || now.saturating_sub(last_emit_ms) >= PROGRESS_THROTTLE_MS {
             last_emit_ms = now;
-            progress(done, total);
+            progress(done, total, &since_emit);
+            since_emit.clear();
         }
     }
     tracing::info!(
@@ -682,7 +719,7 @@ mod tests {
             &pool,
             &|_, _| {},
             &mut |u| meta = u,
-            &mut |d, _| {
+            &mut |d, _, _| {
                 if d == 0 {
                     thumbs += thumb_pass;
                     thumb_pass = 0;
@@ -690,8 +727,8 @@ mod tests {
                     thumb_pass = d;
                 }
             },
-            &mut |d, _| previews = d,
-            &mut |_, _| {},
+            &mut |d, _, _| previews = d,
+            &mut |_, _, _| {},
             true,
         )
         .unwrap();
@@ -714,9 +751,9 @@ mod tests {
             &pool,
             &|_, _| {},
             &mut |updated| gate = Some((updated, thumb_count(&db, 0))),
-            &mut |_, _| {},
-            &mut |_, _| {},
-            &mut |_, _| {},
+            &mut |_, _, _| {},
+            &mut |_, _, _| {},
+            &mut |_, _, _| {},
             false,
         )
         .unwrap();

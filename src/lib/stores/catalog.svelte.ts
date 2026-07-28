@@ -209,9 +209,6 @@ class CatalogStore {
 export const catalog = new CatalogStore();
 catalog.adoptCurrent();
 
-// Throttle the preview-ready refetch during the (throttled-anyway) preview pass.
-let lastPreviewReadyRefresh = 0;
-
 // Backend events keep the catalog fresh while scan/metadata run.
 listen<ScanProgress>("scan:progress", (e) => {
   catalog.scanning = true;
@@ -253,17 +250,16 @@ listen<{ done: number; total: number }>("thumbs:progress", (e) => {
 listen<{ total: number }>("thumbs:done", () => {
   catalog.thumbProgress = { done: 0, total: 0 };
 });
-listen<{ done: number; total: number }>("previews:progress", (e) => {
-  const { done, total } = e.payload;
+listen<{ done: number; total: number; ids?: number[] }>("previews:progress", (e) => {
+  const { done, total, ids } = e.payload;
   // Reset to idle once the background tier completes.
-  catalog.previewProgress = done >= total ? { done: 0, total: 0 } : e.payload;
-  // Refresh which items now have previews so their per-cell spinners clear.
-  // Throttled during the pass; always refetched on the final tick.
-  const now = Date.now();
-  if (done >= total || now - lastPreviewReadyRefresh > 600) {
-    lastPreviewReadyRefresh = now;
-    void catalog.refreshPreviewReady();
-  }
+  catalog.previewProgress = done >= total ? { done: 0, total: 0 } : { done, total };
+  // The event carries exactly which files finished, so their per-cell spinners
+  // clear without re-reading the whole catalogue on a timer.
+  for (const id of ids ?? []) catalog.previewReady.add(id);
+  // One full refetch at the end still runs: it is the only thing that picks up
+  // previews this pass did not generate (already cached, or made on demand).
+  if (done >= total) void catalog.refreshPreviewReady();
 });
 listen<{ done: number; total: number }>("videos:progress", (e) => {
   // The final (video-poster) tier. Reset to idle once it completes.

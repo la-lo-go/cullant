@@ -96,9 +96,9 @@ pub mod bench {
             &thumbs,
             &|_, _| {},
             &mut |updated| meta = updated,
-            &mut |done, _| thumbs_done = done,
-            &mut |done, _| previews = done,
-            &mut |_, _| {},
+            &mut |done, _, _| thumbs_done = done,
+            &mut |done, _, _| previews = done,
+            &mut |_, _, _| {},
             true,
         )
         .expect("ingest failed");
