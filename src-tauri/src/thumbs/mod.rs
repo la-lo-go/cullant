@@ -85,6 +85,8 @@ pub struct ThumbRequest {
     /// source. Used by the pregeneration pass; interactive requests want one
     /// artifact and leave it false.
     pub also_thumb: bool,
+    /// See [`Produce::cache_checked`].
+    pub cache_checked: bool,
     pub respond: Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>,
 }
 
@@ -97,6 +99,7 @@ struct Pending {
     key: (i64, u8),
     kind: ThumbKind,
     also_thumb: bool,
+    cache_checked: bool,
     known_version: Option<CacheVersion>,
     responders: Vec<Responder>,
     /// Set when the pregeneration pass asked for this artifact. The pass only
@@ -247,6 +250,7 @@ impl ThumbPool {
                 key,
                 kind: request.kind,
                 also_thumb: request.also_thumb,
+                cache_checked: request.cache_checked,
                 known_version: request.known_version,
                 responders: vec![request.respond],
                 needs_row: false,
@@ -305,6 +309,7 @@ impl ThumbPool {
                 key,
                 kind: request.kind,
                 also_thumb: request.also_thumb,
+                cache_checked: request.cache_checked,
                 known_version: request.known_version,
                 responders: vec![request.respond],
                 needs_row: true,
@@ -379,6 +384,7 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
                 known: pending.known_version,
                 record_hit: pending.needs_row,
                 also_thumb: pending.also_thumb,
+                cache_checked: pending.cache_checked,
             },
         );
 
@@ -742,6 +748,11 @@ pub(crate) struct Produce {
     pub record_hit: bool,
     /// Also render the grid thumbnail from this decode.
     pub also_thumb: bool,
+    /// The caller already tried `known`'s cache path and missed. Set by the
+    /// protocol handler, whose whole fast path is that same read -- without
+    /// this the worker repeats it for every miss, which is exactly the case
+    /// where it is guaranteed to fail again.
+    pub cache_checked: bool,
 }
 
 impl Produce {
@@ -754,6 +765,7 @@ impl Produce {
             known,
             record_hit: false,
             also_thumb: false,
+            cache_checked: false,
         }
     }
 }
@@ -784,11 +796,12 @@ pub(crate) fn produce_cached(
         known,
         record_hit,
         also_thumb,
+        cache_checked,
     } = req;
     // Fast path: a trusted version lets us try the cache before touching the DB.
     // Full-of-plain-image has no cache file, so it's left to the miss path
     // below (it needs rel_path anyway); every other kind can hit here.
-    if let Some(version) = known {
+    if let Some(version) = known.filter(|_| !cache_checked) {
         let cache_rel = cache_rel_path(file_id, version, kind);
         let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
         if let Ok(bytes) = std::fs::read(&cache_abs) {
@@ -1050,6 +1063,7 @@ mod tests {
                 key,
                 kind: ThumbKind::Thumb,
                 also_thumb: false,
+                cache_checked: false,
                 known_version: None,
                 responders: vec![respond],
                 needs_row: false,

@@ -119,6 +119,8 @@ fn respond_thumb<R: Runtime>(
         known_version: known,
         // An interactive request wants exactly what was asked for.
         also_thumb: false,
+        // The fast path above already tried this exact cache entry.
+        cache_checked: known.is_some(),
         respond: Box::new(move |result: AppResult<Vec<u8>>| match result {
             Ok(bytes) => responder.respond(jpeg_ok(bytes)),
             Err(e) => {

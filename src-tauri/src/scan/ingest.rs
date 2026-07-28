@@ -496,6 +496,8 @@ fn generate_pass(
                 file_id,
                 kind,
                 also_thumb,
+                // The pass has no fast path of its own; the worker does the read.
+                cache_checked: false,
                 known_version: Some(version),
                 // The disk cache is the point; the bytes are discarded here.
                 respond: Box::new(move |_| {
