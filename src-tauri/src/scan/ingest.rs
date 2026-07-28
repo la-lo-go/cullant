@@ -1,29 +1,33 @@
-//! Two-phase ingest.
+//! Two-phase ingest. Nothing here gates the grid — that appears as soon as the
+//! walk reports back, ordered by mtime — so both phases are free to be ordered
+//! by what the user gets soonest rather than by what unblocks them.
 //!
-//! Opening a project must feel instant, so ingest is split by *what gates the
-//! grid*:
+//! - **Phase A — metadata.** EXIF/RAW metadata (capture_time, orientation,
+//!   camera, …) for every file that lacks it. The grid re-sorts by capture time
+//!   when it finishes (`metadata:done`); on a camera card mtime order already
+//!   matches, so the resort is near-identity. Progress drives
+//!   `metadata:progress`.
+//! - **Phase B — thumbnails then previews.** The 384px grid thumbnails and then
+//!   the loupe previews, in the grid's display order (top first) so what the
+//!   user is looking at fills in first. Interactive requests for a cell not yet
+//!   generated are served immediately by the ThumbPool (LIFO) and are race-safe
+//!   with this phase (temp-file+rename writes, idempotent upserts). Progress
+//!   drives `thumbs:progress`/`thumbs:done` and `previews:progress`.
 //!
-//! - **Phase A — metadata (gated).** EXIF/RAW metadata (capture_time,
-//!   orientation, camera, …) for every file that lacks it. This is the only
-//!   blocking phase: the grid is ordered by `COALESCE(capture_time, mtime)`, so
-//!   once metadata is in the grid can show, correctly sorted. Metadata is far
-//!   cheaper than decoding+resizing+encoding a thumbnail, so this gate is short.
-//!   Progress drives `metadata:progress`; the gate releases on `metadata:done`.
-//! - **Phase B — thumbnails then previews (background).** With the gate already
-//!   open, the 384px grid thumbnails and then the 2560px loupe previews are
-//!   generated for the whole project, in the grid's display order (top first) so
-//!   what the user is looking at fills in first. Interactive requests for a cell
-//!   not yet generated are served immediately by the ThumbPool (LIFO) and are
-//!   race-safe with this phase (temp-file+rename writes, idempotent upserts).
-//!   Progress drives `thumbs:progress`/`thumbs:done` and `previews:progress`,
-//!   all non-blocking indicators.
+//! Both phases are organised around a single fact: a file that cannot be
+//! memory-mapped must be read whole, and on Android SAF *no* file can be
+//! memory-mapped. So the ingest reads as few bytes as it can get away with:
 //!
-//! Trade-off: exact ordering from the first frame means metadata is read before
-//! any pixels, so a RAW container is parsed once here for metadata and reopened
-//! in Phase B for its embedded preview — one extra cheap `get_decoder` per RAW,
-//! in the background, invisible to time-to-interactive. (The old fused pass did
-//! one read/parse per file but could not release the grid until every thumbnail
-//! was done.)
+//! - **A RAW+JPEG pair reads only the JPEG.** Both halves take their metadata
+//!   from that one read (a camera writes the same EXIF into both), and the
+//!   pair's grid thumbnail and loupe preview are rendered from it too — the RAW
+//!   fast path renders its *embedded* JPEG anyway, so the two are the same
+//!   frame. The RAW itself is opened only when someone zooms in.
+//! - **Only what the grid shows is pregenerated.** In mirror mode a live pair is
+//!   one cell, so the other half is left to be generated on demand if it is ever
+//!   displayed.
+//!
+//! Together those take a 500-pair shoot from six file reads per pair to one.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -77,14 +81,31 @@ struct ThumbsDone {
     total: usize,
 }
 
-/// A file whose metadata still needs reading (Phase A).
-struct MetaPending {
-    id: i64,
-    rel_path: String,
-    kind: i64,
+/// One row of the Phase-A selection: `(id, kind, rel_path, sibling id, sibling
+/// rel_path)`, where the sibling is the live JPEG half of a RAW+JPEG pair.
+type MetaRow = (i64, i64, String, Option<i64>, Option<String>);
+
+/// One source file to open, and every row that takes its metadata from that one
+/// read (Phase A).
+///
+/// A RAW that is paired with a JPEG reads the JPEG: a camera writes the same
+/// capture time, camera, lens and exposure into both halves, and the JPEG is a
+/// fraction of the bytes -- decisive where a file cannot be memory-mapped and
+/// must be read whole, which is every file on Android SAF. So a RAW+JPEG pair
+/// costs one read of the small half instead of one of each.
+struct MetaWork {
+    source_rel: String,
+    source_kind: i64,
+    /// The row that IS this file, when it needs metadata too. Only this one
+    /// takes the decoded pixel dimensions; a RAW's own dimensions are the
+    /// sensor's and are backfilled later if it is ever decoded.
+    source_id: Option<i64>,
+    /// Rows borrowing this read. Empty for an unpaired file.
+    borrowers: Vec<i64>,
 }
 
 /// EXIF fields extracted during Phase A, batched to the writer thread.
+#[derive(Clone)]
 struct Extracted {
     id: i64,
     capture_time: Option<i64>,
@@ -178,23 +199,69 @@ pub fn run_ingest_inner(
     video_progress: &mut dyn FnMut(usize, usize),
     generate_videos: bool,
 ) -> AppResult<()> {
-    // --- Phase A: metadata, gated ---
-    let pending: Vec<MetaPending> = db.call(|conn| {
+    // --- Phase A: metadata ---
+    // Each row reports the file itself plus, for a RAW in a live pair, its JPEG
+    // sibling. Grouping by whichever file will actually be opened turns a pair
+    // into a single read.
+    let rows: Vec<MetaRow> = db.call_read(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, rel_path, kind FROM files
-             WHERE status = 0 AND kind IN (0, 1, 2) AND capture_time IS NULL",
+            "SELECT f.id, f.kind, f.rel_path,
+                    (SELECT s.id FROM files s JOIN groups g ON g.id = s.group_id
+                      WHERE s.group_id = f.group_id AND s.kind = 1 AND s.status = 0
+                        AND g.decoupled = 0 LIMIT 1),
+                    (SELECT s.rel_path FROM files s JOIN groups g ON g.id = s.group_id
+                      WHERE s.group_id = f.group_id AND s.kind = 1 AND s.status = 0
+                        AND g.decoupled = 0 LIMIT 1)
+             FROM files f
+             WHERE f.status = 0 AND f.kind IN (0, 1, 2) AND f.capture_time IS NULL",
         )?;
         let rows = stmt.query_map([], |r| {
-            Ok(MetaPending {
-                id: r.get(0)?,
-                rel_path: r.get(1)?,
-                kind: r.get(2)?,
-            })
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     })?;
 
+    let mut by_source: std::collections::HashMap<String, MetaWork> =
+        std::collections::HashMap::new();
+    for (id, kind, rel_path, sib_id, sib_rel) in rows {
+        // A RAW with a live JPEG sibling borrows that read; everything else
+        // (including the JPEG itself) is its own source.
+        let borrow = match (kind, sib_id, sib_rel) {
+            (0, Some(sid), Some(srel)) if sid != id => Some((sid, srel)),
+            _ => None,
+        };
+        match borrow {
+            Some((_, srel)) => {
+                by_source
+                    .entry(srel.clone())
+                    .or_insert_with(|| MetaWork {
+                        source_rel: srel,
+                        source_kind: 1,
+                        source_id: None,
+                        borrowers: Vec::new(),
+                    })
+                    .borrowers
+                    .push(id);
+            }
+            None => {
+                let entry = by_source
+                    .entry(rel_path.clone())
+                    .or_insert_with(|| MetaWork {
+                        source_rel: rel_path,
+                        source_kind: kind,
+                        source_id: None,
+                        borrowers: Vec::new(),
+                    });
+                entry.source_id = Some(id);
+                entry.source_kind = kind;
+            }
+        }
+    }
+    let pending: Vec<MetaWork> = by_source.into_values().collect();
+
     let started = Instant::now();
+    // Counted in reads, not files: a RAW+JPEG pair is one read, and reporting
+    // what the loop actually advances keeps the bar honest.
     let total = pending.len();
     // Announce the total up front so the preload panel shows `0 / N` immediately
     // instead of `0 / ?` for the whole first-chunk window.
@@ -207,7 +274,7 @@ pub fn run_ingest_inner(
     for chunk in pending.chunks(CHUNK) {
         let extracted: Vec<Extracted> = chunk
             .par_iter()
-            .map(|p| {
+            .flat_map(|p| {
                 let e = extract_metadata(store, p);
                 // Advance the shared counter and emit — throttled so a fast parse
                 // can't flood IPC, but the last file always reports so the bar
@@ -251,10 +318,17 @@ pub fn run_ingest_inner(
         db,
         thumbs,
         ThumbKind::Thumb,
+        // Only what the grid actually shows. In mirror mode -- the default --
+        // a live RAW+JPEG pair is one cell, its primary, so pregenerating the
+        // other half doubles the work for something nobody looks at. A
+        // decoupled pair shows both, so both qualify. The hidden half is still
+        // generated on demand the moment it IS shown.
         "SELECT f.id, f.mtime, f.orientation
          FROM files f
+         JOIN groups g ON g.id = f.group_id
          LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
          WHERE f.status = 0 AND f.kind IN (0, 1)
+           AND (g.primary_file_id = f.id OR g.decoupled = 1)
            AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
          ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
         thumb_progress,
@@ -273,8 +347,10 @@ pub fn run_ingest_inner(
         &format!(
             "SELECT f.id, f.mtime, f.orientation
              FROM files f
+             JOIN groups g ON g.id = f.group_id
              LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
              WHERE f.status = 0 AND f.kind IN (0, 1)
+           AND (g.primary_file_id = f.id OR g.decoupled = 1)
                AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime
                     OR (tp.long_edge <> 0 AND tp.long_edge <> {}))
              ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
@@ -383,31 +459,39 @@ fn generate_pass(
     Ok(())
 }
 
-/// Read one file's metadata (Phase A). Opens the source once and parses the
-/// container once. Failures are logged and never abort the pass; the returned
-/// [`Extracted`] always carries at least the id, so the batched COALESCE update
-/// falls capture_time back to mtime and unreadable files aren't retried forever.
-fn extract_metadata(store: &dyn ProjectStore, p: &MetaPending) -> Extracted {
-    let mut e = Extracted::empty(p.id);
+/// Read one source file's metadata (Phase A) and hand it to every row that
+/// takes it: itself, and any RAW paired with it. Opens and parses once.
+///
+/// Failures are logged and never abort the pass; every target still gets a row,
+/// so the batched COALESCE update falls capture_time back to mtime and
+/// unreadable files aren't retried forever.
+fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted> {
+    let ids = || {
+        work.source_id
+            .into_iter()
+            .chain(work.borrowers.iter().copied())
+    };
+    let blank = || ids().map(Extracted::empty).collect::<Vec<_>>();
 
     // Videos carry no image-path EXIF; capture_time falls back to mtime via the
     // batched COALESCE update, no file read needed.
-    if p.kind == 2 {
-        return e;
+    if work.source_kind == 2 {
+        return blank();
     }
 
-    let source = match decode::open_source(store, &p.rel_path) {
+    let source = match decode::open_source(store, &work.source_rel) {
         Ok(s) => s,
         Err(err) => {
-            tracing::debug!("metadata could not open {}: {err}", p.rel_path);
-            return e; // mtime fallback still applies
+            tracing::debug!("metadata could not open {}: {err}", work.source_rel);
+            return blank(); // mtime fallback still applies
         }
     };
 
-    if p.kind == 0 {
+    let mut e = Extracted::empty(0);
+    if work.source_kind == 0 {
         match decode::raw::RawSession::open(&source) {
             Ok(session) => {
-                if let Ok(meta) = session.metadata(&p.rel_path) {
+                if let Ok(meta) = session.metadata(&work.source_rel) {
                     e.capture_time = meta.capture_time;
                     e.orientation = meta.orientation;
                     e.camera = meta.camera;
@@ -418,7 +502,7 @@ fn extract_metadata(store: &dyn ProjectStore, p: &MetaPending) -> Extracted {
                     e.exposure_time = meta.exposure_time;
                 }
             }
-            Err(err) => tracing::debug!("metadata could not parse {}: {err}", p.rel_path),
+            Err(err) => tracing::debug!("metadata could not parse {}: {err}", work.source_rel),
         }
     } else if let Ok(meta) = decode::exif::read_metadata(source.buf()) {
         e.capture_time = meta.capture_time;
@@ -433,7 +517,20 @@ fn extract_metadata(store: &dyn ProjectStore, p: &MetaPending) -> Extracted {
         e.height = meta.height;
     }
 
-    e
+    ids()
+        .map(|id| {
+            let mut row = e.clone();
+            row.id = id;
+            // Dimensions describe the file that was decoded. A borrowing RAW's
+            // own are the sensor's, which differ from its JPEG's, so they stay
+            // NULL until something actually decodes the RAW.
+            if Some(id) != work.source_id {
+                row.width = None;
+                row.height = None;
+            }
+            row
+        })
+        .collect()
 }
 
 /// Batched, transactional metadata update on the writer thread. Files whose
@@ -619,6 +716,74 @@ mod tests {
 
         run_all(&db, root);
         // Everything fresh: a second pass finds nothing to do.
+        assert_eq!(run_all(&db, root), (0, 0, 0));
+    }
+
+    /// A RAW+JPEG pair costs one read of the JPEG half, and the RAW is never
+    /// opened at all: metadata, grid thumbnail and loupe preview all come from
+    /// the sibling. Asserted the hard way — the .raf holds garbage, so anything
+    /// that opens it fails loudly.
+    #[test]
+    fn a_paired_raw_is_never_opened() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let img = image::RgbImage::from_fn(640, 480, |x, _| image::Rgb([(x % 255) as u8, 10, 90]));
+        img.save(root.join("IMG_0001.jpg")).unwrap();
+        std::fs::write(root.join("IMG_0001.raf"), b"not a raw file at all").unwrap();
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+
+        let (meta, thumbs, previews) = run_all(&db, root);
+        // One read for the pair, not one per file.
+        assert_eq!(meta, 2, "both rows get metadata from a single read");
+        // The pair is one cell, so one thumbnail and one preview.
+        assert_eq!((thumbs, previews), (1, 1));
+
+        // Both halves are dated, and identically — the JPEG's EXIF is the pair's.
+        let (raw_time, jpg_time): (Option<i64>, Option<i64>) = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT (SELECT capture_time FROM files WHERE kind = 0),
+                            (SELECT capture_time FROM files WHERE kind = 1)",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(raw_time, jpg_time);
+        assert!(raw_time.is_some());
+
+        // The RAW's own dimensions are the sensor's, so borrowing must not
+        // record the JPEG's as if they were the RAW's.
+        let raw_dims: (Option<i64>, Option<i64>) = db
+            .call(|c| {
+                Ok(
+                    c.query_row("SELECT width, height FROM files WHERE kind = 0", [], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })?,
+                )
+            })
+            .unwrap();
+        assert_eq!(raw_dims, (None, None));
+
+        // The generated artifacts belong to the RAW: it is the group primary,
+        // so it is the half the grid shows.
+        let owner: i64 = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT f.kind FROM thumbnails t JOIN files f ON f.id = t.file_id
+                     WHERE t.kind = 0",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(owner, 0, "the RAW is the primary, so it owns the thumbnail");
+
+        // Settled: nothing left to do on a second pass.
         assert_eq!(run_all(&db, root), (0, 0, 0));
     }
 
