@@ -339,10 +339,22 @@
     previewNaturalH = img.naturalHeight;
   }
 
+  /** True once the zoomed-in full image has painted at least one frame. Until
+   *  then the fit image stays underneath it — see the underlay in the markup. */
+  let fullPainted = $state(false);
+  $effect(() => {
+    // Entering the zoom, or pointing it at a different photo, starts a fresh
+    // load — so the underlay comes back until that load paints.
+    void fullSrc;
+    void z.zoomed;
+    fullPainted = false;
+  });
+
   function onFullLoad(e: Event) {
     const img = e.currentTarget as HTMLImageElement;
     fullNaturalW = img.naturalWidth;
     fullNaturalH = img.naturalHeight;
+    fullPainted = true;
   }
 
   function framePoint(e: { clientX: number; clientY: number }): { x: number; y: number } {
@@ -771,6 +783,20 @@
   onpointercancel={onPointerCancel}
   role="img"
 >
+  <!-- The fit image stays mounted while zoomed until the full one has actually
+       painted. Unmounting it on the way in used to run the zoom animation over
+       a blank frame, at the exact moment the user asked to look closer. -->
+  {#if !z.zoomed || !fullPainted}
+    <img
+      src={displayedSrc}
+      alt={displayedAlt}
+      class="fit"
+      class:soft={softPreview}
+      class:underlay={z.zoomed}
+      draggable="false"
+      onload={onFitLoad}
+    />
+  {/if}
   {#if z.zoomed}
     <!-- Only the WIDTH is set: height follows the image's intrinsic ratio, so
          the single uniform scale factor can never deform the photo, even when
@@ -783,15 +809,6 @@
       class:settling
       draggable="false"
       onload={onFullLoad}
-    />
-  {:else}
-    <img
-      src={displayedSrc}
-      alt={displayedAlt}
-      class="fit"
-      class:soft={softPreview}
-      draggable="false"
-      onload={onFitLoad}
     />
   {/if}
 </div>
@@ -835,6 +852,13 @@
   /* Upscaled grid thumb standing in while the sharp preview decodes. */
   img.fit.soft {
     filter: blur(4px);
+  }
+
+  /* Holding the frame while the zoomed-in image loads over it. Taken out of
+     flow so it cannot affect the layout the zoom maths is based on. */
+  img.fit.underlay {
+    position: absolute;
+    inset: 0;
   }
 
 
