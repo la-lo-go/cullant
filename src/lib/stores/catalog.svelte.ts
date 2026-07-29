@@ -257,9 +257,17 @@ listen<{ done: number; total: number; ids?: number[] }>("previews:progress", (e)
   // The event carries exactly which files finished, so their per-cell spinners
   // clear without re-reading the whole catalogue on a timer.
   for (const id of ids ?? []) catalog.previewReady.add(id);
-  // One full refetch at the end still runs: it is the only thing that picks up
-  // previews this pass did not generate (already cached, or made on demand).
-  if (done >= total) void catalog.refreshPreviewReady();
+  if (done >= total) {
+    // One full refetch at the end: the only thing that picks up previews this
+    // pass did not generate (already cached, or made on demand).
+    void catalog.refreshPreviewReady();
+    // And re-read the catalogue itself. Its rows were snapshotted before any of
+    // this ran, so thumbReady, previewFailed and the perceptual hashes that
+    // group bursts are all as they were at open — which is most visibly wrong
+    // after reopening a half-finished import, where a lot was generated this
+    // pass. Once per import, not per tick.
+    void catalog.refresh();
+  }
 });
 listen<{ done: number; total: number }>("videos:progress", (e) => {
   // The final (video-poster) tier. Reset to idle once it completes.
