@@ -45,6 +45,13 @@ pub struct ItemLite {
     /// thumbnail has been generated. Used to tell apart consecutive frames of a
     /// burst from unrelated shots taken moments apart.
     pub phash: Option<String>,
+    /// True when a usable grid thumbnail already exists on disk. Lets the grid
+    /// tell "this is still being generated" apart from "this is cached and is
+    /// about to appear", which are the same skeleton otherwise.
+    pub thumb_ready: bool,
+    /// True when the loupe preview was tried and could not be produced. Without
+    /// it the "generating preview" spinner has no way to stop.
+    pub preview_failed: bool,
 }
 
 /// Lowercase hex of exactly 8 bytes.
@@ -183,7 +190,13 @@ pub fn query_items(
                         AND th.failed = 1 AND th.source_mtime = f.mtime) AS thumb_failed,
                     f.orientation AS orientation,
                     f.camera, f.lens, f.iso, f.focal_length, f.f_number, f.exposure_time,
-                    fa.phash
+                    fa.phash,
+                    EXISTS(SELECT 1 FROM thumbnails tr
+                      WHERE tr.file_id = f.id AND tr.kind = 0
+                        AND tr.failed = 0 AND tr.source_mtime = f.mtime) AS thumb_ready,
+                    EXISTS(SELECT 1 FROM thumbnails pf
+                      WHERE pf.file_id = f.id AND pf.kind = 1
+                        AND pf.failed = 1 AND pf.source_mtime = f.mtime) AS preview_failed
              FROM files f
              JOIN groups g ON g.id = f.group_id
              -- A plain join, not another correlated subquery: this SELECT
@@ -229,6 +242,8 @@ pub fn query_items(
                     .get::<_, Option<Vec<u8>>>(25)?
                     .filter(|b| b.len() == 8)
                     .map(hex8),
+                thumb_ready: r.get::<_, i64>(26)? != 0,
+                preview_failed: r.get::<_, i64>(27)? != 0,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

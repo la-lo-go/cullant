@@ -884,6 +884,7 @@
           class:loading={!loaded.has(v.item.id) &&
             !v.item.thumbFailed &&
             !(v.item.kind === 2 && posterFailed.has(v.item.id))}
+          class:pending={!loaded.has(v.item.id) && !v.item.thumbReady && v.item.kind !== 2}
         >
           <!-- Sized to the item's REAL aspect ratio when portrait (instead of
                filling the square frame and cropping), so every badge/chip/label
@@ -935,7 +936,13 @@
                 onerror={() => retryThumb(v.item.id)}
               />
             {/if}
-            {#if v.item.kind !== 2 && !v.item.thumbFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id) && catalog.previewProgress.total > 0}
+            <!-- Spins for as long as this photo genuinely lacks a preview.
+                 It used to also require the background pass to be running,
+                 which meant the spinner vanished the moment the pass finished
+                 (or had not restarted yet after a half-finished import) even
+                 though the preview still was not there. `previewFailed` is what
+                 stops it now: a real answer rather than a proxy. -->
+            {#if v.item.kind !== 2 && !v.item.thumbFailed && !v.item.previewFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id)}
               <span class="preview-spin" title="Generating full preview…">
                 <Loader size={12} />
               </span>
@@ -1377,7 +1384,15 @@
      It's the frame's own background (behind .photo and its chips), so chips
      stay on top and a finished portrait cell shows the grid's dark background
      through its letterbox gutters, not a gray box. */
+  /* No image yet. A flat placeholder, because for a thumbnail that already
+     exists this lasts a frame or two and a shimmer would just be a flicker. */
   .frame.loading {
+    background: var(--surface-2);
+  }
+
+  /* No image AND none generated yet: this one really is waiting on work, so it
+     says so for as long as that lasts. */
+  .frame.loading.pending {
     background: linear-gradient(
       100deg,
       var(--surface-2) 30%,

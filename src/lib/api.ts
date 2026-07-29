@@ -67,6 +67,12 @@ export interface ItemLite {
   tagIds: number[];
   /** Grid thumbnail could not be decoded (unsupported/corrupt source). */
   thumbFailed: boolean;
+  /** A usable grid thumbnail already exists on disk, so the cell is waiting on
+   *  a fetch rather than on generation. */
+  thumbReady: boolean;
+  /** The loupe preview was tried and could not be produced — the "generating"
+   *  spinner must stop for this photo. */
+  previewFailed: boolean;
   /** 16-char hex of the thumbnail's perceptual hash, or null until that
    *  thumbnail has been generated. Used to tell burst frames apart. */
   phash: string | null;
