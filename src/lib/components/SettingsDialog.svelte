@@ -8,11 +8,10 @@
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
-  import { api, type DeletionMode } from "../api";
+  import { api } from "../api";
   import { backdropDismiss } from "../backdrop";
   import type { BurstMode } from "../bursts";
   import DragList from "./DragList.svelte";
-  import Trash2 from "@lucide/svelte/icons/trash-2";
   import Layers from "@lucide/svelte/icons/layers";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import Monitor from "@lucide/svelte/icons/monitor";
@@ -59,20 +58,6 @@
     e.stopPropagation();
     if (e.key === "Escape") onclose();
   }
-
-  // Deletion mode is stored per project, so this card only exists with one open
-  // — Settings is also reachable from the home screen. The commit dialog offers
-  // the same control and writes the same key.
-  let deletionMode = $state<DeletionMode>("trash");
-  let deletionError = $state("");
-
-  $effect(() => {
-    if (!catalog.project) return;
-    void api.getProjectSetting("deletionMode").then(
-      (v) => (deletionMode = v === "permanent" ? "permanent" : "trash"),
-      () => {},
-    );
-  });
 
   // A pressed control must not keep focus: the ring lingers and the control
   // then swallows the next key press. Only a real pointer press arms the
@@ -138,17 +123,6 @@
     }
   }
 
-  async function changeDeletionMode(e: Event) {
-    const previous = deletionMode;
-    deletionMode = (e.currentTarget as HTMLSelectElement).value as DeletionMode;
-    deletionError = "";
-    try {
-      await api.setProjectSetting("deletionMode", deletionMode);
-    } catch (err) {
-      deletionMode = previous;
-      deletionError = String(err);
-    }
-  }
 </script>
 
 <div
@@ -520,37 +494,6 @@
           <p class="hint">
             A burst never spans two cameras, and a RAW+JPEG pair always stays together.
           </p>
-        </section>
-
-        <section class="card">
-          <header class="card-head">
-            <Trash2 size={16} />
-            <span class="card-text">
-              <span class="card-title">Deletion</span>
-              <span class="card-desc">Where files go when a queued delete is committed.</span>
-            </span>
-          </header>
-          <div class="option row">
-            <span class="text">
-              <span class="label">Deleted files go to</span>
-              <span class="description">
-                {#if deletionMode === "permanent"}
-                  Files are erased outright. This cannot be undone, and they do not reach the
-                  Recycle Bin.
-                {:else}
-                  A _trash folder inside the project, mirroring the original subfolders — so a
-                  delete stays reversible.
-                {/if}
-              </span>
-            </span>
-            <select aria-label="Deletion mode" value={deletionMode} onchange={changeDeletionMode}>
-              <option value="trash">Project _trash folder</option>
-              <option value="permanent">Permanent (no undo!)</option>
-            </select>
-          </div>
-          {#if deletionError}
-            <p class="hint">{deletionError}</p>
-          {/if}
         </section>
       {/if}
 
