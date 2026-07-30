@@ -67,8 +67,8 @@
     const exts = new Set<string>();
     const orientations = new Set<OrientationFilter>();
     const labels = new Set<string>();
-    const cameras = new Set<string>();
-    const lenses = new Set<string>();
+    const cameras = new Map<string, number>();
+    const lenses = new Map<string, number>();
     const isoKeys = new Set<string>();
     const apertureKeys = new Set<string>();
     const focalKeys = new Set<string>();
@@ -302,6 +302,7 @@
   aria-label="Sort & filter"
   tabindex="-1"
   onkeydown={onPanelKeydown}
+  onclick={releaseChipFocus}
 >
   <header>
     <span class="title">Sort & Filter</span>
@@ -534,9 +535,12 @@
       <select
         class="metaselect"
         value={session.cameraFilter ?? ""}
+        onpointerdown={() => (pointerPick = true)}
+        onkeydown={() => (pointerPick = false)}
         onchange={(e) => {
           session.cameraFilter = e.currentTarget.value || null;
           session.clampFocus();
+          releaseAfterPointerPick(e);
         }}
       >
         <option value="">Any</option>
@@ -553,9 +557,12 @@
       <select
         class="metaselect"
         value={session.lensFilter ?? ""}
+        onpointerdown={() => (pointerPick = true)}
+        onkeydown={() => (pointerPick = false)}
         onchange={(e) => {
           session.lensFilter = e.currentTarget.value || null;
           session.clampFocus();
+          releaseAfterPointerPick(e);
         }}
       >
         <option value="">Any</option>
