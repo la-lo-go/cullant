@@ -1162,10 +1162,14 @@
     display: none;
   }
 
+  /* Rides above the bottom action bar whenever it is up (selection mode), so
+     the bar never buries the only report of what the background is doing.
+     --bottom-bar-h is measured and published by the page shell; it is 0 while
+     no bar is shown. */
   .loading-pill {
     position: absolute;
     right: 12px;
-    bottom: 12px;
+    bottom: calc(12px + var(--bottom-bar-h, 0px));
     z-index: 5;
     display: inline-flex;
     align-items: center;

@@ -68,6 +68,10 @@
       // persistence is best-effort
     }
   });
+  // Measured height of the bottom action bar (0 while it is hidden). Published
+  // as --bottom-bar-h so overlays inside the grid — the background-status pill —
+  // can sit above it instead of being buried by it in selection mode.
+  let bottomBarH = $state(0);
   let showKeybindings = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
@@ -333,7 +337,11 @@
   oncontextmenu={(e) => e.preventDefault()}
 />
 
-<main class="app" class:fullscreen={view.fullscreen}>
+<main
+  class="app"
+  class:fullscreen={view.fullscreen}
+  style="--bottom-bar-h: {bottomBarH}px"
+>
   {#if showTitleBar}
     <TitleBar
       onOpenNew={() => void pickProject()}
@@ -500,7 +508,11 @@
       <!-- Grid mode docks the bar as an overlay (same principle as SelectionBar:
            appearing on the first selection must not shrink the grid and jump the
            layout). Viewer/compare keep it in flow, as before. -->
-      <div class="touchbar-dock" class:overlay={view.mode === "grid"}>
+      <div
+        class="touchbar-dock"
+        class:overlay={view.mode === "grid"}
+        bind:clientHeight={bottomBarH}
+      >
         <TouchActionBar
           forceShow={touchBarVisible && view.mode !== "grid"}
           hidden={(view.mode === "grid" && session.selectedIds.size === 0) || view.fullscreen}
