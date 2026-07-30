@@ -1,6 +1,6 @@
 <script lang="ts">
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import {
     api,
     type CommitEntry,
@@ -111,11 +111,24 @@
   function startRun(phases: CommitSection[]) {
     running = true;
     runningPhases = phases;
-    activePhase = null;
+    // Seed the first step from the plan we already hold, so the panel opens on a
+    // real named phase with a real total instead of an empty checklist waiting
+    // for the backend's first event.
+    activePhase = phases[0] ?? null;
     phaseDone = 0;
-    phaseTotal = 0;
+    phaseTotal = plan && phases[0] ? sectionCount(plan, phases[0]) : 0;
     completedPhases = new Set();
     error = "";
+  }
+
+  // Resolves once the browser has drawn the current DOM. requestAnimationFrame
+  // runs just BEFORE the paint, so we hop one more task to land after it. A
+  // background window never fires rAF, so a fallback keeps the commit moving.
+  function afterPaint(): Promise<void> {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => setTimeout(resolve));
+      setTimeout(resolve, 100);
+    });
   }
 
   // Shared execute path for both the whole-plan Execute and the per-section
@@ -123,6 +136,15 @@
   // dialog just before it shows. On failure the dialog stays open with the error.
   async function runCommit(phases: CommitSection[], run: () => Promise<CommitOutcome>) {
     startRun(phases);
+    // The commit command is synchronous on the backend, so it stalls the app for
+    // its whole duration. Get the busy panel committed to the DOM and drawn on
+    // screen BEFORE the call goes out, or the user watches the old view freeze
+    // and only sees the progress at the very end. This matters most for the
+    // per-section run, which fires from inside a requestAnimationFrame callback:
+    // without the yield its state change and the blocking call land in the same
+    // frame, so that frame never reaches the screen.
+    await tick();
+    await afterPaint();
     try {
       const oc = await run();
       await catalog.refresh();
