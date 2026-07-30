@@ -12,6 +12,7 @@
   import PinOff from "@lucide/svelte/icons/pin-off";
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
+  import Layers from "@lucide/svelte/icons/layers";
   import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
@@ -160,8 +161,14 @@
           {#if pinnedSide === "left"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
         {#if !view.fullscreen}
+          {@const b = session.burstPositionOf(left.id)}
           <span class="caption" class:focused-caption={focusedSide === "left"}>
             <span style:color={left.label ? labelColors[left.label] : null}>{left.name}.{left.ext}</span>
+            {#if b}
+              <span class="burst" title="Shot {b.position} of a burst of {b.total}">
+                <Layers size={10} />{b.position}/{b.total}
+              </span>
+            {/if}
             {#each left.tagIds as tagId (tagId)}
               {@const t = tags.byId.get(tagId)}
               {#if t}
@@ -188,8 +195,14 @@
           {#if pinnedSide === "right"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
         {#if !view.fullscreen}
+          {@const b = session.burstPositionOf(right.id)}
           <span class="caption" class:focused-caption={focusedSide === "right"}>
             <span style:color={right.label ? labelColors[right.label] : null}>{right.name}.{right.ext}</span>
+            {#if b}
+              <span class="burst" title="Shot {b.position} of a burst of {b.total}">
+                <Layers size={10} />{b.position}/{b.total}
+              </span>
+            {/if}
             {#each right.tagIds as tagId (tagId)}
               {@const t = tags.byId.get(tagId)}
               {#if t}
@@ -205,7 +218,7 @@
     {/if}
   </div>
   {#if !view.fullscreen}
-    <Filmstrip items={session.filtered} />
+    <Filmstrip items={session.filtered} {companionIndex} />
   {/if}
 </div>
 
@@ -336,6 +349,19 @@
     padding: 2px 8px;
     border-radius: 4px;
     pointer-events: none;
+  }
+
+  /* The loupe's burst pill, in the caption. Compare hid it entirely before, so
+     there was no way to tell you were judging two frames of the same burst. */
+  .burst {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 1px 7px;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
   }
 
   .tagpill {
