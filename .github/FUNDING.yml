@@ -1,0 +1,5 @@
+# Shows GitHub's own Sponsor button on the repository. Uncomment a line once
+# that account exists — an entry pointing nowhere renders a dead button.
+# github: la-lo-go
+# ko_fi: la-lo-go
+# custom: ["https://www.paypal.me/lalogo"]

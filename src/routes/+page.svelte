@@ -26,6 +26,7 @@
   import MoveDialog from "$lib/components/MoveDialog.svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
+  import SupportDialog from "$lib/components/SupportDialog.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
   import SearchOverlay from "$lib/components/SearchOverlay.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
@@ -44,10 +45,7 @@
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
   import SettingsIcon from "@lucide/svelte/icons/settings";
   import CheckCheck from "@lucide/svelte/icons/check-check";
-  import FolderGit2 from "@lucide/svelte/icons/folder-git-2";
-  import { openUrl } from "@tauri-apps/plugin-opener";
-
-  const REPO_URL = "https://github.com/la-lo-go/cullant";
+  import Heart from "@lucide/svelte/icons/heart";
 
   // Compare/loupe action bar: default visible, and remember the user's last
   // toggle across sessions. (It only ever renders in loupe/compare — see the
@@ -74,6 +72,7 @@
   // can sit above it instead of being buried by it in selection mode.
   let bottomBarH = $state(0);
   let showKeybindings = $state(false);
+  let showSupport = $state(false);
   let showSettings = $state(false);
   let showCloseConfirm = $state(false);
   // Set when the open project's folder/volume becomes unreachable while working.
@@ -133,6 +132,10 @@
     }
     if (showKeybindings) {
       showKeybindings = false;
+      return;
+    }
+    if (showSupport) {
+      showSupport = false;
       return;
     }
     if (showSettings) {
@@ -587,12 +590,10 @@
           <SettingsIcon size={13} />
           Settings
         </button>
-        <button class="ghlink" onclick={() => openUrl(REPO_URL)}>
-          <FolderGit2 size={15} />
-          <span class="ghlink-full"
-            >Cullant is free &amp; open source. Say hi or contribute on GitHub!</span
-          >
-          <span class="ghlink-short">Free &amp; open source · GitHub</span>
+        <button class="ghlink" onclick={() => (showSupport = true)}>
+          <Heart size={15} />
+          <span class="ghlink-full">Cullant is free, with no ads. Here is how to help it along.</span>
+          <span class="ghlink-short">Free, no ads · Support it</span>
         </button>
       </footer>
     </div>
@@ -648,6 +649,10 @@
         tags.editorOpen = true;
       }}
     />
+  {/if}
+
+  {#if showSupport}
+    <SupportDialog onclose={() => (showSupport = false)} />
   {/if}
 
   {#if session.recoupleDialogFor !== null}
