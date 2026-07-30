@@ -163,8 +163,8 @@
       </div>
       <p class="hint">
         {session.mirrorMode
-          ? "A pair counts as one photo; actions apply to both files."
-          : "RAW and JPEG are listed and acted on independently."}
+          ? "One photo. Every action hits both files."
+          : "Two photos. Every action hits one file."}
       </p>
     </section>
   {/if}
@@ -197,7 +197,7 @@
     </div>
 
     {#if session.groupBy.length === 0}
-      <p class="hint">Not grouped — one flat grid.</p>
+      <p class="hint">Not grouped. One flat grid.</p>
     {/if}
 
     {#if session.groupBy.length > 0}

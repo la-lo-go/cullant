@@ -112,14 +112,14 @@ fn reversibility(
             Some("trash") if undo.trash_path.is_some() => (true, None),
             Some("permanent") => (
                 false,
-                Some("Deleted permanently — the file is gone from disk.".into()),
+                Some("Deleted permanently. The file is gone from disk.".into()),
             ),
             _ => (false, Some("No record of where this file went.".into())),
         },
         ACTION_MOVE | ACTION_COPY => (true, None),
         ACTION_XMP => (
             false,
-            Some("Sidecar writes merge in place; the previous contents were not kept.".into()),
+            Some("Sidecar writes merge in place. The previous contents were not kept.".into()),
         ),
         _ => (false, Some("Unknown action.".into())),
     }

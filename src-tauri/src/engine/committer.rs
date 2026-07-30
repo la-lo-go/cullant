@@ -804,7 +804,7 @@ pub fn execute(
     let plan = preview(db, store)?;
     if plan.plan_hash != plan_hash {
         return Err(AppError::Other(
-            "pending actions changed since the preview — review again".into(),
+            "pending actions changed since the preview. Review it again.".into(),
         ));
     }
     run_commit(
@@ -874,7 +874,7 @@ pub fn execute_section(
     };
     if current != section_hash {
         return Err(AppError::Other(
-            "pending actions changed since the preview — review again".into(),
+            "pending actions changed since the preview. Review it again.".into(),
         ));
     }
     run_commit(db, store, &plan, phases, progress)

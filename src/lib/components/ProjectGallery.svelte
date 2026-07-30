@@ -140,7 +140,7 @@
               {#if st.state === "ok"}
                 Opened {relativeTime(project.lastOpened)}
               {:else if st.state === "disconnected"}
-                Not connected{st.volumeName ? ` — ${st.volumeName}` : ""}
+                {st.volumeName ? `${st.volumeName} is not connected` : "Not connected"}
               {:else}
                 Folder not found
               {/if}

@@ -201,7 +201,7 @@
             <span class="label">Preview quality</span>
             <span class="description">
               How sharp the loupe preview is. Lower is faster to generate and uses far less
-              memory — worth it on a phone. Changing this regenerates every preview.
+              memory, which is worth it on a phone. Changing this regenerates every preview.
             </span>
           </span>
           <select
@@ -332,7 +332,7 @@
           <span class="card-text">
             <span class="card-title">Bottom action bar</span>
             <span class="card-desc">
-              Drag to reorder the touch classification groups; uncheck one to hide it.
+              Drag to reorder the touch classification groups. Uncheck one to hide it.
             </span>
           </span>
         </header>

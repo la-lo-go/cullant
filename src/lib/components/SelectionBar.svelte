@@ -102,8 +102,8 @@
   <span class="apply">Apply:</span>
 
   <div class="group">
-    <button class="btn reject" class:active-reject={summary.flag === -1} title="Reject (X) — click again to unflag" onclick={act(() => flag(-1))}><X size={15} /></button>
-    <button class="btn pick" class:active-pick={summary.flag === 1} title="Pick (P) — click again to unflag" onclick={act(() => flag(1))}><Check size={15} /></button>
+    <button class="btn reject" class:active-reject={summary.flag === -1} title="Reject (X). Click again to unflag." onclick={act(() => flag(-1))}><X size={15} /></button>
+    <button class="btn pick" class:active-pick={summary.flag === 1} title="Pick (P). Click again to unflag." onclick={act(() => flag(1))}><Check size={15} /></button>
   </div>
 
   <div class="group stars">

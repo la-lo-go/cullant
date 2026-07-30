@@ -140,7 +140,7 @@
                 class="item recent"
                 role="menuitem"
                 title={p.storage.state === "disconnected" && p.storage.volumeName
-                  ? `Not connected — ${p.storage.volumeName}`
+                  ? `${p.storage.volumeName} is not connected`
                   : p.path}
                 disabled={p.storage.state !== "ok"}
                 onclick={() => choose(() => onOpenRecent(p.path))}

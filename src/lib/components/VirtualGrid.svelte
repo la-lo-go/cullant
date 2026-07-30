@@ -995,7 +995,7 @@
               {/if}
               <span class="chip video"><Play size={10} /></span>
             {:else if v.item.thumbFailed}
-              <div class="unreadable" title="{v.item.name}.{v.item.ext} — couldn't be decoded">
+              <div class="unreadable" title="{v.item.name}.{v.item.ext} could not be decoded">
                 <FileWarning size={22} />
                 <span>{v.item.ext.toUpperCase()}</span>
               </div>

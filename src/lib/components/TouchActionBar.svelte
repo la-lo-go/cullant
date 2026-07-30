@@ -143,7 +143,7 @@
         <button
           class="btn reject"
           class:active-reject={flagActive(-1)}
-          title="Reject (X) — click again to unflag"
+          title="Reject (X). Click again to unflag."
           aria-label="Reject"
           onclick={act(() => runCommand(flagActive(-1) ? "flag.unflag" : "flag.reject"))}
         >
@@ -152,7 +152,7 @@
         <button
           class="btn pick"
           class:active-pick={flagActive(1)}
-          title="Pick (P) — click again to unflag"
+          title="Pick (P). Click again to unflag."
           aria-label="Pick"
           onclick={act(() => runCommand(flagActive(1) ? "flag.unflag" : "flag.pick"))}
         >

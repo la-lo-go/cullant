@@ -213,7 +213,7 @@
   // custom TitleBar below) rather than the toolbar — kept out of the way
   // there, still one glance/hover away from anyone who needs the full path.
   $effect(() => {
-    document.title = catalog.project ? `${catalog.project.displayName} — Cullant` : "Cullant";
+    document.title = catalog.project ? `${catalog.project.displayName} · Cullant` : "Cullant";
   });
 
   // Whether the open project has any subfolders — used to hide the folder
@@ -267,7 +267,7 @@
           folderLostMsg =
             info.state === "disconnected"
               ? "The drive or volume holding this project is no longer connected. Reconnect it to keep working, or close the project."
-              : "This project's folder can no longer be found — it may have been moved or deleted. Restore it, or close the project.";
+              : "This project's folder can no longer be found. It may have been moved or deleted. Restore it, or close the project.";
         }
       } catch {
         // Ignore transient IPC errors; the next tick retries.
@@ -430,7 +430,7 @@
           <button
             class:active={session.viewPanelOpen}
             class:haswork={hasCustomView}
-            title="View — thumbnail size, grouping & RAW+JPEG pairing"
+            title="View. Thumbnail size, grouping and RAW+JPEG pairing."
             onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
           >
             <LayoutGrid size={14} />
