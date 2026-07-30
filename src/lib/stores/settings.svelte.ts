@@ -16,9 +16,12 @@ const FILMSTRIP_SHOW_LABEL_KEY = "cullant.filmstrip.showLabel";
 const FILMSTRIP_SHOW_FLAG_KEY = "cullant.filmstrip.showFlag";
 const FILMSTRIP_SHOW_TAGS_KEY = "cullant.filmstrip.showTags";
 const DIM_QUEUED_DELETES_KEY = "cullant.dimQueuedDeletes";
+const DIM_DELETES_IN_PREVIEW_KEY = "cullant.dimDeletesInPreview";
 const AUTO_RESCAN_MINUTES_KEY = "cullant.autoRescanMinutes";
 const FAST_CULLING_KEY = "cullant.fastCulling";
 const LOCK_CAROUSEL_KEY = "cullant.lockCarousel";
+const SKIP_REJECTED_KEY = "cullant.skipRejected";
+const COLLAPSE_BURSTS_KEY = "cullant.collapseBursts";
 const BURST_MODE_KEY = "cullant.burstMode";
 const BURST_GAP_KEY = "cullant.burstGapSeconds";
 const PREVIEW_QUALITY_KEY = "cullant.previewQuality";
@@ -149,6 +152,11 @@ class SettingsStore {
    *  itself dims. */
   dimQueuedDeletes = $state<boolean>(loadBool(DIM_QUEUED_DELETES_KEY, true));
 
+  /** Extend that dimming to the large photo in the loupe and compare views.
+   *  Separate from `dimQueuedDeletes` because a dim thumbnail reads as a status
+   *  badge while a dim preview is the photo you are judging. Off by default. */
+  dimDeletesInPreview = $state<boolean>(loadBool(DIM_DELETES_IN_PREVIEW_KEY, false));
+
   /** How often (minutes) to automatically rescan the open project's folder for
    *  added/removed/changed files; 0 disables it. Only fires while the storage is
    *  reachable, so a disconnected drive isn't polled. A manual rescan is always
@@ -164,6 +172,16 @@ class SettingsStore {
    *  to whichever cell is centered (a carousel), instead of scrolling
    *  independently of the selection. Off by default. */
   lockCarousel = $state<boolean>(loadBool(LOCK_CAROUSEL_KEY, false));
+
+  /** Step over photos already marked for deletion when moving to the next or
+   *  previous photo in the loupe and compare views. Only the next/previous
+   *  commands skip: picking a thumbnail directly still opens it, however it is
+   *  marked. Off by default. */
+  skipRejected = $state<boolean>(loadBool(SKIP_REJECTED_KEY, false));
+
+  /** Show each burst as one stacked cell in the grid instead of every frame.
+   *  Expanding puts the burst badge on each frame instead. */
+  collapseBursts = $state<boolean>(loadBool(COLLAPSE_BURSTS_KEY, true));
 
   /** How the burst threshold is chosen. "adaptive" reads the shoot's own
    *  rhythm and falls back to `burstGapSeconds` when the intervals show no
@@ -251,6 +269,21 @@ class SettingsStore {
   setLockCarousel(on: boolean) {
     this.lockCarousel = on;
     save(LOCK_CAROUSEL_KEY, on);
+  }
+
+  setDimDeletesInPreview(on: boolean) {
+    this.dimDeletesInPreview = on;
+    save(DIM_DELETES_IN_PREVIEW_KEY, on);
+  }
+
+  setSkipRejected(on: boolean) {
+    this.skipRejected = on;
+    save(SKIP_REJECTED_KEY, on);
+  }
+
+  setCollapseBursts(on: boolean) {
+    this.collapseBursts = on;
+    save(COLLAPSE_BURSTS_KEY, on);
   }
 
   // --- bottom classification bar layout ---
