@@ -194,9 +194,32 @@
         return c.reject;
       case "unflagged":
         return c.unflagged;
+      case "anyflag":
+        return c.pick + c.reject;
+      case "notrejected":
+        return c.total - c.reject;
       default:
         return c.total;
     }
+  }
+
+  // A control that keeps DOM focus after a click swallows the arrow keys: the
+  // panel's keydown handler stops them before the grid sees them, and a focused
+  // <select> even consumes them itself. So release focus after a pointer pick,
+  // but not after a keyboard one — a user who tabs into the panel keeps place.
+  let pointerPick = false;
+
+  function releaseAfterPointerPick(e: Event) {
+    if (!pointerPick) return;
+    pointerPick = false;
+    (e.currentTarget as HTMLElement).blur();
+  }
+
+  // Same rule for the chips, delegated once instead of per button. A real click
+  // reports detail > 0; keyboard activation reports 0.
+  function releaseChipFocus(e: MouseEvent) {
+    if (e.detail === 0) return;
+    (e.target as HTMLElement | null)?.closest("button")?.blur();
   }
 
   let panelEl = $state<HTMLDivElement | null>(null);
@@ -355,7 +378,8 @@
 
   <section>
     <span class="lbl">Flag</span>
-    <div class="row">
+    <!-- Six chips never fit one line, so this row wraps like the tag rows. -->
+    <div class="row wrap">
       {#each flagOptions as opt (opt.value)}
         <button
           class="seg"

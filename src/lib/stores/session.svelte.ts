@@ -24,7 +24,17 @@ import { settings } from "./settings.svelte";
 import { tags } from "./tags.svelte";
 import { view } from "./view.svelte";
 
-export type FlagFilter = "all" | "pick" | "reject" | "unflagged";
+export type FlagFilter = "all" | "pick" | "reject" | "unflagged" | "anyflag" | "notrejected";
+
+/** What each flag filter keeps, given a photo's flag (1 pick, 0 none, -1 reject).
+ *  "all" is handled by the caller, which skips the filter entirely. */
+const FLAG_FILTER_TESTS: Record<Exclude<FlagFilter, "all">, (flag: number) => boolean> = {
+  pick: (f) => f === 1,
+  reject: (f) => f === -1,
+  unflagged: (f) => f === 0,
+  anyflag: (f) => f !== 0,
+  notrejected: (f) => f !== -1,
+};
 /** Photo file-type composition filter (photos tab only). */
 export type TypeFilter = "all" | "raw" | "jpeg" | "rawjpeg";
 /** Displayed-aspect orientation filter (applies to photos and videos). */
@@ -406,8 +416,8 @@ class SessionStore {
       out = catalog.items;
     }
     if (this.flagFilter !== "all") {
-      const want = this.flagFilter === "pick" ? 1 : this.flagFilter === "reject" ? -1 : 0;
-      out = out.filter((i) => i.flag === want);
+      const keep = FLAG_FILTER_TESTS[this.flagFilter];
+      out = out.filter((i) => keep(i.flag));
     }
     if (this.minRating > 0) {
       out = out.filter((i) => i.rating >= this.minRating);
