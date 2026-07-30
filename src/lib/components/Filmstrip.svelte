@@ -123,6 +123,16 @@
   // the mode is on, so the recentre effect below doesn't counter-scroll (fight)
   // the drag that is itself moving the focus.
   let lockScrollTs = 0;
+  // True between asking for a recentre and the scroll event it produces.
+  //
+  // Without it, lock-carousel loses a keypress at either end of the strip: the
+  // last few photos cannot be centred, so the browser CLAMPS the recentre, and
+  // the clamped position reads back as an earlier cell — which the handler
+  // below then wrote to the focus, undoing the step that asked for it. The
+  // second press worked only because the strip was already at the limit, so no
+  // scroll event fired at all. The strip must follow the focus here, never the
+  // other way round.
+  let selfScroll = false;
 
   // Scroll handler: track the position and, in lock-carousel mode, drive the
   // focused photo from whichever cell is centered — so moving the strip moves
@@ -130,6 +140,10 @@
   function onStripScroll() {
     if (!strip) return;
     scrollLeft = strip.scrollLeft;
+    if (selfScroll) {
+      selfScroll = false;
+      return;
+    }
     if (settings.lockCarousel && width > 0 && items.length > 0) {
       lockScrollTs = performance.now();
       const centered = Math.round((scrollLeft + width / 2 - CELL / 2) / CELL);
@@ -169,7 +183,12 @@
     // the focus (and thus the loupe) briefly backwards — the "previous image
     // glitch" — before it lands. A jump has no intermediate frames.
     const instant = !hasCentered || rapid || settings.lockCarousel;
+    selfScroll = true;
     strip.scrollTo({ left: target, behavior: instant ? "auto" : "smooth" });
+    // A recentre that changes nothing (already there, or clamped to the same
+    // limit) fires no scroll event, so disarm on the next frame rather than
+    // leaving the flag to swallow the user's next real scroll.
+    requestAnimationFrame(() => (selfScroll = false));
     hasCentered = true;
   });
 
