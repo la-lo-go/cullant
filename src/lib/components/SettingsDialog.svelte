@@ -53,6 +53,9 @@
   });
 
   function onKeydown(e: KeyboardEvent) {
+    // A key press ends any armed pointer release, so a control reached with Tab
+    // and changed with the keyboard keeps its focus.
+    pointerPress = false;
     e.stopPropagation();
     if (e.key === "Escape") onclose();
   }
@@ -71,6 +74,28 @@
     );
   });
 
+  // A pressed control must not keep focus: the ring lingers and the control
+  // then swallows the next key press. Only a real pointer press arms the
+  // release, so keyboard focus survives.
+  let pointerPress = false;
+
+  function releaseFocus(e: Event) {
+    if (!pointerPress) return;
+    pointerPress = false;
+    (e.currentTarget as HTMLElement | null)?.blur();
+    // Focus goes back to the panel so Escape keeps landing on this dialog
+    // instead of reaching the global keymap.
+    panel?.focus();
+  }
+
+  /** Wrap a control handler so a pointer press releases focus afterwards. */
+  function releasing<E extends Event>(fn: (e: E) => void): (e: E) => void {
+    return (e) => {
+      fn(e);
+      releaseFocus(e);
+    };
+  }
+
   // Preview quality invalidates every generated preview, so the select never
   // applies straight away: it parks the choice here and waits for a confirm.
   let pendingQuality = $state<number | null>(null);
@@ -79,6 +104,7 @@
 
   function changePreviewQuality(e: Event) {
     const select = e.currentTarget as HTMLSelectElement;
+    releaseFocus(e);
     const next = Number(select.value);
     if (next === settings.previewQuality) return;
     // Keep showing the value still in force until the change is confirmed.
@@ -135,6 +161,7 @@
     class="dialog"
     bind:this={panel}
     onclick={(e) => e.stopPropagation()}
+    onpointerdown={() => (pointerPress = true)}
     onkeydown={onKeydown}
     role="dialog"
     tabindex="-1"
@@ -159,7 +186,7 @@
           <input
             type="checkbox"
             checked={settings.progressiveLoupe}
-            onchange={(e) => settings.setProgressiveLoupe(e.currentTarget.checked)}
+            onchange={releasing((e) => settings.setProgressiveLoupe(e.currentTarget.checked))}
           />
           <span class="text">
             <span class="label">Progressive loading</span>
@@ -172,7 +199,7 @@
           <input
             type="checkbox"
             checked={settings.dimQueuedDeletes}
-            onchange={(e) => settings.setDimQueuedDeletes(e.currentTarget.checked)}
+            onchange={releasing((e) => settings.setDimQueuedDeletes(e.currentTarget.checked))}
           />
           <span class="text">
             <span class="label">Dim thumbnails marked for deletion</span>
@@ -231,7 +258,7 @@
           <input
             type="checkbox"
             checked={settings.fastCulling}
-            onchange={(e) => settings.setFastCulling(e.currentTarget.checked)}
+            onchange={releasing((e) => settings.setFastCulling(e.currentTarget.checked))}
           />
           <span class="text">
             <span class="label">Fast culling</span>
@@ -245,7 +272,7 @@
           <input
             type="checkbox"
             checked={settings.lockCarousel}
-            onchange={(e) => settings.setLockCarousel(e.currentTarget.checked)}
+            onchange={releasing((e) => settings.setLockCarousel(e.currentTarget.checked))}
           />
           <span class="text">
             <span class="label">Lock carousel</span>
@@ -286,7 +313,7 @@
             <input
               type="checkbox"
               checked={settings.filmstripShowType}
-              onchange={(e) => settings.setFilmstripShowType(e.currentTarget.checked)}
+              onchange={releasing((e) => settings.setFilmstripShowType(e.currentTarget.checked))}
             />
             <span>Photo type (RAW+JPG)</span>
           </label>
@@ -294,7 +321,7 @@
             <input
               type="checkbox"
               checked={settings.filmstripShowRating}
-              onchange={(e) => settings.setFilmstripShowRating(e.currentTarget.checked)}
+              onchange={releasing((e) => settings.setFilmstripShowRating(e.currentTarget.checked))}
             />
             <span>Star rating</span>
           </label>
@@ -302,7 +329,7 @@
             <input
               type="checkbox"
               checked={settings.filmstripShowLabel}
-              onchange={(e) => settings.setFilmstripShowLabel(e.currentTarget.checked)}
+              onchange={releasing((e) => settings.setFilmstripShowLabel(e.currentTarget.checked))}
             />
             <span>Color label</span>
           </label>
@@ -310,7 +337,7 @@
             <input
               type="checkbox"
               checked={settings.filmstripShowFlag}
-              onchange={(e) => settings.setFilmstripShowFlag(e.currentTarget.checked)}
+              onchange={releasing((e) => settings.setFilmstripShowFlag(e.currentTarget.checked))}
             />
             <span>Pick/reject flag</span>
           </label>
@@ -318,7 +345,7 @@
             <input
               type="checkbox"
               checked={settings.filmstripShowTags}
-              onchange={(e) => settings.setFilmstripShowTags(e.currentTarget.checked)}
+              onchange={releasing((e) => settings.setFilmstripShowTags(e.currentTarget.checked))}
             />
             <span>Tags</span>
           </label>
@@ -348,13 +375,13 @@
                 <input
                   type="checkbox"
                   checked={!it.hidden}
-                  onchange={() => settings.toggleBottomBarHidden(it.id)}
+                  onchange={releasing(() => settings.toggleBottomBarHidden(it.id))}
                 />
               </label>
             {/snippet}
           </DragList>
         </div>
-        <button class="reset" onclick={() => settings.resetBottomBar()}>
+        <button class="reset" onclick={releasing(() => settings.resetBottomBar())}>
           <RotateCcw size={13} />
           <span>Reset to default</span>
         </button>
@@ -372,7 +399,7 @@
           <input
             type="checkbox"
             checked={settings.generateVideoThumbs}
-            onchange={(e) => settings.setGenerateVideoThumbs(e.currentTarget.checked)}
+            onchange={releasing((e) => settings.setGenerateVideoThumbs(e.currentTarget.checked))}
           />
           <span class="text">
             <span class="label">Pregenerate video thumbnails</span>
@@ -395,7 +422,7 @@
           <input
             type="checkbox"
             checked={settings.rememberSession}
-            onchange={(e) => settings.setRememberSession(e.currentTarget.checked)}
+            onchange={releasing((e) => settings.setRememberSession(e.currentTarget.checked))}
           />
           <span class="text">
             <span class="label">Remember per project</span>
@@ -428,7 +455,7 @@
           </span>
           <select
             aria-label="Auto-rescan interval"
-            onchange={(e) => settings.setAutoRescanMinutes(Number(e.currentTarget.value))}
+            onchange={releasing((e) => settings.setAutoRescanMinutes(Number(e.currentTarget.value)))}
           >
             <option value={0} selected={settings.autoRescanMinutes === 0}>Off</option>
             <option value={1} selected={settings.autoRescanMinutes === 1}>1 minute</option>
@@ -465,7 +492,7 @@
             <select
               aria-label="Burst threshold mode"
               value={settings.burstMode}
-              onchange={(e) => settings.setBurstMode(e.currentTarget.value as BurstMode)}
+              onchange={releasing((e) => settings.setBurstMode(e.currentTarget.value as BurstMode))}
             >
               <option value="fixed">Fixed gap</option>
               <option value="adaptive">Adaptive</option>
@@ -481,7 +508,7 @@
             </span>
             <select
               aria-label="Burst gap in seconds"
-              onchange={(e) => settings.setBurstGapSeconds(Number(e.currentTarget.value))}
+              onchange={releasing((e) => settings.setBurstGapSeconds(Number(e.currentTarget.value)))}
             >
               {#each BURST_GAP_CHOICES as choice (choice)}
                 <option value={choice} selected={settings.burstGapSeconds === choice}>
@@ -535,7 +562,7 @@
             <span class="card-desc">The to-do labels you can put on a photo or clip.</span>
           </span>
         </header>
-        <button class="shortcuts" onclick={onshowtags}>
+        <button class="shortcuts" onclick={releasing(onshowtags)}>
           <Tag size={14} />
           <span>Edit task tags…</span>
         </button>
@@ -549,7 +576,7 @@
             <span class="card-desc">Review and remap every shortcut.</span>
           </span>
         </header>
-        <button class="shortcuts" onclick={onshowkeybindings}>
+        <button class="shortcuts" onclick={releasing(onshowkeybindings)}>
           <Keyboard size={14} />
           <span>Keyboard shortcuts…</span>
         </button>
@@ -741,17 +768,24 @@
     cursor: pointer;
   }
 
-  /* No lingering focus ring on the last-tapped control (checkbox / select /
-     button) — matches the app-wide button rule, extended here to the inputs
-     the settings dialog uses. */
-  input:focus,
-  input:focus-visible,
-  select:focus,
-  select:focus-visible,
-  button:focus,
-  button:focus-visible {
+  /* No lingering ring on a tapped control (checkbox / select / button). The
+     script already drops focus after a pointer press; this covers the frames
+     before that lands. */
+  input:focus:not(:focus-visible),
+  select:focus:not(:focus-visible),
+  button:focus:not(:focus-visible) {
     outline: none;
     box-shadow: none;
+  }
+
+  /* Keyboard focus stays visible, so the dialog is still tabbable. The
+     !important beats the app-wide button rule in app.html, which exists to hide
+     the ring left by a TAP — a case :focus-visible already excludes. */
+  input:focus-visible,
+  select:focus-visible,
+  button:focus-visible {
+    outline: 2px solid var(--accent) !important;
+    outline-offset: 2px;
   }
 
   .text {
