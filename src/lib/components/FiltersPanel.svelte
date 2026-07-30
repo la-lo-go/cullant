@@ -17,19 +17,25 @@
     apertureBucket,
     focalBucket,
     isoBucket,
+    mergeSpellings,
     shutterBucket,
   } from "../metadataFacets";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
+  import Flag from "@lucide/svelte/icons/flag";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import FilterX from "@lucide/svelte/icons/filter-x";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
 
+  // The four plain flag states first, then the two combinations.
   const flagOptions: { value: FlagFilter; label: string; icon?: typeof Check }[] = [
     { value: "all", label: "All" },
     { value: "pick", label: "Picks", icon: Check },
     { value: "unflagged", label: "Unflagged" },
     { value: "reject", label: "Rejects", icon: X },
+    { value: "anyflag", label: "Any flag", icon: Flag },
+    { value: "notrejected", label: "Not rejected", icon: ShieldCheck },
   ];
 
   const labelColors: Record<string, string> = {
@@ -75,10 +81,12 @@
 
       if (i.ext) exts.add(i.ext.toLowerCase());
 
-      // Photographic-settings facets. camera/lens are exact strings; the numeric
-      // three are collapsed to a bucket so auto-mode variety can't flood the menu.
-      if (i.camera) cameras.add(i.camera);
-      if (i.lens) lenses.add(i.lens);
+      // Photographic-settings facets. camera/lens count each spelling, because
+      // one body can be written in several capitalisations and the menu must
+      // offer it once (see mergeSpellings); the numeric three are collapsed to a
+      // bucket so auto-mode variety can't flood the menu.
+      if (i.camera) cameras.set(i.camera, (cameras.get(i.camera) ?? 0) + 1);
+      if (i.lens) lenses.set(i.lens, (lenses.get(i.lens) ?? 0) + 1);
       const ib = isoBucket(i.iso);
       if (ib) isoKeys.add(ib.key);
       const ab = apertureBucket(i.fNumber);
@@ -160,11 +168,11 @@
   // Color labels actually applied somewhere in the project.
   const presentLabels = $derived(LABELS.filter((l) => facets.labels.has(l)));
 
-  // Photographic-settings facets present in the current photos. camera/lens are
-  // sorted exact strings shown in a dropdown; the numeric three keep the
+  // Photographic-settings facets present in the current photos. camera/lens show
+  // one dropdown entry per case-insensitive name; the numeric three keep the
   // canonical low-to-high bucket order (only present buckets survive).
-  const presentCameras = $derived([...facets.cameras].sort());
-  const presentLenses = $derived([...facets.lenses].sort());
+  const presentCameras = $derived(mergeSpellings(facets.cameras));
+  const presentLenses = $derived(mergeSpellings(facets.lenses));
   const presentIsoBuckets = $derived(ISO_BUCKETS.filter((b) => facets.isoKeys.has(b.key)));
   const presentApertureBuckets = $derived(
     APERTURE_BUCKETS.filter((b) => facets.apertureKeys.has(b.key)),

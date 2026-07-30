@@ -9,7 +9,13 @@
  */
 import type { ItemLite } from "./api";
 import { NO_BURSTS, type Bursts } from "./bursts";
-import { apertureBucket, focalBucket, isoBucket, shutterBucket } from "./metadataFacets";
+import {
+  apertureBucket,
+  focalBucket,
+  isoBucket,
+  metaTextKey,
+  shutterBucket,
+} from "./metadataFacets";
 
 /** A photo's bucket under one dimension. `sort` orders the buckets: a number
  *  for numeric/temporal dimensions, a string for categorical ones. */
@@ -42,6 +48,18 @@ const UNKNOWN: GroupBucket = { key: "~unknown", label: "—", sort: "￿" };
 function dirOf(relPath: string): string {
   const idx = Math.max(relPath.lastIndexOf("/"), relPath.lastIndexOf("\\"));
   return idx === -1 ? "" : relPath.slice(0, idx).replace(/\\/g, "/");
+}
+
+/** Bucket for a free-text EXIF string (camera, lens). The key is case-folded so
+ *  "SONY ILCE-7M3" and "Sony ILCE-7M3" collect in one section. The label is the
+ *  photo's own spelling, which the grid reads from the first photo of the
+ *  section: a dimension sees one item at a time, so it cannot know which
+ *  spelling is the most common one (the filter panel, which sees the whole
+ *  catalogue, does pick that one). */
+function textBucket(value: string | null | undefined): GroupBucket {
+  if (!value) return UNKNOWN;
+  const key = metaTextKey(value);
+  return { key, label: value, sort: key };
 }
 
 function pad(n: number): string {
@@ -92,12 +110,12 @@ export const GROUP_DIMS: GroupDim[] = [
   {
     key: "camera",
     label: "Camera",
-    of: (i) => (i.camera ? { key: i.camera, label: i.camera, sort: i.camera } : UNKNOWN),
+    of: (i) => textBucket(i.camera),
   },
   {
     key: "lens",
     label: "Lens",
-    of: (i) => (i.lens ? { key: i.lens, label: i.lens, sort: i.lens } : UNKNOWN),
+    of: (i) => textBucket(i.lens),
   },
   {
     key: "iso",

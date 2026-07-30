@@ -6,6 +6,9 @@
  * offers only the buckets some present photo falls into; both the panel (to
  * build the chips) and the filter predicate (to test a photo) go through the
  * same `*Bucket` functions, so what you click always matches what filters.
+ *
+ * The free-text settings (camera, lens) need no bucketing, only a case-folded
+ * identity — see `metaTextKey` at the bottom.
  */
 
 export interface FacetBucket {
@@ -106,6 +109,31 @@ export function shutterBucket(secs: number | null | undefined): FacetBucket | nu
   if (secs == null || !Number.isFinite(secs) || secs <= 0) return null;
   const label = shutterLabel(SHUTTER_STOPS[nearestStopIndex(secs, SHUTTER_STOPS)]);
   return { key: `sh:${label}`, label };
+}
+
+/** Case-folded identity of a free-text EXIF string (camera body, lens name).
+ *  The same body is written "SONY ILCE-7M3" by one firmware and "Sony ILCE-7M3"
+ *  by another, so the raw string is not an identity. Everything that groups or
+ *  filters on camera/lens keys on this instead, and the two spellings count as
+ *  one value. */
+export function metaTextKey(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+/** Collapse spelling variants onto one display label per value, given how often
+ *  each spelling occurs. The most used spelling wins; a tie goes to the
+ *  alphabetically first one, so the label never depends on the catalogue's
+ *  current sort order. Returns the labels in display order. */
+export function mergeSpellings(counts: Map<string, number>): string[] {
+  const best = new Map<string, { label: string; count: number }>();
+  for (const [label, count] of counts) {
+    const key = metaTextKey(label);
+    const cur = best.get(key);
+    if (!cur || count > cur.count || (count === cur.count && label.localeCompare(cur.label) < 0)) {
+      best.set(key, { label, count });
+    }
+  }
+  return [...best.values()].map((b) => b.label).sort((a, b) => a.localeCompare(b));
 }
 
 /** All possible buckets in ascending order — the panel filters these down to

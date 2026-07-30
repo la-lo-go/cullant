@@ -12,7 +12,13 @@ import {
 } from "../api";
 import { adaptiveGap, computeBursts } from "../bursts";
 import { groupCompare, type GroupContext } from "../gridGroups";
-import { apertureBucket, focalBucket, isoBucket, shutterBucket } from "../metadataFacets";
+import {
+  apertureBucket,
+  focalBucket,
+  isoBucket,
+  metaTextKey,
+  shutterBucket,
+} from "../metadataFacets";
 import { catalog } from "./catalog.svelte";
 import { settings } from "./settings.svelte";
 import { tags } from "./tags.svelte";
@@ -475,11 +481,17 @@ class SessionStore {
     // chips from. In mirror mode `out` holds one entry per pair, but both halves
     // of a RAW+JPEG pair share the same shot, so testing the shown member is exact.
     if (catalog.media === "photos") {
+      // Camera and lens are free EXIF text, and the same body can be spelled
+      // with different case across bodies or firmware. The panel merges those
+      // spellings into one chip, so the match has to fold case on both sides or
+      // picking that chip would drop every minority spelling behind it.
       if (this.cameraFilter !== null) {
-        out = out.filter((i) => i.camera === this.cameraFilter);
+        const want = metaTextKey(this.cameraFilter);
+        out = out.filter((i) => i.camera != null && metaTextKey(i.camera) === want);
       }
       if (this.lensFilter !== null) {
-        out = out.filter((i) => i.lens === this.lensFilter);
+        const want = metaTextKey(this.lensFilter);
+        out = out.filter((i) => i.lens != null && metaTextKey(i.lens) === want);
       }
       if (this.isoFilter !== null) {
         out = out.filter((i) => isoBucket(i.iso)?.key === this.isoFilter);
