@@ -11,8 +11,14 @@
   import X from "@lucide/svelte/icons/x";
   import Play from "@lucide/svelte/icons/play";
   import Film from "@lucide/svelte/icons/film";
+  import Layers from "@lucide/svelte/icons/layers";
 
-  let { items }: { items: ItemLite[] } = $props();
+  // `companionIndex` is compare's second photo: marked too, but never as
+  // strongly as the focused one, which is what the action bar acts on.
+  let {
+    items,
+    companionIndex = null,
+  }: { items: ItemLite[]; companionIndex?: number | null } = $props();
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -279,9 +285,11 @@
     >
       <div class="canvas" style="width:{items.length * CELL}px">
         {#each visible as v (v.item.id)}
+          {@const burst = session.burstPositionAt(v.index)}
           <div
             class="cell"
             class:focused={v.index === session.focusedIndex}
+            class:companion={v.index !== session.focusedIndex && v.index === companionIndex}
             style="transform: translateX({v.x}px); width:{CELL}px"
             onpointerdown={(e) => onCellPointerDown(e, v.index)}
             onpointerup={onCellPointerUp}
@@ -324,13 +332,18 @@
               {#if settings.filmstripShowLabel && v.item.label}
                 <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
               {/if}
+              {#if burst}
+                <span class="burst" title="Shot {burst.position} of a burst of {burst.total}">
+                  <Layers size={8} />{burst.position}/{burst.total}
+                </span>
+              {/if}
               {#if settings.filmstripShowType}
                 {#if session.mirrorMode && v.item.groupSize > 1}
-                  <span class="chip" class:split={v.item.decoupled}>
+                  <span class="chip" class:split={v.item.decoupled} class:below-burst={burst}>
                     {#if v.item.decoupled}<Scissors size={8} /><span>SPLIT</span>{:else}RAW+JPG{/if}
                   </span>
                 {:else if v.item.kind === 0}
-                  <span class="chip">RAW</span>
+                  <span class="chip" class:below-burst={burst}>RAW</span>
                 {/if}
               {/if}
               {#if settings.filmstripShowFlag && v.item.flag !== 0}
@@ -530,8 +543,17 @@
     border-radius: 6px;
   }
 
+  /* In compare the two marks must never read as equal: the action bar only
+     ever acts on the focused one, so it gets the solid ring and a lift, and
+     the companion gets a dashed, dimmer one. */
   .cell.focused {
-    outline: 2px solid var(--accent);
+    outline: 3px solid var(--accent);
+    outline-offset: -3px;
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
+  .cell.companion {
+    outline: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent);
     outline-offset: -2px;
   }
 
@@ -623,6 +645,31 @@
 
   .chip.split {
     color: #ffb86b;
+  }
+
+  /* Second row of the top-left stack: the burst badge owns the corner, same
+     order as the grid cell. */
+  .chip.below-burst {
+    top: 17px;
+  }
+
+  /* Burst badge: the grid's pill, sized down for a filmstrip cell. */
+  .burst {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 8px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 1px 4px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: rgba(0, 0, 0, 0.55);
+    color: #e8e8e8;
+    pointer-events: none;
   }
 
   /* Pick/reject flag badge: a green check / red X — the same visual language
