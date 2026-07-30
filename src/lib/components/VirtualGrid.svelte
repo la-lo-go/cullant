@@ -15,10 +15,33 @@
   import FileWarning from "@lucide/svelte/icons/file-warning";
   import Loader from "@lucide/svelte/icons/loader";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Layers from "@lucide/svelte/icons/layers";
   import { edgeBounce } from "../anim";
   import { bucketOf } from "../gridGroups";
 
   let { items }: { items: ItemLite[] } = $props();
+
+  // The grid draws CELLS, not items: with bursts collapsed one cell can stand
+  // for a whole run of consecutive frames. `session.gridCellStarts` is null
+  // when the two coincide, and these helpers hide the difference from the
+  // layout, hit-testing and marquee code below. A cell index addresses the
+  // grid; `session` speaks `filtered` indexes, so every call into it goes
+  // through `cellFirst`.
+  const cellStarts = $derived(session.gridCellStarts);
+  const cellCount = $derived(cellStarts ? cellStarts.length : items.length);
+
+  function cellFirst(cell: number): number {
+    return cellStarts ? cellStarts[cell] : cell;
+  }
+
+  function cellSpan(cell: number): number {
+    if (!cellStarts) return 1;
+    return (cell + 1 < cellStarts.length ? cellStarts[cell + 1] : items.length) - cellStarts[cell];
+  }
+
+  function cellItem(cell: number): ItemLite {
+    return items[cellFirst(cell)];
+  }
 
   const OVERSCAN_ROWS = 2;
   const LONG_PRESS_MS = 400; // touch: hold this long to start a marquee
@@ -162,9 +185,8 @@
     /** Stable identity for this section (the joined bucket path down to this
      *  depth) — the collapsed-set key and the DOM #each key. */
     key: string;
-    /** Index range into `items` this section covers ([start, end)), including
-     *  anything hidden under a collapsed sub-section — used for the group
-     *  select-all checkbox. */
+    /** Cell range this section covers ([start, end)), including anything hidden
+     *  under a collapsed sub-section — used for the group select-all checkbox. */
     start: number;
     end: number;
     collapsed: boolean;
@@ -182,11 +204,20 @@
     collapsedKeys = next;
   }
 
+  /** The `items` range a header's cell range covers. */
+  function headerItems(h: Header): { from: number; to: number } {
+    return {
+      from: cellFirst(h.start),
+      to: h.end >= cellCount ? items.length : cellFirst(h.end),
+    };
+  }
+
   /** Whether every item in a header's section is currently selected (the
    *  checkbox's checked state) — false for an empty range. */
   function groupAllSelected(h: Header): boolean {
     if (h.end <= h.start) return false;
-    for (let i = h.start; i < h.end; i++) {
+    const { from, to } = headerItems(h);
+    for (let i = from; i < to; i++) {
       if (!session.selectedIds.has(items[i].id)) return false;
     }
     return true;
@@ -198,7 +229,8 @@
   function toggleGroupSelect(h: Header) {
     const selectAll = !groupAllSelected(h);
     const next = new Set(session.selectedIds);
-    for (let i = h.start; i < h.end; i++) {
+    const { from, to } = headerItems(h);
+    for (let i = from; i < to; i++) {
       const id = items[i].id;
       if (selectAll) next.add(id);
       else next.delete(id);
@@ -215,13 +247,15 @@
   // which lets the visible-window and hit-testing code binary-search it.
   const layout = $derived.by(() => {
     const group = session.groupBy;
-    const n = items.length;
+    const n = cellCount;
     const itemX = new Float64Array(n);
     const itemY = new Float64Array(n);
     const hidden = new Uint8Array(n);
     const headers: Header[] = [];
 
-    // Per-item bucket paths + prefix counts (for the header "· N" tallies).
+    // Per-cell bucket paths + prefix counts (for the header "· N" tallies). A
+    // collapsed burst is bucketed by its first frame and counts once, matching
+    // what the section actually draws.
     const paths: string[][] = [];
     const labels: string[][] = [];
     const counts = new Map<string, number>();
@@ -231,7 +265,7 @@
         const labs: string[] = [];
         let prefix = "";
         for (let L = 0; L < group.length; L++) {
-          const b = bucketOf(items[i], group[L], session.groupContext);
+          const b = bucketOf(cellItem(i), group[L], session.groupContext);
           keys.push(b?.key ?? "~");
           labs.push(b?.label ?? "—");
           prefix += `\u0000${keys[L]}`;
@@ -348,7 +382,7 @@
   // Uses the laid-out y so it stays correct with headers between groups.
   $effect(() => {
     if (!viewport || session.focusedIndex === -1 || height === 0) return;
-    const top = layout.itemY[session.focusedIndex];
+    const top = layout.itemY[session.gridCellAt(session.focusedIndex)];
     if (top === undefined) return;
     const bottom = top + CELL;
     if (top < viewport.scrollTop) viewport.scrollTo({ top });
@@ -360,15 +394,31 @@
   // instead of reassigning `src` on reused nodes.
   const visible = $derived.by(() => {
     const { itemX, itemY, hidden } = layout;
-    const n = items.length;
+    const n = cellCount;
     const top = scrollTop - OVERSCAN_ROWS * CELL;
     const bot = scrollTop + height + OVERSCAN_ROWS * CELL;
     const start = lowerBound(itemY, top - CELL); // itemY >= top-CELL ⇒ cell bottom >= top
-    const out: { item: ItemLite; index: number; x: number; y: number }[] = [];
+    const out: {
+      item: ItemLite;
+      index: number;
+      /** First `items` index this cell draws. */
+      first: number;
+      /** Frames stacked under it (1 for a plain photo). */
+      span: number;
+      x: number;
+      y: number;
+    }[] = [];
     for (let i = start; i < n; i++) {
       if (itemY[i] > bot) break;
       if (hidden[i]) continue; // parked under a collapsed section — not rendered
-      out.push({ item: items[i], index: i, x: itemX[i], y: itemY[i] });
+      out.push({
+        item: cellItem(i),
+        index: i,
+        first: cellFirst(i),
+        span: cellSpan(i),
+        x: itemX[i],
+        y: itemY[i],
+      });
     }
     return out;
   });
@@ -454,7 +504,7 @@
     if (x >= viewport.clientWidth) return null; // scrollbar, not the grid
     const y = viewY + viewport.scrollTop;
     const { itemX, itemY, hidden } = layout;
-    const n = items.length;
+    const n = cellCount;
     if (n === 0) return { x, y, index: 0, onCell: false };
     // Greatest index with itemY <= y: the row at or above the point.
     const k = lowerBound(itemY, y + 1e-6) - 1;
@@ -520,9 +570,9 @@
 
     // Mouse/pen: select immediately, then arm the marquee.
     if (onCell) {
-      if (e.shiftKey) session.rangeSelect(index, e.ctrlKey);
-      else if (e.ctrlKey) session.toggleSelect(index);
-      else session.selectOnly(index);
+      if (e.shiftKey) session.rangeSelect(cellFirst(index), e.ctrlKey);
+      else if (e.ctrlKey) session.toggleSelect(cellFirst(index));
+      else session.selectOnly(cellFirst(index));
     }
     if (e.shiftKey) return; // Shift is range-select; never starts a marquee
 
@@ -594,13 +644,17 @@
 
     // Rectangle-intersect the laid-out cell boxes. itemY ascends, so start at the
     // first cell whose bottom reaches y0 and stop once a cell's top passes y1.
+    // Touching a collapsed burst takes every frame stacked under it.
     const { itemX, itemY } = layout;
-    const n = items.length;
+    const n = cellCount;
     const next = new Set(drag.base);
     for (let i = lowerBound(itemY, y0 - CELL); i < n; i++) {
       if (itemY[i] > y1) break;
       const ix = itemX[i];
-      if (ix + CELL > x0 && ix < x1) next.add(items[i].id);
+      if (ix + CELL > x0 && ix < x1) {
+        const from = cellFirst(i);
+        for (let k = from; k < from + cellSpan(i); k++) next.add(items[k].id);
+      }
     }
     session.selectedIds = next;
   }
@@ -623,8 +677,9 @@
     if (!hit?.onCell) return;
     // Focus the double-clicked photo before opening so the loupe shows IT. With a
     // selection active, focus is intentionally dropped (a selection has no single
-    // "focused" cell), so without this the loupe would open on nothing.
-    session.selectOnly(hit.index);
+    // "focused" cell), so without this the loupe would open on nothing. A
+    // collapsed burst opens on its first frame, where , and . step the rest.
+    session.selectOnly(cellFirst(hit.index));
     view.markOpenedFromGrid();
     view.mode = "viewer";
   }
@@ -656,15 +711,15 @@
             now - lastSelTap.time < DOUBLE_TAP_MS
           ) {
             lastSelTap = null;
-            session.selectOnly(tap.index);
+            session.selectOnly(cellFirst(tap.index));
             view.markOpenedFromGrid();
             view.mode = "viewer";
           } else {
             lastSelTap = { index: tap.index, time: now };
-            session.toggleSelect(tap.index);
+            session.toggleSelect(cellFirst(tap.index));
           }
         } else {
-          session.selectOnly(tap.index);
+          session.selectOnly(cellFirst(tap.index));
           // Note the tap-open so ZoomImage can ignore the second tap of a
           // habitual double-tap-to-open (which would otherwise zoom on arrival).
           view.markOpenedFromGrid();
@@ -870,10 +925,14 @@
       {@const selected = session.selectedIds.has(v.item.id)}
       {@const inset = selected ? SELECTED_INSET : 0}
       {@const dims = displayDims(v.item)}
-      {@const portrait = dims !== null && dims.h > dims.w}
+      {@const stacked = v.span > 1}
+      {@const portrait = !stacked && dims !== null && dims.h > dims.w}
+      {@const burstAt = stacked ? null : session.burstPositionAt(v.first)}
       <div
         class="cell"
-        class:focused={v.index === session.focusedIndex && session.selectedIds.size === 0}
+        class:focused={session.focusedIndex >= v.first &&
+          session.focusedIndex < v.first + v.span &&
+          session.selectedIds.size === 0}
         class:selected
         style="transform: translate({v.x + GAP / 2 + inset}px, {v.y + GAP / 2 + inset}px); width:{CELL - GAP - inset * 2}px; height:{CELL - GAP - inset * 2}px"
         role="button"
@@ -881,11 +940,26 @@
       >
         <div
           class="frame"
+          class:stacked
           class:loading={!loaded.has(v.item.id) &&
             !v.item.thumbFailed &&
             !(v.item.kind === 2 && posterFailed.has(v.item.id))}
           class:pending={!loaded.has(v.item.id) && !v.item.thumbReady && v.item.kind !== 2}
         >
+          <!-- Cards peeking out behind a collapsed burst. They sit in the
+               padding .frame.stacked opens up, so the deck never leaves the
+               cell and never touches its neighbours. -->
+          {#if stacked}
+            {@const behind = session.filtered.slice(v.first + 1, v.first + 3)}
+            <!-- One card per frame it actually hides, capped at two: a 2-shot
+                 burst that showed three cards would misreport its own size. -->
+            {#if behind[1]}
+              <span class="deck d2"><img src={thumbUrl(behind[1])} alt="" decoding="async" /></span>
+            {/if}
+            {#if behind[0]}
+              <span class="deck d1"><img src={thumbUrl(behind[0])} alt="" decoding="async" /></span>
+            {/if}
+          {/if}
           <!-- Sized to the item's REAL aspect ratio when portrait (instead of
                filling the square frame and cropping), so every badge/chip/label
                below — all positioned relative to THIS box, not .frame — stays
@@ -950,12 +1024,28 @@
             {#if v.item.label}
               <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
             {/if}
+            {#if stacked}
+              <span class="burst" title="Burst of {v.span} photos">
+                <Layers size={10} />{v.span}
+              </span>
+            {:else if burstAt}
+              <span
+                class="burst"
+                title="Shot {burstAt.position} of a burst of {burstAt.total}"
+              >
+                <Layers size={10} />{burstAt.position}/{burstAt.total}
+              </span>
+            {/if}
             {#if session.mirrorMode && v.item.groupSize > 1}
-              <span class="chip pair" class:split={v.item.decoupled}>
+              <span
+                class="chip pair"
+                class:split={v.item.decoupled}
+                class:below-burst={stacked || burstAt}
+              >
                 {#if v.item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
               </span>
             {:else if v.item.kind === 0}
-              <span class="chip raw">RAW</span>
+              <span class="chip raw" class:below-burst={stacked || burstAt}>RAW</span>
             {/if}
             {#if session.pendingDeleteIds.has(v.item.id)}
               <span class="badge pending" title="Queued for deletion"><X size={12} /></span>
@@ -1359,6 +1449,47 @@
     pointer-events: none;
   }
 
+  /* Collapsed burst: the thumbnail gives up a strip along its top and right
+     edges so the two cards behind it have somewhere to peek from. */
+  .frame.stacked {
+    box-sizing: border-box;
+    padding: 8px 8px 0 0;
+  }
+
+  /* Both deck cards trace the photo's own box (the frame minus that padding)
+     and are then nudged out of it. .photo is position: relative, so DOM order
+     keeps the photo on top of them. */
+  .deck {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    bottom: 0;
+    left: 0;
+    border-radius: 6px;
+    border: 1px solid var(--border-strong);
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+
+  /* The cards carry the real frames they stand for. They are darkened so the
+     front photo still reads as the one in charge of the cell. */
+  .deck img {
+    filter: brightness(0.55);
+  }
+
+  .deck.d1 {
+    transform: translate(4px, -4px);
+  }
+
+  .deck.d2 {
+    transform: translate(8px, -8px);
+    background: var(--surface);
+  }
+
+  .deck.d2 img {
+    filter: brightness(0.4);
+  }
+
   .marquee {
     position: absolute;
     top: 0;
@@ -1475,6 +1606,30 @@
 
   .chip.pair {
     color: #8fd0ff;
+  }
+
+  /* Second row of the top-left stack: the burst badge owns the corner. */
+  .chip.below-burst {
+    top: 24px;
+  }
+
+  /* Burst badge: the same pill as the loupe's info bar, sized for a cell. It
+     reads "how many" on a collapsed stack and "which one" on a loose frame. */
+  .burst {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: rgba(0, 0, 0, 0.55);
+    color: #e8e8e8;
   }
 
   .chip.pair.split {

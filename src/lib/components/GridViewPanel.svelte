@@ -1,6 +1,7 @@
 <script lang="ts">
   import { session, type GridDensity } from "../stores/session.svelte";
   import { catalog } from "../stores/catalog.svelte";
+  import { settings } from "../stores/settings.svelte";
   import { backdropDismiss } from "../backdrop";
   import { GROUP_DIMS } from "../gridGroups";
   import DragList from "./DragList.svelte";
@@ -164,6 +165,25 @@
         {session.mirrorMode
           ? "A pair counts as one photo; actions apply to both files."
           : "RAW and JPEG are listed and acted on independently."}
+      </p>
+    </section>
+  {/if}
+
+  {#if session.hasBursts}
+    <section>
+      <span class="lbl">Bursts</span>
+      <button
+        class="toggle"
+        class:on={settings.collapseBursts}
+        onclick={() => settings.setCollapseBursts(!settings.collapseBursts)}
+      >
+        <span>Collapse bursts</span>
+        <span class="pill"></span>
+      </button>
+      <p class="hint">
+        {settings.collapseBursts
+          ? "Each burst takes one cell. Open it to step through the frames."
+          : "Every frame of a burst gets its own cell."}
       </p>
     </section>
   {/if}

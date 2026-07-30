@@ -509,24 +509,131 @@ class SessionStore {
     return out;
   });
 
-  /** Where the focused photo sits in its burst, or null when it is not in one.
-   *  Counted over `filtered`, so the position matches what stepping with , and .
-   *  will actually walk through. */
+  /** burst key -> its frames, as indexes into `filtered` and in that order.
+   *  Counted over the visible list, so a position reads as "3 of the 8 you can
+   *  actually step through" rather than 3 of 8 files on disk. */
+  burstRuns = $derived.by(() => {
+    const runs = new Map<string, number[]>();
+    if (!this.hasBursts) return runs;
+    for (let i = 0; i < this.filtered.length; i++) {
+      const key = this.bursts.byFile.get(this.filtered[i].id);
+      if (key === undefined) continue;
+      const run = runs.get(key);
+      if (run) run.push(i);
+      else runs.set(key, [i]);
+    }
+    return runs;
+  });
+
+  /** Where the photo at a `filtered` index sits in its burst, or null when it
+   *  is not in one. Feeds the Layers badge in the grid and the filmstrip. */
+  burstPositionAt(index: number): { position: number; total: number } | null {
+    const item = this.filtered[index];
+    if (!item) return null;
+    const key = this.bursts.byFile.get(item.id);
+    if (key === undefined) return null;
+    const run = this.burstRuns.get(key);
+    if (!run || run.length < 2) return null;
+    const at = run.indexOf(index);
+    return at === -1 ? null : { position: at + 1, total: run.length };
+  }
+
+  /** Same, by file id, for the callers that hold a photo rather than its place
+   *  in the list. Compare's two panes are the case: either of them can be a
+   *  pinned photo that the focus has since walked away from. */
+  burstPositionOf(id: number): { position: number; total: number } | null {
+    const key = this.bursts.byFile.get(id);
+    if (key === undefined) return null;
+    const run = this.burstRuns.get(key);
+    if (!run || run.length < 2) return null;
+    const at = run.findIndex((idx) => this.filtered[idx]?.id === id);
+    return at === -1 ? null : { position: at + 1, total: run.length };
+  }
+
+  /** Where the focused photo sits in its burst, or null when it is not in one. */
   focusedBurst = $derived.by(() => {
     const item = this.focused;
     if (!item) return null;
     const key = this.bursts.byFile.get(item.id);
-    if (!key) return null;
-    const members: number[] = [];
-    let index = -1;
-    for (let i = 0; i < this.filtered.length; i++) {
-      if (this.bursts.byFile.get(this.filtered[i].id) !== key) continue;
-      if (i === this.focusedIndex) index = members.length;
-      members.push(i);
-    }
-    if (index === -1 || members.length < 2) return null;
+    if (key === undefined) return null;
+    const members = this.burstRuns.get(key);
+    if (!members || members.length < 2) return null;
+    const index = members.indexOf(this.focusedIndex);
+    if (index === -1) return null;
     return { position: index + 1, total: members.length, members };
   });
+
+  // --- grid cells (collapsed bursts) ---
+
+  /** Start index (into `filtered`) of every grid cell, when each burst is drawn
+   *  as ONE stacked cell. null means one cell per photo, which is both the
+   *  common case and the cheap one: no per-photo array is built for it.
+   *
+   *  Only a run of CONSECUTIVE frames collapses. A sort that scatters a burst
+   *  (by name, by size) then yields several stacks instead of one, which is the
+   *  honest reading: the grid's order is what the user sees. */
+  gridCellStarts = $derived.by<number[] | null>(() => {
+    if (!settings.collapseBursts || !this.hasBursts) return null;
+    const starts: number[] = [];
+    let prev: string | undefined;
+    for (let i = 0; i < this.filtered.length; i++) {
+      const key = this.bursts.byFile.get(this.filtered[i].id);
+      if (key === undefined || key !== prev) starts.push(i);
+      prev = key;
+    }
+    return starts;
+  });
+
+  /** How many cells the grid draws. */
+  gridCellCount = $derived(this.gridCellStarts?.length ?? this.filtered.length);
+
+  /** First `filtered` index drawn by grid cell `cell`. */
+  gridCellStart(cell: number): number {
+    const starts = this.gridCellStarts;
+    return starts ? starts[cell] : cell;
+  }
+
+  /** One past the last `filtered` index drawn by grid cell `cell`. */
+  gridCellEnd(cell: number): number {
+    const starts = this.gridCellStarts;
+    if (!starts) return cell + 1;
+    return cell + 1 < starts.length ? starts[cell + 1] : this.filtered.length;
+  }
+
+  /** Which grid cell draws a `filtered` index. Cells partition `filtered` in
+   *  order, so this is a binary search over the starts. */
+  gridCellAt(index: number): number {
+    const starts = this.gridCellStarts;
+    if (!starts || starts.length === 0) return Math.max(0, index);
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= index) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  }
+
+  /** Every file id the grid cell holding `index` stands for — the whole burst
+   *  under a collapsed stack, a single photo otherwise. */
+  cellIdsAt(index: number): number[] {
+    const item = this.filtered[index];
+    if (!item) return [];
+    if (view.mode !== "grid" || !this.gridCellStarts) return [item.id];
+    const cell = this.gridCellAt(index);
+    const out: number[] = [];
+    for (let i = this.gridCellStart(cell); i < this.gridCellEnd(cell); i++) {
+      out.push(this.filtered[i].id);
+    }
+    return out;
+  }
+
+  /** The starts array, but only where it applies: selection and navigation step
+   *  by cell in the grid, by photo everywhere else. */
+  private activeCellStarts(): number[] | null {
+    return view.mode === "grid" ? this.gridCellStarts : null;
+  }
 
   /** Step within the focused photo's burst (`,` and `.`), stopping at its own
    *  ends rather than walking on into the next one. */
@@ -804,7 +911,10 @@ class SessionStore {
 
   focusEdge(end: boolean) {
     this.collapseSelection();
-    this.focusedIndex = end ? Math.max(0, this.filtered.length - 1) : 0;
+    const starts = this.activeCellStarts();
+    if (!end || this.filtered.length === 0) this.focusedIndex = 0;
+    else if (starts && starts.length > 0) this.focusedIndex = starts[starts.length - 1];
+    else this.focusedIndex = this.filtered.length - 1;
     this.selectionAnchor = this.focusedIndex;
   }
 
@@ -838,18 +948,20 @@ class SessionStore {
     if (this.selectedIds.size > 0) this.selectedIds = new Set();
   }
 
-  /** Ctrl+click: toggle one item; an empty selection is seeded from focus. */
+  /** Ctrl+click: toggle one cell; an empty selection is seeded from focus. A
+   *  collapsed burst toggles as a block — every frame it hides goes with it. */
   toggleSelect(index: number) {
     const item = this.filtered[index];
     if (!item) return;
+    const ids = this.cellIdsAt(index);
     const wasEmpty = this.selectedIds.size === 0;
     const next = new Set(this.selectedIds);
-    if (wasEmpty && this.focused) next.add(this.focused.id);
+    if (wasEmpty && this.focused) for (const id of this.cellIdsAt(this.focusedIndex)) next.add(id);
     // Ctrl+clicking the focused item of an empty selection selects it —
     // seed + toggle would cancel out, so skip the toggle in that one case.
     if (!(wasEmpty && this.focused?.id === item.id)) {
-      if (next.has(item.id)) next.delete(item.id);
-      else next.add(item.id);
+      if (ids.every((id) => next.has(id))) for (const id of ids) next.delete(id);
+      else for (const id of ids) next.add(id);
     }
     this.selectedIds = next;
     // Making a selection drops the focus outline entirely: a focused cell next
@@ -864,8 +976,15 @@ class SessionStore {
   /** Select the contiguous run between two indexes. `additive` keeps what was
    *  already selected (Ctrl held). */
   private fillRange(anchor: number, head: number, additive = false) {
-    const lo = Math.min(anchor, head);
-    const hi = Math.max(anchor, head);
+    let lo = Math.min(anchor, head);
+    let hi = Math.max(anchor, head);
+    const starts = this.activeCellStarts();
+    if (starts) {
+      // A range that touches a collapsed burst takes all of it: the grid draws
+      // one cell there, so there is no way to point at a single hidden frame.
+      lo = this.gridCellStart(this.gridCellAt(lo));
+      hi = this.gridCellEnd(this.gridCellAt(hi)) - 1;
+    }
     const next = additive ? new Set(this.selectedIds) : new Set<number>();
     for (let i = lo; i <= hi; i++) {
       const item = this.filtered[i];
@@ -902,6 +1021,14 @@ class SessionStore {
   extendSelection(delta: number) {
     if (this.filtered.length === 0) return;
     const head = this.selectionHeadIndex();
+    const starts = this.activeCellStarts();
+    if (starts) {
+      const cell = this.gridCellAt(head);
+      const nextCell = Math.min(starts.length - 1, Math.max(0, cell + delta));
+      if (nextCell === cell) return;
+      this.extendTo(starts[nextCell]);
+      return;
+    }
     const max = this.filtered.length - 1;
     const next = Math.min(max, Math.max(0, head + delta));
     if (next === head) return;
@@ -972,7 +1099,10 @@ class SessionStore {
     }
     const item = this.focused;
     if (!item) return null;
-    return { ids: [item.id], asGroups: this.mirrorMode };
+    // A collapsed burst cell stands for every frame under it, so a rating, a
+    // flag or a tag applied to the stack lands on the whole burst.
+    const ids = this.cellIdsAt(this.focusedIndex);
+    return { ids: ids.length > 0 ? ids : [item.id], asGroups: this.mirrorMode };
   }
 
   /// Merge authoritative rows back into the catalog (optimistic UI included:
