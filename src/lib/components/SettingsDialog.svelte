@@ -1,40 +1,54 @@
 <script lang="ts">
   import {
     settings,
-    BURST_GAP_CHOICES,
     PREVIEW_QUALITY_CHOICES,
     PREVIEW_QUALITY_LABELS,
   } from "../stores/settings.svelte";
+  import {
+    FILMSTRIP_BADGES,
+    GROUPS,
+    SETTINGS,
+    anyModified,
+    groupModified,
+    matches,
+    resetAll,
+    resetGroup,
+    type GroupId,
+    type Setting,
+    type SettingGroup,
+  } from "../settingsSchema";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
+  import { view } from "../stores/view.svelte";
   import { api } from "../api";
   import { backdropDismiss } from "../backdrop";
-  import type { BurstMode } from "../bursts";
+  import { keepClamped } from "../popover";
   import DragList from "./DragList.svelte";
-  import Layers from "@lucide/svelte/icons/layers";
+  import Info from "@lucide/svelte/icons/info";
+  import Search from "@lucide/svelte/icons/search";
   import Keyboard from "@lucide/svelte/icons/keyboard";
-  import Monitor from "@lucide/svelte/icons/monitor";
-  import Film from "@lucide/svelte/icons/film";
-  import Video from "@lucide/svelte/icons/video";
-  import History from "@lucide/svelte/icons/history";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import Zap from "@lucide/svelte/icons/zap";
-  import PanelBottom from "@lucide/svelte/icons/panel-bottom";
-  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import Tag from "@lucide/svelte/icons/tag";
+  import Heart from "@lucide/svelte/icons/heart";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import X from "@lucide/svelte/icons/x";
 
   let {
     onclose,
     onshowkeybindings,
     onshowtags,
+    onshowsupport,
   }: {
     onclose: () => void;
     /** Open the keyboard-shortcuts dialog (owned by the page). */
     onshowkeybindings: () => void;
     /** Open the task-tag editor (owned by the page). */
     onshowtags: () => void;
+    /** Open the support dialog (owned by the page). */
+    onshowsupport: () => void;
   } = $props();
 
   // Touch platform (Android) reaches the manual rescan via pull-to-refresh;
@@ -46,9 +60,62 @@
 
   let panel = $state<HTMLDivElement | null>(null);
 
+  // One source of truth for the layout mode. The CSS below keys off the same
+  // width, and the info affordance needs the answer in JS too (anchored popover
+  // above it, bottom sheet below), so a narrow desktop window behaves like a
+  // phone instead of the app sniffing the platform.
+  const NARROW_QUERY = "(max-width: 600px)";
+  let narrow = $state(false);
+  $effect(() => {
+    const mq = window.matchMedia(NARROW_QUERY);
+    narrow = mq.matches;
+    const onChange = () => (narrow = mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  });
+
   // Focus the panel so Escape lands here (and stops) instead of the global keymap.
   $effect(() => {
     panel?.focus();
+  });
+
+  // A sub-panel or an explanation left open would greet the next visit out of
+  // context, so the dialog always opens at its top level.
+  $effect(() => {
+    view.resetSettingsNav();
+    return () => view.resetSettingsNav();
+  });
+
+  let query = $state("");
+
+  const openPanel = $derived(SETTINGS.find((s) => s.id === view.settingsPanel) ?? null);
+  const infoSetting = $derived(SETTINGS.find((s) => s.id === view.settingsInfo) ?? null);
+
+  /** Settings of a group that survive the current search. */
+  function rows(group: GroupId): Setting[] {
+    return SETTINGS.filter((s) => s.group === group && matches(s, query));
+  }
+
+  const visibleGroups = $derived(GROUPS.filter((g) => rows(g.id).length > 0));
+
+  /** Split the groups into two desktop columns of roughly equal height, counting
+   *  a header plus its rows. Balancing rather than hardcoding keeps the columns
+   *  even as settings are added, and as the search empties groups out. */
+  const columns = $derived.by<[SettingGroup[], SettingGroup[]]>(() => {
+    const weight = (g: SettingGroup) => 1 + rows(g.id).length;
+    const total = visibleGroups.reduce((n, g) => n + weight(g), 0);
+    const left: SettingGroup[] = [];
+    const right: SettingGroup[] = [];
+    let filled = 0;
+    for (const g of visibleGroups) {
+      if (filled + weight(g) / 2 <= total / 2) {
+        left.push(g);
+        filled += weight(g);
+      } else {
+        right.push(g);
+      }
+    }
+    return [left, right];
   });
 
   function onKeydown(e: KeyboardEvent) {
@@ -56,7 +123,11 @@
     // and changed with the keyboard keeps its focus.
     pointerPress = false;
     e.stopPropagation();
-    if (e.key === "Escape") onclose();
+    if (e.key !== "Escape") return;
+    // Same order the app's back ladder uses: shed the innermost layer first.
+    if (view.settingsInfo) view.settingsInfo = null;
+    else if (view.settingsPanel) view.settingsPanel = null;
+    else onclose();
   }
 
   // A pressed control must not keep focus: the ring lingers and the control
@@ -80,6 +151,30 @@
       releaseFocus(e);
     };
   }
+
+  // --- the info affordance ---
+
+  let infoAnchor: HTMLElement | null = null;
+  let infoEl = $state<HTMLDivElement | null>(null);
+
+  function toggleInfo(id: string, e: MouseEvent) {
+    infoAnchor = e.currentTarget as HTMLElement;
+    view.settingsInfo = view.settingsInfo === id ? null : id;
+    releaseFocus(e);
+  }
+
+  // Desktop only: park the popover under the icon it belongs to and let the
+  // shared clamp pull it back inside the window. The bottom sheet needs none of
+  // this, since it spans the full width by construction.
+  $effect(() => {
+    if (narrow || !view.settingsInfo || !infoEl || !infoAnchor) return;
+    const r = infoAnchor.getBoundingClientRect();
+    infoEl.style.left = `${r.left}px`;
+    infoEl.style.top = `${r.bottom + 6}px`;
+    return keepClamped(() => infoEl);
+  });
+
+  // --- preview quality ---
 
   // Preview quality invalidates every generated preview, so the select never
   // applies straight away: it parks the choice here and waits for a confirm.
@@ -123,14 +218,119 @@
     }
   }
 
+  // --- resets ---
+
+  let confirmResetAll = $state(false);
+
+  // --- settings that live in other surfaces ---
+
+  /** Both destinations need a project, so the whole section waits for one. */
+  const elsewhere = $derived(
+    catalog.project
+      ? [
+          {
+            what: "Thumbnail size, grouping, RAW+JPEG pairing, burst collapsing",
+            where: "View panel",
+            go: () => {
+              onclose();
+              view.mode = "grid";
+              session.viewPanelOpen = true;
+            },
+          },
+          {
+            what: "Where deleted files go",
+            where: "Commit dialog",
+            go: () => {
+              onclose();
+              session.commitDialogOpen = true;
+            },
+          },
+        ]
+      : [],
+  );
 </script>
 
-<div
-  class="backdrop"
-  {...dismiss}
-  onkeydown={(e) => e.key === "Escape" && onclose()}
-  role="presentation"
->
+{#snippet infoButton(s: Setting)}
+  <button
+    class="info"
+    class:on={view.settingsInfo === s.id}
+    aria-label="What does {s.label} do?"
+    onclick={(e) => toggleInfo(s.id, e)}
+  >
+    <Info size={13} />
+  </button>
+{/snippet}
+
+{#snippet settingRow(s: Setting)}
+  <div class="row" class:changed={s.modified()}>
+    <span class="name">
+      <span class="label">{s.label}</span>
+      {@render infoButton(s)}
+    </span>
+
+    {#if s.kind === "toggle"}
+      <button
+        class="switch"
+        class:on={s.get()}
+        role="switch"
+        aria-checked={s.get()}
+        aria-label={s.label}
+        onclick={releasing(() => s.set(!s.get()))}
+      >
+        <span class="knob"></span>
+      </button>
+    {:else if s.kind === "choice"}
+      <select aria-label={s.label} value={s.get()} onchange={releasing((e) => s.set(e.currentTarget.value))}>
+        {#each s.options as o (o.value)}
+          <option value={o.value}>{o.label}</option>
+        {/each}
+      </select>
+    {:else if s.kind === "panel"}
+      <button class="drill" onclick={releasing(() => (view.settingsPanel = s.id))}>
+        <span class="summary">{s.summary()}</span>
+        <ChevronRight size={14} />
+      </button>
+    {:else if s.slot === "previewQuality"}
+      <select
+        aria-label={s.label}
+        disabled={previewBusy}
+        value={settings.previewQuality}
+        onchange={changePreviewQuality}
+      >
+        {#each PREVIEW_QUALITY_CHOICES as choice (choice)}
+          <option value={choice}>{choice} px · {PREVIEW_QUALITY_LABELS[choice]}</option>
+        {/each}
+      </select>
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet groupBlock(g: SettingGroup)}
+  <section class="group">
+    <header>
+      <g.icon size={14} />
+      <span class="gname">{g.label}</span>
+      {#if groupModified(g.id)}
+        <button
+          class="greset"
+          title="Reset {g.label} to defaults"
+          aria-label="Reset {g.label} to defaults"
+          onclick={releasing(() => resetGroup(g.id))}
+        >
+          <RotateCcw size={12} />
+        </button>
+      {/if}
+    </header>
+    {#each rows(g.id) as s (s.id)}
+      {@render settingRow(s)}
+    {/each}
+    {#if g.id === "quality" && previewMsg}
+      <p class="hint">{previewMsg}</p>
+    {/if}
+  </section>
+{/snippet}
+
+<div class="backdrop" {...dismiss} role="presentation">
   <div
     class="dialog"
     bind:this={panel}
@@ -138,406 +338,182 @@
     onpointerdown={() => (pointerPress = true)}
     onkeydown={onKeydown}
     role="dialog"
+    aria-label="Settings"
     tabindex="-1"
   >
     <header class="head">
-      <h2>Settings</h2>
+      {#if openPanel}
+        <button class="back" onclick={releasing(() => (view.settingsPanel = null))} aria-label="Back">
+          <ChevronLeft size={18} />
+        </button>
+        <h2>{openPanel.label}</h2>
+      {:else}
+        <h2>Settings</h2>
+        <label class="find">
+          <Search size={13} />
+          <input
+            type="search"
+            placeholder="Search settings"
+            aria-label="Search settings"
+            bind:value={query}
+          />
+        </label>
+      {/if}
       <button class="close-x" onclick={onclose} aria-label="Close settings" title="Close">
         <X size={18} />
       </button>
     </header>
 
-    <div class="content">
-      <section class="card">
-        <header class="card-head">
-          <Monitor size={16} />
-          <span class="card-text">
-            <span class="card-title">Display</span>
-            <span class="card-desc">How photos load and appear while you cull.</span>
-          </span>
-        </header>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={settings.progressiveLoupe}
-            onchange={releasing((e) => settings.setProgressiveLoupe(e.currentTarget.checked))}
-          />
-          <span class="text">
-            <span class="label">Progressive loading</span>
-            <span class="description">
-              Show the thumbnail instantly while the sharp preview loads.
-            </span>
-          </span>
-        </label>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={settings.dimQueuedDeletes}
-            onchange={releasing((e) => settings.setDimQueuedDeletes(e.currentTarget.checked))}
-          />
-          <span class="text">
-            <span class="label">Dim thumbnails marked for deletion</span>
-            <span class="description">
-              Fade rejects in the grid and filmstrip so they stand out at a glance.
-            </span>
-          </span>
-        </label>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={settings.dimDeletesInPreview}
-            onchange={releasing((e) => settings.setDimDeletesInPreview(e.currentTarget.checked))}
-          />
-          <span class="text">
-            <span class="label">Also dim the large photo</span>
-            <span class="description">
-              Extend the same fade to the loupe and compare views, so a photo marked for
-              deletion is easy to spot while you judge it.
-            </span>
-          </span>
-        </label>
-        <div class="option row">
-          <span class="text">
-            <span class="label">Preview quality</span>
-            <span class="description">
-              How sharp the loupe preview is. Lower is faster to generate and uses far less
-              memory, which is worth it on a phone. Changing this regenerates every preview.
-            </span>
-          </span>
-          <select
-            aria-label="Preview quality"
-            disabled={previewBusy}
-            value={settings.previewQuality}
-            onchange={changePreviewQuality}
-          >
-            {#each PREVIEW_QUALITY_CHOICES as choice (choice)}
-              <option value={choice}>{choice} px · {PREVIEW_QUALITY_LABELS[choice]}</option>
-            {/each}
-          </select>
-        </div>
-        {#if previewMsg}
-          <p class="hint">{previewMsg}</p>
-        {/if}
-      </section>
-
-      <section class="card">
-        <header class="card-head">
-          <Zap size={16} />
-          <span class="card-text">
-            <span class="card-title">Culling</span>
-            <span class="card-desc">Faster keyboard/touch culling in the loupe and compare views.</span>
-          </span>
-        </header>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={settings.fastCulling}
-            onchange={releasing((e) => settings.setFastCulling(e.currentTarget.checked))}
-          />
-          <span class="text">
-            <span class="label">Fast culling</span>
-            <span class="description">
-              In the loupe and compare views, any rating, flag, label or tag jumps to the
-              next photo automatically. Hold Shift to stay put.
-            </span>
-          </span>
-        </label>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={settings.lockCarousel}
-            onchange={releasing((e) => settings.setLockCarousel(e.currentTarget.checked))}
-          />
-          <span class="text">
-            <span class="label">Lock carousel</span>
-            <span class="description">
-              Scrolling the filmstrip moves the loupe to the centered photo, instead of
-              scrolling on its own.
-            </span>
-          </span>
-        </label>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={settings.skipRejected}
-            onchange={releasing((e) => settings.setSkipRejected(e.currentTarget.checked))}
-          />
-          <span class="text">
-            <span class="label">Skip photos marked for deletion</span>
-            <span class="description">
-              Next and previous step over them in the loupe and compare views. Picking a
-              thumbnail still opens a marked photo.
-            </span>
-          </span>
-        </label>
-      </section>
-
-      <section class="card">
-        <header class="card-head">
-          <Film size={16} />
-          <span class="card-text">
-            <span class="card-title">Filmstrip badges</span>
-            <span class="card-desc">
-              Which badges to show on the filmstrip's small thumbnails.
-            </span>
-          </span>
-        </header>
-        <div class="checks">
+    {#if openPanel?.kind === "panel" && openPanel.panel === "filmstripBadges"}
+      <div class="content sub">
+        <p class="sub-intro">{openPanel.info}</p>
+        {#each FILMSTRIP_BADGES as badge (badge.label)}
           <label class="check">
             <input
               type="checkbox"
-              checked={settings.filmstripShowType}
-              onchange={releasing((e) => settings.setFilmstripShowType(e.currentTarget.checked))}
+              checked={badge.get()}
+              onchange={releasing((e) => badge.set(e.currentTarget.checked))}
             />
-            <span>Photo type (RAW+JPG)</span>
+            <span>{badge.label}</span>
           </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={settings.filmstripShowRating}
-              onchange={releasing((e) => settings.setFilmstripShowRating(e.currentTarget.checked))}
-            />
-            <span>Star rating</span>
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={settings.filmstripShowLabel}
-              onchange={releasing((e) => settings.setFilmstripShowLabel(e.currentTarget.checked))}
-            />
-            <span>Color label</span>
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={settings.filmstripShowFlag}
-              onchange={releasing((e) => settings.setFilmstripShowFlag(e.currentTarget.checked))}
-            />
-            <span>Pick/reject flag</span>
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              checked={settings.filmstripShowTags}
-              onchange={releasing((e) => settings.setFilmstripShowTags(e.currentTarget.checked))}
-            />
-            <span>Tags</span>
-          </label>
-        </div>
-      </section>
-
-      <section class="card">
-        <header class="card-head">
-          <PanelBottom size={16} />
-          <span class="card-text">
-            <span class="card-title">Bottom action bar</span>
-            <span class="card-desc">
-              Drag to reorder the touch classification groups. Uncheck one to hide it.
-            </span>
-          </span>
-        </header>
-        <div class="bar-list">
-          <DragList
-            items={settings.bottomBarList}
-            keyOf={(it) => it.id}
-            onMove={(from, to) => settings.moveBottomBarItem(from, to)}
-            ariaLabel="Bottom bar groups"
-          >
-            {#snippet row(it)}
-              <label class="bar-row">
-                <span class="bar-name" class:off={it.hidden}>{it.label}</span>
-                <input
-                  type="checkbox"
-                  checked={!it.hidden}
-                  onchange={releasing(() => settings.toggleBottomBarHidden(it.id))}
-                />
-              </label>
-            {/snippet}
-          </DragList>
-        </div>
-        <button class="reset" onclick={releasing(() => settings.resetBottomBar())}>
+        {/each}
+      </div>
+    {:else if openPanel?.kind === "panel" && openPanel.panel === "touchBar"}
+      <div class="content sub">
+        <p class="sub-intro">{openPanel.info}</p>
+        <DragList
+          items={settings.bottomBarList}
+          keyOf={(it) => it.id}
+          onMove={(from, to) => settings.moveBottomBarItem(from, to)}
+          ariaLabel="Bottom bar groups"
+        >
+          {#snippet row(it)}
+            <label class="bar-row">
+              <span class="bar-name" class:off={it.hidden}>{it.label}</span>
+              <input
+                type="checkbox"
+                checked={!it.hidden}
+                onchange={releasing(() => settings.toggleBottomBarHidden(it.id))}
+              />
+            </label>
+          {/snippet}
+        </DragList>
+        <button class="wide" onclick={releasing(() => settings.resetBottomBar())}>
           <RotateCcw size={13} />
           <span>Reset to default</span>
         </button>
-      </section>
-
-      <section class="card">
-        <header class="card-head">
-          <Video size={16} />
-          <span class="card-text">
-            <span class="card-title">Media</span>
-            <span class="card-desc">Background generation of video poster frames.</span>
-          </span>
-        </header>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={settings.generateVideoThumbs}
-            onchange={releasing((e) => settings.setGenerateVideoThumbs(e.currentTarget.checked))}
-          />
-          <span class="text">
-            <span class="label">Pregenerate video thumbnails</span>
-            <span class="description">
-              Build video posters in the background. Off: each is made when you scroll to it.
-            </span>
-          </span>
-        </label>
-      </section>
-
-      <section class="card">
-        <header class="card-head">
-          <History size={16} />
-          <span class="card-text">
-            <span class="card-title">Session</span>
-            <span class="card-desc">What is restored when you reopen a project.</span>
-          </span>
-        </header>
-        <label class="option">
-          <input
-            type="checkbox"
-            checked={settings.rememberSession}
-            onchange={releasing((e) => settings.setRememberSession(e.currentTarget.checked))}
-          />
-          <span class="text">
-            <span class="label">Remember per project</span>
-            <span class="description">
-              Restore each project's last sort, filters and focused photo.
-            </span>
-          </span>
-        </label>
-      </section>
-
-      <section class="card">
-        <header class="card-head">
-          <RefreshCw size={16} />
-          <span class="card-text">
-            <span class="card-title">Project folder</span>
-            <span class="card-desc">Keep the catalog in sync with files changed outside Cullant.</span>
-          </span>
-        </header>
-        <div class="option row">
-          <span class="text">
-            <span class="label">Auto-rescan interval</span>
-            <span class="description">
-              How often to rescan for added or removed files, when the folder is reachable.
-              {#if isTouch}
-                Pull down the grid to rescan now.
-              {:else}
-                Rescan now from the title-bar menu.
-              {/if}
-            </span>
-          </span>
-          <select
-            aria-label="Auto-rescan interval"
-            onchange={releasing((e) => settings.setAutoRescanMinutes(Number(e.currentTarget.value)))}
-          >
-            <option value={0} selected={settings.autoRescanMinutes === 0}>Off</option>
-            <option value={1} selected={settings.autoRescanMinutes === 1}>1 minute</option>
-            <option value={5} selected={settings.autoRescanMinutes === 5}>5 minutes</option>
-            <option value={15} selected={settings.autoRescanMinutes === 15}>15 minutes</option>
-          </select>
-        </div>
-      </section>
-
-      {#if catalog.project}
-        <section class="card">
-          <header class="card-head">
-            <Layers size={16} />
-            <span class="card-text">
-              <span class="card-title">Bursts</span>
-              <span class="card-desc">How close together shots must be to count as one burst.</span>
-            </span>
-          </header>
-          <div class="option row">
-            <span class="text">
-              <span class="label">Threshold</span>
-              <span class="description">
-                {#if settings.burstMode === "adaptive"}
-                  {#if session.burstGap.adaptive}
-                    Read from this project's own rhythm: {session.burstGap.seconds}s.
-                  {:else}
-                    This project's intervals show no clear split, so the fixed gap is in use.
-                  {/if}
-                {:else}
-                  Shots separated by less than this belong to the same burst.
-                {/if}
-              </span>
-            </span>
-            <select
-              aria-label="Burst threshold mode"
-              value={settings.burstMode}
-              onchange={releasing((e) => settings.setBurstMode(e.currentTarget.value as BurstMode))}
-            >
-              <option value="fixed">Fixed gap</option>
-              <option value="adaptive">Adaptive</option>
-            </select>
-          </div>
-          <div class="option row">
-            <span class="text">
-              <span class="label">Fixed gap</span>
-              <span class="description">
-                Used directly in fixed mode, and as the fallback when adaptive finds no clear
-                split.
-              </span>
-            </span>
-            <select
-              aria-label="Burst gap in seconds"
-              onchange={releasing((e) => settings.setBurstGapSeconds(Number(e.currentTarget.value)))}
-            >
-              {#each BURST_GAP_CHOICES as choice (choice)}
-                <option value={choice} selected={settings.burstGapSeconds === choice}>
-                  {choice} second{choice === 1 ? "" : "s"}
-                </option>
+      </div>
+    {:else}
+      <div class="content">
+        {#if visibleGroups.length === 0}
+          <p class="empty">Nothing matches “{query}”.</p>
+        {:else}
+          <div class="cols">
+            <div class="col">
+              {#each columns[0] as g (g.id)}
+                {@render groupBlock(g)}
               {/each}
-            </select>
+            </div>
+            <div class="col">
+              {#each columns[1] as g (g.id)}
+                {@render groupBlock(g)}
+              {/each}
+            </div>
           </div>
-          <p class="hint">
-            A burst never spans two cameras, and a RAW+JPEG pair always stays together.
+        {/if}
+
+        {#if !query}
+          <div class="jump">
+            <button class="wide" onclick={releasing(onshowkeybindings)}>
+              <Keyboard size={14} />
+              <span>Keyboard shortcuts</span>
+              <ChevronRight size={14} />
+            </button>
+            <button class="wide" onclick={releasing(onshowtags)}>
+              <Tag size={14} />
+              <span>Task tags</span>
+              <ChevronRight size={14} />
+            </button>
+            <button class="wide support" onclick={releasing(onshowsupport)}>
+              <Heart size={14} />
+              <span>Support Cullant</span>
+              <ChevronRight size={14} />
+            </button>
+          </div>
+
+          {#if elsewhere.length > 0}
+            <section class="group elsewhere">
+              <header><span class="gname">Elsewhere</span></header>
+              {#each elsewhere as item (item.where)}
+                <button class="out" onclick={releasing(item.go)}>
+                  <span class="what">{item.what}</span>
+                  <span class="where">{item.where}<ArrowUpRight size={12} /></span>
+                </button>
+              {/each}
+            </section>
+          {/if}
+
+          <p class="hint tail">
+            {isTouch
+              ? "Pull down on the grid to rescan the project now."
+              : "Press ? anytime to see the shortcuts you have configured."}
           </p>
-        </section>
-      {/if}
 
-      <section class="card">
-        <header class="card-head">
-          <Tag size={16} />
-          <span class="card-text">
-            <span class="card-title">Task tags</span>
-            <span class="card-desc">The to-do labels you can put on a photo or clip.</span>
-          </span>
-        </header>
-        <button class="shortcuts" onclick={releasing(onshowtags)}>
-          <Tag size={14} />
-          <span>Edit task tags…</span>
-        </button>
-      </section>
-
-      <section class="card">
-        <header class="card-head">
-          <Keyboard size={16} />
-          <span class="card-text">
-            <span class="card-title">Keyboard</span>
-            <span class="card-desc">Review and remap every shortcut.</span>
-          </span>
-        </header>
-        <button class="shortcuts" onclick={releasing(onshowkeybindings)}>
-          <Keyboard size={14} />
-          <span>Keyboard shortcuts…</span>
-        </button>
-        <p class="hint">Press ? anytime to see the shortcuts you have configured.</p>
-      </section>
-    </div>
+          {#if anyModified()}
+            <button class="reset-all" onclick={releasing(() => (confirmResetAll = true))}>
+              <RotateCcw size={13} />
+              <span>Reset all settings</span>
+            </button>
+          {/if}
+        {/if}
+      </div>
+    {/if}
   </div>
 </div>
+
+{#if infoSetting}
+  <!-- The explanation. Anchored under its icon on a wide screen, a full-width
+       sheet on a narrow one, where a popover pinned near the right edge would
+       leave the text a few characters wide. -->
+  <div
+    class="info-pop"
+    class:sheet={narrow}
+    bind:this={infoEl}
+    role="tooltip"
+    onpointerdown={(e) => e.stopPropagation()}
+  >
+    <span class="ip-title">{infoSetting.label}</span>
+    <p>{infoSetting.info}</p>
+  </div>
+  <button
+    class="info-scrim"
+    aria-label="Close explanation"
+    onclick={() => (view.settingsInfo = null)}
+  ></button>
+{/if}
 
 {#if pendingQuality !== null}
   <ConfirmDialog
     title="Rebuild every preview?"
     message={catalog.project
-      ? `Loupe previews will be regenerated at ${pendingQuality} px. The ones built at ${settings.previewQuality} px are deleted first, so photos you open before this finishes show their grid thumbnail for a moment. Your photos are not touched.`
-      : `Previews will be generated at ${pendingQuality} px from now on. Existing projects rebuild theirs the next time you open them.`}
-    confirmLabel="Rebuild previews"
+      ? `Previews change to ${pendingQuality} px. The ones already generated are discarded and rebuilt in the background.`
+      : `Previews change to ${pendingQuality} px, and are rebuilt the next time you open a project.`}
+    confirmLabel="Change and rebuild"
     onconfirm={() => void applyPreviewQuality()}
     oncancel={() => (pendingQuality = null)}
+  />
+{/if}
+
+{#if confirmResetAll}
+  <ConfirmDialog
+    title="Reset all settings?"
+    message="Every preference goes back to the value Cullant ships with. Your photos, ratings and pending actions are untouched."
+    confirmLabel="Reset all"
+    onconfirm={() => {
+      confirmResetAll = false;
+      resetAll();
+    }}
+    oncancel={() => (confirmResetAll = false)}
   />
 {/if}
 
@@ -545,307 +521,543 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.55);
+    z-index: 60;
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 100;
-    /* Keep the centered panel inside the safe area (system bars, cutout). */
-    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
-    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.55);
+    padding: var(--dialog-edge-margin);
+    padding-top: calc(var(--inset-top) + var(--dialog-edge-margin));
+    padding-bottom: calc(var(--inset-bottom) + var(--dialog-edge-margin));
   }
 
   .dialog {
-    background: var(--surface-2);
-    border: 1px solid var(--border-strong);
-    border-radius: 10px;
-    width: 500px;
-    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
-    max-height: calc(100vh - 48px - var(--inset-top) - var(--inset-bottom));
+    outline: none;
     display: flex;
     flex-direction: column;
-    outline: none;
+    /* Two columns of label-only rows fit every desktop screen without scrolling,
+       which is the whole point of the layout: no navigation and no hidden state. */
+    width: 720px;
+    max-width: 100%;
+    max-height: 100%;
+    background: #232329;
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
   }
 
   .head {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px 12px 12px 20px;
+    gap: 10px;
+    padding: 12px 8px 12px 16px;
     border-bottom: 1px solid var(--border);
   }
 
   h2 {
     margin: 0;
-    font-size: 16px;
-    flex: 1;
+    font-size: 15px;
+    font-weight: 600;
   }
 
-  /* Corner dismiss: a borderless icon button, ≥40px hit area for touch. */
+  .find {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    opacity: 0.75;
+  }
+
+  .find:focus-within {
+    opacity: 1;
+    border-color: var(--accent);
+  }
+
+  .find input {
+    width: 150px;
+    padding: 5px 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font-size: 12px;
+    outline: none;
+  }
+
+  /* The platform search affordance is a second, redundant clear button. */
+  .find input::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .back,
   .close-x {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 40px;
-    height: 40px;
-    flex: none;
-    padding: 0;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
+    height: 32px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
     color: inherit;
-    opacity: 0.7;
+    opacity: 0.6;
     cursor: pointer;
   }
 
-  .close-x:hover {
-    background: var(--hover);
-    opacity: 1;
+  .close-x {
+    margin-left: auto;
   }
 
-  /* Scrollable body: the header and footer stay put while the category cards
-     scroll on small viewports. */
+  .back {
+    margin-left: -6px;
+  }
+
+  .back:hover,
+  .close-x:hover {
+    opacity: 1;
+    background: var(--surface);
+  }
+
   .content {
     overflow-y: auto;
-    padding: 12px 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    padding: 14px 16px 16px;
   }
 
-  /* Each category is a card one shade darker than the dialog surface, so the
-     grouping reads at a glance. */
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 10px 10px 6px;
+  .cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 22px;
+    align-items: start;
   }
 
-  .card-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 2px 10px 8px;
-    color: var(--accent);
-  }
-
-  .card-head :global(svg) {
-    flex-shrink: 0;
-    margin-top: 1px;
-  }
-
-  .card-text {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-  }
-
-  .card-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: #e8e8e8;
-  }
-
-  .card-desc {
-    font-size: 12px;
-    /* Neutral, not the card-head's accent (which the icon uses) — descriptions
-       shouldn't read as colored links. */
-    color: #e8e8e8;
-    opacity: 0.55;
-    line-height: 1.4;
-  }
-
-  /* Setting rows are full-width and at least 44px tall so the whole row is a
-     comfortable touch target on phones. */
-  .option {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    min-height: 44px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    cursor: pointer;
-    box-sizing: border-box;
-  }
-
-  .option:hover {
-    background: var(--hover);
-  }
-
-  /* A setting whose control sits inline at the right (e.g. a dropdown) rather
-     than a leading checkbox. */
-  .option.row {
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    cursor: default;
-  }
-
-  .option.row:hover {
-    background: transparent;
-  }
-
-  .option.row .text {
-    flex: 1;
+  .col {
     min-width: 0;
   }
 
-  /* Box/chevron come from the app-wide :global(select); keep only the taller
-     touch target and right padding for the chevron. */
-  select {
-    flex: none;
-    min-height: 40px;
-    padding: 6px 28px 6px 10px;
+  .group {
+    margin-bottom: 14px;
   }
 
-  .option input {
-    margin-top: 2px;
+  .group header {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 4px 2px;
+    color: #cfcfd6;
   }
 
-  input[type="checkbox"] {
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-    accent-color: var(--accent);
+  .group header :global(svg) {
+    opacity: 0.65;
+  }
+
+  .gname {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    opacity: 0.75;
+  }
+
+  .greset {
+    margin-left: auto;
+    display: inline-flex;
+    padding: 3px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: inherit;
+    opacity: 0.5;
     cursor: pointer;
   }
 
-  /* No lingering ring on a tapped control (checkbox / select / button). The
-     script already drops focus after a pointer press; this covers the frames
-     before that lands. */
-  input:focus:not(:focus-visible),
-  select:focus:not(:focus-visible),
-  button:focus:not(:focus-visible) {
-    outline: none;
-    box-shadow: none;
+  .greset:hover {
+    opacity: 1;
+    background: var(--surface);
   }
 
-  /* Keyboard focus stays visible, so the dialog is still tabbable. The
-     !important beats the app-wide button rule in app.html, which exists to hide
-     the ring left by a TAP — a case :focus-visible already excludes. */
-  input:focus-visible,
-  select:focus-visible,
-  button:focus-visible {
-    outline: 2px solid var(--accent) !important;
-    outline-offset: 2px;
-  }
-
-  .text {
+  .row {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    padding: 2px 4px 2px 6px;
+    border-radius: 6px;
+  }
+
+  .row:hover {
+    background: var(--surface);
+  }
+
+  .name {
+    display: flex;
+    align-items: center;
     gap: 2px;
+    min-width: 0;
+    flex: 1;
   }
 
   .label {
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.3;
-  }
-
-  .description {
     font-size: 12.5px;
-    opacity: 0.65;
-    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* Badge toggles stack vertically (mobile-first) instead of wrapping inline. */
-  .checks {
-    display: flex;
-    flex-direction: column;
+  /* A dot on any preference that no longer matches what Cullant ships, so "what
+     have I changed" is answerable at a glance when something behaves oddly. */
+  .row.changed .label::after {
+    content: "";
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+    border-radius: 50%;
+    background: var(--accent);
   }
 
-  .check {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 44px;
-    padding: 4px 10px;
-    border-radius: 8px;
-    font-size: 13px;
-    cursor: pointer;
-    box-sizing: border-box;
-  }
-
-  .check:hover {
-    background: var(--hover);
-  }
-
-  /* Bottom-bar customization: the DragList rows carry the grip; each row here is
-     the item name + a show/hide checkbox. */
-  .bar-list {
-    padding: 2px 6px 6px;
-  }
-
-  .bar-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-height: 40px;
-    padding: 4px 6px;
-    cursor: pointer;
-  }
-
-  .bar-name {
-    font-size: 13px;
-  }
-
-  .bar-name.off {
-    opacity: 0.5;
-  }
-
-  .reset {
+  .info {
     display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0 6px 4px;
-    font-size: 12.5px;
-  }
-
-  .shortcuts {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    width: 100%;
-    min-height: 44px;
-    margin-bottom: 4px;
-  }
-
-  .hint {
-    margin: 2px 2px 6px;
-    font-size: 12.5px;
-    opacity: 0.65;
-    line-height: 1.4;
-  }
-
-  button {
-    border-radius: 6px;
-    border: 1px solid var(--border-strong);
-    padding: 8px 12px;
-    font-size: 13px;
-    font-family: inherit;
-    color: #e8e8e8;
-    background-color: var(--control);
+    flex: none;
+    padding: 3px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: inherit;
+    opacity: 0.32;
     cursor: pointer;
   }
 
-  button:hover {
+  .row:hover .info,
+  .info.on {
+    opacity: 0.9;
+  }
+
+  .switch {
+    flex: none;
+    position: relative;
+    width: 32px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    background: var(--surface);
+    cursor: pointer;
+  }
+
+  .switch.on {
+    background: var(--accent);
     border-color: var(--accent);
   }
 
-  /* Phone widths: no room left for a dropdown beside the description, so it
-     drops onto its own line at full width, where it is an easier target too. */
+  .knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #d8d8de;
+    transition: transform 0.14s ease;
+  }
+
+  .switch.on .knob {
+    transform: translateX(14px);
+    background: #fff;
+  }
+
+  select {
+    flex: none;
+    max-width: 46%;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: inherit;
+    font-size: 11.5px;
+  }
+
+  .drill {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 4px 3px 8px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .drill:hover {
+    background: var(--surface-2);
+  }
+
+  .summary {
+    font-size: 11.5px;
+    opacity: 0.65;
+  }
+
+  .jump {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .wide {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .wide:hover {
+    border-color: var(--border-strong);
+    background: var(--surface-2);
+  }
+
+  .wide span {
+    text-align: left;
+  }
+
+  .wide :global(svg:last-child) {
+    margin-left: auto;
+    opacity: 0.5;
+  }
+
+  .support :global(svg:first-child) {
+    color: #ff7597;
+  }
+
+  .elsewhere {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .out {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 6px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .out:hover {
+    background: var(--surface);
+  }
+
+  .what {
+    flex: 1;
+    opacity: 0.8;
+  }
+
+  .where {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--accent);
+  }
+
+  .hint {
+    margin: 6px 2px 0;
+    font-size: 11px;
+    opacity: 0.55;
+  }
+
+  .tail {
+    margin-top: 12px;
+  }
+
+  .empty {
+    margin: 24px 0;
+    text-align: center;
+    font-size: 12.5px;
+    opacity: 0.6;
+  }
+
+  .reset-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: none;
+    color: inherit;
+    font-size: 11.5px;
+    opacity: 0.8;
+    cursor: pointer;
+  }
+
+  .reset-all:hover {
+    opacity: 1;
+    border-color: #b4545c;
+    color: #ff9ca3;
+  }
+
+  /* --- sub-panels --- */
+
+  .sub {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sub-intro {
+    margin: 0 2px 8px;
+    font-size: 12px;
+    line-height: 1.45;
+    opacity: 0.65;
+  }
+
+  .check,
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 0 6px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .check:hover,
+  .bar-row:hover {
+    background: var(--surface);
+  }
+
+  .bar-name {
+    flex: 1;
+  }
+
+  .bar-name.off {
+    opacity: 0.45;
+    text-decoration: line-through;
+  }
+
+  .sub .wide {
+    margin-top: 8px;
+  }
+
+  /* --- the explanation --- */
+
+  .info-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 61;
+    border: 0;
+    background: none;
+    cursor: default;
+  }
+
+  .info-pop {
+    position: fixed;
+    z-index: 62;
+    width: 300px;
+    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
+    overflow-y: auto;
+    padding: 10px 12px;
+    background: #2c2c33;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  .info-pop.sheet {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    max-width: none;
+    padding: 16px 18px calc(18px + var(--inset-bottom));
+    border-width: 1px 0 0;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .ip-title {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px
+;
+    font-weight: 600;
+  }
+
+  .info-pop p {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    opacity: 0.8;
+  }
+
   @media (max-width: 600px) {
-    .option.row {
-      flex-direction: column;
-      align-items: stretch;
-      gap: 8px;
+    .backdrop {
+      padding: 0;
     }
 
-    .option.row select {
+    .dialog {
       width: 100%;
+      height: 100%;
+      max-height: none;
+      border: 0;
+      border-radius: 0;
+      padding-top: var(--inset-top);
+    }
+
+    /* One column, and the group header sticks so you always know which group the
+       rows under your thumb belong to. */
+    .cols {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+
+    .group header {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #232329;
+    }
+
+    .row {
+      min-height: 44px;
+    }
+
+    .jump {
+      grid-template-columns: 1fr;
+    }
+
+    .find input {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .find {
+      flex: 1;
+      min-width: 0;
     }
   }
 </style>

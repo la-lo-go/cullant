@@ -138,6 +138,16 @@
       showSupport = false;
       return;
     }
+    // Settings nests two layers of its own, so back sheds them before the
+    // dialog: first the explanation, then whichever sub-panel is open.
+    if (view.settingsInfo) {
+      view.settingsInfo = null;
+      return;
+    }
+    if (view.settingsPanel) {
+      view.settingsPanel = null;
+      return;
+    }
     if (showSettings) {
       showSettings = false;
       return;
@@ -647,6 +657,10 @@
       onshowtags={() => {
         showSettings = false;
         tags.editorOpen = true;
+      }}
+      onshowsupport={() => {
+        showSettings = false;
+        showSupport = true;
       }}
     />
   {/if}

@@ -34,6 +34,20 @@ class ViewStore {
   openedFromGridAt = $state(0);
   /** Read-only keyboard cheat-sheet overlay open (toggled by `?`). */
   shortcutsOpen = $state(false);
+
+  /** The settings dialog's nested state: which sub-panel is open, and the id of
+   *  the setting whose explanation is showing. Both live here rather than inside
+   *  the component so the app's single back/Escape ladder in +page.svelte can
+   *  dismiss them in order before it closes the dialog itself. */
+  settingsPanel = $state<string | null>(null);
+  settingsInfo = $state<string | null>(null);
+
+  /** Drop the settings dialog back to its top level. Called when it opens and
+   *  when it closes, so a sub-panel left open never greets the next visit. */
+  resetSettingsNav() {
+    this.settingsPanel = null;
+    this.settingsInfo = null;
+  }
   /** Loupe/compare only: hides the top toolbar and the touch action bar so the
    *  photo gets the whole screen. Reset to false whenever the grid comes back
    *  (see the effect below) — it has no meaning there and must never linger. */
