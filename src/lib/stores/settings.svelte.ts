@@ -50,6 +50,50 @@ export const PREVIEW_QUALITY_LABELS: Record<number, string> = {
   3840: "High",
 };
 
+/** Every preference's out-of-the-box value, in one place. The loaders below take
+ *  their fallback from here and the settings dialog compares against it to mark
+ *  a preference as changed and to reset it. Declared twice, those two readings
+ *  would be free to disagree. */
+export const DEFAULTS: {
+  progressiveLoupe: boolean;
+  rememberSession: boolean;
+  generateVideoThumbs: boolean;
+  previewQuality: number;
+  filmstripShowType: boolean;
+  filmstripShowRating: boolean;
+  filmstripShowLabel: boolean;
+  filmstripShowFlag: boolean;
+  filmstripShowTags: boolean;
+  dimQueuedDeletes: boolean;
+  dimDeletesInPreview: boolean;
+  autoRescanMinutes: number;
+  fastCulling: boolean;
+  lockCarousel: boolean;
+  skipRejected: boolean;
+  collapseBursts: boolean;
+  burstMode: BurstMode;
+  burstGapSeconds: number;
+} = {
+  progressiveLoupe: true,
+  rememberSession: true,
+  generateVideoThumbs: true,
+  previewQuality: PREVIEW_QUALITY_DEFAULT,
+  filmstripShowType: true,
+  filmstripShowRating: true,
+  filmstripShowLabel: true,
+  filmstripShowFlag: true,
+  filmstripShowTags: true,
+  dimQueuedDeletes: true,
+  dimDeletesInPreview: false,
+  autoRescanMinutes: 5,
+  fastCulling: false,
+  lockCarousel: false,
+  skipRejected: false,
+  collapseBursts: true,
+  burstMode: "fixed",
+  burstGapSeconds: 2,
+};
+
 function loadBool(key: string, fallback: boolean): boolean {
   try {
     const raw = localStorage.getItem(key);
@@ -121,75 +165,75 @@ const initialBottomBar = loadBottomBar();
 
 class SettingsStore {
   /** Paint the cached thumbnail instantly while the sharp preview loads. */
-  progressiveLoupe = $state<boolean>(loadBool(PROGRESSIVE_LOUPE_KEY, true));
+  progressiveLoupe = $state<boolean>(loadBool(PROGRESSIVE_LOUPE_KEY, DEFAULTS.progressiveLoupe));
 
   /** Remember and restore each project's last sort, media tab, filters and
    *  focused item (persisted in the per-project DB). */
-  rememberSession = $state<boolean>(loadBool(REMEMBER_SESSION_KEY, true));
+  rememberSession = $state<boolean>(loadBool(REMEMBER_SESSION_KEY, DEFAULTS.rememberSession));
 
   /** Pregenerate video poster thumbnails. They always run last (after every
    *  photo thumbnail and preview) because ffmpeg extraction is the slow tier;
    *  off skips their background pregeneration entirely. Mirrored to the backend
    *  (see the sync effect in +page.svelte) since the ingest pass reads it. */
-  generateVideoThumbs = $state<boolean>(loadBool(GENERATE_VIDEO_THUMBS_KEY, true));
+  generateVideoThumbs = $state<boolean>(loadBool(GENERATE_VIDEO_THUMBS_KEY, DEFAULTS.generateVideoThumbs));
   /** Loupe preview long edge. Changing it invalidates every generated preview,
    *  so the UI confirms first and then discards + regenerates them. */
   previewQuality = $state<number>(
-    loadChoice(PREVIEW_QUALITY_KEY, PREVIEW_QUALITY_CHOICES, PREVIEW_QUALITY_DEFAULT),
+    loadChoice(PREVIEW_QUALITY_KEY, PREVIEW_QUALITY_CHOICES, DEFAULTS.previewQuality),
   );
 
   /** Filmstrip badge visibility (see the keys above for why these exist
    *  separately from the grid, which never lets a badge leave the photo). */
-  filmstripShowType = $state<boolean>(loadBool(FILMSTRIP_SHOW_TYPE_KEY, true));
-  filmstripShowRating = $state<boolean>(loadBool(FILMSTRIP_SHOW_RATING_KEY, true));
-  filmstripShowLabel = $state<boolean>(loadBool(FILMSTRIP_SHOW_LABEL_KEY, true));
-  filmstripShowFlag = $state<boolean>(loadBool(FILMSTRIP_SHOW_FLAG_KEY, true));
-  filmstripShowTags = $state<boolean>(loadBool(FILMSTRIP_SHOW_TAGS_KEY, true));
+  filmstripShowType = $state<boolean>(loadBool(FILMSTRIP_SHOW_TYPE_KEY, DEFAULTS.filmstripShowType));
+  filmstripShowRating = $state<boolean>(loadBool(FILMSTRIP_SHOW_RATING_KEY, DEFAULTS.filmstripShowRating));
+  filmstripShowLabel = $state<boolean>(loadBool(FILMSTRIP_SHOW_LABEL_KEY, DEFAULTS.filmstripShowLabel));
+  filmstripShowFlag = $state<boolean>(loadBool(FILMSTRIP_SHOW_FLAG_KEY, DEFAULTS.filmstripShowFlag));
+  filmstripShowTags = $state<boolean>(loadBool(FILMSTRIP_SHOW_TAGS_KEY, DEFAULTS.filmstripShowTags));
 
   /** Darken the thumbnails of files marked for deletion — reject flag OR
    *  queued delete (grid + filmstrip), so a doomed photo reads at a glance
    *  while culling. The red-X badge stays fully visible — only the photo
    *  itself dims. */
-  dimQueuedDeletes = $state<boolean>(loadBool(DIM_QUEUED_DELETES_KEY, true));
+  dimQueuedDeletes = $state<boolean>(loadBool(DIM_QUEUED_DELETES_KEY, DEFAULTS.dimQueuedDeletes));
 
   /** Extend that dimming to the large photo in the loupe and compare views.
    *  Separate from `dimQueuedDeletes` because a dim thumbnail reads as a status
    *  badge while a dim preview is the photo you are judging. Off by default. */
-  dimDeletesInPreview = $state<boolean>(loadBool(DIM_DELETES_IN_PREVIEW_KEY, false));
+  dimDeletesInPreview = $state<boolean>(loadBool(DIM_DELETES_IN_PREVIEW_KEY, DEFAULTS.dimDeletesInPreview));
 
   /** How often (minutes) to automatically rescan the open project's folder for
    *  added/removed/changed files; 0 disables it. Only fires while the storage is
    *  reachable, so a disconnected drive isn't polled. A manual rescan is always
    *  available (title-bar menu on desktop, pull-to-refresh on mobile). */
-  autoRescanMinutes = $state<number>(loadChoice(AUTO_RESCAN_MINUTES_KEY, AUTO_RESCAN_CHOICES, 5));
+  autoRescanMinutes = $state<number>(loadChoice(AUTO_RESCAN_MINUTES_KEY, AUTO_RESCAN_CHOICES, DEFAULTS.autoRescanMinutes));
 
   /** Fast culling: in the loupe/compare views, any classification (rating, flag,
    *  label, tag) auto-advances to the next photo — no Caps Lock needed. Off by
    *  default; the grid is never affected. */
-  fastCulling = $state<boolean>(loadBool(FAST_CULLING_KEY, false));
+  fastCulling = $state<boolean>(loadBool(FAST_CULLING_KEY, DEFAULTS.fastCulling));
 
   /** Lock the filmstrip to the shown photo: scrolling the strip moves the loupe
    *  to whichever cell is centered (a carousel), instead of scrolling
    *  independently of the selection. Off by default. */
-  lockCarousel = $state<boolean>(loadBool(LOCK_CAROUSEL_KEY, false));
+  lockCarousel = $state<boolean>(loadBool(LOCK_CAROUSEL_KEY, DEFAULTS.lockCarousel));
 
   /** Step over photos already marked for deletion when moving to the next or
    *  previous photo in the loupe and compare views. Only the next/previous
    *  commands skip: picking a thumbnail directly still opens it, however it is
    *  marked. Off by default. */
-  skipRejected = $state<boolean>(loadBool(SKIP_REJECTED_KEY, false));
+  skipRejected = $state<boolean>(loadBool(SKIP_REJECTED_KEY, DEFAULTS.skipRejected));
 
   /** Show each burst as one stacked cell in the grid instead of every frame.
    *  Expanding puts the burst badge on each frame instead. */
-  collapseBursts = $state<boolean>(loadBool(COLLAPSE_BURSTS_KEY, true));
+  collapseBursts = $state<boolean>(loadBool(COLLAPSE_BURSTS_KEY, DEFAULTS.collapseBursts));
 
   /** How the burst threshold is chosen. "adaptive" reads the shoot's own
    *  rhythm and falls back to `burstGapSeconds` when the intervals show no
    *  clear split — a sports shoot and a wedding do not photograph alike. */
   burstMode = $state<BurstMode>(
-    localStorage.getItem(BURST_MODE_KEY) === '"adaptive"' ? "adaptive" : "fixed",
+    localStorage.getItem(BURST_MODE_KEY) === '"adaptive"' ? "adaptive" : DEFAULTS.burstMode,
   );
-  burstGapSeconds = $state<number>(loadChoice(BURST_GAP_KEY, BURST_GAP_CHOICES, 2));
+  burstGapSeconds = $state<number>(loadChoice(BURST_GAP_KEY, BURST_GAP_CHOICES, DEFAULTS.burstGapSeconds));
 
   setBurstMode(mode: BurstMode) {
     this.burstMode = mode;
