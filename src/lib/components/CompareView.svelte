@@ -55,11 +55,24 @@
   const right = $derived.by(() => {
     if (pinnedSide === "right") return pinnedLive;
     if (pinnedSide === "left") return session.focused;
-    return session.filtered[session.focusedIndex + 1];
+    const i = session.compareCompanionIndex;
+    return i === null ? undefined : session.filtered[i];
   });
 
   // Which pane tracks the focused photo (gets the accent caption).
   const focusedSide = $derived<Side>(pinnedSide === "left" ? "right" : "left");
+
+  /** The other pane's photo, as an index into `filtered`, so the filmstrip can
+   *  mark both photos on screen. The focused one is marked by the strip itself
+   *  and stays the stronger mark, because it is the one the action bar hits.
+   *  A pinned photo filtered out of the strip has no cell to mark. */
+  const companionIndex = $derived.by(() => {
+    if (!pinnedSide) return session.compareCompanionIndex;
+    const id = pinnedLive?.id;
+    if (id === undefined) return null;
+    const idx = session.filtered.findIndex((i) => i.id === id);
+    return idx === -1 ? null : idx;
+  });
 
   function togglePin(side: Side, current: ItemLite | null | undefined) {
     if (pinnedSide === side) {

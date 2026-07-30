@@ -241,6 +241,20 @@
             </span>
           </span>
         </label>
+        <label class="option">
+          <input
+            type="checkbox"
+            checked={settings.skipRejected}
+            onchange={releasing((e) => settings.setSkipRejected(e.currentTarget.checked))}
+          />
+          <span class="text">
+            <span class="label">Skip photos marked for deletion</span>
+            <span class="description">
+              Next and previous step over them in the loupe and compare views. Picking a
+              thumbnail still opens a marked photo.
+            </span>
+          </span>
+        </label>
       </section>
 
       <section class="card">

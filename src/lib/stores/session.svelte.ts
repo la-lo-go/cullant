@@ -888,10 +888,56 @@ class SessionStore {
   /** Minimum gap between edge bumps so a hard scroll produces one clean nudge. */
   private static readonly EDGE_BUMP_COOLDOWN_MS = 250;
 
+  /** Whether a photo is already on its way out: the reject flag, or a queued
+   *  delete. The same pair the grid and the filmstrip dim. */
+  private markedForDeletion(item: ItemLite): boolean {
+    return item.flag === -1 || this.pendingDeleteIds.has(item.id);
+  }
+
+  /** Which photo compare puts in its second pane while nothing is pinned: the
+   *  next one after the focus, stepping over the ones already marked for
+   *  deletion when the setting asks for it. Offering a photo you have already
+   *  decided against as the thing to judge against is wasted screen. null when
+   *  there is nothing left to pair with. */
+  compareCompanionIndex = $derived.by<number | null>(() => {
+    let i = this.focusedIndex + 1;
+    if (settings.skipRejected) {
+      while (i < this.filtered.length && this.markedForDeletion(this.filtered[i])) i++;
+    }
+    return i < this.filtered.length ? i : null;
+  });
+
+  /** Where `moveFocus(delta)` lands, or null when it cannot move.
+   *  The grid steps by CELL, so one press passes a collapsed burst. The loupe
+   *  and compare views step by photo, and step OVER the photos already marked
+   *  for deletion when the setting asks for it. */
+  private nextFocusIndex(delta: number): number | null {
+    const max = this.filtered.length - 1;
+    if (max < 0) return null;
+    if (this.focusedIndex < 0) return 0;
+
+    const starts = this.activeCellStarts();
+    if (starts) {
+      const cell = this.gridCellAt(this.focusedIndex);
+      const next = Math.min(starts.length - 1, Math.max(0, cell + delta));
+      return next === cell ? null : starts[next];
+    }
+
+    let next = Math.min(max, Math.max(0, this.focusedIndex + delta));
+    if (settings.skipRejected && (view.mode === "viewer" || view.mode === "compare")) {
+      const step = delta >= 0 ? 1 : -1;
+      while (next >= 0 && next <= max && this.markedForDeletion(this.filtered[next])) next += step;
+      // Everything ahead is marked: hold position rather than wrap or land
+      // outside the set.
+      if (next < 0 || next > max) return null;
+    }
+    return next === this.focusedIndex ? null : next;
+  }
+
   moveFocus(delta: number) {
-    const max = Math.max(0, this.filtered.length - 1);
-    const next = Math.min(max, Math.max(0, this.focusedIndex + delta));
-    if (next === this.focusedIndex && delta !== 0) {
+    const next = this.nextFocusIndex(delta);
+    if (next === null) {
+      if (delta === 0) return;
       // Already at the edge — signal a bounce instead of a silent no-op, but
       // throttle so a fast wheel/swipe burst yields a single clean nudge.
       const now = Date.now();
