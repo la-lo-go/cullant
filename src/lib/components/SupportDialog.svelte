@@ -58,15 +58,25 @@
         here is how you can help it keep going.
       </p>
 
-      <span class="head">Costs nothing</span>
-      {#each FREE_WAYS as c (c.id)}
-        {@render way(c)}
-      {/each}
+      <section class="block">
+        <header>
+          <span class="h-title">Costs nothing</span>
+          <span class="h-note">Worth more than it sounds</span>
+        </header>
+        {#each FREE_WAYS as c (c.id)}
+          {@render way(c)}
+        {/each}
+      </section>
 
-      <span class="head">With money</span>
-      {#each MONEY_WAYS as c (c.id)}
-        {@render way(c)}
-      {/each}
+      <section class="block money">
+        <header>
+          <span class="h-title">With money</span>
+          <span class="h-note">None of these are open yet</span>
+        </header>
+        {#each MONEY_WAYS as c (c.id)}
+          {@render way(c)}
+        {/each}
+      </section>
 
       <p class="foot">Every link opens in your browser.</p>
     </div>
@@ -133,17 +143,12 @@
     cursor: pointer;
   }
 
-  .close-x:hover {
-    opacity: 1;
-    background: var(--surface);
-  }
-
   .content {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    padding: 14px 16px 16px;
+    gap: 10px;
+    padding: 14px 16px 22px;
   }
 
   .intro {
@@ -153,13 +158,42 @@
     opacity: 0.75;
   }
 
-  .head {
-    margin: 8px 2px 2px;
+  /* The two routes are genuinely different asks, so they read as two blocks
+     rather than two labels in one long list. */
+  .block {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.16);
+  }
+
+  .block.money {
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+
+  .block header {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 0 2px 4px;
+    border: 0;
+  }
+
+  .h-title {
     font-size: 10.5px;
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    opacity: 0.6;
+    color: var(--accent);
+  }
+
+  .h-note {
+    font-size: 11px;
+    opacity: 0.55;
   }
 
   .way {
@@ -175,9 +209,17 @@
     cursor: pointer;
   }
 
-  .way:hover {
-    border-color: var(--border-strong);
-    background: var(--surface-2);
+  /* Hover belongs to pointers that can hover. On touch it sticks after a tap. */
+  @media (hover: hover) {
+    .way:hover {
+      border-color: var(--border-strong);
+      background: var(--surface-2);
+    }
+
+    .close-x:hover {
+      opacity: 1;
+      background: var(--surface);
+    }
   }
 
   .way :global(svg:first-child) {
@@ -215,17 +257,9 @@
   }
 
   @media (max-width: 600px) {
-    .backdrop {
-      padding: 0;
-    }
 
     .dialog {
       width: 100%;
-      height: 100%;
-      max-height: none;
-      border: 0;
-      border-radius: 0;
-      padding-top: var(--inset-top);
     }
   }
 </style>
