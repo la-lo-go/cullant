@@ -27,6 +27,7 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import SettingsDialog from "$lib/components/SettingsDialog.svelte";
   import SupportDialog from "$lib/components/SupportDialog.svelte";
+  import InfoOverlay from "$lib/components/InfoOverlay.svelte";
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
   import SearchOverlay from "$lib/components/SearchOverlay.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
@@ -74,6 +75,27 @@
   let showKeybindings = $state(false);
   let showSupport = $state(false);
   let showSettings = $state(false);
+  /** Settings opens three dialogs of its own, and closes itself to do it.
+   *  Backing out of one of those should land back in Settings rather than in the
+   *  grid, so it remembers where the user came from. */
+  let returnToSettings = $state(false);
+
+  /** Close a dialog Settings opened, going back to Settings if that is where it
+   *  was opened from. */
+  function leaveSubDialog(close: () => void) {
+    close();
+    if (returnToSettings) {
+      returnToSettings = false;
+      showSettings = true;
+    }
+  }
+
+  /** Open a dialog from Settings, remembering to come back to it. */
+  function fromSettings(open: () => void) {
+    showSettings = false;
+    returnToSettings = true;
+    open();
+  }
   let showCloseConfirm = $state(false);
   // Set when the open project's folder/volume becomes unreachable while working.
   let folderLostMsg = $state("");
@@ -130,18 +152,17 @@
       view.shortcutsOpen = false;
       return;
     }
+    // An explanation floats above everything that can raise one.
+    if (view.infoTip) {
+      view.infoTip = null;
+      return;
+    }
     if (showKeybindings) {
-      showKeybindings = false;
+      leaveSubDialog(() => (showKeybindings = false));
       return;
     }
     if (showSupport) {
-      showSupport = false;
-      return;
-    }
-    // Settings nests two layers of its own, so back sheds them before the
-    // dialog: first the explanation, then whichever sub-panel is open.
-    if (view.settingsInfo) {
-      view.settingsInfo = null;
+      leaveSubDialog(() => (showSupport = false));
       return;
     }
     if (view.settingsPanel) {
@@ -157,7 +178,7 @@
       return;
     }
     if (tags.editorOpen) {
-      tags.editorOpen = false;
+      leaveSubDialog(() => (tags.editorOpen = false));
       return;
     }
     if (session.commitDialogOpen) {
@@ -639,34 +660,29 @@
     <ShortcutsOverlay onclose={() => (view.shortcutsOpen = false)} />
   {/if}
 
+  <!-- Mounted once for the whole app: any InfoTip, in any dialog or panel,
+       raises its explanation here. -->
+  <InfoOverlay />
+
   {#if session.searchOpen}
     <SearchOverlay />
   {/if}
 
   {#if showKeybindings}
-    <KeybindingsDialog onclose={() => (showKeybindings = false)} />
+    <KeybindingsDialog onclose={() => leaveSubDialog(() => (showKeybindings = false))} />
   {/if}
 
   {#if showSettings}
     <SettingsDialog
       onclose={() => (showSettings = false)}
-      onshowkeybindings={() => {
-        showSettings = false;
-        showKeybindings = true;
-      }}
-      onshowtags={() => {
-        showSettings = false;
-        tags.editorOpen = true;
-      }}
-      onshowsupport={() => {
-        showSettings = false;
-        showSupport = true;
-      }}
+      onshowkeybindings={() => fromSettings(() => (showKeybindings = true))}
+      onshowtags={() => fromSettings(() => (tags.editorOpen = true))}
+      onshowsupport={() => fromSettings(() => (showSupport = true))}
     />
   {/if}
 
   {#if showSupport}
-    <SupportDialog onclose={() => (showSupport = false)} />
+    <SupportDialog onclose={() => leaveSubDialog(() => (showSupport = false))} />
   {/if}
 
   {#if session.recoupleDialogFor !== null}
@@ -674,7 +690,7 @@
   {/if}
 
   {#if tags.editorOpen}
-    <TagEditor onclose={() => (tags.editorOpen = false)} />
+    <TagEditor onclose={() => leaveSubDialog(() => (tags.editorOpen = false))} />
   {/if}
 
   {#if session.commitDialogOpen}

@@ -18,14 +18,13 @@
     type SettingGroup,
   } from "../settingsSchema";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import InfoTip from "./InfoTip.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
   import { api } from "../api";
   import { backdropDismiss } from "../backdrop";
-  import { keepClamped } from "../popover";
   import DragList from "./DragList.svelte";
-  import Info from "@lucide/svelte/icons/info";
   import Search from "@lucide/svelte/icons/search";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import Tag from "@lucide/svelte/icons/tag";
@@ -52,27 +51,12 @@
   } = $props();
 
   // Touch platform (Android) reaches the manual rescan via pull-to-refresh;
-  // desktop uses the title-bar menu. The auto-rescan help text reflects whichever
-  // one this device actually has.
+  // desktop uses the title-bar menu. The tail hint reflects whichever this has.
   const isTouch = navigator.userAgent.includes("Android");
 
   const dismiss = backdropDismiss(() => onclose());
 
   let panel = $state<HTMLDivElement | null>(null);
-
-  // One source of truth for the layout mode. The CSS below keys off the same
-  // width, and the info affordance needs the answer in JS too (anchored popover
-  // above it, bottom sheet below), so a narrow desktop window behaves like a
-  // phone instead of the app sniffing the platform.
-  const NARROW_QUERY = "(max-width: 600px)";
-  let narrow = $state(false);
-  $effect(() => {
-    const mq = window.matchMedia(NARROW_QUERY);
-    narrow = mq.matches;
-    const onChange = () => (narrow = mq.matches);
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
-  });
 
   // Focus the panel so Escape lands here (and stops) instead of the global keymap.
   $effect(() => {
@@ -89,7 +73,6 @@
   let query = $state("");
 
   const openPanel = $derived(SETTINGS.find((s) => s.id === view.settingsPanel) ?? null);
-  const infoSetting = $derived(SETTINGS.find((s) => s.id === view.settingsInfo) ?? null);
 
   /** Settings of a group that survive the current search. */
   function rows(group: GroupId): Setting[] {
@@ -125,7 +108,7 @@
     e.stopPropagation();
     if (e.key !== "Escape") return;
     // Same order the app's back ladder uses: shed the innermost layer first.
-    if (view.settingsInfo) view.settingsInfo = null;
+    if (view.infoTip) view.infoTip = null;
     else if (view.settingsPanel) view.settingsPanel = null;
     else onclose();
   }
@@ -151,28 +134,6 @@
       releaseFocus(e);
     };
   }
-
-  // --- the info affordance ---
-
-  let infoAnchor: HTMLElement | null = null;
-  let infoEl = $state<HTMLDivElement | null>(null);
-
-  function toggleInfo(id: string, e: MouseEvent) {
-    infoAnchor = e.currentTarget as HTMLElement;
-    view.settingsInfo = view.settingsInfo === id ? null : id;
-    releaseFocus(e);
-  }
-
-  // Desktop only: park the popover under the icon it belongs to and let the
-  // shared clamp pull it back inside the window. The bottom sheet needs none of
-  // this, since it spans the full width by construction.
-  $effect(() => {
-    if (narrow || !view.settingsInfo || !infoEl || !infoAnchor) return;
-    const r = infoAnchor.getBoundingClientRect();
-    infoEl.style.left = `${r.left}px`;
-    infoEl.style.top = `${r.bottom + 6}px`;
-    return keepClamped(() => infoEl);
-  });
 
   // --- preview quality ---
 
@@ -218,11 +179,7 @@
     }
   }
 
-  // --- resets ---
-
   let confirmResetAll = $state(false);
-
-  // --- settings that live in other surfaces ---
 
   /** Both destinations need a project, so the whole section waits for one. */
   const elsewhere = $derived(
@@ -250,22 +207,11 @@
   );
 </script>
 
-{#snippet infoButton(s: Setting)}
-  <button
-    class="info"
-    class:on={view.settingsInfo === s.id}
-    aria-label="What does {s.label} do?"
-    onclick={(e) => toggleInfo(s.id, e)}
-  >
-    <Info size={13} />
-  </button>
-{/snippet}
-
 {#snippet settingRow(s: Setting)}
   <div class="row" class:changed={s.modified()}>
     <span class="name">
       <span class="label">{s.label}</span>
-      {@render infoButton(s)}
+      <InfoTip title={s.label} text={s.info} />
     </span>
 
     {#if s.kind === "toggle"}
@@ -280,7 +226,11 @@
         <span class="knob"></span>
       </button>
     {:else if s.kind === "choice"}
-      <select aria-label={s.label} value={s.get()} onchange={releasing((e) => s.set(e.currentTarget.value))}>
+      <select
+        aria-label={s.label}
+        value={s.get()}
+        onchange={releasing((e) => s.set(e.currentTarget.value))}
+      >
         {#each s.options as o (o.value)}
           <option value={o.value}>{o.label}</option>
         {/each}
@@ -343,7 +293,11 @@
   >
     <header class="head">
       {#if openPanel}
-        <button class="back" onclick={releasing(() => (view.settingsPanel = null))} aria-label="Back">
+        <button
+          class="back"
+          onclick={releasing(() => (view.settingsPanel = null))}
+          aria-label="Back"
+        >
           <ChevronLeft size={18} />
         </button>
         <h2>{openPanel.label}</h2>
@@ -369,12 +323,12 @@
         <p class="sub-intro">{openPanel.info}</p>
         {#each FILMSTRIP_BADGES as badge (badge.label)}
           <label class="check">
+            <span>{badge.label}</span>
             <input
               type="checkbox"
               checked={badge.get()}
               onchange={releasing((e) => badge.set(e.currentTarget.checked))}
             />
-            <span>{badge.label}</span>
           </label>
         {/each}
       </div>
@@ -388,8 +342,8 @@
           ariaLabel="Bottom bar groups"
         >
           {#snippet row(it)}
-            <label class="bar-row">
-              <span class="bar-name" class:off={it.hidden}>{it.label}</span>
+            <label class="check">
+              <span class:off={it.hidden}>{it.label}</span>
               <input
                 type="checkbox"
                 checked={!it.hidden}
@@ -434,12 +388,20 @@
               <span>Task tags</span>
               <ChevronRight size={14} />
             </button>
-            <button class="wide support" onclick={releasing(onshowsupport)}>
-              <Heart size={14} />
-              <span>Support Cullant</span>
-              <ChevronRight size={14} />
-            </button>
           </div>
+
+          <!-- Deliberately not a third grey row like the two above. Nothing funds
+               this app, so the one ask it makes gets to be seen. -->
+          <button class="support" onclick={releasing(onshowsupport)}>
+            <Heart size={20} />
+            <span class="s-text">
+              <span class="s-title">Support Cullant</span>
+              <span class="s-note">
+                Free, no ads, no account. Help with your time or with money.
+              </span>
+            </span>
+            <ChevronRight size={16} />
+          </button>
 
           {#if elsewhere.length > 0}
             <section class="group elsewhere">
@@ -470,27 +432,6 @@
     {/if}
   </div>
 </div>
-
-{#if infoSetting}
-  <!-- The explanation. Anchored under its icon on a wide screen, a full-width
-       sheet on a narrow one, where a popover pinned near the right edge would
-       leave the text a few characters wide. -->
-  <div
-    class="info-pop"
-    class:sheet={narrow}
-    bind:this={infoEl}
-    role="tooltip"
-    onpointerdown={(e) => e.stopPropagation()}
-  >
-    <span class="ip-title">{infoSetting.label}</span>
-    <p>{infoSetting.info}</p>
-  </div>
-  <button
-    class="info-scrim"
-    aria-label="Close explanation"
-    onclick={() => (view.settingsInfo = null)}
-  ></button>
-{/if}
 
 {#if pendingQuality !== null}
   <ConfirmDialog
@@ -544,6 +485,11 @@
     border: 1px solid var(--border-strong);
     border-radius: 12px;
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  }
+
+  /* A pressed control keeps focus for the keyboard, never a visible ring. */
+  .dialog :global(*:focus:not(:focus-visible)) {
+    outline: none;
   }
 
   .head {
@@ -615,15 +561,13 @@
     margin-left: -6px;
   }
 
-  .back:hover,
-  .close-x:hover {
-    opacity: 1;
-    background: var(--surface);
-  }
-
+  /* The scroll container carries no top padding: a sticky group header offsets
+     from the scrollport, so padding there becomes a transparent band with the
+     previous group's rows sliding through it. The breathing room goes on the
+     first group instead, which scrolls away like content should. */
   .content {
     overflow-y: auto;
-    padding: 14px 16px 16px;
+    padding: 0 16px 22px;
   }
 
   .cols {
@@ -641,16 +585,16 @@
     margin-bottom: 14px;
   }
 
+  .col > .group:first-child {
+    margin-top: 12px;
+  }
+
   .group header {
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 4px 2px;
-    color: #cfcfd6;
-  }
-
-  .group header :global(svg) {
-    opacity: 0.65;
+    padding: 5px 2px;
+    color: var(--accent);
   }
 
   .gname {
@@ -658,7 +602,6 @@
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    opacity: 0.75;
   }
 
   .greset {
@@ -669,13 +612,8 @@
     border-radius: 4px;
     background: none;
     color: inherit;
-    opacity: 0.5;
+    opacity: 0.6;
     cursor: pointer;
-  }
-
-  .greset:hover {
-    opacity: 1;
-    background: var(--surface);
   }
 
   .row {
@@ -687,10 +625,6 @@
     border-radius: 6px;
   }
 
-  .row:hover {
-    background: var(--surface);
-  }
-
   .name {
     display: flex;
     align-items: center;
@@ -700,6 +634,7 @@
   }
 
   .label {
+    position: relative;
     font-size: 12.5px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -707,33 +642,21 @@
   }
 
   /* A dot on any preference that no longer matches what Cullant ships, so "what
-     have I changed" is answerable at a glance when something behaves oddly. */
+     have I changed" is answerable at a glance. It rides the top-right corner of
+     the label like a superscript, not the middle of the line. */
+  .row.changed .label {
+    padding-right: 9px;
+  }
+
   .row.changed .label::after {
     content: "";
-    display: inline-block;
+    position: absolute;
+    top: 0;
+    right: 1px;
     width: 5px;
     height: 5px;
-    margin-left: 6px;
-    vertical-align: middle;
     border-radius: 50%;
     background: var(--accent);
-  }
-
-  .info {
-    display: inline-flex;
-    flex: none;
-    padding: 3px;
-    border: 0;
-    border-radius: 4px;
-    background: none;
-    color: inherit;
-    opacity: 0.32;
-    cursor: pointer;
-  }
-
-  .row:hover .info,
-  .info.on {
-    opacity: 0.9;
   }
 
   .switch {
@@ -793,10 +716,6 @@
     cursor: pointer;
   }
 
-  .drill:hover {
-    background: var(--surface-2);
-  }
-
   .summary {
     font-size: 11.5px;
     opacity: 0.65;
@@ -823,11 +742,6 @@
     cursor: pointer;
   }
 
-  .wide:hover {
-    border-color: var(--border-strong);
-    background: var(--surface-2);
-  }
-
   .wide span {
     text-align: left;
   }
@@ -837,12 +751,52 @@
     opacity: 0.5;
   }
 
+  .support {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    margin-top: 10px;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
   .support :global(svg:first-child) {
+    flex: none;
     color: #ff7597;
   }
 
+  .support :global(svg:last-child) {
+    flex: none;
+    margin-left: auto;
+    opacity: 0.6;
+  }
+
+  .s-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .s-title {
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .s-note {
+    font-size: 11.5px;
+    line-height: 1.4;
+    opacity: 0.7;
+  }
+
   .elsewhere {
-    margin-top: 14px;
+    margin-top: 16px;
     padding-top: 10px;
     border-top: 1px solid var(--border);
   }
@@ -860,10 +814,6 @@
     font-size: 12px;
     text-align: left;
     cursor: pointer;
-  }
-
-  .out:hover {
-    background: var(--surface);
   }
 
   .what {
@@ -912,18 +862,13 @@
     cursor: pointer;
   }
 
-  .reset-all:hover {
-    opacity: 1;
-    border-color: #b4545c;
-    color: #ff9ca3;
-  }
-
   /* --- sub-panels --- */
 
   .sub {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
+    padding-top: 12px;
   }
 
   .sub-intro {
@@ -933,28 +878,29 @@
     opacity: 0.65;
   }
 
-  .check,
-  .bar-row {
+  /* Control on the right, matching every row in the main list, so the eye runs
+     down one column of controls instead of two. */
+  .check {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
-    min-height: 36px;
+    min-height: 38px;
     padding: 0 6px;
     border-radius: 6px;
     font-size: 12.5px;
     cursor: pointer;
   }
 
-  .check:hover,
-  .bar-row:hover {
-    background: var(--surface);
+  .check input {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
   }
 
-  .bar-name {
-    flex: 1;
-  }
-
-  .bar-name.off {
+  .check .off {
     opacity: 0.45;
     text-decoration: line-through;
   }
@@ -963,73 +909,58 @@
     margin-top: 8px;
   }
 
-  /* --- the explanation --- */
+  /* Hover belongs to pointers that can hover. On touch it sticks after a tap and
+     reads as "this row is still selected". */
+  @media (hover: hover) {
+    .back:hover,
+    .close-x:hover {
+      opacity: 1;
+      background: var(--surface);
+    }
 
-  .info-scrim {
-    position: fixed;
-    inset: 0;
-    z-index: 61;
-    border: 0;
-    background: none;
-    cursor: default;
-  }
+    .row:hover,
+    .out:hover,
+    .check:hover {
+      background: var(--surface);
+    }
 
-  .info-pop {
-    position: fixed;
-    z-index: 62;
-    width: 300px;
-    max-width: calc(100vw - var(--dialog-edge-margin) * 2);
-    overflow-y: auto;
-    padding: 10px 12px;
-    background: #2c2c33;
-    border: 1px solid var(--border-strong);
-    border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  }
+    .greset:hover {
+      opacity: 1;
+      background: var(--surface);
+    }
 
-  .info-pop.sheet {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    top: auto;
-    width: auto;
-    max-width: none;
-    padding: 16px 18px calc(18px + var(--inset-bottom));
-    border-width: 1px 0 0;
-    border-radius: 14px 14px 0 0;
-  }
+    .drill:hover {
+      background: var(--surface-2);
+    }
 
-  .ip-title {
-    display: block;
-    margin-bottom: 4px;
-    font-size: 12px
-;
-    font-weight: 600;
-  }
+    .wide:hover {
+      border-color: var(--border-strong);
+      background: var(--surface-2);
+    }
 
-  .info-pop p {
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.5;
-    opacity: 0.8;
+    .support:hover {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 20%, transparent);
+    }
+
+    .reset-all:hover {
+      opacity: 1;
+      border-color: #b4545c;
+      color: #ff9ca3;
+    }
   }
 
   @media (max-width: 600px) {
-    .backdrop {
-      padding: 0;
-    }
-
+    /* Still a card, not a full-screen takeover: the edge margin and the safe-area
+       insets on the backdrop keep it clear of the screen edges, and the dialog
+       just takes the width available. */
     .dialog {
       width: 100%;
-      height: 100%;
-      max-height: none;
-      border: 0;
-      border-radius: 0;
-      padding-top: var(--inset-top);
     }
 
     /* One column, and the group header sticks so you always know which group the
-       rows under your thumb belong to. */
+       rows under your thumb belong to. Full-bleed, so nothing slides past it
+       through a gap at the sides. */
     .cols {
       grid-template-columns: 1fr;
       gap: 0;
@@ -1039,24 +970,34 @@
       position: sticky;
       top: 0;
       z-index: 1;
+      margin: 0 -16px;
+      padding: 7px 18px;
       background: #232329;
+    }
+
+    .col > .group:first-child {
+      margin-top: 0;
     }
 
     .row {
       min-height: 44px;
     }
 
+    .check {
+      min-height: 46px;
+    }
+
     .jump {
       grid-template-columns: 1fr;
     }
 
-    .find input {
-      width: 100%;
+    .find {
+      flex: 1;
       min-width: 0;
     }
 
-    .find {
-      flex: 1;
+    .find input {
+      width: 100%;
       min-width: 0;
     }
   }

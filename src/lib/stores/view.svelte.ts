@@ -35,18 +35,23 @@ class ViewStore {
   /** Read-only keyboard cheat-sheet overlay open (toggled by `?`). */
   shortcutsOpen = $state(false);
 
-  /** The settings dialog's nested state: which sub-panel is open, and the id of
-   *  the setting whose explanation is showing. Both live here rather than inside
-   *  the component so the app's single back/Escape ladder in +page.svelte can
-   *  dismiss them in order before it closes the dialog itself. */
+  /** Which settings sub-panel is open. Lives here rather than inside the dialog
+   *  so the app's single back/Escape ladder in +page.svelte can step out of it
+   *  before it closes the dialog itself. */
   settingsPanel = $state<string | null>(null);
-  settingsInfo = $state<string | null>(null);
+
+  /** The explanation currently on screen, wherever it was opened from: the
+   *  settings rows, the view panel, anywhere an InfoTip sits. One at a time by
+   *  construction, and one place for the back ladder to dismiss. `x`/`y` are the
+   *  icon's viewport position, which is all the overlay needs to anchor itself
+   *  on a wide screen (on a narrow one it is a full-width sheet). */
+  infoTip = $state<{ title: string; text: string; x: number; y: number } | null>(null);
 
   /** Drop the settings dialog back to its top level. Called when it opens and
    *  when it closes, so a sub-panel left open never greets the next visit. */
   resetSettingsNav() {
     this.settingsPanel = null;
-    this.settingsInfo = null;
+    this.infoTip = null;
   }
   /** Loupe/compare only: hides the top toolbar and the touch action bar so the
    *  photo gets the whole screen. Reset to false whenever the grid comes back

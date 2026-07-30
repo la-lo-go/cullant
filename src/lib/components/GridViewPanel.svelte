@@ -6,6 +6,7 @@
   import { keepClamped } from "../popover";
   import { GROUP_DIMS } from "../gridGroups";
   import DragList from "./DragList.svelte";
+  import InfoTip from "./InfoTip.svelte";
   import X from "@lucide/svelte/icons/x";
   import Link from "@lucide/svelte/icons/link";
   import Unlink from "@lucide/svelte/icons/unlink";
@@ -101,7 +102,14 @@
 
   {#if hasRaws}
     <section>
-      <span class="lbl">RAW + JPEG pairs</span>
+      <span class="lbl">
+        RAW + JPEG pairs
+        <InfoTip
+          title="RAW + JPEG pairs"
+          text="Files sharing a name are one photo. Mirror treats the pair as a single photo, so a rating or a delete hits both files. Separate lists and acts on them independently."
+          size={12}
+        />
+      </span>
       <div class="row">
         <button
           class="seg"
@@ -118,17 +126,19 @@
           <Unlink size={13} /><span>Separate</span>
         </button>
       </div>
-      <p class="hint">
-        {session.mirrorMode
-          ? "One photo. Every action hits both files."
-          : "Two photos. Every action hits one file."}
-      </p>
     </section>
   {/if}
 
   {#if session.hasBursts}
     <section>
-      <span class="lbl">Bursts</span>
+      <span class="lbl">
+        Bursts
+        <InfoTip
+          title="Collapse bursts"
+          text="Collapsed, each burst takes one grid cell drawn as a stack, and acting on it acts on every frame under it. Open a stack to step through the frames with , and . Expanded, every frame gets its own cell and carries its position badge."
+          size={12}
+        />
+      </span>
       <button
         class="toggle"
         class:on={settings.collapseBursts}
@@ -137,11 +147,6 @@
         <span>Collapse bursts</span>
         <span class="pill"></span>
       </button>
-      <p class="hint">
-        {settings.collapseBursts
-          ? "Each burst takes one cell. Open it to step through the frames."
-          : "Every frame of a burst gets its own cell."}
-      </p>
     </section>
   {/if}
 
@@ -153,9 +158,6 @@
       {/if}
     </div>
 
-    {#if session.groupBy.length === 0}
-      <p class="hint">Not grouped. One flat grid.</p>
-    {/if}
 
     {#if session.groupBy.length > 0}
       <DragList
@@ -292,6 +294,13 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
+  }
+
+  /* Keeps an InfoTip on the label's baseline instead of hanging below it. */
+  .lbl {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
   }
 
   .lbl-row {
