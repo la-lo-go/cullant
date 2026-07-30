@@ -622,11 +622,13 @@
   function onPointerDown(e: PointerEvent) {
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     cancelSettle();
+    startPeek();
 
     if (e.pointerType === "touch") {
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
         // Second finger down: begin a pinch anchored on the finger midpoint.
+        endPeek();
         pinchedThisGesture = true;
         pinchFrameRect = frame ? frame.getBoundingClientRect() : null;
         const [a, b] = [...pointers.values()];
@@ -696,6 +698,7 @@
   }
 
   function onPointerUp(e: PointerEvent) {
+    endPeek();
     if (e.pointerType === "touch") {
       const wasSingle = pointers.size === 1;
       const wasPinching = pinchStartDist > 0;
@@ -771,7 +774,42 @@
     dragging = false;
   }
 
+  // Same "marked for deletion" test the grid and filmstrip dim on (reject flag
+  // OR queued delete), behind its own opt-in setting.
+  const markedForDeletion = $derived(
+    settings.dimDeletesInPreview && (item.flag === -1 || session.pendingDeleteIds.has(item.id)),
+  );
+
+  // Press and hold the photo to drop that dim for as long as you hold it, so a
+  // rejected frame can still be looked at properly before you commit. The delay
+  // is what keeps a plain tap or click from flashing the photo; a pinch cancels,
+  // because two fingers mean the user is zooming, not peeking.
+  const PEEK_HOLD_MS = 160;
+  let peeking = $state(false);
+  let peekTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function startPeek() {
+    if (!markedForDeletion || peekTimer !== null || peeking) return;
+    peekTimer = setTimeout(() => {
+      peekTimer = null;
+      peeking = true;
+    }, PEEK_HOLD_MS);
+  }
+
+  function endPeek() {
+    if (peekTimer !== null) clearTimeout(peekTimer);
+    peekTimer = null;
+    peeking = false;
+  }
+
+  // Paging to another photo mid-hold must not leave the new one undimmed.
+  $effect(() => {
+    void item.id;
+    return endPeek;
+  });
+
   function onPointerCancel(e: PointerEvent) {
+    endPeek();
     pointers.delete(e.pointerId);
     if (pointers.size < 2) {
       pinchStartDist = 0;
@@ -784,6 +822,7 @@
 <div
   class="frame"
   class:zoomed={z.zoomed}
+  class:queued={markedForDeletion && !peeking}
   bind:this={frame}
   bind:clientWidth={frameW}
   bind:clientHeight={frameH}
@@ -793,6 +832,7 @@
   onpointermove={onPointerMove}
   onpointerup={onPointerUp}
   onpointercancel={onPointerCancel}
+  onpointerleave={endPeek}
   role="img"
 >
   <!-- The fit image stays mounted while zoomed until the full one has actually
@@ -859,6 +899,18 @@
     height: 100%;
     object-fit: contain;
     user-select: none;
+  }
+
+  /* Marked for deletion (reject flag or queued delete). Reads as doomed at a
+     glance, like the grid and filmstrip do. Press and hold the photo to drop
+     the dim while you look. Declared before the rules below at equal
+     specificity, so a soft stand-in keeps its blur. */
+  .frame.queued img {
+    opacity: 0.34;
+    filter: grayscale(60%);
+    transition:
+      opacity 0.12s ease,
+      filter 0.12s ease;
   }
 
   /* Upscaled grid thumb standing in while the sharp preview decodes. */

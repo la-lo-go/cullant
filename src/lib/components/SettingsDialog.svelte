@@ -181,6 +181,20 @@
             </span>
           </span>
         </label>
+        <label class="option">
+          <input
+            type="checkbox"
+            checked={settings.dimDeletesInPreview}
+            onchange={releasing((e) => settings.setDimDeletesInPreview(e.currentTarget.checked))}
+          />
+          <span class="text">
+            <span class="label">Also dim the large photo</span>
+            <span class="description">
+              Extend the same fade to the loupe and compare views, so a photo marked for
+              deletion is easy to spot while you judge it.
+            </span>
+          </span>
+        </label>
         <div class="option row">
           <span class="text">
             <span class="label">Preview quality</span>
