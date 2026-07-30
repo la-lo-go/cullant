@@ -891,4 +891,18 @@
   button:hover {
     border-color: var(--accent);
   }
+
+  /* Phone widths: no room left for a dropdown beside the description, so it
+     drops onto its own line at full width, where it is an easier target too. */
+  @media (max-width: 600px) {
+    .option.row {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .option.row select {
+      width: 100%;
+    }
+  }
 </style>
