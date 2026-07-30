@@ -152,7 +152,7 @@
             aria-label="Delete Cullant data for this project"
             onclick={(e) => askDeleteCard(e, project)}
           >
-            <Trash2 size={13} />
+            <Trash2 size={18} />
           </button>
         </div>
       {/each}
@@ -309,7 +309,9 @@
   }
 
   /* The only per-card action: deletes Cullant's own data (DB + thumb cache)
-     for this project. Turns red on hover since it's destructive. */
+     for this project. Turns red on hover since it's destructive. Sized like the
+     app's other icon buttons (36px, 44px on touch) so it is easy to hit, with a
+     chip background because it sits over the photo stack once the card fans out. */
   .delete {
     position: absolute;
     top: 4px;
@@ -317,26 +319,35 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
+    width: 36px;
+    height: 36px;
     border: none;
-    background: transparent;
-    border-radius: 5px;
-    color: #999;
+    background: rgba(18, 18, 22, 0.6);
+    border-radius: 8px;
+    color: #bbb;
     opacity: 0;
+    /* Hidden means inert. Without this the invisible button still takes the
+       clicks aimed at the card corner, and at this size it would eat a real
+       slice of the area that opens the project. */
+    pointer-events: none;
     cursor: pointer;
   }
 
   .card-wrap:hover .delete,
   .delete:focus-visible {
     opacity: 1;
+    pointer-events: auto;
   }
 
   /* Touch has no hover: leave the button always visible there instead of
-     requiring a tap-and-hold just to reveal it. */
+     requiring a tap-and-hold just to reveal it, and give it the full 44px
+     target the rest of the app uses on coarse pointers. */
   @media (pointer: coarse) {
     .delete {
+      width: 44px;
+      height: 44px;
       opacity: 1;
+      pointer-events: auto;
     }
   }
 
