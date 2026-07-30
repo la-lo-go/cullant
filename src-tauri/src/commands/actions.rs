@@ -29,7 +29,9 @@ pub fn commit_detail(commit_id: i64, state: State<'_, AppState>) -> AppResult<Ve
     undo::commit_detail(&db, commit_id)
 }
 
-#[tauri::command]
+/// `async` for the same reason as `commit_execute`: undoing a bulk commit puts
+/// every file back, which is filesystem work of the same order.
+#[tauri::command(async)]
 pub fn undo_commit(
     commit_id: i64,
     app: AppHandle,
@@ -41,7 +43,7 @@ pub fn undo_commit(
     Ok(outcome)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn undo_commit_entry(
     entry_id: i64,
     app: AppHandle,
@@ -122,7 +124,11 @@ pub fn commit_preview(state: State<'_, AppState>) -> AppResult<CommitPlan> {
     committer::preview(&db, store.as_ref())
 }
 
-#[tauri::command]
+/// `async` puts the commit on the sync threadpool instead of the IPC handler
+/// thread. It walks every queued file, so run inline it froze the whole window
+/// for the length of the commit: the `commit:progress` events below were
+/// emitted on time but the UI never got a frame in which to paint them.
+#[tauri::command(async)]
 pub fn commit_execute(
     plan_hash: String,
     app: AppHandle,
@@ -148,8 +154,9 @@ pub fn commit_execute(
 
 /// Commit a single section (deletes / moves / copies / xmp) — the dialog's
 /// hold-to-run buttons. Validates only that section's digest, so the untouched
-/// sections stay pending with their own still-valid hashes.
-#[tauri::command]
+/// sections stay pending with their own still-valid hashes. `async` for the
+/// same reason as `commit_execute`.
+#[tauri::command(async)]
 pub fn commit_execute_section(
     section: String,
     section_hash: String,
