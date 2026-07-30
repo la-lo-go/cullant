@@ -3,6 +3,7 @@
   import { catalog } from "../stores/catalog.svelte";
   import { settings } from "../stores/settings.svelte";
   import { backdropDismiss } from "../backdrop";
+  import { keepClamped } from "../popover";
   import { GROUP_DIMS } from "../gridGroups";
   import DragList from "./DragList.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -46,51 +47,7 @@
     panelEl?.focus();
   });
 
-  // Keeps the panel fully on-screen regardless of where the toolbar button
-  // sits (it can be anywhere horizontally once the toolbar wraps on mobile) —
-  // same technique as FiltersPanel: shift via transform when either edge would
-  // overflow, and cap the height so the panel always fits between the top
-  // safe-area and a comfortable gap above the bottom one, scrolling internally
-  // (scrollbar hidden) past that.
-  function clampToViewport() {
-    if (!panelEl) return;
-    panelEl.style.transform = "";
-    const cs = getComputedStyle(document.documentElement);
-    const px = (name: string) => parseFloat(cs.getPropertyValue(name)) || 0;
-    const edge = px("--dialog-edge-margin") || 12;
-    const marginL = edge + px("--inset-left");
-    const marginR = edge + px("--inset-right");
-    const rect = panelEl.getBoundingClientRect();
-    let dx = 0;
-    if (rect.right > window.innerWidth - marginR) dx = window.innerWidth - marginR - rect.right;
-    if (rect.left + dx < marginL) dx = marginL - rect.left;
-    if (dx) panelEl.style.transform = `translateX(${dx}px)`;
-    panelEl.style.maxHeight = "";
-    const top = Math.max(panelEl.getBoundingClientRect().top, px("--inset-top") + edge);
-    const bottomGap = edge + px("--inset-bottom") + 24;
-    const available = window.innerHeight - bottomGap - top;
-    if (panelEl.offsetHeight > available)
-      panelEl.style.maxHeight = `${Math.max(available, 120)}px`;
-  }
-
-  $effect(() => {
-    clampToViewport();
-    // Throttle to one clamp per frame: the raw resize event fires far faster
-    // than a repaint, and each clamp forces synchronous layout.
-    let raf = 0;
-    const onResize = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        clampToViewport();
-      });
-    };
-    window.addEventListener("resize", onResize);
-    return () => {
-      if (raf) cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
-    };
-  });
+  $effect(() => keepClamped(() => panelEl));
 
   function onPanelKeydown(e: KeyboardEvent) {
     e.stopPropagation();
