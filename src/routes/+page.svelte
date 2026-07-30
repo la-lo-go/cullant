@@ -1,5 +1,6 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { session } from "$lib/stores/session.svelte";
   import { settings } from "$lib/stores/settings.svelte";
@@ -295,11 +296,25 @@
   });
 
   async function pickProject() {
-    // Android has no filesystem folder dialog; use the SAF tree picker, which
+    // Android has no filesystem folder dialog, so use the SAF tree picker, which
     // returns a content:// URI. Desktop uses the native directory dialog.
-    const path = navigator.userAgent.includes("Android")
-      ? await api.pickSafTree()
-      : await open({ directory: true, title: "Open project folder" });
+    if (navigator.userAgent.includes("Android")) {
+      const uri = await api.pickSafTree();
+      if (uri) await openProject(uri);
+      return;
+    }
+    const path = await open({ directory: true, title: "Open project folder" });
+    // The native dialog takes focus off the webview, and dismissing it hands
+    // focus back to the OS window but not to the document. Every shortcut is a
+    // window-level keydown, so cancelling the picker left the whole app deaf to
+    // the keyboard until the user clicked back into the page. Restore it before
+    // opening anything, so the cancel path is covered too.
+    try {
+      await getCurrentWindow().setFocus();
+      window.focus();
+    } catch {
+      // Best-effort: failing to focus is not a reason to skip the open.
+    }
     if (path) await openProject(path);
   }
 
