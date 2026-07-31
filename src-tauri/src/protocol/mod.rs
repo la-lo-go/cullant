@@ -16,6 +16,22 @@ pub fn handle<R: Runtime>(
     request: Request<Vec<u8>>,
     responder: UriSchemeResponder,
 ) {
+    // The webview reaches this scheme cross-origin (the page is served from
+    // `tauri.localhost`), so anything script fetches from here — the video
+    // route, which the in-app remuxer reads with `fetch` — is a CORS request.
+    // A `Range` header is not CORS-safelisted, so it is preflighted first.
+    if request.method() == tauri::http::Method::OPTIONS {
+        responder.respond(
+            cors(Response::builder())
+                .status(StatusCode::NO_CONTENT)
+                .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, OPTIONS")
+                .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Range")
+                .body(Vec::new())
+                .unwrap(),
+        );
+        return;
+    }
+
     let path = request.uri().path().to_owned();
     let mut parts = path.trim_start_matches('/').splitn(2, '/');
     let route = parts.next().unwrap_or("");
@@ -239,7 +255,7 @@ fn respond_video<R: Runtime>(
             None => (0, (WINDOW - 1).min(len.saturating_sub(1))),
         };
         if start >= len {
-            return Ok(Response::builder()
+            return Ok(cors(Response::builder())
                 .status(StatusCode::RANGE_NOT_SATISFIABLE)
                 .header(header::CONTENT_RANGE, format!("bytes */{len}"))
                 .body(Vec::new())
@@ -251,7 +267,7 @@ fn respond_video<R: Runtime>(
         file.seek(SeekFrom::Start(start))?;
         file.read_exact(&mut buf)?;
 
-        Ok(Response::builder()
+        Ok(cors(Response::builder())
             .status(StatusCode::PARTIAL_CONTENT)
             .header(header::CONTENT_TYPE, mime)
             .header(header::ACCEPT_RANGES, "bytes")
@@ -371,11 +387,26 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
 }
 
 fn plain(status: StatusCode, message: String) -> Response<Vec<u8>> {
-    Response::builder()
+    cors(Response::builder())
         .status(status)
         .header(header::CONTENT_TYPE, "text/plain")
         .body(message.into_bytes())
         .unwrap()
+}
+
+/// Allow script on the app's own page to read these responses.
+///
+/// `*` matches what Tauri's own IPC protocol sends, and carries no more risk:
+/// the only thing that can reach this scheme is a page already running inside
+/// the app, and Cullant never navigates the webview to remote content.
+///
+/// `Content-Range` has to be exposed by name — it is not one of the handful of
+/// response headers CORS reveals by default, and the video reader needs it to
+/// learn the file's length.
+fn cors(builder: tauri::http::response::Builder) -> tauri::http::response::Builder {
+    builder
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_EXPOSE_HEADERS, "Content-Range")
 }
 
 #[cfg(test)]
