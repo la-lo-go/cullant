@@ -36,6 +36,15 @@ pub struct StoreEntry {
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub const MIME_DIRECTORY: &str = "vnd.android.document/directory";
 
+/// A video poster frame produced by a backend's own platform media API, for the
+/// backends that have one. `width`/`height` are the clip's display dimensions,
+/// which `jpeg` may be scaled down from.
+pub struct VideoPoster {
+    pub jpeg: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// How often a walk reports its running count. Frequent enough to look alive on
 /// slow storage, rare enough that the emit itself costs nothing.
 pub const WALK_PROGRESS_EVERY: usize = 200;
@@ -88,6 +97,24 @@ pub trait ProjectStore: Send + Sync {
     /// hand a concrete path to an OS API (e.g. memory-mapping the file to decode).
     fn local_path(&self, _rel: &str) -> Option<std::path::PathBuf> {
         None
+    }
+
+    /// Whether this backend extracts video poster frames itself, through a
+    /// platform media API. True only for Android SAF, which has neither an
+    /// ffmpeg binary to shell out to nor a real path to hand it (see
+    /// [`local_path`](ProjectStore::local_path)).
+    fn extracts_video_posters(&self) -> bool {
+        false
+    }
+
+    /// Extract a poster frame from the video at `rel`, scaled so its longest
+    /// edge is at most `max_edge` (0 = the frame's native size). Only backends
+    /// that report [`extracts_video_posters`](ProjectStore::extracts_video_posters)
+    /// implement this.
+    fn video_poster(&self, _rel: &str, _max_edge: u32) -> AppResult<VideoPoster> {
+        Err(crate::error::AppError::Other(
+            "video_poster is not supported by this store".into(),
+        ))
     }
 
     /// Hand the file at `rel` to the OS to open in an external default app (used

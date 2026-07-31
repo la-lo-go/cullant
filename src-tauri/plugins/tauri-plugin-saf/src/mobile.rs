@@ -1,3 +1,4 @@
+use base64::Engine;
 use serde::de::DeserializeOwned;
 use tauri::{plugin::PluginApi, AppHandle, Runtime};
 
@@ -202,6 +203,31 @@ impl<R: Runtime> Saf<R> {
             },
         )?;
         Ok(())
+    }
+
+    /// Extract a poster frame from a video document via Android's
+    /// `MediaMetadataRetriever`, scaled so its longest edge is at most
+    /// `max_edge` (0 = native size). Returns `(jpeg, display_width,
+    /// display_height)`, where the dimensions describe the *clip*, not the
+    /// (possibly downscaled) frame.
+    pub fn video_poster(
+        &self,
+        tree_uri: &str,
+        document_id: &str,
+        max_edge: u32,
+    ) -> Result<(Vec<u8>, u32, u32)> {
+        let res: VideoPosterResponse = self.0.run_mobile_plugin(
+            "videoPoster",
+            VideoPosterPayload {
+                tree_uri: tree_uri.to_string(),
+                document_id: document_id.to_string(),
+                max_edge,
+            },
+        )?;
+        let jpeg = base64::engine::general_purpose::STANDARD
+            .decode(&res.jpeg_base64)
+            .map_err(|e| Error::Other(format!("video poster is not valid base64: {e}")))?;
+        Ok((jpeg, res.width, res.height))
     }
 
     /// Permanently delete a document.

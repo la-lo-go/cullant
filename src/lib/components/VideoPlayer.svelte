@@ -33,7 +33,7 @@
 
   // Poster shown over the (paused, pre-playback) video so the clip never opens on
   // a black frame. We paint the generated thumbnail; if it 404s — no poster was
-  // ever generated (ffmpeg absent / undecodable) — we fall back to the same
+  // ever generated (no extractor / undecodable) — we fall back to the same
   // film-glyph placeholder the grid uses. Cleared once playback starts, and reset
   // per clip in the item-change effect below.
   let showPoster = $state(true);

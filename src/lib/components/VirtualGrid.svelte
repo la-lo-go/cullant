@@ -106,8 +106,9 @@
     return n ? `${thumbUrl(item)}&retry=${n}` : thumbUrl(item);
   }
 
-  // Video ids whose pregenerated poster couldn't be served (ffmpeg absent or
-  // the clip was undecodable → 404). Those cells fall back to a live <video>.
+  // Video ids whose pregenerated poster couldn't be served (no frame extractor
+  // on this platform, or the clip was undecodable → 404). Those cells fall back
+  // to a live <video>.
   let posterFailed = $state<Set<number>>(new Set());
   function markPosterFailed(id: number) {
     if (posterFailed.has(id)) return;
@@ -974,7 +975,7 @@
           >
             {#if v.item.kind === 2}
               {#if posterFailed.has(v.item.id)}
-                <!-- No pregenerated poster (ffmpeg absent / undecodable): a
+                <!-- No pregenerated poster (no extractor / undecodable): a
                      neutral, on-brand placeholder that still reads as a video,
                      instead of a live <video> (heavy on mobile, and it usually
                      just paints black when the poster couldn't be made). -->
@@ -1564,7 +1565,7 @@
     letter-spacing: 0.03em;
   }
 
-  /* Video with no generated poster (ffmpeg missing / undecodable clip). Reads
+  /* Video with no generated poster (no extractor / undecodable clip). Reads
      as a deliberate video tile, not an error: a filled dark box + film glyph +
      extension, with the Play chip still on top. */
   .no-poster {

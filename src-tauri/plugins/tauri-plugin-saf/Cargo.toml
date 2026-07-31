@@ -18,3 +18,8 @@ tauri-plugin = { version = "2", features = ["build"] }
 tauri = { version = "2", default-features = false }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+# Video poster frames come back from Kotlin base64-encoded: the bridge to the
+# Android side carries JSON, so there is no way to hand over raw bytes.
+[target.'cfg(target_os = "android")'.dependencies]
+base64 = "0.22"

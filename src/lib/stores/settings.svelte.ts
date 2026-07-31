@@ -172,7 +172,7 @@ class SettingsStore {
   rememberSession = $state<boolean>(loadBool(REMEMBER_SESSION_KEY, DEFAULTS.rememberSession));
 
   /** Pregenerate video poster thumbnails. They always run last (after every
-   *  photo thumbnail and preview) because ffmpeg extraction is the slow tier;
+   *  photo thumbnail and preview) because frame extraction is the slow tier;
    *  off skips their background pregeneration entirely. Mirrored to the backend
    *  (see the sync effect in +page.svelte) since the ingest pass reads it. */
   generateVideoThumbs = $state<boolean>(loadBool(GENERATE_VIDEO_THUMBS_KEY, DEFAULTS.generateVideoThumbs));

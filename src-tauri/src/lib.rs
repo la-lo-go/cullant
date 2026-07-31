@@ -34,7 +34,7 @@ pub struct ProjectState {
 pub struct AppState {
     pub project: Mutex<Option<ProjectState>>,
     /// Whether ingest pregenerates video poster thumbnails (they run last, after
-    /// every photo thumbnail and preview, because ffmpeg poster extraction is the
+    /// every photo thumbnail and preview, because poster extraction is the
     /// slowest tier). Pushed from the frontend setting; defaults to on. Only
     /// gates *background* pregeneration — a video's poster is still made on demand
     /// when its cell scrolls into view.

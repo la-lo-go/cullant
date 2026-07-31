@@ -296,7 +296,7 @@ export const SETTINGS: Setting[] = [
     id: "generateVideoThumbs",
     group: "quality",
     label: "Video poster frames",
-    info: "Generates one poster frame per video in the background. They always run last, after every photo thumbnail and preview, because extracting them is the slow tier. Needs ffmpeg on PATH.",
+    info: "Generates one poster frame per video in the background. They always run last, after every photo thumbnail and preview, because extracting them is the slow tier. On desktop this needs ffmpeg on PATH; on Android it uses the system media decoder.",
     keywords: "video movie mp4 mov ffmpeg thumbnail",
     get: () => settings.generateVideoThumbs,
     set: (v) => settings.setGenerateVideoThumbs(v),

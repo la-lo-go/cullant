@@ -31,10 +31,11 @@
   const CELL = 96;
   const OVERSCAN = 6;
 
-  // Video ids whose pregenerated poster couldn't be served (ffmpeg absent or the
-  // clip was undecodable → 404). Those cells fall back to a Film-glyph tile, the
-  // same as VirtualGrid — never a live <video> (heavy: scrolling clips would
-  // spin up many decoders, and a metadata failure just paints a blank box).
+  // Video ids whose pregenerated poster couldn't be served (no frame extractor
+  // on this platform, or the clip was undecodable → 404). Those cells fall back
+  // to a Film-glyph tile, the same as VirtualGrid — never a live <video>
+  // (heavy: scrolling clips would spin up many decoders, and a metadata failure
+  // just paints a blank box).
   let posterFailed = $state<Set<number>>(new Set());
   function markPosterFailed(id: number) {
     if (posterFailed.has(id)) return;
@@ -599,7 +600,7 @@
     filter: grayscale(35%);
   }
 
-  /* Video with no generated poster (ffmpeg missing / undecodable clip): a dark
+  /* Video with no generated poster (no extractor / undecodable clip): a dark
      film-glyph tile, matching VirtualGrid's fallback. */
   .no-poster {
     width: 100%;

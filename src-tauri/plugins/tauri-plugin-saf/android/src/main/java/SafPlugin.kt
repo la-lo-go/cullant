@@ -6,12 +6,18 @@ package app.tauri.saf
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Matrix
+import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
 import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
+import android.util.Base64
 import androidx.activity.result.ActivityResult
+import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -20,6 +26,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.io.ByteArrayOutputStream
 
 @InvokeArg
 class TreeArgs {
@@ -80,6 +87,14 @@ class OpenDocumentArgs {
     lateinit var treeUri: String
     lateinit var documentId: String
     var mimeType: String? = null
+}
+
+@InvokeArg
+class VideoPosterArgs {
+    lateinit var treeUri: String
+    lateinit var documentId: String
+    // Longest edge the returned frame may have; 0 = native size.
+    var maxEdge: Int = 0
 }
 
 @TauriPlugin
@@ -389,9 +404,132 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    // ---- video poster frames ----
+
+    // Extract one frame from a video as a JPEG. This is Cullant's only way to
+    // thumbnail a video on Android: the desktop path shells out to ffmpeg, which
+    // exists on no phone and could not read a content:// URI anyway. The frame
+    // comes back base64-encoded because the Rust <-> Kotlin bridge carries JSON
+    // and nothing else; a poster scaled to the grid's cell size is tens of
+    // kilobytes, so the encoding overhead is irrelevant.
+    //
+    // `width`/`height` in the response are the clip's real display dimensions,
+    // NOT the returned frame's — the caller records them as the video's size and
+    // must not learn the thumbnail's size instead.
+    @Command
+    fun videoPoster(invoke: Invoke) {
+        val args = invoke.parseArgs(VideoPosterArgs::class.java)
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(activity, docUri(args.treeUri, args.documentId))
+
+            val stored = intMeta(retriever, MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH) to
+                intMeta(retriever, MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            val rotation = intMeta(retriever, MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            // The width/height keys report the dimensions as stored, without
+            // folding in the rotation (AOSP records the angle as a separate key
+            // and never swaps them), so a quarter turn swaps them here into what
+            // the viewer is meant to see.
+            val display =
+                if (rotation == 90 || rotation == 270) stored.second to stored.first else stored
+
+            val frame = firstFrame(retriever, args.maxEdge) ?: run {
+                invoke.reject("no frame could be extracted")
+                return
+            }
+            val oriented = orient(frame, rotation, display)
+            val scaled = clampToMaxEdge(oriented, args.maxEdge)
+
+            val out = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, POSTER_QUALITY, out)
+
+            val res = JSObject()
+            res.put("jpegBase64", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP))
+            // Fall back to the frame's own size for a clip whose metadata does not
+            // report its dimensions, rather than claiming a size of zero.
+            res.put("width", if (display.first > 0) display.first else scaled.width)
+            res.put("height", if (display.second > 0) display.second else scaled.height)
+            invoke.resolve(res)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "failed to extract a video poster")
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+                // A retriever that cannot be released is already unusable.
+            }
+        }
+    }
+
+    // A frame from a second in, falling back to the very start for clips shorter
+    // than that. Mirrors the desktop ffmpeg path: a small skip past the start
+    // avoids the black leader frames many clips open on.
+    private fun firstFrame(retriever: MediaMetadataRetriever, maxEdge: Int): Bitmap? {
+        for (timeUs in longArrayOf(1_000_000L, 0L)) {
+            // A square target box: getScaledFrameAtTime preserves the aspect
+            // ratio and fits the frame inside it, so this caps the long edge
+            // whichever way round the clip is — no rotation guesswork needed.
+            // Scaling during extraction beats decoding a 4K frame to throw all
+            // but a grid cell of it away, but it is the newer and less
+            // universally implemented call, so a device that refuses it drops to
+            // the plain one rather than losing the poster.
+            if (maxEdge > 0 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                try {
+                    retriever.getScaledFrameAtTime(
+                        timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, maxEdge, maxEdge
+                    )?.let { return it }
+                } catch (e: Exception) {
+                    Logger.warn("getScaledFrameAtTime failed, falling back: ${e.message}")
+                }
+            }
+            retriever.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?.let { return it }
+        }
+        return null
+    }
+
+    // Rotate a frame that came back in the clip's stored orientation.
+    //
+    // Recent Android releases already apply the rotation metadata to the frame
+    // they hand back, but older ones do not, and the platform documents neither
+    // behaviour. So we detect it instead of assuming: a frame still in stored
+    // orientation is the one whose portrait/landscape sense disagrees with the
+    // display dimensions.
+    //
+    // That test cannot see a half turn, which leaves the aspect ratio alone — so
+    // a 180-rotated clip on a release that does not rotate for us comes out
+    // upside down. Only a phone held inverted records one, and any release that
+    // applies a quarter turn applies a half turn too, so the case is doubly rare.
+    private fun orient(frame: Bitmap, rotation: Int, display: Pair<Int, Int>): Bitmap {
+        val (dw, dh) = display
+        if (rotation == 0 || dw <= 0 || dh <= 0 || dw == dh) return frame
+        if ((frame.width > frame.height) == (dw > dh)) return frame
+        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+        return Bitmap.createBitmap(frame, 0, 0, frame.width, frame.height, matrix, true)
+    }
+
+    // Safety net for the getFrameAtTime fallback, which ignores the target size.
+    private fun clampToMaxEdge(frame: Bitmap, maxEdge: Int): Bitmap {
+        val longEdge = maxOf(frame.width, frame.height)
+        if (maxEdge <= 0 || longEdge <= maxEdge) return frame
+        val scale = maxEdge.toDouble() / longEdge
+        val w = maxOf(1, Math.round(frame.width * scale).toInt())
+        val h = maxOf(1, Math.round(frame.height * scale).toInt())
+        return Bitmap.createScaledBitmap(frame, w, h, true)
+    }
+
+    private fun intMeta(retriever: MediaMetadataRetriever, key: Int): Int =
+        retriever.extractMetadata(key)?.toIntOrNull() ?: 0
+
     private fun resolveDocId(invoke: Invoke, uri: Uri) {
         val res = JSObject()
         res.put("documentId", DocumentsContract.getDocumentId(uri))
         invoke.resolve(res)
+    }
+
+    private companion object {
+        // The frame is re-encoded downstream at the cache's own quality, so this
+        // only has to survive one round trip without visible loss.
+        const val POSTER_QUALITY = 90
     }
 }

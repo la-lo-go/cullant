@@ -267,7 +267,7 @@ export const api = {
   closeProject: () => invoke("close_project"),
   rescanProject: () => invoke("rescan_project"),
   // Push the "pregenerate video thumbnails" preference to the backend; the
-  // ingest pass reads it before its final (slow, ffmpeg) video-poster tier.
+  // ingest pass reads it before its final (slow) video-poster tier.
   setGenerateVideoThumbs: (on: boolean) => invoke("set_generate_video_thumbs", { on }),
   // Push the loupe-preview long edge. Non-destructive and idempotent, so the
   // startup push is free; returns the value actually in force.

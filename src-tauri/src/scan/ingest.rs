@@ -357,8 +357,9 @@ pub fn run_ingest_inner(
     //    whose preview was already cached (so the fused pass short-circuited
     //    before rendering anything) but whose thumbnail was not.
     //
-    // Video posters come last: ffmpeg spawns a process per file, so deferring
-    // them keeps the whole photo library browsable before that tier competes.
+    // Video posters come last: extracting one spins up a whole video decoder per
+    // file (an ffmpeg process on desktop, a platform decoder on Android), so
+    // deferring them keeps the photo library browsable before that tier competes.
     let thumb_sql = |extra: &str| {
         format!(
             "SELECT f.id, f.mtime, f.orientation
@@ -420,7 +421,7 @@ pub fn run_ingest_inner(
         thumb_progress,
     )?;
 
-    // Video poster thumbnails last, and only when enabled (the ffmpeg tier is the
+    // Video poster thumbnails last, and only when enabled (the poster tier is the
     // slow one — see AppState::generate_video_thumbs). Skipping here only skips
     // *pregeneration*; a poster is still produced on demand when a video's cell
     // scrolls into view.
@@ -996,7 +997,8 @@ mod tests {
     #[test]
     fn video_is_ingested_without_preview_and_never_panics() {
         let _guard = ingest_guard();
-        // Exercises the video branch end-to-end. The .mp4 bytes are not a real
+        // Exercises the video branch end-to-end. This is a local-filesystem
+        // project, so the extractor is ffmpeg; the .mp4 bytes are not a real
         // video, so the outcome depends on whether ffmpeg is installed:
         //   - ffmpeg present: extraction fails -> thumbnail tombstoned;
         //   - ffmpeg absent:  extraction skipped -> no thumbnail, no tombstone.

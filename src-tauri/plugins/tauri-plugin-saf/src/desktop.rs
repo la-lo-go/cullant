@@ -63,6 +63,14 @@ impl<R: Runtime> Saf<R> {
     pub fn delete_document(&self, _tree_uri: &str, _doc: &str) -> Result<()> {
         Err(Error::Unsupported)
     }
+    pub fn video_poster(
+        &self,
+        _tree_uri: &str,
+        _doc: &str,
+        _max_edge: u32,
+    ) -> Result<(Vec<u8>, u32, u32)> {
+        Err(Error::Unsupported)
+    }
     pub fn open_document(
         &self,
         _tree_uri: &str,

@@ -139,3 +139,24 @@ pub(crate) struct OpenDocumentPayload {
 pub(crate) struct DocumentIdResponse {
     pub document_id: String,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct VideoPosterPayload {
+    pub tree_uri: String,
+    pub document_id: String,
+    /// Longest edge the extracted frame may have; 0 for its native size.
+    pub max_edge: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct VideoPosterResponse {
+    /// The frame as a base64 (unwrapped) JPEG. The bridge to Kotlin carries
+    /// JSON, so bytes have no other way across.
+    pub jpeg_base64: String,
+    /// The clip's real display dimensions, which the frame may be scaled down
+    /// from.
+    pub width: u32,
+    pub height: u32,
+}
