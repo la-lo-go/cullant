@@ -4,6 +4,7 @@
 package app.tauri.saf
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -377,10 +378,17 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    // Hand a document to an external app via an ACTION_VIEW chooser. The clip
-    // stays where it is (SAF content URI); the launched app gets a temporary
-    // read grant for the lifetime of that task. Used as the "open in an external
-    // player" fallback when the in-app WebView can't decode a video.
+    // Hand a document to an external app. The clip stays where it is (SAF content
+    // URI); the launched app gets a temporary read grant for the lifetime of that
+    // task. Used as the "open in an external player" fallback when the in-app
+    // WebView can't decode a video.
+    //
+    // The bare ACTION_VIEW intent goes out first, on purpose. Android's own
+    // resolver then handles it, which is what offers "Just once / Always" and
+    // lets the user stop being asked — `Intent.createChooser` deliberately
+    // suppresses that choice and always re-asks, which made picking a player a
+    // permanent tax. The chooser survives only for the case it was really
+    // covering: nothing on the device claims this document.
     @Command
     fun openDocument(invoke: Invoke) {
         val args = invoke.parseArgs(OpenDocumentArgs::class.java)
@@ -389,13 +397,19 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
             val mime = args.mimeType ?: resolver.getType(uri) ?: "*/*"
             val view = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, mime)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            val chooser = Intent.createChooser(view, null).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            activity.startActivity(chooser)
+            try {
+                activity.startActivity(view)
+            } catch (_: ActivityNotFoundException) {
+                activity.startActivity(
+                    Intent.createChooser(view, null).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                )
+            }
             val res = JSObject()
             res.put("ok", true)
             invoke.resolve(res)
