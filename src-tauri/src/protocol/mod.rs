@@ -195,11 +195,13 @@ fn respond_video<R: Runtime>(
         return;
     };
 
-    let mime = if rel_path.to_lowercase().ends_with(".mov") {
-        "video/quicktime"
-    } else {
-        "video/mp4"
-    };
+    // Every video is announced as MP4, `.mov` included. Chromium can already
+    // parse QuickTime — QTFF and MP4 are near-identical containers and it routes
+    // both through the same pipeline — but it never registered `video/quicktime`
+    // as a playable type, so labelling a .mov honestly makes the element reject
+    // it before it ever looks at the bytes. That is what made every .mov fail on
+    // Android. Do not "correct" this back.
+    let mime = "video/mp4";
 
     // Real `std::fs::File` on every backend (a detached fd on SAF), so the
     // seekable Range logic below is unchanged.
