@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, previewUrl, videoUrl, type ItemLite } from "../api";
+  import { api, thumbUrl, videoUrl, type ItemLite } from "../api";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
   import Volume2 from "@lucide/svelte/icons/volume-2";
@@ -32,10 +32,16 @@
   let failed = $state(false);
 
   // Poster shown over the (paused, pre-playback) video so the clip never opens on
-  // a black frame. We paint the generated thumbnail; if it 404s — no poster was
-  // ever generated (no extractor / undecodable) — we fall back to the same
-  // film-glyph placeholder the grid uses. Cleared once playback starts, and reset
-  // per clip in the item-change effect below.
+  // a black frame. We paint the grid thumbnail; if it 404s — no poster was ever
+  // generated (no extractor / undecodable) — we fall back to the same film-glyph
+  // placeholder the grid uses. Cleared once playback starts, and reset per clip
+  // in the item-change effect below.
+  //
+  // The THUMBNAIL, not the preview: videos are excluded from the preview
+  // pregeneration pass (only stills get one), so asking for a preview kicks off a
+  // cold full-size frame extraction on the spot and shows the placeholder until it
+  // lands. The thumbnail is the frame the grid just painted — already on disk and
+  // in the memcache, so it appears at once.
   let showPoster = $state(true);
   let posterFailed = $state(false);
 
@@ -202,9 +208,12 @@
     onerror={() => (failed = true)}
   ></video>
 
-  {#if showPoster && !failed}
+  {#if showPoster}
     <!-- Pre-playback poster so the clip doesn't open on a black frame. Passes
-         pointer events through to the video below (a tap still plays). -->
+         pointer events through to the video below (a tap still plays). Kept on
+         screen when playback fails, so the "can't be played" panel sits over the
+         clip's own frame instead of over black — only playback actually starting
+         clears it. -->
     <div class="video-poster">
       {#if posterFailed}
         <div class="no-poster">
@@ -212,7 +221,7 @@
           <span>{item.ext.toUpperCase()}</span>
         </div>
       {:else}
-        <img src={previewUrl(item)} alt="" onerror={() => (posterFailed = true)} />
+        <img src={thumbUrl(item)} alt="" onerror={() => (posterFailed = true)} />
       {/if}
     </div>
   {/if}
