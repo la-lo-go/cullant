@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, thumbUrl, videoUrl, type ItemLite } from "../api";
+  import { remuxForPlayback, type Remux } from "../video/remux";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
   import Volume2 from "@lucide/svelte/icons/volume-2";
@@ -24,12 +25,60 @@
   let volume = $state(1);
   let fullscreen = $state(false);
 
-  // Set when the WebView reports it can't decode this clip (a MediaError on the
-  // element). Android's built-in media stack supports far fewer codecs than a
-  // desktop browser, so HEVC/other clips can fail here even though they play
-  // fine in a native app — hence the "open externally" escape hatch. Reset per
-  // clip in the item-change effect below.
+  // Set once a clip has run out of ways to play: the WebView refused it AND the
+  // in-app remux could not rescue it. Only then is the "open externally" escape
+  // hatch the last word. Reset per clip in the item-change effect below.
   let failed = $state(false);
+
+  // The source on the element: the file itself, unless the WebView turned that
+  // down and the in-app remuxer produced a MediaSource it will accept.
+  const nativeSrc = $derived(videoUrl(item));
+  let remuxSrc = $state<string | null>(null);
+  const src = $derived(remuxSrc ?? nativeSrc);
+  // True while the remuxer is still feeding the MediaSource. Playback usually
+  // starts long before this finishes — fragmented MP4 is playable as it arrives
+  // — so this drives an unobtrusive indicator, not a blocking spinner.
+  let remuxing = $state(false);
+  let remuxProgress = $state(0);
+  // The MediaError code the element reported, surfaced in the failure panel so
+  // a field report names the problem instead of describing it.
+  let mediaErrorCode = $state<number | null>(null);
+  let remux: Remux | null = null;
+  let triedRemux = false;
+
+  // The element failed. Try to rewrite the clip into something it will accept
+  // before giving up — see lib/video/remux.ts for why that so often works.
+  async function onVideoError() {
+    mediaErrorCode = video?.error?.code ?? null;
+    console.error("video playback failed", mediaErrorCode, video?.error?.message);
+    // A second failure is the remuxed source failing too; nothing left to try.
+    if (triedRemux) {
+      failed = true;
+      return;
+    }
+    triedRemux = true;
+    remuxing = true;
+    remuxProgress = 0;
+    try {
+      const handle = await remuxForPlayback(item, (f) => (remuxProgress = f));
+      remux = handle;
+      remuxSrc = handle.src;
+      void handle.done.then(
+        () => (remuxing = false),
+        (e) => {
+          console.error("in-app remux failed", e);
+          remuxing = false;
+          failed = true;
+        },
+      );
+    } catch (e) {
+      console.error("in-app remux unavailable", e);
+      remuxing = false;
+      failed = true;
+    }
+  }
+
+  $effect(() => () => remux?.cancel());
 
   // Poster shown over the (paused, pre-playback) video so the clip never opens on
   // a black frame. We paint the grid thumbnail; if it 404s — no poster was ever
@@ -110,6 +159,13 @@
     showPoster = true;
     posterFailed = false;
     volOpen = false;
+    // Drop any remux belonging to the previous clip, along with its object URL.
+    remux?.cancel();
+    remux = null;
+    remuxSrc = null;
+    remuxing = false;
+    mediaErrorCode = null;
+    triedRemux = false;
     // Grab focus so Space toggles playback immediately, without a prior click.
     wrap?.focus();
   });
@@ -200,12 +256,12 @@
     bind:duration
     bind:muted
     bind:volume
-    src={videoUrl(item)}
+    {src}
     preload="metadata"
     playsinline
     onclick={togglePlay}
     onplay={() => (showPoster = false)}
-    onerror={() => (failed = true)}
+    onerror={onVideoError}
   ></video>
 
   {#if showPoster}
@@ -234,12 +290,27 @@
     ></button>
   {/if}
 
+  {#if remuxing && !failed}
+    <!-- The WebView refused the container and the in-app remuxer took over.
+         Playback usually starts while this is still counting up, so it sits in
+         a corner rather than over the frame. -->
+    <div class="remuxing">
+      <Film size={13} />
+      <span>Decoding in app… {Math.round(remuxProgress * 100)}%</span>
+    </div>
+  {/if}
+
   {#if failed}
-    <!-- Shown when the WebView can't decode the clip. Not part of the transport
-         chrome, so it stays put while the (now useless) controls auto-hide. -->
+    <!-- Shown once the WebView refused the clip AND the in-app remux couldn't
+         rescue it. Not part of the transport chrome, so it stays put while the
+         (now useless) controls auto-hide. -->
     <div class="fallback">
       <TriangleAlert size={30} />
-      <p>This video can't be played here.</p>
+      <p>
+        This video can't be played here.{#if mediaErrorCode}
+          <br /><span class="code">Media error {mediaErrorCode}</span>
+        {/if}
+      </p>
       <button class="open-ext" onclick={openExternally}>
         <ExternalLink size={16} />
         <span>Open in external player</span>
@@ -349,6 +420,35 @@
     margin: 0;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.7);
+  }
+
+  /* The raw MediaError code, kept quiet: useful in a bug report, noise to
+     everyone else. */
+  .fallback .code {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  /* Progress of the in-app remux. Tucked into the top corner, under the safe-area
+     insets, so it never covers the frame that is already playing. */
+  .remuxing {
+    position: absolute;
+    top: calc(10px + var(--safe-top));
+    left: calc(10px + var(--safe-left));
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+    pointer-events: none;
   }
 
   .open-ext {
