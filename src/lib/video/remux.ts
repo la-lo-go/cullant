@@ -190,7 +190,10 @@ export async function remuxForPlayback(
             if (!canceled && mediaSource.readyState === "open") mediaSource.endOfStream();
             resolve();
           } catch (e) {
-            reject(e);
+            // Cancelling is the caller moving to another clip, not a failure —
+            // reporting it as one would flash "can't be played" on the way out.
+            if (canceled) resolve();
+            else reject(e);
           } finally {
             input.dispose();
           }
