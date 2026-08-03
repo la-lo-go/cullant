@@ -5,6 +5,7 @@
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { catalog } from "../stores/catalog.svelte";
+  import Loader from "@lucide/svelte/icons/loader";
 
   /** Dwell before requesting an *uncached* preview, so arrowing quickly through
    *  photos never enqueues a decode for ones merely passed over. */
@@ -349,7 +350,29 @@
     const img = e.currentTarget as HTMLImageElement;
     previewNaturalW = img.naturalWidth;
     previewNaturalH = img.naturalHeight;
+    fitPainted = true;
   }
+
+  /** True once the fit image has painted anything at all — the sharp preview or
+   *  the softened thumbnail standing in for it. */
+  let fitPainted = $state(false);
+  /** Drives the "still generating" indicator. The progressive path leans on the
+   *  grid thumbnail being cached, which holds while the user moves inside the
+   *  range the background pass has reached. Jump past it — on a slow or
+   *  saturated drive both artifacts then have to be generated on demand, which
+   *  was measured at ~13 s — and there is no thumbnail to soften and nothing at
+   *  all on screen. Delayed so a cached preview, which lands in about 30 ms,
+   *  never flashes it. */
+  let waiting = $state(false);
+  $effect(() => {
+    void displayedSrc;
+    fitPainted = false;
+    waiting = false;
+    const t = setTimeout(() => {
+      if (!fitPainted) waiting = true;
+    }, 400);
+    return () => clearTimeout(t);
+  });
 
   /** True once the zoomed-in full image has painted at least one frame. Until
    *  then the fit image stays underneath it — see the underlay in the markup. */
@@ -849,6 +872,12 @@
       onload={onFitLoad}
     />
   {/if}
+  {#if waiting && !fitPainted && !z.zoomed}
+    <div class="waiting" role="status">
+      <Loader size={22} />
+      <span>Preparing this photo…</span>
+    </div>
+  {/if}
   {#if z.zoomed}
     <!-- Only the WIDTH is set: height follows the image's intrinsic ratio, so
          the single uniform scale factor can never deform the photo, even when
@@ -866,6 +895,29 @@
 </div>
 
 <style>
+  .waiting {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    color: #9a9aa4;
+    font-size: 12px;
+    pointer-events: none;
+  }
+
+  .waiting :global(svg) {
+    animation: waiting-spin 1s linear infinite;
+  }
+
+  @keyframes waiting-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .frame {
     position: relative;
     flex: 1;
