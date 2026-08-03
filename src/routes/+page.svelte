@@ -1121,12 +1121,19 @@
 
   /* Colour alone carries this state otherwise, which fails anyone who cannot
      separate the two fills — and is easy to miss in a glance across the bar.
-     The dot rides along with whatever colour the button already uses. */
+     Absolutely positioned so marking a button never changes its width and the
+     toolbar cannot reflow as filters come and go. */
+  .toolbar-right button.haswork {
+    position: relative;
+  }
+
   .toolbar-right button.haswork::after {
     content: "";
-    width: 5px;
-    height: 5px;
-    margin-left: 5px;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     background: currentColor;
   }
