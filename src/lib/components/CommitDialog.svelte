@@ -650,7 +650,10 @@
           </div>
         {/if}
 
-        <p class="hint">Tap a row to expand · hold it to run that section on its own.</p>
+        <p class="hint">
+          <span class="fine">Click a row to expand · hold it to run that section on its own.</span>
+          <span class="coarse">Tap a row to expand · hold it to run that section on its own.</span>
+        </p>
 
         <div class="rows">
           <button
@@ -835,6 +838,21 @@
     margin: 0;
     font-size: 11px;
     opacity: 0.5;
+  }
+
+  /* One hint, worded for the pointer actually in use: "tap" is wrong with a
+     mouse, and "click" is wrong on a phone. */
+  .hint .coarse {
+    display: none;
+  }
+
+  @media (pointer: coarse) {
+    .hint .fine {
+      display: none;
+    }
+    .hint .coarse {
+      display: inline;
+    }
   }
 
   .rows {
