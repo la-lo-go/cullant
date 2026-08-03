@@ -61,6 +61,11 @@
     }
   }
   let touchBarVisible = $state(loadTouchBarVisible());
+  // Dev-only: publish an ingest event trace on window for external UI driving.
+  // Dynamic import so the module never reaches a production bundle.
+  if (import.meta.env.DEV) {
+    void import("$lib/dev/trace").then((m) => m.installDevTrace());
+  }
   $effect(() => {
     try {
       localStorage.setItem(TOUCHBAR_KEY, JSON.stringify(touchBarVisible));
