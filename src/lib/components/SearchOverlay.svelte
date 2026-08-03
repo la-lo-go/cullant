@@ -4,7 +4,7 @@
   import { keymap } from "../keyboard/dispatcher.svelte";
   import { normalizeKey } from "../keyboard/keymap";
   import SearchIcon from "@lucide/svelte/icons/search";
-  import X from "@lucide/svelte/icons/x";
+  import Eraser from "@lucide/svelte/icons/eraser";
 
   let inputEl = $state<HTMLInputElement | null>(null);
 
@@ -77,13 +77,13 @@
     {/if}
   </span>
   {#if session.nameFilter !== ""}
-    <button class="icon" aria-label="Clear search" title="Clear" onclick={clear}>
-      <X size={14} />
+    <!-- Clearing the text is the only button here. Closing is Escape, or the
+         shortcut that opened it — two adjacent X buttons read as one control
+         repeated, and neither said which one closed the bar. -->
+    <button class="icon" aria-label="Clear search" title="Clear (Esc closes)" onclick={clear}>
+      <Eraser size={14} />
     </button>
   {/if}
-  <button class="icon" aria-label="Close search" title="Close (Esc)" onclick={close}>
-    <X size={15} />
-  </button>
 </div>
 
 <style>
