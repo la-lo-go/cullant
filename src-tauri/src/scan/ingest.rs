@@ -181,17 +181,24 @@ pub fn run_ingest_pass(
         &mut |updated| {
             let _ = app.emit("metadata:done", MetadataDone { updated });
         },
-        &mut |done, total, _ids| {
-            let _ = app.emit(
-                "thumbs:progress",
-                Progress {
-                    done,
-                    total,
-                    ids: Vec::new(),
-                },
-            );
-            if done >= total {
-                let _ = app.emit("thumbs:done", ThumbsDone { total });
+        // `done >= total` also holds for an empty pass (0 >= 0), so reopening a
+        // project with nothing left to do announced the phase complete on every
+        // emit. Latch it: one `thumbs:done` per pass, whatever the totals.
+        &mut {
+            let mut announced = false;
+            move |done, total, _ids: &[i64]| {
+                let _ = app.emit(
+                    "thumbs:progress",
+                    Progress {
+                        done,
+                        total,
+                        ids: Vec::new(),
+                    },
+                );
+                if done >= total && !announced {
+                    announced = true;
+                    let _ = app.emit("thumbs:done", ThumbsDone { total });
+                }
             }
         },
         &mut |done, total, ids: &[i64]| {
