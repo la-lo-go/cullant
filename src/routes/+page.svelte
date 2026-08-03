@@ -319,15 +319,18 @@
 
   // Periodically rescan the open project's folder for added/removed/changed
   // files, at the interval chosen in Settings (0 = off). Only fires while the
-  // storage is reachable and no scan is already running, so a disconnected drive
-  // or an in-flight rescan is never piled onto. The rescan is fire-and-forget:
+  // storage is reachable and no part of an import is still running, so a
+  // disconnected drive or a live ingest is never piled onto. Fire-and-forget:
   // its scan:* events reconcile the catalog just like the manual triggers.
   $effect(() => {
     const minutes = settings.autoRescanMinutes;
     if (!catalog.project || minutes <= 0) return;
     const id = setInterval(
       () => {
-        if (storageOk && !catalog.scanning) void api.rescanProject();
+        // `ingesting`, not `scanning`: the walk is only the first phase, and
+        // piling one onto a running metadata/thumbnail pass makes the rescan
+        // compete with it for the same saturated storage backend.
+        if (storageOk && !catalog.ingesting) void api.rescanProject();
       },
       minutes * 60 * 1000,
     );
