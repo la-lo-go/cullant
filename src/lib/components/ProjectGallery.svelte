@@ -13,6 +13,43 @@
 
   const PREVIEW_SLOTS = [0, 1, 2];
 
+  /** Placeholder colours for a card with no cached thumbnails. Pastels, so they
+   *  read as "photo not here yet" rather than as an error state. */
+  const PLACEHOLDER_COLORS = [
+    "#8ab6d6",
+    "#a3c9a8",
+    "#e3b7a0",
+    "#c9a7d4",
+    "#e6c98f",
+    "#92c7c0",
+    "#d99a9a",
+    "#b0b8e0",
+    "#c7cf9c",
+    "#e0a8c4",
+    "#9fc6e0",
+    "#d4b48c",
+    "#a9d1b8",
+    "#cbb2e8",
+    "#e8c4a0",
+  ];
+  /** Strides coprime with the palette length, so the three slots of one card
+   *  can never land on the same colour. */
+  const COLOR_STRIDES = [1, 2, 4, 7];
+
+  function hashPath(path: string): number {
+    let h = 0;
+    for (let i = 0; i < path.length; i++) h = (h * 31 + path.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+
+  /** Pseudo-random, but derived from the path so a card keeps its colours
+   *  across re-renders instead of reshuffling under the pointer. */
+  function placeholderColor(path: string, slot: number): string {
+    const h = hashPath(path);
+    const stride = COLOR_STRIDES[h % COLOR_STRIDES.length];
+    return PLACEHOLDER_COLORS[(h + slot * stride) % PLACEHOLDER_COLORS.length];
+  }
+
   // Storage-kind badge icon per classification.
   const kindIcon: Record<StorageKind, typeof HardDrive> = {
     internal: HardDrive,
@@ -126,7 +163,10 @@
                        therefore reveals a coloured card instead of a hole — for a
                        project whose import has not reached the previews yet, and
                        for one that simply holds fewer photos than there are slots. -->
-                  <span class="peek peek-{i} placeholder ph-{i}"></span>
+                  <span
+                    class="peek peek-{i} placeholder"
+                    style="background: {placeholderColor(project.path, slot)}"
+                  ></span>
                   <img
                     class="peek peek-{i}"
                     src={recentThumbUrl(index, slot, project.path)}
@@ -249,19 +289,6 @@
     transition: transform 180ms ease-out;
   }
 
-  /* Muted, distinct per slot, so an empty stack still reads as three photos. */
-  .placeholder {
-    background: linear-gradient(150deg, #3d4a63, #2f3950);
-  }
-
-  .ph-1 {
-    background: linear-gradient(150deg, #4d3f5e, #3a3049);
-  }
-
-  .ph-2 {
-    background: linear-gradient(150deg, #2f5551, #26423f);
-  }
-
   .peek-0 {
     transform: translateX(-8px) rotate(-8deg);
     z-index: 1;
@@ -341,7 +368,7 @@
     width: 26px;
     height: 26px;
     border: none;
-    background: rgba(70, 70, 80, 0.72);
+    background: none;
     border-radius: 7px;
     color: #d8d8de;
     opacity: 0;
