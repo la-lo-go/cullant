@@ -64,7 +64,7 @@
   const SELECTED_INSET = 5;
 
   // A small pill (bottom-right, over the cells) reporting whatever background
-  // work is in flight: scanning, then thumbnail generation, then previews. All
+  // work is in flight: scanning, then metadata, then the artifact passes. All
   // status lives here — the top bar never shows these messages.
   const bgStatus = $derived.by(() => {
     if (catalog.scanning) return `Scanning… ${catalog.scanFound || 0}`;
@@ -73,10 +73,16 @@
     // reorder unexplained.
     const m = catalog.metaProgress;
     if (m.total > 0) return `Reading photo info ${m.done} / ${m.total}`;
+    // Neither of these two is "the thumbnail phase". The first is a fixed
+    // start-up window (LEAD_WINDOW) that fills the top of the grid; the second
+    // is the fused pass, which writes the thumbnail *and* the preview for
+    // everything else. Naming the first one "Thumbnails N / 60" reported a
+    // constant as a denominator and made a fresh import of hundreds of photos
+    // look nearly finished at 60.
     const t = catalog.thumbProgress;
-    if (t.total > 0) return `Thumbnails ${t.done} / ${t.total}`;
+    if (t.total > 0) return `Preparing first photos ${t.done} / ${t.total}`;
     const p = catalog.previewProgress;
-    if (p.total > 0) return `Previews ${p.done} / ${p.total}`;
+    if (p.total > 0) return `Preparing photos ${p.done} / ${p.total}`;
     const v = catalog.videoProgress;
     if (v.total > 0) return `Video thumbnails ${v.done} / ${v.total}`;
     return null;
