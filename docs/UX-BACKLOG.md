@@ -91,6 +91,103 @@ the filter: focus resets to `img_0000.jpg` instead of returning to
 **Fix.** Keep the focused id while the filter empties the grid and restore it
 when the id comes back into the filtered set.
 
+### 7. Reopening a project can fail with a raw database error
+
+**Observed.** Closing "Japon 2025" (577 files on an external `D:` drive) and
+reopening it immediately failed:
+
+> Couldn't open project — `database error: unable to open database file`
+
+The retry a minute later succeeded. The failure left **no backend log line** —
+it aborted before `opened project at`. The database file was intact and its
+`-wal`/`-shm` companions were gone, so the previous session had closed cleanly.
+
+**Likely cause.** An external drive that spun down, or a short-lived lock right
+after close. Not reproducible on demand.
+
+**Fix.** A photo culler reads projects from external drives and camera cards, so
+a transient open failure is expected traffic, not an exception. Retry the open
+before reporting, and log the failure. The current message also blames "the
+project" for what is a storage hiccup.
+
+### 8. Jumping ahead of the background pass leaves the viewer blank
+
+**Observed.** With the preview pass still running and the drive saturated,
+pressing `End` in the loupe to reach the last photo took:
+
+| Request | Time |
+|---|---|
+| `thumb/556` | 12.9 s |
+| `preview/556` | 14.7 s |
+
+**Cause.** The loupe has no spinner by design. It softens the grid thumbnail
+after 80 ms instead, and `ZoomImage.svelte:245` states the assumption: the grid
+thumb is *"virtually always cached"*. That holds while the user moves inside the
+generated range. It breaks the moment the user jumps past it — there is then no
+thumbnail to soften and nothing to show.
+
+The grid has the right control for this (`.preview-spin`,
+`VirtualGrid.svelte:1020`), but its condition needs `loaded.has(item.id)`, so it
+only appears once the **thumbnail** has painted. A cell still waiting for its
+thumbnail shows no spinner either.
+
+**Fix.** Show a progress indicator when neither artifact is cached. The data is
+already there — `previewReady` says exactly which ids are ready.
+
+### 9. The thumbnail pill goes idle while thumbnails are still being generated
+
+**Observed.** `thumbs:done` fired after 60 items, at which point the UI stopped
+reporting thumbnail work. Thumbnails on disk kept climbing (60 → 66 → 80 → 255)
+under the `previews` label.
+
+**Cause.** This is correct internally: `LEAD_WINDOW` is 60, and the fused pass
+after it generates the thumbnail and the preview together
+(`scan/ingest.rs:54`). Only the reporting is wrong — the fused pass reports as
+"Previews" alone.
+
+**Fix.** Report the fused pass for what it is, or fold the two pills into one
+"Preparing photos" count.
+
+### 10. `close()` does not clear `previewReady`
+
+**Cause.** `catalog.close()` clears `thumbLoaded` but not `previewReady`
+(`src/lib/stores/catalog.svelte.ts:176`), while `open()` (`:112`) and
+`adoptCurrent()` (`:77`) clear both.
+
+**Impact is latent, not visible.** `open()` clears the set before any cell of
+the next project renders. Worth fixing for symmetry: file ids are unique only
+inside one project's database, which is the same invariant `close_project`
+protects on the backend when it clears the memory cache.
+
+### 11. `thumbs:done` fires twice
+
+**Observed.** Reopening a fully generated project emitted `thumbs:done` at
+894235 ms and again at 894243 ms.
+
+## Verified — the ingest resumes correctly
+
+Driving a 577-file, 11 GB project through close/reopen twice:
+
+| Phase | Cold open | Reopen, half done | Reopen, fully done |
+|---|---|---|---|
+| scan | 34 ms | 17.6 ms, `0 new` | 18.4 ms, `0 new` |
+| metadata | 4.5 s · 407 files · 11.07 GB | 48.9 µs · 0 files | 106.6 µs · 0 files |
+| thumbnails (lead) | 14.5 s · 60 | 8.4 s · 60 · 3.29 GB | nothing to do |
+| previews | 234.8 s, interrupted | 109.1 s · **108**, not 359 | nothing to do |
+| video posters | aborted by close | 57.6 s · 48 | nothing to do |
+
+- **No work is repeated.** The second reopen ran the whole pipeline in **18 ms**
+  with every phase reporting a total of 0, and the cache on disk did not change
+  (412 thumbnails, 359 previews before and after).
+- **The resume count is exact.** After the first reopen `previewReady` held 251
+  ids and the disk held 251 preview files.
+- **A cached preview opens instantly**: 28 ms in the loupe, no spinner — which
+  is the correct behaviour, since nothing needs generating.
+- **Closing does stop the background work.** `close_project` shuts the ThumbPool
+  down and the drained phases end in ~120 µs.
+- **`recent-thumb` serves what exists**: 8–22 ms for projects with a cache, 404
+  only for projects that have none. Finding 1 stands as first diagnosed.
+
 ## Checked — no action needed
 
 These looked suspicious from outside and turned out correct:
