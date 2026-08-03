@@ -166,7 +166,22 @@
                   <span
                     class="peek peek-{i} placeholder"
                     style="background: {placeholderColor(project.path, slot)}"
-                  ></span>
+                  >
+                    <!-- The app mark, watermarked into the card so an empty slot
+                         still looks like something Cullant drew on purpose. -->
+                    <svg class="mark" viewBox="0 0 1369 1218" aria-hidden="true">
+                      <g transform="matrix(1,0,0,1,-1069.617379,-135.415161)">
+                        <g transform="matrix(3.103723,0,0,3.103723,154.590885,-721.515314)">
+                          <path
+                            d="M735.586,519.5C735.586,519.5 739.473,568.534 712.678,582.843C680.798,599.868 663.519,553.11 634.642,577.247C611.326,596.735 629.032,625.109 626.151,643.124C619.985,681.67 555.152,677.363 569.967,621.314C571.184,616.713 584.535,562.904 535.024,552.746C518.381,549.332 479.567,550.468 480.73,596.91C481.01,608.097 487.504,638.968 460.464,643.631C448.06,645.77 432.423,635.11 434.118,613.897C435.531,596.208 442.333,576.751 407.462,568.666C377.23,561.657 353.197,588.486 328.527,589.882C325.237,590.069 298.431,591.586 295.307,565.522C292.837,544.908 300.402,535.202 302.029,533.113C306.097,527.894 391.343,432.74 394.697,430.789C409.535,422.16 419.042,435.709 427.892,444.083C432.306,448.259 432.329,448.152 436.673,452.323C472.319,486.545 472.587,486.553 475.559,487.197C484.075,489.039 482.846,484.581 509.213,452.274C528.631,428.482 527.26,427.49 546.592,403.57C563.401,382.77 562.188,381.933 579.285,361.329C587.143,351.86 592.61,338.702 606.33,342.985C611.957,344.741 611.874,347.567 646.265,390.682C660.202,408.155 678.899,432.673 681.703,436.351C708.771,471.847 731.085,495.961 734.185,506.594C736.027,512.914 735.586,519.5 735.586,519.5Z"
+                          />
+                          <g transform="matrix(0.813344,0,0,0.813344,-674.196775,-1509.93443)">
+                            <circle cx="1324.072" cy="2261.054" r="65.142" />
+                          </g>
+                        </g>
+                      </g>
+                    </svg>
+                  </span>
                   <img
                     class="peek peek-{i}"
                     src={recentThumbUrl(index, slot, project.path)}
@@ -287,6 +302,24 @@
     border: 2px solid var(--bg);
     box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
     transition: transform 180ms ease-out;
+  }
+
+  .placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  /* White on a light pastel reads as a watermark rather than as a label, which
+     is what keeps the empty slot quiet next to cards showing real photos. */
+  .mark {
+    width: 46%;
+    height: auto;
+    fill: #fff;
+    opacity: 0.55;
+    fill-rule: evenodd;
+    clip-rule: evenodd;
   }
 
   .peek-0 {
