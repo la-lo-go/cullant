@@ -4,7 +4,20 @@ Findings from driving the running app over CDP (`npm run tauri:debug` + Playwrig
 MCP). Each item records the observed behaviour, the cause in the code, and the
 decided fix.
 
-## Open
+## Fixed in this pass
+
+All twelve are implemented, in `a70010d..f044a2a`. Each heading keeps the
+evidence that found it, so a regression stays recognisable.
+
+Three were confirmed against the running app afterwards: the placeholders
+(cards with no cache now show coloured stacks), `aria-activedescendant` and
+`aria-pressed` (both read correctly from the accessibility tree), and the focus
+rule — narrow to one photo, filter to zero, relax, and the focus returns to that
+photo even when it is no longer first in the order. The rest are covered by
+`cargo test` (86 pass) and `npm run check`.
+
+Two need a fresh import on removable media to observe, and were not re-run:
+the database open retry (#7) and the "Preparing photos" counter (#9).
 
 ### 1. Recent-project cards show an empty box when thumbnails are missing
 
