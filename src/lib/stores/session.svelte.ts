@@ -242,7 +242,23 @@ class SessionStore {
   // --- focus / selection (indexes into `filtered`) ---
   /** Index into `filtered`; -1 is the sentinel "no item focused" state (no
    *  grid cell matches, so nothing shows the focus outline). */
-  focusedIndex = $state(-1);
+  #focusedIndex = $state(-1);
+  get focusedIndex() {
+    return this.#focusedIndex;
+  }
+  /** Every focus move goes through here, which is what keeps `stickyFocusId`
+   *  honest — the arrow keys assign the index directly and never call
+   *  `clampFocus`. */
+  set focusedIndex(i: number) {
+    this.#focusedIndex = i;
+    const it = this.filtered[i];
+    if (it) this.stickyFocusId = it.id;
+  }
+  /** Id of the item the focus last landed on. An index means nothing once a
+   *  filter changes `filtered` underneath it; the id is what lets the focus
+   *  return to the same photo instead of to whatever inherited the position.
+   *  Not `$state`: it is bookkeeping for `clampFocus`, never rendered. */
+  private stickyFocusId: number | null = null;
   /** Column count reported by the grid so ↑/↓ move one visual row. */
   gridCols = $state(1);
 
@@ -881,6 +897,17 @@ class SessionStore {
   }
 
   clampFocus() {
+    // Identity first. A filter that hides the focused photo and is then relaxed
+    // has to come back to that photo — clamping alone silently moved the focus
+    // to whichever item had inherited the index, and a filter matching nothing
+    // dropped it to the top of the list.
+    if (this.focusedIndex !== -1 && this.stickyFocusId !== null) {
+      const at = this.filtered.findIndex((it) => it.id === this.stickyFocusId);
+      if (at >= 0) {
+        this.focusedIndex = at;
+        return;
+      }
+    }
     const max = Math.max(0, this.filtered.length - 1);
     if (this.focusedIndex > max) this.focusedIndex = max;
     // Preserve a deliberate -1 ("nothing focused"); only pull other
@@ -893,6 +920,9 @@ class SessionStore {
    *  switching the Photos/Videos media tab. */
   clearFocus() {
     this.focusedIndex = -1;
+    // Drop the remembered photo too. This runs on project open, and an id from
+    // the previous project could otherwise collide with a real one here.
+    this.stickyFocusId = null;
     this.clearSelection();
   }
 
