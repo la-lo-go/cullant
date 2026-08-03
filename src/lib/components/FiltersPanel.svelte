@@ -319,7 +319,8 @@
     <input
       class="namefield"
       type="text"
-      placeholder="Any"
+      placeholder="Any, or /regex/"
+      title="Substring match, or a regular expression between slashes"
       spellcheck="false"
       autocomplete="off"
       bind:value={session.nameFilter}

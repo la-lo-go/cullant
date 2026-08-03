@@ -142,9 +142,10 @@ class SessionStore {
   minRating = $state(0);
   labelFilter = $state<string | null>(null);
   tagFilter = $state<number | null>(null);
-  /** Case-insensitive substring match on the file name; "" = no filter. Shared
-   *  by the search overlay and the Sort & Filter field, so whichever one the
-   *  user opens shows what the other typed. */
+  /** File-name query; "" = no filter. Shared by the search overlay and the
+   *  Sort & Filter field, so whichever one the user opens shows what the other
+   *  typed. Matched by `nameMatcher` — plain text is a case-insensitive
+   *  substring, `/…/` is a regular expression. */
   nameFilter = $state("");
   /** Photo file-type composition filter; inert on the videos tab. */
   typeFilter = $state<TypeFilter>("all");
@@ -393,6 +394,35 @@ class SessionStore {
     return map;
   });
 
+  /** How `nameFilter` is matched against a file's displayed name (basename plus
+   *  extension — the extension is a separate column, so matching the basename
+   *  alone meant a query like ".jpg" could never hit anything).
+   *
+   *  A query wrapped in slashes is a regular expression: `/DSC\d{4}/`, with
+   *  optional trailing flags. Anything else is a case-insensitive substring.
+   *  `null` means "no filter"; `valid: false` means the pattern does not
+   *  compile, which the search overlay reports rather than silently matching
+   *  everything.
+   */
+  nameMatcher = $derived.by<{ test: (name: string) => boolean; valid: boolean } | null>(() => {
+    const raw = this.nameFilter.trim();
+    if (raw === "") return null;
+    const asRegex = /^\/(.+)\/([dgimsuvy]*)$/.exec(raw);
+    if (asRegex) {
+      // `g` and `y` make `test` stateful through lastIndex, which would make a
+      // match depend on how many items were tested before it.
+      const flags = asRegex[2].replace(/[gy]/g, "");
+      try {
+        const rx = new RegExp(asRegex[1], flags.includes("i") ? flags : `${flags}i`);
+        return { test: (name: string) => rx.test(name), valid: true };
+      } catch {
+        return { test: () => false, valid: false };
+      }
+    }
+    const needle = raw.toLowerCase();
+    return { test: (name: string) => name.toLowerCase().includes(needle), valid: true };
+  });
+
   /** The gap actually in use, and where it came from. Adaptive detection is
    *  reported rather than hidden: a threshold you cannot see is impossible to
    *  argue with when it guesses wrong. */
@@ -444,9 +474,9 @@ class SessionStore {
     if (this.tagFilter !== null) {
       out = out.filter((i) => i.tagIds.includes(this.tagFilter!));
     }
-    const query = this.nameFilter.trim().toLowerCase();
-    if (query !== "") {
-      out = out.filter((i) => i.name.toLowerCase().includes(query));
+    const matcher = this.nameMatcher;
+    if (matcher) {
+      out = out.filter((i) => matcher.test(`${i.name}.${i.ext}`));
     }
     // File-type composition (photos only; a video has no RAW/JPEG notion). In
     // mirror mode `out` already holds one entry per group, so groupSize/decoupled

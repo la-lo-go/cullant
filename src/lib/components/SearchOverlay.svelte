@@ -16,6 +16,7 @@
   });
 
   const matches = $derived(session.filtered.length);
+  const patternValid = $derived(session.nameMatcher?.valid ?? true);
 
   function close() {
     session.searchOpen = false;
@@ -62,14 +63,18 @@
     bind:this={inputEl}
     bind:value={session.nameFilter}
     type="text"
-    placeholder="Search file names…"
+    placeholder="Search file names, or /regex/…"
     spellcheck="false"
     autocomplete="off"
     oninput={() => session.clampFocus()}
   />
-  <span class="count" class:none={matches === 0}>
-    {matches}
-    {matches === 1 ? "match" : "matches"}
+  <span class="count" class:none={matches === 0 || !patternValid}>
+    {#if !patternValid}
+      bad pattern
+    {:else}
+      {matches}
+      {matches === 1 ? "match" : "matches"}
+    {/if}
   </span>
   {#if session.nameFilter !== ""}
     <button class="icon" aria-label="Clear search" title="Clear" onclick={clear}>
