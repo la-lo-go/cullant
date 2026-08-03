@@ -913,6 +913,13 @@ class SessionStore {
     // Preserve a deliberate -1 ("nothing focused"); only pull other
     // out-of-range negatives up into the valid range.
     else if (this.focusedIndex < -1) this.focusedIndex = 0;
+    // The setter cannot catch this one: a narrowing filter usually leaves the
+    // index alone and swaps the item under it, so nothing is ever assigned.
+    // Record what the focus actually landed on — and only from a real item,
+    // because while the filter matches nothing there is nothing to record and
+    // that is precisely the id that has to survive until it is relaxed.
+    const landed = this.filtered[this.focusedIndex];
+    if (landed) this.stickyFocusId = landed.id;
   }
 
   /** Enter the "no item focused" state: no grid cell shows the focus outline,
