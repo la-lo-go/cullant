@@ -121,6 +121,12 @@
             <div class="preview">
               {#if st.state === "ok"}
                 {#each PREVIEW_SLOTS as slot, i}
+                  <!-- The placeholder sits under its thumbnail and the opaque
+                       thumbnail covers it. Hiding a thumbnail that never arrives
+                       therefore reveals a coloured card instead of a hole — for a
+                       project whose import has not reached the previews yet, and
+                       for one that simply holds fewer photos than there are slots. -->
+                  <span class="peek peek-{i} placeholder ph-{i}"></span>
                   <img
                     class="peek peek-{i}"
                     src={recentThumbUrl(index, slot, project.path)}
@@ -152,7 +158,7 @@
             aria-label="Delete Cullant data for this project"
             onclick={(e) => askDeleteCard(e, project)}
           >
-            <Trash2 size={18} />
+            <Trash2 size={14} />
           </button>
         </div>
       {/each}
@@ -243,6 +249,19 @@
     transition: transform 180ms ease-out;
   }
 
+  /* Muted, distinct per slot, so an empty stack still reads as three photos. */
+  .placeholder {
+    background: linear-gradient(150deg, #3d4a63, #2f3950);
+  }
+
+  .ph-1 {
+    background: linear-gradient(150deg, #4d3f5e, #3a3049);
+  }
+
+  .ph-2 {
+    background: linear-gradient(150deg, #2f5551, #26423f);
+  }
+
   .peek-0 {
     transform: translateX(-8px) rotate(-8deg);
     z-index: 1;
@@ -319,12 +338,12 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 26px;
+    height: 26px;
     border: none;
-    background: rgba(18, 18, 22, 0.6);
-    border-radius: 8px;
-    color: #bbb;
+    background: rgba(70, 70, 80, 0.72);
+    border-radius: 7px;
+    color: #d8d8de;
     opacity: 0;
     /* Hidden means inert. Without this the invisible button still takes the
        clicks aimed at the card corner, and at this size it would eat a real
@@ -348,6 +367,12 @@
       height: 44px;
       opacity: 1;
       pointer-events: auto;
+    }
+    /* The desktop icon is sized for a 26px button; keep it legible in the 44px
+       touch target rather than leaving it adrift in the middle. */
+    .delete :global(svg) {
+      width: 18px;
+      height: 18px;
     }
   }
 
