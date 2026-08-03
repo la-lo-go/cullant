@@ -1131,7 +1131,7 @@
     content: "";
     position: absolute;
     top: 2px;
-    left: 2px;
+    right: 2px;
     width: 6px;
     height: 6px;
     border-radius: 50%;
