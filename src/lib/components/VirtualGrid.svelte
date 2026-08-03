@@ -51,6 +51,10 @@
   // and marquee math, but each cell's visual box is inset by GAP so adjacent
   // focus/selection outlines never touch. Kept out of the pitch math on purpose.
   const GAP = 6;
+  // Carried by whichever cell is focused, so aria-activedescendant always
+  // resolves. Naming it after the item id would break on a collapsed burst,
+  // whose focused member is not the cell the grid draws.
+  const ACTIVE_CELL_ID = "grid-active-cell";
   // Selected cells shrink a touch further — extra breathing room so a block of
   // adjacent selections never reads as one solid blue mass. Computed as a
   // plain extra inset (added to the existing GAP/2 offset, subtracted twice
@@ -870,6 +874,7 @@
     id="photo-grid-scroll"
     role="grid"
     aria-label="Photo grid"
+    aria-activedescendant={session.focused ? ACTIVE_CELL_ID : undefined}
     tabindex="-1"
     bind:this={viewport}
     bind:clientWidth={width}
@@ -929,13 +934,16 @@
       {@const stacked = v.span > 1}
       {@const portrait = !stacked && dims !== null && dims.h > dims.w}
       {@const burstAt = stacked ? null : session.burstPositionAt(v.first)}
+      {@const isFocused =
+        session.focusedIndex >= v.first &&
+        session.focusedIndex < v.first + v.span &&
+        session.selectedIds.size === 0}
       <div
         class="cell"
-        class:focused={session.focusedIndex >= v.first &&
-          session.focusedIndex < v.first + v.span &&
-          session.selectedIds.size === 0}
+        class:focused={isFocused}
         class:selected
         style="transform: translate({v.x + GAP / 2 + inset}px, {v.y + GAP / 2 + inset}px); width:{CELL - GAP - inset * 2}px; height:{CELL - GAP - inset * 2}px"
+        {...isFocused ? { id: ACTIVE_CELL_ID } : {}}
         role="button"
         tabindex="-1"
       >

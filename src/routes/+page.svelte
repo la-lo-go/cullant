@@ -445,7 +445,10 @@
           <button
             class:active={session.filtersPanelOpen}
             class:haswork={session.hasActiveFilters}
-            title="Sort & filter"
+            title={session.hasActiveFilters
+              ? "Sort & filter — filters are active"
+              : "Sort & filter"}
+            aria-pressed={session.hasActiveFilters}
             onclick={blurring(() => (session.filtersPanelOpen = !session.filtersPanelOpen))}
           >
             <ListFilter size={14} />
@@ -469,7 +472,10 @@
           <button
             class:active={session.viewPanelOpen}
             class:haswork={hasCustomView}
-            title="View. Thumbnail size, grouping and RAW+JPEG pairing."
+            title={hasCustomView
+              ? "View — settings changed. Thumbnail size, grouping and RAW+JPEG pairing."
+              : "View. Thumbnail size, grouping and RAW+JPEG pairing."}
+            aria-pressed={hasCustomView}
             onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
           >
             <LayoutGrid size={14} />
@@ -494,7 +500,9 @@
         <button
           class="commit"
           class:haswork={session.hasCommitWork}
-          title="Review & commit pending actions (Ctrl+Enter)"
+          title={session.hasCommitWork
+            ? "Review & commit pending actions — actions are queued (Ctrl+Enter)"
+            : "Review & commit pending actions (Ctrl+Enter)"}
           onclick={blurring(() => (session.commitDialogOpen = true))}
         >
           <CheckCheck size={14} /><span>Commit</span>
@@ -1106,6 +1114,18 @@
   button.commit.haswork {
     border-color: #ffb86b;
     color: #ffd9a8;
+  }
+
+  /* Colour alone carries this state otherwise, which fails anyone who cannot
+     separate the two fills — and is easy to miss in a glance across the bar.
+     The dot rides along with whatever colour the button already uses. */
+  .toolbar-right button.haswork::after {
+    content: "";
+    width: 5px;
+    height: 5px;
+    margin-left: 5px;
+    border-radius: 50%;
+    background: currentColor;
   }
 
   /* Anchors the Filters dropdown under its toolbar button. */
