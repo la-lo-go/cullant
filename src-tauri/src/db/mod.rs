@@ -14,6 +14,13 @@ type Job = Box<dyn FnOnce(&mut Connection) + Send>;
 /// How long a reader/checkpoint waits on a briefly-held lock before erroring.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Attempts to open the database file, and the pause between them. A project
+/// lives on whatever the photos live on — an external disk that has spun down,
+/// a card reader — so the first open can fail on storage that is about to
+/// answer perfectly well a moment later.
+const OPEN_ATTEMPTS: u32 = 4;
+const OPEN_RETRY_DELAY: Duration = Duration::from_millis(400);
+
 /// Handle to the project database. Writes go through a single writer thread
 /// that owns one connection (they must serialize anyway); reads can instead
 /// borrow a connection from a small read-only pool and run concurrently on the
@@ -73,7 +80,34 @@ impl Drop for ReaderGuard<'_> {
 impl Db {
     /// Open (creating if needed) `<project_root>/.cullant/cullant.db` and run
     /// pending migrations.
+    ///
+    /// Retries a failed open before giving up. `SQLITE_CANTOPEN` off removable
+    /// media usually means the drive was still waking, not that the project is
+    /// broken — and reporting "unable to open database file" for a project that
+    /// opens on the next try is the wrong answer.
     pub fn open(project_root: &Path) -> AppResult<Db> {
+        let mut last_err = None;
+        for attempt in 1..=OPEN_ATTEMPTS {
+            match Self::open_once(project_root) {
+                Ok(db) => {
+                    if attempt > 1 {
+                        tracing::info!("opened project database on attempt {attempt}");
+                    }
+                    return Ok(db);
+                }
+                Err(e) => {
+                    tracing::warn!("opening project database failed (attempt {attempt}): {e}");
+                    last_err = Some(e);
+                    if attempt < OPEN_ATTEMPTS {
+                        thread::sleep(OPEN_RETRY_DELAY);
+                    }
+                }
+            }
+        }
+        Err(last_err.expect("at least one attempt runs"))
+    }
+
+    fn open_once(project_root: &Path) -> AppResult<Db> {
         let dir = project_root.join(".cullant");
         std::fs::create_dir_all(&dir)?;
         let path = dir.join("cullant.db");
