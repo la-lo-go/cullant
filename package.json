@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:debug": "tauri dev --config src-tauri/tauri.debug.conf.json"
   },
   "license": "GPL-3.0-or-later",
   "dependencies": {

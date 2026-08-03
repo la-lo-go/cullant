@@ -48,12 +48,31 @@ Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters
 npm install
 npm run tauri dev            # dev app
 CULLANT_OPEN_PROJECT=<dir> npm run tauri dev   # auto-open a project at startup (test hook)
+npm run tauri:debug          # dev app + CDP on port 9222 (UI automation)
 npm run tauri build          # NSIS + MSI installers
 ```
 
 - Synthetic test data: `cd src-tauri && cargo run --release --example gen_testdata -- C:\dev\cullant-testdata 600`.
 - Backend checks: from `src-tauri/` → `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
 - Frontend check: `npm run check` (must end 0 errors, 0 warnings).
+
+### Driving the UI from outside
+
+`npm run tauri:debug` starts the app with `--remote-debugging-port=9222`, so any Chrome DevTools
+Protocol client can inspect and drive the real window. Attach Playwright MCP to it with
+`npx @playwright/mcp@latest --cdp-endpoint http://127.0.0.1:9222` — that gives an accessibility
+snapshot, clicks, key presses, screenshots, console errors and the network log of a live session.
+Use it for UX/discoverability passes; it is not a substitute for `cargo test`.
+
+- The port comes from `src-tauri/tauri.debug.conf.json`, a config overlay that Tauri merges over
+  `tauri.conf.json`. Never move the flag into `tauri.conf.json` — that would ship a debug port in
+  the installer.
+- `additionalBrowserArgs` **replaces** wry's defaults instead of extending them, so the overlay must
+  repeat `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`. The overlay also repeats
+  the whole `app.windows[0]` object, because the merge overwrites arrays. Keep both in sync with
+  `tauri.conf.json`.
+- The `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` environment variable does **not** work here. wry always
+  passes its own arguments to `CoreWebView2EnvironmentOptions`, which overrides the variable.
 
 ## Gotchas
 
