@@ -267,10 +267,11 @@
   // the same way active filters colour Sort & Filter. Separate mode counts:
   // it changes what every cell in the grid stands for, so now that the toggle
   // lives inside the panel this badge is the only thing left saying so.
+  // Thumbnail size is deliberately not part of this. It is a comfort setting,
+  // not a view that hides or regroups anything, so marking the button for it
+  // would flag a state the user has nothing to undo.
   const hasCustomView = $derived(
-    session.groupBy.length > 0 ||
-      session.gridDensity !== "medium" ||
-      (!session.mirrorMode && hasRaws),
+    session.groupBy.length > 0 || (!session.mirrorMode && hasRaws),
   );
 
   // Watch the open project's storage while working: if its folder/volume goes
