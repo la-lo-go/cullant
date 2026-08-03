@@ -175,6 +175,29 @@
   );
   const padX = $derived(EDGE + Math.max(0, (width - EDGE * 2 - cols * CELL) / 2));
 
+  /** Whether cells may animate their move. A geometry change moves every cell
+   *  at once, which reads as the grid shuffling itself: opening a project runs
+   *  `cols` from 1 to N the moment the viewport reports its width, and a window
+   *  resize does the same. The transition is there for the selection shrink, so
+   *  suppress it while the layout itself is what changed and restore it once
+   *  the new geometry has painted. */
+  let animateCells = $state(false);
+  $effect(() => {
+    void cols;
+    void CELL;
+    animateCells = false;
+    // Two frames: one for the new geometry to be applied, one for it to paint.
+    // Re-enabling any earlier animates the very move being suppressed.
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => (animateCells = true));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      if (inner) cancelAnimationFrame(inner);
+    };
+  });
+
   // Report layout so keyboard ↑/↓ move one visual row.
   $effect(() => {
     session.gridCols = cols;
@@ -894,6 +917,7 @@
   >
   <div
     class="canvas"
+    class:animate={animateCells}
     bind:this={canvasEl}
     style="height:{contentHeight}px; transform: translateY({pullY}px); transition:{pullDragging ? 'none' : 'transform 0.28s cubic-bezier(0.22, 1, 0.36, 1)'}"
   >
@@ -1385,11 +1409,15 @@
     gap: 4px;
     border-radius: 8px;
     user-select: none; /* marquee drags must not select label text */
-    /* Animates the selection shrink (width/height/position all move together
-       by SELECTED_INSET). Harmless elsewhere: a mounted cell's own x/y is
-       invariant under scrolling (only which cells are visible changes), so
-       this never fires on scroll — only on selection toggling, or a column
-       count change (screen rotation), where the slide is a nice touch too. */
+  }
+
+  /* Animates the selection shrink (width/height/position all move together by
+     SELECTED_INSET). Scoped to `.animate` because the same properties carry the
+     layout: on a column-count or cell-size change every cell moves at once, and
+     animating that reads as the grid reordering itself rather than as feedback.
+     A mounted cell's x/y is invariant under scrolling, so this never fires on
+     scroll either way. */
+  .canvas.animate .cell {
     transition:
       transform 100ms ease-out,
       width 100ms ease-out,
