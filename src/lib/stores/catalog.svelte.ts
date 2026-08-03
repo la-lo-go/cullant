@@ -174,6 +174,10 @@ class CatalogStore {
     this.scanning = false;
     this.preloading = false;
     this.thumbLoaded.clear();
+    // File ids are unique only inside one project's database, so neither set may
+    // outlive the project that filled it — the same invariant close_project
+    // keeps on the backend when it clears the thumbnail memory cache.
+    this.previewReady.clear();
   }
 
   async refresh() {
