@@ -6,6 +6,10 @@
   import { settings } from "../stores/settings.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import Loader from "@lucide/svelte/icons/loader";
+  import RadialMenu, { type RadialAction, type RadialHandlers } from "./RadialMenu.svelte";
+  import ContextMenu from "./ContextMenu.svelte";
+  import { buildPhotoMenu, runPhotoCommand } from "../photoActions";
+  import type { MenuNode } from "../menu";
 
   /** Dwell before requesting an *uncached* preview, so arrowing quickly through
    *  photos never enqueues a decode for ones merely passed over. */
@@ -652,6 +656,8 @@
       if (pointers.size === 2) {
         // Second finger down: begin a pinch anchored on the finger midpoint.
         endPeek();
+        // Two fingers mean zooming, not holding.
+        dropRadial();
         pinchedThisGesture = true;
         pinchFrameRect = frame ? frame.getBoundingClientRect() : null;
         const [a, b] = [...pointers.values()];
@@ -674,11 +680,28 @@
         lastX = e.clientX;
         lastY = e.clientY;
         dragging = z.zoomed; // one finger pans only when already zoomed
+        armRadial(e);
       }
       return;
     }
 
-    // Mouse / pen: drag to pan when zoomed (unchanged desktop behavior).
+    // Mouse / pen. The right button opens the ring at once; the left one has to
+    // be held, and any movement first means a pan.
+    if (e.button === 2 && settings.radialMouse !== "left") {
+      gestureConsumed = true;
+      radial = {
+        x: e.clientX,
+        y: e.clientY,
+        px: e.clientX,
+        py: e.clientY,
+        released: false,
+        pointerId: e.pointerId,
+      };
+      return;
+    }
+    if (e.button === 0 && settings.radialMouse !== "right") armRadial(e);
+
+    // Drag to pan when zoomed (unchanged desktop behavior).
     if (!z.zoomed) return;
     dragging = true;
     lastX = e.clientX;
@@ -686,6 +709,16 @@
   }
 
   function onPointerMove(e: PointerEvent) {
+    // The ring owns the pointer once it is up: feeding it the position is the
+    // whole interaction, and panning underneath it would be nonsense.
+    if (radial && e.pointerId === radial.pointerId) {
+      radial.px = e.clientX;
+      radial.py = e.clientY;
+      return;
+    }
+    if (radialTimer !== null && Math.hypot(e.clientX - holdX, e.clientY - holdY) > RADIAL_MOVE_SLOP) {
+      cancelRadialArm();
+    }
     if (e.pointerType === "touch") {
       if (!pointers.has(e.pointerId)) return;
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -722,6 +755,23 @@
 
   function onPointerUp(e: PointerEvent) {
     endPeek();
+    cancelRadialArm();
+    // Releasing with the ring up hands the release to it, and to nothing else.
+    if (radial && e.pointerId === radial.pointerId) {
+      radial.released = true;
+      pointers.delete(e.pointerId);
+      dragging = false;
+      return;
+    }
+    // The ring was open and has already been dealt with: this release must not
+    // also tap, page or swipe. Bounded by TAP_SLOP alone, a tap has no time
+    // limit, so a long hold in the margin would otherwise still page.
+    if (gestureConsumed) {
+      gestureConsumed = false;
+      pointers.delete(e.pointerId);
+      dragging = false;
+      return;
+    }
     if (e.pointerType === "touch") {
       const wasSingle = pointers.size === 1;
       const wasPinching = pinchStartDist > 0;
@@ -831,8 +881,95 @@
     return endPeek;
   });
 
+  // --- press and hold: the radial menu ---
+  //
+  // Longer than DOUBLE_TAP_MS so a deliberate double-tap never grows into a
+  // ring, and long enough that a margin tap has to be held on purpose.
+  const RADIAL_HOLD_MS = 350;
+  // Mouse only: a pan starts by moving, so any real movement before the ring
+  // arms means the user is panning and not holding.
+  const RADIAL_MOVE_SLOP = 6;
+
+  let radial = $state<{
+    x: number;
+    y: number;
+    px: number;
+    py: number;
+    released: boolean;
+    pointerId: number;
+  } | null>(null);
+  let radialTimer: ReturnType<typeof setTimeout> | null = null;
+  let holdX = 0;
+  let holdY = 0;
+  /**
+   * Set the moment the ring arms, and read by `onPointerUp`.
+   *
+   * A tap here is bounded by DISTANCE only (`TAP_SLOP`) and not by time, so
+   * without this a finger held in the margin for a second and then lifted would
+   * still schedule a page — the ring would open and the photo would change
+   * underneath it. Nothing else about the tap path needed to change.
+   */
+  let gestureConsumed = false;
+
+  let photoMenu = $state<{ x: number; y: number; items: MenuNode[] } | null>(null);
+
+  /** Everything this pane's ring acts on: the photo shown HERE, never the
+   *  focused one, with the same pair fan-out the rest of the app uses. */
+  const radialTargets = $derived({ ids: [item.id], asGroups: session.mirrorMode });
+
+  const radialHandlers: RadialHandlers = {
+    run: (id) => runPhotoCommand(id, item, radialTargets),
+    rate: (r) => void session.rate(r, undefined, radialTargets),
+    label: (l) => void session.setLabel(l, radialTargets),
+    tag: (t) => void session.toggleTag(t, undefined, radialTargets),
+  };
+
+  function armRadial(e: PointerEvent) {
+    cancelRadialArm();
+    holdX = e.clientX;
+    holdY = e.clientY;
+    const pointerId = e.pointerId;
+    radialTimer = setTimeout(() => {
+      radialTimer = null;
+      gestureConsumed = true;
+      radial = { x: holdX, y: holdY, px: holdX, py: holdY, released: false, pointerId };
+    }, RADIAL_HOLD_MS);
+  }
+
+  function cancelRadialArm() {
+    if (radialTimer !== null) clearTimeout(radialTimer);
+    radialTimer = null;
+  }
+
+  /** Drop the ring and the arming timer both — a second finger, a cancelled
+   *  pointer, or paging away all mean the gesture is over. */
+  function dropRadial() {
+    cancelRadialArm();
+    radial = null;
+  }
+
+  function onRadialPick(action: RadialAction) {
+    const at = radial ? { x: radial.px, y: radial.py } : { x: holdX, y: holdY };
+    radial = null;
+    // "More…" hands over to the full list rather than acting. A ring of the
+    // forty-odd unassigned commands would not be a menu.
+    if (action.more) {
+      photoMenu = { ...at, items: buildPhotoMenu(item, radialTargets) };
+      return;
+    }
+    action.run?.();
+  }
+
+  // Paging to another photo mid-hold would leave the ring pointing at a photo
+  // that is no longer under it.
+  $effect(() => {
+    void item.id;
+    return dropRadial;
+  });
+
   function onPointerCancel(e: PointerEvent) {
     endPeek();
+    dropRadial();
     pointers.delete(e.pointerId);
     if (pointers.size < 2) {
       pinchStartDist = 0;
@@ -893,6 +1030,28 @@
     />
   {/if}
 </div>
+
+{#if radial}
+  <RadialMenu
+    x={radial.x}
+    y={radial.y}
+    px={radial.px}
+    py={radial.py}
+    released={radial.released}
+    handlers={radialHandlers}
+    onpick={onRadialPick}
+    oncancel={dropRadial}
+  />
+{/if}
+
+{#if photoMenu}
+  <ContextMenu
+    x={photoMenu.x}
+    y={photoMenu.y}
+    items={photoMenu.items}
+    onclose={() => (photoMenu = null)}
+  />
+{/if}
 
 <style>
   .waiting {

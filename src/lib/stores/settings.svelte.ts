@@ -1,6 +1,15 @@
 /** App-wide user preferences, persisted in localStorage. */
 
 import type { BurstMode } from "../bursts";
+import {
+  DEFAULT_RADIAL_SLOTS,
+  RADIAL_MOUSE_CHOICES,
+  RADIAL_SECTOR_CHOICES,
+  healSlots,
+  slotKey,
+  type RadialMouse,
+  type RadialSlot,
+} from "../radial";
 
 const PROGRESSIVE_LOUPE_KEY = "cullant.progressiveLoupe";
 const REMEMBER_SESSION_KEY = "cullant.rememberSession";
@@ -25,6 +34,9 @@ const COLLAPSE_BURSTS_KEY = "cullant.collapseBursts";
 const BURST_MODE_KEY = "cullant.burstMode";
 const BURST_GAP_KEY = "cullant.burstGapSeconds";
 const PREVIEW_QUALITY_KEY = "cullant.previewQuality";
+const RADIAL_SLOTS_KEY = "cullant.radial.slots";
+const RADIAL_SECTORS_KEY = "cullant.radial.sectors";
+const RADIAL_MOUSE_KEY = "cullant.radial.mouse";
 
 /** Allowed burst gaps in seconds — a whitelist for the same reason the
  *  auto-rescan intervals are one. */
@@ -162,6 +174,36 @@ function loadBottomBar(): { order: string[]; hidden: string[] } {
 }
 
 const initialBottomBar = loadBottomBar();
+
+/** Default number of sectors. Six fits the whole culling vocabulary without any
+ *  of them getting thin enough to miss on the move. */
+const RADIAL_SECTORS_DEFAULT = 6;
+
+function loadRadialSectors(): number {
+  return loadChoice(RADIAL_SECTORS_KEY, RADIAL_SECTOR_CHOICES, RADIAL_SECTORS_DEFAULT);
+}
+
+function loadRadialMouse(): RadialMouse {
+  try {
+    const raw = localStorage.getItem(RADIAL_MOUSE_KEY);
+    if (raw === null) return "left";
+    const v = JSON.parse(raw);
+    return RADIAL_MOUSE_CHOICES.includes(v) ? v : "left";
+  } catch {
+    return "left";
+  }
+}
+
+function loadRadialSlots(sectors: number): RadialSlot[] {
+  try {
+    const raw = localStorage.getItem(RADIAL_SLOTS_KEY);
+    return healSlots(raw === null ? null : JSON.parse(raw), sectors);
+  } catch {
+    return healSlots(null, sectors);
+  }
+}
+
+const initialRadialSectors = loadRadialSectors();
 
 class SettingsStore {
   /** Paint the cached thumbnail instantly while the sharp preview loads. */
@@ -370,6 +412,64 @@ class SettingsStore {
     this.bottomBarOrder = [...BAR_IDS];
     this.bottomBarHidden = [];
     this.saveBottomBar();
+  }
+
+  // --- radial menu (press and hold over a photo) ---
+  /** How many sectors the ring is split into. */
+  radialSectors = $state<number>(initialRadialSectors);
+  /** What each sector holds, clockwise from the top. Always exactly
+   *  `radialSectors` long, and always including the `more` slot. */
+  radialSlots = $state<RadialSlot[]>(loadRadialSlots(initialRadialSectors));
+  /** Which mouse gesture opens it. Touch always uses press-and-hold. */
+  radialMouse = $state<RadialMouse>(loadRadialMouse());
+
+  setRadialSectors(n: number) {
+    if (!RADIAL_SECTOR_CHOICES.includes(n as (typeof RADIAL_SECTOR_CHOICES)[number])) return;
+    this.radialSectors = n;
+    // Resizing the ring re-heals the layout, so growing it fills the new sectors
+    // and shrinking it never drops `more`.
+    this.radialSlots = healSlots(this.radialSlots.map(slotKey), n);
+    save(RADIAL_SECTORS_KEY, n);
+    this.saveRadialSlots();
+  }
+
+  setRadialMouse(mode: RadialMouse) {
+    this.radialMouse = mode;
+    save(RADIAL_MOUSE_KEY, mode);
+  }
+
+  private saveRadialSlots() {
+    save(RADIAL_SLOTS_KEY, this.radialSlots.map(slotKey));
+  }
+
+  setRadialSlot(index: number, slot: RadialSlot) {
+    if (index < 0 || index >= this.radialSlots.length) return;
+    const next = [...this.radialSlots];
+    // A slot can only be in one place, so assigning it elsewhere swaps rather
+    // than duplicating — two sectors doing the same thing is never intended.
+    const existing = next.findIndex((s) => slotKey(s) === slotKey(slot));
+    if (existing !== -1) next[existing] = next[index];
+    next[index] = slot;
+    this.radialSlots = healSlots(next.map(slotKey), this.radialSectors);
+    this.saveRadialSlots();
+  }
+
+  moveRadialSlot(from: number, to: number) {
+    const arr = [...this.radialSlots];
+    if (from < 0 || from >= arr.length || to < 0 || to >= arr.length || from === to) return;
+    const [moved] = arr.splice(from, 1);
+    arr.splice(to, 0, moved);
+    this.radialSlots = arr;
+    this.saveRadialSlots();
+  }
+
+  resetRadial() {
+    this.radialSectors = RADIAL_SECTORS_DEFAULT;
+    this.radialSlots = healSlots(DEFAULT_RADIAL_SLOTS.map(slotKey), RADIAL_SECTORS_DEFAULT);
+    this.radialMouse = "left";
+    save(RADIAL_SECTORS_KEY, this.radialSectors);
+    save(RADIAL_MOUSE_KEY, this.radialMouse);
+    this.saveRadialSlots();
   }
 }
 

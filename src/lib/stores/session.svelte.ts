@@ -1429,19 +1429,32 @@ class SessionStore {
     if (advance) this.moveFocus(1);
   }
 
-  async rate(rating: number, event?: KeyboardEvent) {
-    const t = this.targets();
+  /** Auto-advance, unless an explicit target says otherwise.
+   *
+   *  The radial menu acts on the pane it was opened over, which in compare need
+   *  not be the focused one. Advancing then would move a pane the user is not
+   *  even looking at, so an explicit target only advances when it IS the focus. */
+  private advanceFor(t: Targets, override: Targets | undefined, event?: KeyboardEvent) {
+    if (override) {
+      const id = this.focused?.id;
+      if (id === undefined || !t.ids.includes(id)) return;
+    }
+    this.maybeAdvance(event);
+  }
+
+  async rate(rating: number, event?: KeyboardEvent, override?: Targets) {
+    const t = override ?? this.targets();
     if (!t) return;
     this.applyStates(t.ids.map((id) => this.localGuess(id, { rating })));
-    this.maybeAdvance(event);
+    this.advanceFor(t, override, event);
     this.applyStates(await api.setRating(t, rating));
   }
 
-  async flag(flag: number, event?: KeyboardEvent) {
-    const t = this.targets();
+  async flag(flag: number, event?: KeyboardEvent, override?: Targets) {
+    const t = override ?? this.targets();
     if (!t) return;
     this.applyStates(t.ids.map((id) => this.localGuess(id, { flag })));
-    this.maybeAdvance(event);
+    this.advanceFor(t, override, event);
     this.applyStates(await api.setFlag(t, flag));
     // Invariant: reject flag = queued delete. Every flag write funnels through
     // here, so this is the single place that keeps the two in sync: rejecting
@@ -1478,13 +1491,13 @@ class SessionStore {
    *  this: they already resolve set-vs-clear from the selection-uniform state
    *  they display, unlike the keyboard path (`label`), which toggles off the
    *  focused item Lightroom-style. */
-  async setLabel(label: string | null) {
-    const t = this.targets();
+  async setLabel(label: string | null, override?: Targets) {
+    const t = override ?? this.targets();
     if (!t) return;
     this.applyStates(t.ids.map((id) => this.localGuess(id, { label })));
     // Fast culling advances on any classification from the bars too, matching the
     // keyboard `label()` path. No-ops outside fast culling / outside loupe-compare.
-    this.maybeAdvance();
+    this.advanceFor(t, override);
     this.applyStates(await api.setLabel(t, label));
   }
 
@@ -1508,17 +1521,17 @@ class SessionStore {
   /** Turn the current targets a quarter turn; positive `steps` is clockwise.
    *  The new orientation comes back from the backend instead of being guessed
    *  locally, so the EXIF rotation table lives in exactly one place. */
-  async rotate(steps: number) {
-    const t = this.targets();
+  async rotate(steps: number, override?: Targets) {
+    const t = override ?? this.targets();
     if (!t) return;
     this.applyStates(await api.rotate(t, steps));
   }
 
   /** Toggle a task tag on the focused photo (fan-out included). */
-  async toggleTag(tagId: number, event?: KeyboardEvent) {
-    const t = this.targets();
+  async toggleTag(tagId: number, event?: KeyboardEvent, override?: Targets) {
+    const t = override ?? this.targets();
     if (!t) return;
-    this.maybeAdvance(event);
+    this.advanceFor(t, override, event);
     tags.applyChanges(await api.toggleTaskTag(t, tagId));
   }
 
@@ -1570,11 +1583,11 @@ class SessionStore {
   }
 
   /** Queue a delete for the focused photo. Scope picks pair members. */
-  async queueDelete(scope: PairScope, event?: KeyboardEvent) {
-    const t = this.targets();
+  async queueDelete(scope: PairScope, event?: KeyboardEvent, override?: Targets) {
+    const t = override ?? this.targets();
     if (!t) return;
     await api.enqueueAction(t, "delete", null, scope);
-    this.maybeAdvance(event);
+    this.advanceFor(t, override, event);
     await this.refreshPending();
   }
 
