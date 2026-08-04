@@ -11,7 +11,7 @@ import {
   type Targets,
 } from "../api";
 import { adaptiveGap, computeBursts } from "../bursts";
-import { groupCompare, type GroupContext } from "../gridGroups";
+import { dayKey, groupCompare, type GroupContext } from "../gridGroups";
 import {
   apertureBucket,
   focalBucket,
@@ -70,6 +70,7 @@ interface SavedSession {
     focalFilter?: string | null;
     shutterFilter?: string | null;
     folderFilter?: string | null;
+    dateFilter?: string | null;
   };
   focusKey?: string | null;
 }
@@ -170,6 +171,14 @@ class SessionStore {
   apertureFilter = $state<string | null>(null);
   focalFilter = $state<string | null>(null);
   shutterFilter = $state<string | null>(null);
+  /** Single calendar day (`YYYY-MM-DD`, UTC) to scope the grid to; null = any.
+   *  Keyed by `dayKey`, the same function the Date grouping dimension uses. */
+  dateFilter = $state<string | null>(null);
+  /** One specific burst to scope the grid to, by burst key; null = any.
+   *  Deliberately NOT persisted: burst keys are derived from the current gap
+   *  setting, so a restored one could name a burst this session never forms and
+   *  leave the grid mysteriously empty. */
+  burstKeyFilter = $state<string | null>(null);
   /** Whether the Filters dropdown panel is open. */
   filtersPanelOpen = $state(false);
   /** Whether the name-search overlay is open (Ctrl+F). */
@@ -188,6 +197,8 @@ class SessionStore {
       (this.typeFilter !== "all" && catalog.media === "photos") ||
       this.extFilter !== null ||
       this.orientationFilter !== "all" ||
+      this.dateFilter !== null ||
+      this.burstKeyFilter !== null ||
       // Same idea for bursts: a project with none offers no such control, so it
       // must not badge the button either.
       (this.burstFilter !== "all" && this.hasBursts) ||
@@ -219,6 +230,8 @@ class SessionStore {
     this.apertureFilter = null;
     this.focalFilter = null;
     this.shutterFilter = null;
+    this.dateFilter = null;
+    this.burstKeyFilter = null;
     this.clampFocus();
   }
 
@@ -262,9 +275,14 @@ class SessionStore {
    *  honest — the arrow keys assign the index directly and never call
    *  `clampFocus`. */
   set focusedIndex(i: number) {
+    const moved = i !== this.#focusedIndex;
     this.#focusedIndex = i;
     const it = this.filtered[i];
     if (it) this.stickyFocusId = it.id;
+    // An explicit compare pairing lasts only while the focus stays put: once it
+    // walks on, a second pane still showing the old partner would be a mode the
+    // user never asked to enter.
+    if (moved) this.compareWithId = null;
   }
   /** Id of the item the focus last landed on. An index means nothing once a
    *  filter changes `filtered` underneath it; the id is what lets the focus
@@ -549,6 +567,9 @@ class SessionStore {
       const wantBurst = this.burstFilter === "burst";
       out = out.filter((i) => this.bursts.byFile.has(i.id) === wantBurst);
     }
+    if (this.burstKeyFilter !== null) {
+      out = out.filter((i) => this.bursts.byFile.get(i.id) === this.burstKeyFilter);
+    }
     // Photographic-settings filters. Photo-only (a video carries no camera/lens/
     // ISO/focal/aperture EXIF), so they are inert on the videos tab. camera/lens
     // compare the exact EXIF string; iso/aperture/focal compare the item's bucket
@@ -583,6 +604,9 @@ class SessionStore {
     }
     if (this.folderFilter !== null) {
       out = out.filter((i) => isInFolder(i.relPath, this.folderFilter!));
+    }
+    if (this.dateFilter !== null) {
+      out = out.filter((i) => dayKey(i) === this.dateFilter);
     }
     // Grouping is a stable multi-level sort applied last, so items of the same
     // bucket become contiguous while the active catalog sort survives within the
@@ -665,11 +689,33 @@ class SessionStore {
     let prev: string | undefined;
     for (let i = 0; i < this.filtered.length; i++) {
       const key = this.bursts.byFile.get(this.filtered[i].id);
-      if (key === undefined || key !== prev) starts.push(i);
-      prev = key;
+      // An individually expanded burst draws a cell per frame, so `prev` is
+      // cleared as well: the frame after it must start its own cell too.
+      const stacks = key !== undefined && !this.expandedBursts.has(key);
+      if (!stacks || key !== prev) starts.push(i);
+      prev = stacks ? key : undefined;
     }
     return starts;
   });
+
+  /** Bursts the user opened out while "Collapse bursts" is on, by burst key.
+   *  Exceptions to the global setting rather than a second mode: closing the
+   *  setting makes them irrelevant without having to be cleared. */
+  expandedBursts = $state<Set<string>>(new Set());
+
+  /** The burst key of a `filtered` index, or null when it is in no burst. */
+  burstKeyAt(index: number): string | null {
+    const item = this.filtered[index];
+    return (item && this.bursts.byFile.get(item.id)) ?? null;
+  }
+
+  /** Open a collapsed burst out into its frames, or stack it back up. */
+  toggleBurstExpanded(key: string) {
+    const next = new Set(this.expandedBursts);
+    if (!next.delete(key)) next.add(key);
+    this.expandedBursts = next;
+    this.clampFocus();
+  }
 
   /** How many cells the grid draws. */
   gridCellCount = $derived(this.gridCellStarts?.length ?? this.filtered.length);
@@ -889,6 +935,7 @@ class SessionStore {
         focalFilter: this.focalFilter,
         shutterFilter: this.shutterFilter,
         folderFilter: this.folderFilter,
+        dateFilter: this.dateFilter,
       },
       focusKey: this.focused?.relPath ?? null,
     };
@@ -935,6 +982,7 @@ class SessionStore {
         this.focalFilter = f.focalFilter ?? null;
         this.shutterFilter = f.shutterFilter ?? null;
         this.folderFilter = f.folderFilter ?? null;
+        this.dateFilter = f.dateFilter ?? null;
       }
       this.pendingFocusKey = s.focusKey ?? null;
       // Sort/media re-query the catalog to reorder/reselect the visible items.
@@ -1009,13 +1057,33 @@ class SessionStore {
    *  deletion when the setting asks for it. Offering a photo you have already
    *  decided against as the thing to judge against is wasted screen. null when
    *  there is nothing left to pair with. */
+  /** A photo picked to fill compare's second pane, instead of the one after the
+   *  focus. Set by "Compare with focused"; cleared as soon as the focus moves,
+   *  so it is a one-shot pairing and never a mode the user has to undo. */
+  compareWithId = $state<number | null>(null);
+
   compareCompanionIndex = $derived.by<number | null>(() => {
+    if (this.compareWithId !== null) {
+      const at = this.filtered.findIndex((i) => i.id === this.compareWithId);
+      if (at !== -1) return at;
+    }
     let i = this.focusedIndex + 1;
     if (settings.skipRejected) {
       while (i < this.filtered.length && this.markedForDeletion(this.filtered[i])) i++;
     }
     return i < this.filtered.length ? i : null;
   });
+
+  /** Show `index` alongside the currently focused photo. */
+  compareWith(index: number) {
+    const item = this.filtered[index];
+    if (!item) return;
+    this.ensureFocus();
+    if (this.focused?.id === item.id) return;
+    this.collapseSelection();
+    this.compareWithId = item.id;
+    view.mode = "compare";
+  }
 
   /** Where `moveFocus(delta)` lands, or null when it cannot move.
    *  The grid steps by CELL, so one press passes a collapsed burst. The loupe
@@ -1102,6 +1170,17 @@ class SessionStore {
     this.focusedIndex = index;
     this.selectionAnchor = index;
     if (this.selectedIds.size > 0) this.selectedIds = new Set();
+  }
+
+  /** Select an explicit set of files (a whole burst, every shot from one camera).
+   *  Drops the focus for the same reason the marquee does: `targets()` prefers a
+   *  selection, so a surviving focus outline would claim a cell the next action
+   *  is not going to hit. */
+  selectIds(ids: Iterable<number>) {
+    const next = new Set(ids);
+    if (next.size === 0) return;
+    this.selectedIds = next;
+    this.focusedIndex = -1;
   }
 
   /** Ctrl+click: toggle one cell; an empty selection is seeded from focus. A

@@ -7,6 +7,9 @@
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
+  import ContextMenu from "./ContextMenu.svelte";
+  import { buildGridMenu } from "../gridMenu";
+  import type { MenuNode } from "../menu";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import Scissors from "@lucide/svelte/icons/scissors";
@@ -568,6 +571,32 @@
   // from mouse/pen — see its own comment for why that matters.
   let lastPointerType = "mouse";
 
+  /** Open menu: its anchor point and the tree to draw. */
+  let menu = $state<{ x: number; y: number; items: MenuNode[] } | null>(null);
+
+  /** Right-click. Windows-style targeting: inside the selection the menu acts on
+   *  the whole selection, outside it the click first replaces the selection with
+   *  the cell it landed on — so what the menu will hit is always what is drawn
+   *  as selected. Built AFTER that, because every command reads
+   *  `session.targets()`. */
+  function onContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    // A menu opening mid-marquee would act on a selection still being dragged.
+    cancelLongPress();
+    drag = null;
+    marquee = null;
+
+    const hit = hitTest(e);
+    let index: number | null = null;
+    if (hit?.onCell) {
+      index = cellFirst(hit.index);
+      const inSelection = session.selectedIds.has(items[index].id);
+      if (!inSelection) session.selectOnly(index);
+      else index = session.focusedIndex >= 0 ? session.focusedIndex : index;
+    }
+    menu = { x: e.clientX, y: e.clientY, items: buildGridMenu(index) };
+  }
+
   function onPointerDown(e: PointerEvent) {
     lastPointerType = e.pointerType;
     if (e.button !== 0 || !viewport) return; // marquee/selection: primary button only
@@ -924,6 +953,7 @@
     onpointerup={endDrag}
     onpointercancel={endDrag}
     ondblclick={onDblClick}
+    oncontextmenu={onContextMenu}
   >
   <div
     class="canvas"
@@ -1177,6 +1207,10 @@
     </div>
   {/if}
 </div>
+
+{#if menu}
+  <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+{/if}
 
 <style>
   /* Positioned wrapper so the loading pill can float over the scrolling grid

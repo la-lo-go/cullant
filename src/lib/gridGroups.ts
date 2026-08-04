@@ -66,6 +66,17 @@ function pad(n: number): string {
   return n < 10 ? `0${n}` : `${n}`;
 }
 
+/** The calendar day a photo belongs to, as `YYYY-MM-DD`.
+ *
+ * capture_time/mtime are UTC unix seconds; the day is formatted in UTC to match
+ * the backend's timezone-free convention. Shared by the Date grouping dimension
+ * and the date filter, so "group by day" and "filter by this day" can never
+ * disagree about where a midnight shot lands. */
+export function dayKey(item: ItemLite): string {
+  const d = new Date((item.captureTime ?? item.mtime) * 1000);
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+}
+
 const LABEL_ORDER: Record<string, number> = {
   Red: 0,
   Yellow: 1,
@@ -91,12 +102,8 @@ export const GROUP_DIMS: GroupDim[] = [
     key: "date",
     label: "Date",
     of: (i) => {
-      const t = i.captureTime ?? i.mtime;
-      // capture_time/mtime are UTC unix seconds; format the day in UTC to match
-      // the backend's timezone-free convention.
-      const d = new Date(t * 1000);
-      const day = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-      return { key: day, label: day, sort: t };
+      const day = dayKey(i);
+      return { key: day, label: day, sort: i.captureTime ?? i.mtime };
     },
   },
   {
