@@ -2,6 +2,7 @@
   import { catalog } from "../stores/catalog.svelte";
   import { backdropDismiss } from "../backdrop";
   import { keepClamped } from "../popover";
+  import { dayKey } from "../gridGroups";
   import {
     session,
     LABELS,
@@ -59,7 +60,10 @@
   // entirely client-side over catalog.items, so the same in-memory rows tell us
   // which values the project actually contains: each section offers only those,
   // and hides completely when every present file shares one value (nothing to
-  // discriminate). No backend facet query is needed. All four facets are filled
+  // discriminate) — unless that axis is currently filtered, because the grid's
+  // context menu can set an axis from a photo's own value and a filter with no
+  // section here would be one the user cannot take off.
+  // No backend facet query is needed. All four facets are filled
   // in ONE pass over catalog.items — a keystroke-rate remap must not re-scan the
   // whole catalog four times. ---
   const facets = $derived.by(() => {
@@ -67,6 +71,7 @@
     let jpeg = false;
     let pair = false;
     const exts = new Set<string>();
+    const days = new Set<string>();
     const orientations = new Set<OrientationFilter>();
     const labels = new Set<string>();
     const cameras = new Map<string, number>();
@@ -82,6 +87,7 @@
       else if (i.kind === 1) jpeg = true;
 
       if (i.ext) exts.add(i.ext.toLowerCase());
+      days.add(dayKey(i));
 
       // Photographic-settings facets. camera/lens count each spelling, because
       // one body can be written in several capitalisations and the menu must
@@ -114,6 +120,7 @@
     return {
       typePresence: { raw, jpeg, pair },
       exts,
+      days,
       orientations,
       labels,
       cameras,
@@ -147,6 +154,10 @@
 
   // Distinct extensions present in the current media tab (lowercased, sorted).
   const presentExts = $derived([...facets.exts].sort());
+
+  // Capture days present, newest first — a shoot is usually looked for from the
+  // most recent end. Keys are ISO dates, so a plain string sort is chronological.
+  const presentDays = $derived([...facets.days].sort().reverse());
 
   // Displayed-aspect orientations that occur.
   const presentOrientations = $derived(facets.orientations);
@@ -427,7 +438,7 @@
     </section>
   {/if}
 
-  {#if showTypeSection}
+  {#if showTypeSection || (session.typeFilter !== "all" && catalog.media === "photos")}
     <section>
       <span class="lbl">File type</span>
       <div class="row">
@@ -447,7 +458,7 @@
     </section>
   {/if}
 
-  {#if presentExts.length > 1}
+  {#if presentExts.length > 1 || session.extFilter !== null}
     <section>
       <span class="lbl">Extension</span>
       <div class="row wrap">
@@ -477,7 +488,58 @@
     </section>
   {/if}
 
-  {#if orientationOptions.length > 1}
+  {#if presentDays.length > 1 || session.dateFilter !== null}
+    <section>
+      <span class="lbl">Capture day</span>
+      <div class="row wrap">
+        <button
+          class="seg"
+          class:active={session.dateFilter === null}
+          onclick={() => {
+            session.dateFilter = null;
+            session.clampFocus();
+          }}
+        >
+          <span>All</span>
+        </button>
+        {#each presentDays as day (day)}
+          <button
+            class="seg"
+            class:active={session.dateFilter === day}
+            onclick={() => {
+              session.dateFilter = session.dateFilter === day ? null : day;
+              session.clampFocus();
+            }}
+          >
+            <span>{day}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  <!-- Scoping to one burst is only ever set from the grid's context menu: burst
+       keys are opaque and there can be hundreds, so there is no facet list worth
+       offering. It still needs a home here, because this panel is where a filter
+       is expected to be taken off again. -->
+  {#if session.burstKeyFilter !== null}
+    <section>
+      <span class="lbl">Burst scope</span>
+      <div class="row">
+        <button
+          class="seg active"
+          onclick={() => {
+            session.burstKeyFilter = null;
+            session.clampFocus();
+          }}
+        >
+          <span>Showing one burst — clear</span>
+        </button>
+      </div>
+    </section>
+  {/if}
+
+  {#if orientationOptions.length > 1 || session.orientationFilter !== "all"}
     <section>
       <span class="lbl">Orientation</span>
       <div class="row">
@@ -518,7 +580,7 @@
     </section>
   {/if}
 
-  {#if presentCameras.length > 1}
+  {#if presentCameras.length > 1 || session.cameraFilter !== null}
     <section>
       <span class="lbl">Camera</span>
       <select
@@ -540,7 +602,7 @@
     </section>
   {/if}
 
-  {#if presentLenses.length > 1}
+  {#if presentLenses.length > 1 || session.lensFilter !== null}
     <section>
       <span class="lbl">Lens</span>
       <select
@@ -562,7 +624,7 @@
     </section>
   {/if}
 
-  {#if presentIsoBuckets.length > 1}
+  {#if presentIsoBuckets.length > 1 || session.isoFilter !== null}
     <section>
       <span class="lbl">ISO</span>
       <div class="row wrap">
@@ -592,7 +654,7 @@
     </section>
   {/if}
 
-  {#if presentApertureBuckets.length > 1}
+  {#if presentApertureBuckets.length > 1 || session.apertureFilter !== null}
     <section>
       <span class="lbl">Aperture</span>
       <div class="row wrap">
@@ -622,7 +684,7 @@
     </section>
   {/if}
 
-  {#if presentFocalBuckets.length > 1}
+  {#if presentFocalBuckets.length > 1 || session.focalFilter !== null}
     <section>
       <span class="lbl">Focal length</span>
       <div class="row wrap">
@@ -652,7 +714,7 @@
     </section>
   {/if}
 
-  {#if presentShutterBuckets.length > 1}
+  {#if presentShutterBuckets.length > 1 || session.shutterFilter !== null}
     <section>
       <span class="lbl">Shutter speed</span>
       <div class="row wrap">
