@@ -40,9 +40,17 @@ is kept as the record of what was decided and why, plus what is still open.
 - **Two identical camera bodies report the same EXIF string**, so the
   device partition cannot tell them apart. The serial number is not in the
   schema.
-- **A pair takes its shared sidecar on both halves** on import. Lightroom
-  strictly applies `IMG.xmp` to the RAW only, but being asymmetric would break
-  the round-trip of our own export.
+- **A pair takes its shared sidecar on both halves** on import, *while the two
+  agree*. Lightroom strictly applies `IMG.xmp` to the RAW only, but being
+  asymmetric would break the round-trip of our own export.
+- **A pair that disagrees gets a sidecar each.** One sidecar cannot carry two
+  states, and the old rule — the higher-id row wins — silently discarded one of
+  them. Diverging is a legitimate way to work (queue the RAWs, keep the JPEGs),
+  so nothing is thrown away: the group's primary keeps `IMG.xmp`, the name other
+  applications look for, and the other half is exported to `IMG.JPG.xmp`, the
+  form Bridge and exiftool use for non-raw files. Import prefers a file's own
+  sidecar over the shared one, or a rescan would undo the difference; and the
+  per-file copy is deleted when the pair agrees again, or when that half is.
 
 ## Still open
 

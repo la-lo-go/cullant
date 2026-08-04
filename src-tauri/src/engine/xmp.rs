@@ -44,18 +44,34 @@ pub fn sidecar_rel(rel_path: &str) -> String {
     }
 }
 
-/// Write (or update) the sidecar for a RAW file, through the storage backend.
+/// The sidecar name belonging to ONE file rather than to its basename:
+/// `IMG_001.JPG` -> `IMG_001.JPG.xmp`.
+///
+/// A RAW+JPEG pair maps to a single `IMG_001.xmp`, which is what Lightroom and
+/// Capture One expect and what `sidecar_rel` produces. That only works while the
+/// two halves agree. When they do not — the RAW queued for deletion and the JPEG
+/// kept, say — one of them has to be exported somewhere else, and this is the
+/// form Bridge and exiftool use for non-raw files.
+pub fn sidecar_rel_per_file(rel_path: &str) -> String {
+    format!("{rel_path}.xmp")
+}
+
+/// Write (or update) a sidecar at `sc_rel`, through the storage backend.
 /// If a sidecar already exists — e.g. Lightroom stored develop settings in it —
 /// only OUR attributes are touched; everything else is preserved where possible.
+///
+/// The target path is passed in rather than derived, because the caller is the
+/// one that knows whether this file shares the basename sidecar with its partner
+/// or needs a per-file one (see `sidecar_rel_per_file`).
 /// Returns the sidecar's rel_path.
 pub fn write_sidecar(
     store: &dyn ProjectStore,
-    rel_path: &str,
+    sc_rel: &str,
     state: &XmpState,
 ) -> AppResult<String> {
     use std::io::Write;
 
-    let sc_rel = sidecar_rel(rel_path);
+    let sc_rel = sc_rel.to_string();
     // A missing sidecar is expected (write fresh). Any other case that ends in a
     // fresh overwrite must warn first, so foreign content (e.g. Lightroom develop
     // settings) is never lost silently — including a stat error, an unreadable
@@ -321,7 +337,7 @@ mod tests {
             label: Some("Red".into()),
             orientation: 6,
         };
-        let sc_rel = write_sidecar(&store, "IMG_1.cr3", &state).unwrap();
+        let sc_rel = write_sidecar(&store, &sidecar_rel("IMG_1.cr3"), &state).unwrap();
         assert_eq!(sc_rel, "IMG_1.xmp");
         let content = std::fs::read_to_string(dir.path().join(&sc_rel)).unwrap();
         assert!(content.contains("xmp:Rating=\"4\""));
@@ -346,7 +362,7 @@ mod tests {
             label: None,
             orientation: 1,
         };
-        let sc_rel = write_sidecar(&store, "IMG_2.cr3", &state).unwrap();
+        let sc_rel = write_sidecar(&store, &sidecar_rel("IMG_2.cr3"), &state).unwrap();
         let content = std::fs::read_to_string(dir.path().join(&sc_rel)).unwrap();
         assert!(content.contains("tiff:Orientation=\"1\""));
         // Out-of-range values normalise rather than reaching the file.
@@ -356,7 +372,7 @@ mod tests {
             label: None,
             orientation: 42,
         };
-        write_sidecar(&store, "IMG_2.cr3", &odd).unwrap();
+        write_sidecar(&store, &sidecar_rel("IMG_2.cr3"), &odd).unwrap();
         let content = std::fs::read_to_string(dir.path().join(&sc_rel)).unwrap();
         assert!(content.contains("tiff:Orientation=\"1\""));
     }

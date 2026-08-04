@@ -303,7 +303,10 @@ fn import_sidecars(
     // Every photo that maps to a sidecar we have, paired with what we know.
     // Both halves of a RAW+JPEG pair map to the same sidecar, exactly as the
     // writer does — so exporting and re-importing round-trips instead of
-    // silently applying to only one member.
+    // silently applying to only one member. A half that has a sidecar of its own
+    // reads from that one instead: the writer gives a member its own file only
+    // when the pair disagrees, and reading the shared one here would import the
+    // partner's state over the difference the user made on purpose.
     let photos: Vec<(i64, String, i64, Option<i64>)> = db.call_read(|conn| {
         let mut stmt = conn.prepare(
             "SELECT id, rel_path, COALESCE(state_updated_at, 0), xmp_source_mtime
@@ -315,7 +318,12 @@ fn import_sidecars(
 
     let mut todo: Vec<SidecarCandidate> = Vec::new();
     for (file_id, rel_path, state_updated_at, imported_from) in photos {
-        let sc_rel = crate::engine::xmp::sidecar_rel(&rel_path);
+        let own = crate::engine::xmp::sidecar_rel_per_file(&rel_path);
+        let sc_rel = if sidecar_mtimes.contains_key(own.as_str()) {
+            own
+        } else {
+            crate::engine::xmp::sidecar_rel(&rel_path)
+        };
         let Some(&sc_mtime) = sidecar_mtimes.get(sc_rel.as_str()) else {
             continue;
         };
@@ -484,6 +492,26 @@ mod tests {
         assert_eq!(done.xmp_imported, 2);
         assert_eq!(state_of(&db, "IMG_2.cr3").0, 5);
         assert_eq!(state_of(&db, "IMG_2.jpg").0, 5);
+    }
+
+    #[test]
+    fn a_half_with_its_own_sidecar_reads_that_one_not_the_shared_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_7.cr3");
+        touch(root, "IMG_7.jpg");
+        // What a committed divergence leaves on disk: the primary keeps the
+        // basename sidecar, the other half has one of its own.
+        write_sidecar_file(root, "IMG_7.xmp", 5);
+        write_sidecar_file(root, "IMG_7.jpg.xmp", 1);
+        let db = Arc::new(Db::open(root).unwrap());
+
+        scan(&db, root);
+
+        // Reading the shared sidecar for the JPEG too would quietly undo the
+        // difference the user made on purpose.
+        assert_eq!(state_of(&db, "IMG_7.cr3").0, 5);
+        assert_eq!(state_of(&db, "IMG_7.jpg").0, 1);
     }
 
     #[test]

@@ -93,17 +93,25 @@ pub fn set_setting(db: &Arc<Db>, key: &str, value: &str) -> AppResult<()> {
 }
 
 /// One pending sidecar write: dirty photos grouped by their sidecar path.
-/// In a RAW+JPEG pair both members map to the same `IMG.xmp`, so the sidecar
-/// is written once and the dirty flag cleared for every member. Pair members
-/// normally share rating/flag/label via group fan-out; if they have diverged,
-/// the higher-id row wins (last writer).
+///
+/// In a RAW+JPEG pair both members map to the same `IMG.xmp`, so while they
+/// agree the sidecar is written once and the dirty flag cleared for every
+/// member. When they do NOT agree, no state is thrown away: the group's primary
+/// keeps `IMG.xmp` — the name other applications look for — and the other half
+/// is exported to its own `IMG.JPG.xmp`. Divergence is a legitimate way to work
+/// (queue the RAWs, keep the JPEGs), so picking a winner would silently discard
+/// a decision the user made on purpose.
 struct DirtySidecar {
     /// Every dirty file mapping to this sidecar (all get `xmp_dirty` cleared).
     file_ids: Vec<i64>,
-    /// rel_path of the representative photo (the winner when states diverge).
+    /// rel_path of the representative photo.
     rel_path: String,
-    /// The sidecar rel_path all members map to (`IMG.CR3`/`IMG.JPG` → `IMG.xmp`).
+    /// The sidecar rel_path this write targets.
     sc_rel: String,
+    /// rel_paths of every file merged into this sidecar. A file folded back into
+    /// a shared sidecar may still have a per-file one on disk from when the pair
+    /// disagreed; that copy is stale the moment it is represented here again.
+    member_paths: Vec<String>,
     state: XmpState,
 }
 
@@ -126,10 +134,15 @@ pub fn xmp_dirty_count(db: &Arc<Db>) -> AppResult<i64> {
 /// sidecar path. Videos (kind 2) never get sidecars.
 fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
     db.call(|conn| {
+        // The group's primary is visited first, so when a pair has diverged the
+        // primary is the one that keeps the shared `IMG.xmp` and the other half
+        // is the one pushed onto a per-file name. Ordering by id alone would
+        // hand that role to whichever member the scan happened to insert first.
         let mut stmt = conn.prepare(
-            "SELECT id, rel_path, rating, flag, label, orientation FROM files
-             WHERE status = 0 AND kind IN (0, 1) AND xmp_dirty = 1
-             ORDER BY id",
+            "SELECT f.id, f.rel_path, f.rating, f.flag, f.label, f.orientation
+             FROM files f JOIN groups g ON g.id = f.group_id
+             WHERE f.status = 0 AND f.kind IN (0, 1) AND f.xmp_dirty = 1
+             ORDER BY CASE WHEN f.id = g.primary_file_id THEN 0 ELSE 1 END, f.id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -146,17 +159,30 @@ fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
         let mut out: Vec<DirtySidecar> = Vec::new();
         for row in rows {
             let (id, rel_path, state) = row?;
-            let sc_rel = xmp::sidecar_rel(&rel_path);
-            match out.iter_mut().find(|d| d.sc_rel == sc_rel) {
-                Some(d) => {
+            let shared = xmp::sidecar_rel(&rel_path);
+            match out.iter_mut().find(|d| d.sc_rel == shared) {
+                // Same state: one sidecar speaks for both, exactly as before.
+                Some(d) if d.state == state => {
                     d.file_ids.push(id);
-                    d.rel_path = rel_path;
-                    d.state = state;
+                    d.member_paths.push(rel_path);
+                }
+                // Diverged: this half needs a sidecar of its own rather than
+                // overwriting what the primary is about to export.
+                Some(_) => {
+                    let sc_rel = xmp::sidecar_rel_per_file(&rel_path);
+                    out.push(DirtySidecar {
+                        file_ids: vec![id],
+                        member_paths: vec![rel_path.clone()],
+                        rel_path,
+                        sc_rel,
+                        state,
+                    });
                 }
                 None => out.push(DirtySidecar {
                     file_ids: vec![id],
+                    member_paths: vec![rel_path.clone()],
                     rel_path,
-                    sc_rel,
+                    sc_rel: shared,
                     state,
                 }),
             }
@@ -462,6 +488,15 @@ fn run_deletes(
         // sidecar while the partner survives, or that survivor loses its
         // exported rating/flag/label. Remove it only when no live file maps to it.
         if let Ok(undo) = &mut result {
+            // A per-file sidecar (written when the pair disagreed) names exactly
+            // one file, so it always goes with it — no survivor can be reading it.
+            let own = xmp::sidecar_rel_per_file(&p.rel_path);
+            if run.store.exists(&own).unwrap_or(false) {
+                match delete_via_store(run.store, &own, mode) {
+                    Ok(sc) => undo.sidecar_trash_path = sc.trash_path,
+                    Err(e) => tracing::warn!("per-file sidecar delete failed: {e}"),
+                }
+            }
             let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
             if sidecar_rel != p.rel_path
                 && run.store.exists(&sidecar_rel).unwrap_or(false)
@@ -667,10 +702,22 @@ fn run_xmp(run: &mut CommitRun) -> AppResult<()> {
     run.begin_phase("xmp", xmp_files.len());
     for d in xmp_files {
         let result: Result<String, String> =
-            xmp::write_sidecar(run.store, &d.rel_path, &d.state).map_err(|e| e.to_string());
+            xmp::write_sidecar(run.store, &d.sc_rel, &d.state).map_err(|e| e.to_string());
         match &result {
             Ok(sc_rel) => {
                 run.note_ok();
+                // A pair that has agreed again is back to one shared sidecar, so
+                // the per-file copy written while it disagreed now describes a
+                // state no file has. Left behind it would keep re-importing that
+                // stale state on the next scan.
+                for path in &d.member_paths {
+                    let stale = xmp::sidecar_rel_per_file(path);
+                    if stale != *sc_rel && run.store.exists(&stale).unwrap_or(false) {
+                        if let Err(e) = run.store.remove_file(&stale) {
+                            tracing::warn!("stale per-file sidecar {stale} not removed: {e}");
+                        }
+                    }
+                }
                 // Every file mapping to this sidecar (a RAW+JPEG pair shares it)
                 // is now exported.
                 let file_ids = d.file_ids.clone();
@@ -1261,6 +1308,117 @@ mod tests {
         );
     }
 
+    /// A scanned RAW+JPEG pair with a store, ready to be rated apart.
+    fn paired_project() -> (tempfile::TempDir, Arc<Db>, crate::store::LocalFsStore) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("IMG_1.cr3"), b"raw").unwrap();
+        fs::write(root.join("IMG_1.jpg"), b"jpg").unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        let store = crate::store::LocalFsStore::new(root);
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        (dir, db, store)
+    }
+
+    #[test]
+    fn a_diverged_pair_writes_a_sidecar_each_instead_of_picking_a_winner() {
+        let (dir, db, store) = paired_project();
+        let root = dir.path();
+
+        // Per-file rating, so the halves genuinely disagree.
+        rate(&db, &["cr3"], 5);
+        rate(&db, &["jpg"], 2);
+
+        let plan = preview(&db, &store).unwrap();
+        assert_eq!(plan.xmp_count, 2, "each half needs its own sidecar");
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+
+        // The primary (the RAW) keeps the name other applications look for.
+        let shared = fs::read_to_string(root.join("IMG_1.xmp")).unwrap();
+        assert!(shared.contains("xmp:Rating=\"5\""), "{shared}");
+        let own = fs::read_to_string(root.join("IMG_1.jpg.xmp")).unwrap();
+        assert!(own.contains("xmp:Rating=\"2\""), "{own}");
+    }
+
+    #[test]
+    fn agreeing_again_removes_the_stale_per_file_sidecar() {
+        let (dir, db, store) = paired_project();
+        let root = dir.path();
+
+        rate(&db, &["cr3"], 5);
+        rate(&db, &["jpg"], 2);
+        let plan = preview(&db, &store).unwrap();
+        execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
+        assert!(root.join("IMG_1.jpg.xmp").exists());
+
+        // Settle the pair: one sidecar speaks for it again, so the per-file copy
+        // now describes a state no file has and must not survive to be re-imported.
+        crate::engine::groups::sync_state(
+            &db,
+            group_of(&db, "cr3"),
+            crate::engine::groups::SyncFrom::Raw,
+        )
+        .unwrap();
+        let plan = preview(&db, &store).unwrap();
+        execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
+
+        assert!(
+            !root.join("IMG_1.jpg.xmp").exists(),
+            "the stale per-file sidecar must go when the pair agrees again"
+        );
+        let shared = fs::read_to_string(root.join("IMG_1.xmp")).unwrap();
+        assert!(shared.contains("xmp:Rating=\"5\""), "{shared}");
+    }
+
+    #[test]
+    fn deleting_a_diverged_half_takes_only_its_own_sidecar() {
+        let (dir, db, store) = paired_project();
+        let root = dir.path();
+        set_setting(&db, "deletionMode", "permanent").unwrap();
+
+        rate(&db, &["cr3"], 5);
+        rate(&db, &["jpg"], 2);
+        let plan = preview(&db, &store).unwrap();
+        execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
+
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![ids(&db, "jpg")],
+                as_groups: false,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+        let plan = preview(&db, &store).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+
+        assert!(
+            !root.join("IMG_1.jpg.xmp").exists(),
+            "a per-file sidecar names one file and goes with it"
+        );
+        assert!(
+            root.join("IMG_1.xmp").exists(),
+            "the surviving RAW's own sidecar must stay"
+        );
+    }
+
+    fn group_of(db: &Arc<Db>, ext: &str) -> i64 {
+        let ext = ext.to_string();
+        db.call(move |c| {
+            Ok(c.query_row(
+                "SELECT group_id FROM files WHERE ext = ?1",
+                params![ext],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap()
+    }
+
     #[test]
     fn undo_info_records_the_sidecar_and_the_lost_primary() {
         let dir = tempfile::tempdir().unwrap();
@@ -1336,6 +1494,10 @@ mod tests {
         assert_eq!(outcome.ok, 1, "one sidecar write, not two");
         let content = fs::read_to_string(root.join("IMG_1.xmp")).unwrap();
         assert!(content.contains("xmp:Rating=\"4\""));
+        assert!(
+            !root.join("IMG_1.jpg.xmp").exists(),
+            "halves that agree need no per-file sidecar"
+        );
         // Both members got their dirty flag cleared by the single write.
         let dirty: i64 = db
             .call(|c| {
