@@ -245,7 +245,7 @@ export const SETTINGS: Setting[] = [
     id: "filmstripBadges",
     group: "appearance",
     label: "Filmstrip badges",
-    info: "Which badges the filmstrip's small thumbnails carry. They are separate from the grid's because a filmstrip cell is small enough that a badge can legitimately sit outside the photo.",
+    info: "Which badges the filmstrip thumbnails carry. Set apart from the grid's, because a filmstrip cell is small enough for a badge to sit outside the photo.",
     keywords: "raw jpg star rating color label flag tags",
     summary: () => `${FILMSTRIP_BADGES.filter((b) => b.get()).length} of 5 shown`,
     modified: () => FILMSTRIP_BADGES.some((b, i) => b.get() !== BADGE_DEFAULTS[i]),
