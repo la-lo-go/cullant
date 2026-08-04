@@ -25,6 +25,27 @@
   import { api } from "../api";
   import { backdropDismiss } from "../backdrop";
   import DragList from "./DragList.svelte";
+  import {
+    ASSIGNABLE_COMMANDS,
+    RADIAL_GROUPS,
+    RADIAL_SECTOR_CHOICES,
+    slotKey,
+    type RadialGroupId,
+    type RadialMouse,
+    type RadialSlot,
+  } from "../radial";
+  import type { CommandId } from "../keyboard/keymap";
+
+  /** Turn a `<select>` value back into the slot it names. Assigning a slot that
+   *  is already elsewhere swaps the two, which the store handles. */
+  function assignSlot(index: number, key: string) {
+    const [kind, id] = key.split(":", 2);
+    const slot: RadialSlot =
+      kind === "group"
+        ? { kind: "group", id: id as RadialGroupId }
+        : { kind: "command", id: id as CommandId };
+    settings.setRadialSlot(index, slot);
+  }
   import Search from "@lucide/svelte/icons/search";
   import Keyboard from "@lucide/svelte/icons/keyboard";
   import Tag from "@lucide/svelte/icons/tag";
@@ -353,6 +374,77 @@
           {/snippet}
         </DragList>
         <button class="wide" onclick={releasing(() => settings.resetBottomBar())}>
+          <RotateCcw size={13} />
+          <span>Reset to default</span>
+        </button>
+      </div>
+    {:else if openPanel?.kind === "panel" && openPanel.panel === "radial"}
+      <div class="content sub">
+        <p class="sub-intro">{openPanel.info}</p>
+
+        <label class="check">
+          <span>Sectors</span>
+          <select
+            value={settings.radialSectors}
+            onchange={releasing((e) => settings.setRadialSectors(Number(e.currentTarget.value)))}
+          >
+            {#each RADIAL_SECTOR_CHOICES as n (n)}
+              <option value={n}>{n}</option>
+            {/each}
+          </select>
+        </label>
+
+        <label class="check">
+          <span>Mouse</span>
+          <select
+            value={settings.radialMouse}
+            onchange={releasing((e) =>
+              settings.setRadialMouse(e.currentTarget.value as RadialMouse))}
+          >
+            <option value="left">Hold left button</option>
+            <option value="right">Right button</option>
+            <option value="both">Either</option>
+          </select>
+        </label>
+
+        <!-- Listed from the top of the ring, clockwise, so the order here reads
+             the way the sectors are laid out. -->
+        <p class="sub-intro">Sectors, from the top and clockwise.</p>
+        <DragList
+          items={settings.radialSlots.map((slot, i) => ({ slot, i }))}
+          keyOf={(it) => `${it.i}`}
+          onMove={(from, to) => settings.moveRadialSlot(from, to)}
+          ariaLabel="Radial menu sectors"
+        >
+          {#snippet row(it)}
+            <label class="check">
+              <span>{it.i + 1}</span>
+              {#if it.slot.kind === "more"}
+                <!-- Not assignable: it is what keeps every command reachable
+                     whatever the rest of the ring is set to. -->
+                <span class="fixed">More… (always present)</span>
+              {:else}
+                <select
+                  value={slotKey(it.slot)}
+                  onchange={releasing((e) => assignSlot(it.i, e.currentTarget.value))}
+                >
+                  <optgroup label="Groups">
+                    {#each RADIAL_GROUPS as g (g.id)}
+                      <option value={`group:${g.id}`}>{g.label}</option>
+                    {/each}
+                  </optgroup>
+                  <optgroup label="Commands">
+                    {#each ASSIGNABLE_COMMANDS as c (c.id)}
+                      <option value={`cmd:${c.id}`}>{c.title}</option>
+                    {/each}
+                  </optgroup>
+                </select>
+              {/if}
+            </label>
+          {/snippet}
+        </DragList>
+
+        <button class="wide" onclick={releasing(() => settings.resetRadial())}>
           <RotateCcw size={13} />
           <span>Reset to default</span>
         </button>

@@ -14,6 +14,7 @@
  */
 
 import { BOTTOM_BAR_ITEMS, DEFAULTS, settings } from "./stores/settings.svelte";
+import { DEFAULT_RADIAL_SLOTS, slotKey } from "./radial";
 import type { BurstMode } from "./bursts";
 import { AUTO_RESCAN_CHOICES, BURST_GAP_CHOICES } from "./stores/settings.svelte";
 import Zap from "@lucide/svelte/icons/zap";
@@ -25,7 +26,7 @@ import FolderOpen from "@lucide/svelte/icons/folder-open";
 export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project";
 
 /** Rows that open a nested panel rather than holding their own control. */
-export type SubPanelId = "filmstripBadges" | "touchBar";
+export type SubPanelId = "filmstripBadges" | "touchBar" | "radial";
 
 /** Rows the dialog renders with bespoke markup. */
 export type CustomSlot = "previewQuality";
@@ -268,6 +269,21 @@ export const SETTINGS: Setting[] = [
     },
     modified: () => settings.bottomBarHidden.length > 0 || barReordered(),
     reset: () => settings.resetBottomBar(),
+  },
+  {
+    kind: "panel",
+    panel: "radial",
+    id: "radial",
+    group: "culling",
+    label: "Radial menu",
+    info: "The ring that opens when you press and hold a photo in the loupe or compare: what each sector does, how many there are, and which mouse button opens it. It always acts on the photo you held, which in compare need not be the focused one.",
+    keywords: "hold press gesture wheel pie sectors touch thumb mouse right click",
+    summary: () => `${settings.radialSectors} sectors`,
+    modified: () =>
+      settings.radialSectors !== 6 ||
+      settings.radialMouse !== "left" ||
+      settings.radialSlots.map(slotKey).join() !== DEFAULT_RADIAL_SLOTS.map(slotKey).join(),
+    reset: () => settings.resetRadial(),
   },
 
   // --- Quality & performance ---
