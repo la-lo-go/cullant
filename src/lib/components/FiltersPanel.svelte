@@ -5,6 +5,7 @@
   import {
     session,
     LABELS,
+    type BurstFilter,
     type FlagFilter,
     type TypeFilter,
     type OrientationFilter,
@@ -181,6 +182,22 @@
   const presentFocalBuckets = $derived(FOCAL_BUCKETS.filter((b) => facets.focalKeys.has(b.key)));
   const presentShutterBuckets = $derived(
     SHUTTER_BUCKETS.filter((b) => facets.shutterKeys.has(b.key)),
+  );
+
+  // Burst membership. Counted over the whole project like the flag counts
+  // below, so picking an option never rewrites the numbers beside it. byFile
+  // holds every member id (both halves of a pair), which is what makes the
+  // "not in a burst" count the plain complement.
+  const burstOptions = $derived(
+    [
+      { value: "all", label: "All", count: catalog.items.length },
+      { value: "burst", label: "In a burst", count: session.bursts.byFile.size },
+      {
+        value: "single",
+        label: "Not in a burst",
+        count: catalog.items.length - session.bursts.byFile.size,
+      },
+    ] as { value: BurstFilter; label: string; count: number }[],
   );
 
   // Hover-preview state for the minimum-rating star row (0 = not hovering).
@@ -474,6 +491,27 @@
             }}
           >
             <span>{opt.label}</span>
+          </button>
+        {/each}
+      </div>
+    </section>
+  {/if}
+
+  {#if session.hasBursts}
+    <section>
+      <span class="lbl">Burst</span>
+      <div class="row wrap">
+        {#each burstOptions as opt (opt.value)}
+          <button
+            class="seg"
+            class:active={session.burstFilter === opt.value}
+            onclick={() => {
+              session.burstFilter = opt.value;
+              session.clampFocus();
+            }}
+          >
+            <span>{opt.label}</span>
+            <span class="count">{opt.count}</span>
           </button>
         {/each}
       </div>

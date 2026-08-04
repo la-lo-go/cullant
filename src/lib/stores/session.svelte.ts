@@ -39,6 +39,8 @@ const FLAG_FILTER_TESTS: Record<Exclude<FlagFilter, "all">, (flag: number) => bo
 export type TypeFilter = "all" | "raw" | "jpeg" | "rawjpeg";
 /** Displayed-aspect orientation filter (applies to photos and videos). */
 export type OrientationFilter = "all" | "portrait" | "landscape" | "square";
+/** Burst membership filter; inert while the project has no burst. */
+export type BurstFilter = "all" | "burst" | "single";
 
 /** Shape of the per-project session blob persisted in the DB (migration v4).
  *  Every field is optional so blobs written by an older or newer build degrade
@@ -60,6 +62,7 @@ interface SavedSession {
     typeFilter?: TypeFilter;
     extFilter?: string | null;
     orientationFilter?: OrientationFilter;
+    burstFilter?: BurstFilter;
     cameraFilter?: string | null;
     lensFilter?: string | null;
     isoFilter?: string | null;
@@ -154,6 +157,9 @@ class SessionStore {
   extFilter = $state<string | null>(null);
   /** Displayed-aspect orientation filter. */
   orientationFilter = $state<OrientationFilter>("all");
+  /** Burst membership filter. Bursts are clustered over groups, so both halves
+   *  of a RAW+JPEG pair always answer this filter the same way. */
+  burstFilter = $state<BurstFilter>("all");
   /** Photographic-settings filters (photos only; inert on the videos tab).
    *  camera/lens hold an exact EXIF string; iso/aperture/focal hold a bucket
    *  key from `metadataFacets` (a photographic step/range, not a raw value).
@@ -172,8 +178,9 @@ class SessionStore {
   /** True when any filter narrows the grid (used to badge the Filters button).
    *  The type filter only counts while on the photos tab (it is inert on
    *  videos), so switching tabs never leaves a phantom "active" badge. */
-  hasActiveFilters = $derived(
-    this.flagFilter !== "all" ||
+  hasActiveFilters = $derived.by(
+    () =>
+      this.flagFilter !== "all" ||
       this.minRating > 0 ||
       this.labelFilter !== null ||
       this.tagFilter !== null ||
@@ -181,6 +188,9 @@ class SessionStore {
       (this.typeFilter !== "all" && catalog.media === "photos") ||
       this.extFilter !== null ||
       this.orientationFilter !== "all" ||
+      // Same idea for bursts: a project with none offers no such control, so it
+      // must not badge the button either.
+      (this.burstFilter !== "all" && this.hasBursts) ||
       // The five photographic-settings filters are photo-only, so they never
       // badge the button while the videos tab is active (matching typeFilter).
       ((this.cameraFilter !== null ||
@@ -202,6 +212,7 @@ class SessionStore {
     this.typeFilter = "all";
     this.extFilter = null;
     this.orientationFilter = "all";
+    this.burstFilter = "all";
     this.cameraFilter = null;
     this.lensFilter = null;
     this.isoFilter = null;
@@ -529,6 +540,14 @@ class SessionStore {
             return true;
         }
       });
+    }
+    // Burst membership. Inert while the project has no burst, so a filter left
+    // over from a shoot that had them cannot silently empty a shoot that has
+    // none. `byFile` holds every member id, pairs included, so mirror mode and
+    // separate mode agree on what belongs to a burst.
+    if (this.burstFilter !== "all" && this.hasBursts) {
+      const wantBurst = this.burstFilter === "burst";
+      out = out.filter((i) => this.bursts.byFile.has(i.id) === wantBurst);
     }
     // Photographic-settings filters. Photo-only (a video carries no camera/lens/
     // ISO/focal/aperture EXIF), so they are inert on the videos tab. camera/lens
@@ -862,6 +881,7 @@ class SessionStore {
         typeFilter: this.typeFilter,
         extFilter: this.extFilter,
         orientationFilter: this.orientationFilter,
+        burstFilter: this.burstFilter,
         cameraFilter: this.cameraFilter,
         lensFilter: this.lensFilter,
         isoFilter: this.isoFilter,
@@ -907,6 +927,7 @@ class SessionStore {
         if (f.typeFilter) this.typeFilter = f.typeFilter;
         this.extFilter = f.extFilter ?? null;
         if (f.orientationFilter) this.orientationFilter = f.orientationFilter;
+        if (f.burstFilter) this.burstFilter = f.burstFilter;
         this.cameraFilter = f.cameraFilter ?? null;
         this.lensFilter = f.lensFilter ?? null;
         this.isoFilter = f.isoFilter ?? null;
