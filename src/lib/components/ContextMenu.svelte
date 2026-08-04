@@ -11,6 +11,11 @@
    * open exactly when the path passes through it, so hovering, arrowing and
    * clicking all move the same variable and can never disagree about what is
    * open.
+   *
+   * Every panel is positioned `fixed` and placed by script, submenus included.
+   * An absolutely-positioned submenu would be clipped by its own scroller: a
+   * list with `overflow-y: auto` computes `overflow-x` to `auto` as well, so the
+   * part of the submenu that hangs outside the parent panel simply disappears.
    */
   import { backdropDismiss } from "../backdrop";
   import { isSelectable, type MenuNode } from "../menu";
@@ -31,12 +36,46 @@
 
   let activePath = $state<number[]>([]);
   let rootEl = $state<HTMLDivElement | null>(null);
+  let backdropEl = $state<HTMLDivElement | null>(null);
 
   const dismiss = backdropDismiss(() => onclose());
 
   $effect(() => {
     rootEl?.focus();
   });
+
+  /** Place the root panel, and do it again whenever the anchor moves: a
+   *  right-click elsewhere reuses this component instance rather than mounting
+   *  a new one, so a mount-time placement would leave the menu at the old
+   *  cursor. Any open submenu belongs to the previous menu and is dropped. */
+  $effect(() => {
+    const el = rootEl;
+    void x;
+    void y;
+    void items;
+    if (!el) return;
+    activePath = [];
+    place(el, x, y);
+  });
+
+  /** Put a fixed panel at a point, flipping past it rather than sliding along
+   *  it when it runs out of room — a menu that covers its own anchor is worse
+   *  than one that opens the other way. */
+  function place(el: HTMLElement, atX: number, atY: number, flipLeftTo?: number) {
+    el.style.left = "0px";
+    el.style.top = "0px";
+    const r = el.getBoundingClientRect();
+    const left =
+      atX + r.width > window.innerWidth - EDGE
+        ? Math.max(EDGE, (flipLeftTo ?? atX) - r.width)
+        : atX;
+    const top =
+      atY + r.height > window.innerHeight - EDGE
+        ? Math.max(EDGE, window.innerHeight - EDGE - r.height)
+        : atY;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }
 
   function nodesAt(path: number[]): MenuNode[] {
     let nodes = items;
@@ -125,32 +164,43 @@
     }
   }
 
-  /** Keep the root panel inside the viewport, flipping past the cursor rather
-   *  than sliding along it — a menu that covers its own anchor is worse than one
-   *  that opens the other way. */
-  function placeRoot(el: HTMLElement) {
-    const r = el.getBoundingClientRect();
-    const left = x + r.width > window.innerWidth - EDGE ? Math.max(EDGE, x - r.width) : x;
-    const top =
-      y + r.height > window.innerHeight - EDGE
-        ? Math.max(EDGE, window.innerHeight - EDGE - r.height)
-        : y;
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
+  /** Open a submenu off its parent row: to the right normally, flipped to the
+   *  row's left edge when the right side has no room. */
+  function placeSub(el: HTMLElement) {
+    const row = el.parentElement?.querySelector<HTMLElement>(".row");
+    if (!row) return;
+    const rr = row.getBoundingClientRect();
+    // The panel's own padding, so the first child row lines up with the parent.
+    place(el, rr.right, rr.top - 5, rr.left);
   }
 
-  /** Flip a submenu to the parent's other side when it would leave the viewport,
-   *  and lift it when it would run off the bottom. */
-  function placeSub(el: HTMLElement) {
-    const r = el.getBoundingClientRect();
-    if (r.right > window.innerWidth - EDGE) el.classList.add("flip-x");
-    const over = r.bottom - (window.innerHeight - EDGE);
-    if (over > 0) el.style.marginTop = `${-Math.min(over, Math.max(0, r.top - EDGE))}px`;
+  /** A right-click while the menu is open belongs to whatever is underneath it,
+   *  not to the backdrop that happens to be covering the page. Close, then hand
+   *  the event on so the grid can open a menu on the newly clicked photo. */
+  function onBackdropContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    const bd = backdropEl;
+    if (!bd) return;
+    // elementFromPoint would answer "the backdrop" while it is still hit-testable.
+    bd.style.pointerEvents = "none";
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    bd.style.pointerEvents = "";
+    onclose();
+    under?.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      }),
+    );
   }
 </script>
 
 {#snippet level(nodes: MenuNode[], path: number[])}
-  <ul class="menu">
+  <!-- Submenus are placed against their row's viewport rect, so scrolling a long
+       panel would leave one floating beside nothing. Close it instead. -->
+  <ul class="menu" onscroll={() => (activePath = activePath.slice(0, path.length + 1))}>
     {#each nodes as node, i (i)}
       {#if node.kind === "sep"}
         <li class="sep" role="separator"></li>
@@ -194,7 +244,13 @@
   </ul>
 {/snippet}
 
-<div class="backdrop" role="presentation" {...dismiss}></div>
+<div
+  class="backdrop"
+  role="presentation"
+  bind:this={backdropEl}
+  oncontextmenu={onBackdropContextMenu}
+  {...dismiss}
+></div>
 
 <div
   class="root"
@@ -203,7 +259,7 @@
   tabindex="-1"
   aria-label="Context menu"
   onkeydown={onKeydown}
-  use:placeRoot
+  oncontextmenu={(e) => e.preventDefault()}
 >
   {@render level(items, [])}
 </div>
@@ -315,15 +371,10 @@
     letter-spacing: 0.03em;
   }
 
+  /* Fixed, not absolute: the parent panel scrolls, and a scroller clips both
+     axes, so an absolute submenu is cut off at the panel's edge. */
   .sub {
-    position: absolute;
-    top: -5px;
-    left: 100%;
-    z-index: 1;
-  }
-
-  .sub:global(.flip-x) {
-    left: auto;
-    right: 100%;
+    position: fixed;
+    z-index: 62;
   }
 </style>
