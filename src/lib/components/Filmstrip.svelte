@@ -1,6 +1,6 @@
 <script lang="ts">
   import { thumbUrl, displayDims, containFit, type ItemLite } from "../api";
-  import { session } from "../stores/session.svelte";
+  import { describeHalf, session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
@@ -359,8 +359,23 @@
               {/if}
               {#if settings.filmstripShowType}
                 {#if session.mirrorMode && v.item.groupSize > 1}
-                  <span class="chip" class:split={v.item.decoupled} class:below-burst={burst}>
-                    {#if v.item.decoupled}<Scissors size={8} /><span>SPLIT</span>{:else}RAW+JPG{/if}
+                  {@const pair = session.pairHalves(v.item)}
+                  <span
+                    class="chip"
+                    class:split={v.item.decoupled}
+                    class:below-burst={burst}
+                    title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
+                  >
+                    {#if v.item.decoupled}
+                      <Scissors size={8} /><span>SPLIT</span>
+                    {:else if pair?.diverged}
+                      {#each pair.halves as h, hi (h.id)}
+                        {#if hi > 0}<span class="half-sep"></span>{/if}
+                        <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
+                      {/each}
+                    {:else}
+                      RAW+JPG
+                    {/if}
                   </span>
                 {:else if v.item.kind === 0}
                   <span class="chip" class:below-burst={burst}>RAW</span>
@@ -661,6 +676,21 @@
     background: rgba(0, 0, 0, 0.55);
     color: #8fd0ff;
     pointer-events: none;
+  }
+
+  /* Halves of a pair that disagree. Same colour as an ordinary pair on purpose:
+     it reports the difference, it does not warn about it. */
+  .chip .half-sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 1px -1px;
+    background: currentColor;
+    opacity: 0.4;
+  }
+
+  .chip .half.struck {
+    text-decoration: line-through;
+    opacity: 0.55;
   }
 
   .chip.split {

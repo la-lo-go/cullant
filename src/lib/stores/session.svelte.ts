@@ -140,6 +140,28 @@ export type Label = (typeof LABELS)[number];
 /** Grid thumbnail size. `medium` is the historical default. */
 export type GridDensity = "small" | "medium" | "large";
 
+/** One member of a pair, as the split RAW+JPG chip needs to draw it. */
+export interface PairHalf {
+  id: number;
+  /** Short display name: "RAW" for a raw file, else its extension ("JPG"). */
+  name: string;
+  flag: number;
+  rating: number;
+  label: string | null;
+  queuedDelete: boolean;
+}
+
+/** A one-line reading of a pair half, for the chip's tooltip. */
+export function describeHalf(h: PairHalf): string {
+  const bits: string[] = [];
+  if (h.rating > 0) bits.push("★".repeat(h.rating));
+  if (h.flag === 1) bits.push("pick");
+  else if (h.flag === -1) bits.push("reject");
+  if (h.label) bits.push(h.label.toLowerCase());
+  if (h.queuedDelete) bits.push("queued for deletion");
+  return `${h.name}: ${bits.length > 0 ? bits.join(", ") : "unmarked"}`;
+}
+
 class SessionStore {
   // --- filters ---
   flagFilter = $state<FlagFilter>("all");
@@ -422,6 +444,46 @@ class SessionStore {
     }
     return map;
   });
+
+  /**
+   * The members of a pair, RAW first, with what each half is actually going to
+   * get. null for anything that is not a present multi-file group.
+   *
+   * Mirror mode shows one row per group — the primary's — so a pair whose halves
+   * disagree renders as whatever the RAW says and the JPEG's state is invisible.
+   * That matters because diverging is a legitimate workflow, not a mistake:
+   * queueing the RAWs for deletion and keeping the JPEGs is exactly what
+   * `delete.rawOnly` is for, and until now the grid drew no trace of it.
+   *
+   * `diverged` covers the queue as well as the classification, because "this
+   * half is on its way out and that one is not" is the difference the user is
+   * most likely to have created on purpose.
+   */
+  pairHalves(item: ItemLite): { halves: PairHalf[]; diverged: boolean } | null {
+    const members = this.groupIndex.get(item.groupId);
+    if (!members || members.length < 2) return null;
+    const halves: PairHalf[] = members
+      .map((m) => ({
+        id: m.id,
+        // A RAW is called RAW whatever its extension; the other half speaks for
+        // itself, so a pair of unusual formats still labels both sides honestly.
+        name: m.kind === 0 ? "RAW" : m.ext.toUpperCase(),
+        flag: m.flag,
+        rating: m.rating,
+        label: m.label,
+        queuedDelete: this.pendingDeleteIds.has(m.id),
+      }))
+      .sort((a, b) => (a.name === "RAW" ? -1 : b.name === "RAW" ? 1 : 0));
+    const first = halves[0];
+    const diverged = halves.some(
+      (h) =>
+        h.flag !== first.flag ||
+        h.rating !== first.rating ||
+        h.label !== first.label ||
+        h.queuedDelete !== first.queuedDelete,
+    );
+    return { halves, diverged };
+  }
 
   /** How `nameFilter` is matched against a file's displayed name (basename plus
    *  extension — the extension is a separate column, so matching the basename

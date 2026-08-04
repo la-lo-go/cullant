@@ -2,7 +2,7 @@
   import { api, thumbUrl, displayDims, type ItemLite } from "../api";
   import { SvelteMap } from "svelte/reactivity";
   import { catalog } from "../stores/catalog.svelte";
-  import { session } from "../stores/session.svelte";
+  import { describeHalf, session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
@@ -44,6 +44,27 @@
 
   function cellItem(cell: number): ItemLite {
     return items[cellFirst(cell)];
+  }
+
+  /** What a collapsed burst has been culled to, summed over the frames it hides.
+   *  `rejects` counts a frame already on its way out by either route (the reject
+   *  flag or a queued delete), the same pair the dimming uses. */
+  function stackSummary(first: number, span: number) {
+    let picks = 0;
+    let rejects = 0;
+    let maxRating = 0;
+    for (let i = first; i < first + span; i++) {
+      const it = items[i];
+      if (!it) continue;
+      if (it.flag === 1) picks++;
+      else if (it.flag === -1 || session.pendingDeleteIds.has(it.id)) rejects++;
+      if (it.rating > maxRating) maxRating = it.rating;
+    }
+    return { picks, rejects, maxRating };
+  }
+
+  function stackTitle(sum: ReturnType<typeof stackSummary>, span: number): string {
+    return `${sum.picks} picked, ${sum.rejects} rejected of ${span}`;
   }
 
   const OVERSCAN_ROWS = 2;
@@ -1116,25 +1137,61 @@
               </span>
             {/if}
             {#if session.mirrorMode && v.item.groupSize > 1}
+              {@const pair = session.pairHalves(v.item)}
               <span
                 class="chip pair"
                 class:split={v.item.decoupled}
                 class:below-burst={stacked || burstAt}
+                title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
               >
-                {#if v.item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
+                {#if v.item.decoupled}
+                  <Scissors size={10} /><span>SPLIT</span>
+                {:else if pair?.diverged}
+                  <!-- Halves shown separately only once they disagree, so the
+                       ordinary pair keeps drawing exactly as it always has. -->
+                  {#each pair.halves as h, hi (h.id)}
+                    {#if hi > 0}<span class="half-sep"></span>{/if}
+                    <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
+                  {/each}
+                {:else}
+                  RAW+JPG
+                {/if}
               </span>
             {:else if v.item.kind === 0}
               <span class="chip raw" class:below-burst={stacked || burstAt}>RAW</span>
             {/if}
-            {#if session.pendingDeleteIds.has(v.item.id)}
-              <span class="badge pending" title="Queued for deletion"><X size={12} /></span>
-            {:else if v.item.flag !== 0}
-              <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
-                {#if v.item.flag === 1}<Check size={12} />{:else}<X size={12} />{/if}
-              </span>
-            {/if}
-            {#if v.item.rating > 0}
-              <span class="stars">{"★".repeat(v.item.rating)}</span>
+            {#if stacked}
+              <!-- A stack stands for many photos, so the first frame's flag would
+                   speak for frames it knows nothing about. Sum them instead: a
+                   burst with some picks and some rejects is one that has been
+                   worked, not one in conflict. -->
+              {@const sum = stackSummary(v.first, v.span)}
+              {#if sum.picks > 0 || sum.rejects > 0}
+                <span class="badge counts" title={stackTitle(sum, v.span)}>
+                  {#if sum.picks > 0}
+                    <span class="pick"><Check size={11} />{sum.picks}</span>
+                  {/if}
+                  {#if sum.rejects > 0}
+                    <span class="reject"><X size={11} />{sum.rejects}</span>
+                  {/if}
+                </span>
+              {/if}
+              {#if sum.maxRating > 0}
+                <span class="stars" title="Best rating in this burst">
+                  {"★".repeat(sum.maxRating)}
+                </span>
+              {/if}
+            {:else}
+              {#if session.pendingDeleteIds.has(v.item.id)}
+                <span class="badge pending" title="Queued for deletion"><X size={12} /></span>
+              {:else if v.item.flag !== 0}
+                <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
+                  {#if v.item.flag === 1}<Check size={12} />{:else}<X size={12} />{/if}
+                </span>
+              {/if}
+              {#if v.item.rating > 0}
+                <span class="stars">{"★".repeat(v.item.rating)}</span>
+              {/if}
             {/if}
             {#if v.item.tagIds.length > 0}
               <span class="tags">
@@ -1699,6 +1756,22 @@
     color: #8fd0ff;
   }
 
+  /* A pair whose halves disagree. Deliberately the same colour as an ordinary
+     pair: queueing the RAW and keeping the JPEG is a normal way to work, so
+     this reports the difference rather than warning about it. */
+  .chip.pair .half-sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 1px -1px;
+    background: currentColor;
+    opacity: 0.4;
+  }
+
+  .chip.pair .half.struck {
+    text-decoration: line-through;
+    opacity: 0.55;
+  }
+
   /* Second row of the top-left stack: the burst badge owns the corner. */
   .chip.below-burst {
     top: 24px;
@@ -1748,6 +1821,28 @@
   }
 
   .badge.pending {
+    color: #ff6b6b;
+  }
+
+  /* Pick/reject tallies on a collapsed burst, in the single badge's place. */
+  .badge.counts {
+    gap: 5px;
+    font-size: 10px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .badge.counts > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+  }
+
+  .badge.counts .pick {
+    color: #6be675;
+  }
+
+  .badge.counts .reject {
     color: #ff6b6b;
   }
 
