@@ -36,7 +36,6 @@
 
   let activePath = $state<number[]>([]);
   let rootEl = $state<HTMLDivElement | null>(null);
-  let backdropEl = $state<HTMLDivElement | null>(null);
 
   const dismiss = backdropDismiss(() => onclose());
 
@@ -174,27 +173,6 @@
     place(el, rr.right, rr.top - 5, rr.left);
   }
 
-  /** A right-click while the menu is open belongs to whatever is underneath it,
-   *  not to the backdrop that happens to be covering the page. Close, then hand
-   *  the event on so the grid can open a menu on the newly clicked photo. */
-  function onBackdropContextMenu(e: MouseEvent) {
-    e.preventDefault();
-    const bd = backdropEl;
-    if (!bd) return;
-    // elementFromPoint would answer "the backdrop" while it is still hit-testable.
-    bd.style.pointerEvents = "none";
-    const under = document.elementFromPoint(e.clientX, e.clientY);
-    bd.style.pointerEvents = "";
-    onclose();
-    under?.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        cancelable: true,
-        clientX: e.clientX,
-        clientY: e.clientY,
-      }),
-    );
-  }
 </script>
 
 {#snippet level(nodes: MenuNode[], path: number[])}
@@ -244,13 +222,7 @@
   </ul>
 {/snippet}
 
-<div
-  class="backdrop"
-  role="presentation"
-  bind:this={backdropEl}
-  oncontextmenu={onBackdropContextMenu}
-  {...dismiss}
-></div>
+<div class="backdrop" role="presentation" {...dismiss}></div>
 
 <div
   class="root"
