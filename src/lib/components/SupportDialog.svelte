@@ -54,9 +54,9 @@
     <div class="content">
       <p class="intro">
         Cullant is free and open source. No ads, no account, no subscription, and it
-        never sends your photos or anything about them anywhere. If it saves you time,
-        here is how you can help it keep going.
+        never sends your photos or anything about them anywhere.
       </p>
+      <p class="intro">If it saves you time, here is how you can help it keep going.</p>
 
       <section class="block">
         <header>
@@ -77,8 +77,6 @@
           {@render way(c)}
         {/each}
       </section>
-
-      <p class="foot">Every link opens in your browser.</p>
     </div>
   </div>
 </div>
@@ -248,12 +246,6 @@
     font-size: 11px;
     line-height: 1.35;
     opacity: 0.6;
-  }
-
-  .foot {
-    margin: 10px 2px 0;
-    font-size: 11px;
-    opacity: 0.5;
   }
 
   @media (max-width: 600px) {
