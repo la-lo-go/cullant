@@ -158,17 +158,27 @@
   const DENSITY: Record<string, number> = { small: 0.72, medium: 1, large: 1.34 };
   const isNarrow = $derived(width > 0 && width < 520);
   const BASE_CELL = $derived((isNarrow ? 116 : 188) * (DENSITY[session.gridDensity] ?? 1));
+  // Same mobile test as the rest of the app. Read once: a device does not grow
+  // a mouse mid-session.
+  const isTouch =
+    navigator.userAgent.includes("Android") ||
+    window.matchMedia("(pointer: coarse)").matches;
   // Never collapse below two columns: on very narrow viewports keep 2 columns
   // and shrink the cells to fit instead.
   const MIN_COLS = 2;
   const cols = $derived(width > 0 ? Math.max(MIN_COLS, Math.floor(width / BASE_CELL)) : 1);
-  // On phones, all but a hair of side margin is given back to the cells (the grid
-  // reads edge-to-edge there), so the cells fill the width. On desktop the block
-  // of base-pitch columns is centred with its leftover split as equal margins.
-  const EDGE = $derived(isNarrow ? 2 : 0);
+  // Touch, and any narrow viewport: the row is justified — all but a hair of side
+  // margin is given back to the cells, and the base pitch's leftover is spread
+  // across the columns so they tile the width EXACTLY at every thumbnail size.
+  // Keying that on width alone left every touch screen wider than 520px (tablet,
+  // foldable, phone in landscape) on the desktop path, where a bigger thumbnail
+  // size means a bigger leftover and so wider dead margins. Desktop keeps the
+  // base pitch and centres the block, splitting the leftover as equal margins.
+  const fillWidth = $derived(isTouch || isNarrow);
+  const EDGE = $derived(fillWidth ? 2 : 0);
   const CELL = $derived(
-    isNarrow
-      ? Math.max(1, Math.floor((width - EDGE * 2) / cols))
+    fillWidth
+      ? Math.max(1, (width - EDGE * 2) / cols)
       : cols * BASE_CELL <= width
         ? BASE_CELL
         : Math.max(1, Math.floor(width / cols)),
