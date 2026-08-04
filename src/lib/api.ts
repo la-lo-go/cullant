@@ -342,6 +342,9 @@ export const api = {
   // Open a media file in the OS default external app (the "play in an external
   // player" fallback for videos the in-app WebView can't decode).
   openExternal: (fileId: number) => invoke("open_external", { fileId }),
+  // Show a file in the OS file manager. Local-filesystem projects only — a SAF
+  // project's content:// URI cannot be handed to one.
+  revealInExplorer: (fileId: number) => invoke("reveal_in_explorer", { fileId }),
 };
 
 // The cullant:// scheme is served as http://cullant.localhost/ on Windows and

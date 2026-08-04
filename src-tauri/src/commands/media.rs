@@ -41,3 +41,34 @@ pub fn open_external(file_id: i64, app: AppHandle, state: State<'_, AppState>) -
         None => store.open_external(&rel_path),
     }
 }
+
+/// Show a file in the OS file manager, with the file itself selected.
+///
+/// Local filesystems only: a SAF project's documents live behind a `content://`
+/// URI that no file manager can be pointed at, so the caller is expected to omit
+/// the affordance there rather than rely on this error.
+#[tauri::command]
+pub fn reveal_in_explorer(
+    file_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let (db, store) = project(&state)?;
+
+    let rel_path: String = db.call(move |conn| {
+        Ok(conn.query_row(
+            "SELECT rel_path FROM files WHERE id = ?1 AND status = 0",
+            params![file_id],
+            |r| r.get(0),
+        )?)
+    })?;
+
+    let path = store
+        .local_path(&rel_path)
+        .ok_or_else(|| AppError::Other("this project has no local file manager path".into()))?;
+
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .reveal_item_in_dir(path)
+        .map_err(|e| AppError::Other(format!("opener: {e}")))
+}
