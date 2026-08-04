@@ -26,6 +26,8 @@
   import { backdropDismiss } from "../backdrop";
   import DragList from "./DragList.svelte";
   import RadialPreview from "./RadialPreview.svelte";
+  import ContextMenu from "./ContextMenu.svelte";
+  import { pruneMenu, type MenuNode } from "../menu";
   import {
     ASSIGNABLE_COMMANDS,
     RADIAL_GROUPS,
@@ -42,6 +44,56 @@
   /** Which sector the panel is pointing at, so hovering a row lights up the
    *  matching wedge in the preview and the other way round. */
   let radialHighlight = $state(-1);
+
+  /** The "what should this sector do?" menu, for adding one. */
+  let addMenu = $state<{ x: number; y: number; items: MenuNode[] } | null>(null);
+
+  /** Every action not already on the ring, as a menu. Asking first means a new
+   *  sector is what the user wanted rather than a guess they have to correct. */
+  function slotChoices(add: (slot: RadialSlot) => void): MenuNode[] {
+    const free = (slot: RadialSlot) => !settings.radialHas(slot);
+    return pruneMenu([
+      ...(free({ kind: "more" })
+        ? [
+            {
+              kind: "item" as const,
+              label: "More… (the full command list)",
+              run: () => add({ kind: "more" }),
+            },
+            { kind: "sep" as const },
+          ]
+        : []),
+      {
+        kind: "submenu",
+        label: "Groups",
+        children: RADIAL_GROUPS.filter((g) => free({ kind: "group", id: g.id })).map((g) => ({
+          kind: "item" as const,
+          label: g.label,
+          run: () => add({ kind: "group", id: g.id }),
+        })),
+      },
+      {
+        kind: "submenu",
+        label: "Commands",
+        children: ASSIGNABLE_COMMANDS.filter((c) => free({ kind: "command", id: c.id })).map(
+          (c) => ({
+            kind: "item" as const,
+            label: c.title,
+            run: () => add({ kind: "command", id: c.id }),
+          }),
+        ),
+      },
+    ]);
+  }
+
+  function openAddMenu(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    addMenu = {
+      x: Math.round(r.left),
+      y: Math.round(r.bottom + 4),
+      items: slotChoices((slot) => settings.addRadialSlot(slot)),
+    };
+  }
 
   /** Turn a `<select>` value back into the slot it names. Assigning a slot that
    *  is already elsewhere swaps the two, which the store handles. */
@@ -416,9 +468,10 @@
                   onpointerleave={() => (radialHighlight = -1)}
                 >
                   {#if it.slot.kind === "more"}
-                    <!-- Not assignable and not removable: it is what keeps every
-                         command reachable whatever the rest is set to. -->
-                    <span class="fixed">{slotLabel(it.slot)} — always present</span>
+                    <!-- Not a picker: `more` is not one action among many, it is
+                         the escape hatch to all of them. It can still be dragged
+                         and removed like any other sector. -->
+                    <span class="fixed">{slotLabel(it.slot)} — the full command list</span>
                   {:else}
                     <select
                       value={slotKey(it.slot)}
@@ -435,16 +488,16 @@
                         {/each}
                       </optgroup>
                     </select>
-                    <button
-                      class="drop"
-                      title="Remove this sector"
-                      aria-label="Remove this sector"
-                      disabled={settings.radialSlots.length <= RADIAL_MIN_SECTORS}
-                      onclick={releasing(() => settings.removeRadialSlot(it.i))}
-                    >
-                      <X size={14} />
-                    </button>
                   {/if}
+                  <button
+                    class="drop"
+                    title="Remove this sector"
+                    aria-label="Remove this sector"
+                    disabled={settings.radialSlots.length <= RADIAL_MIN_SECTORS}
+                    onclick={releasing(() => settings.removeRadialSlot(it.i))}
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               {/snippet}
             </DragList>
@@ -452,10 +505,10 @@
             <button
               class="wide"
               disabled={settings.radialSlots.length >= RADIAL_MAX_SECTORS}
-              onclick={releasing(() => settings.addRadialSlot())}
+              onclick={openAddMenu}
             >
               <Plus size={13} />
-              <span>Add sector</span>
+              <span>Add sector…</span>
             </button>
           </div>
         </div>
@@ -563,6 +616,15 @@
     confirmLabel="Change and rebuild"
     onconfirm={() => void applyPreviewQuality()}
     oncancel={() => (pendingQuality = null)}
+  />
+{/if}
+
+{#if addMenu}
+  <ContextMenu
+    x={addMenu.x}
+    y={addMenu.y}
+    items={addMenu.items}
+    onclose={() => (addMenu = null)}
   />
 {/if}
 

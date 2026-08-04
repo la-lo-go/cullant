@@ -24,7 +24,7 @@
   import { LABELS } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
-  import { sectorPoint, slotIcon, slotLabel, wedgePath, type RadialSlot } from "../radial";
+  import { arcPath, sectorPoint, slotIcon, slotLabel, wedgePath, type RadialSlot } from "../radial";
   import type { CommandId } from "../keyboard/keymap";
   import Star from "@lucide/svelte/icons/star";
   import Circle from "@lucide/svelte/icons/circle";
@@ -82,8 +82,10 @@
   /** The box leaves room for the armed sector to grow past R_OUTER. */
   const BOX = 250;
   const ICON_R = (R_INNER + R_OUTER) / 2;
-  /** Where the armed sector's name sits — outside the ring, clear of the icon. */
-  const NAME_R = R_OUTER + 16;
+  /** The armed sector's icon travels out with the wedge that grew under it, so
+   *  the sector reads as one moving thing rather than a shape and a label that
+   *  happen to share an angle. */
+  const ICON_R_ARMED = ICON_R + 9;
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -117,6 +119,20 @@
     if (a < 0) a += Math.PI * 2;
     return Math.floor((a + step / 2) / step) % n;
   });
+
+  /** The armed sector, when it is a group still waiting to be opened. */
+  const pulling = $derived.by(() => {
+    if (descended !== null || armed < 0) return null;
+    const hit = rootActions[armed];
+    return hit?.children ? hit : null;
+  });
+
+  /** How far towards opening that group the finger has travelled, 0 to 1. The
+   *  ring shows this: a group that needs a firmer pull than a plain command
+   *  should say so while the finger is still on the way. */
+  const pull = $derived(
+    Math.max(0, Math.min(1, (dist - DEAD_ZONE) / Math.max(1, DESCEND_R - DEAD_ZONE))),
+  );
 
   // Descending happens on the way out, so it is part of the same motion rather
   // than a second gesture. Climbing back out needs a return to the dead zone,
@@ -184,11 +200,23 @@
         d={wedgePath(i, actions.length, R_INNER, R_OUTER, BOX)}
       />
     {/each}
+
+    {#if pulling}
+      <!-- The line the finger has to cross to open this group. It brightens and
+           thickens as the pull gets there, so the extra travel a group asks for
+           is visible while it is being made instead of only once it works. -->
+      <path
+        class="gate"
+        d={arcPath(armed, actions.length, DESCEND_R, BOX)}
+        style="opacity:{0.22 + pull * 0.78}; stroke-width:{1.5 + pull * 3}"
+      />
+    {/if}
   </svg>
 
   {#each actions as action, i (i)}
-    {@const p = sectorPoint(i, actions.length, ICON_R, BOX)}
-    <span class="ico" class:armed={armed === i} style="left:{p.x}px; top:{p.y}px">
+    {@const on = armed === i}
+    {@const p = sectorPoint(i, actions.length, on ? ICON_R_ARMED : ICON_R, BOX)}
+    <span class="ico" class:armed={on} style="left:{p.x}px; top:{p.y}px">
       {#if action.glyph}
         <span class="glyph">{action.glyph}</span>
       {:else if action.swatch}
@@ -197,13 +225,13 @@
         {@const Icon = action.icon}
         <Icon size={19} strokeWidth={2} />
       {/if}
+      {#if on}
+        <!-- Named only while armed, and directly under its own icon so the eye
+             never has to travel to find out what it is about to do. -->
+        <span class="name">{action.label}</span>
+      {/if}
     </span>
   {/each}
-
-  {#if armed >= 0}
-    {@const p = sectorPoint(armed, actions.length, NAME_R, BOX)}
-    <span class="name" style="left:{p.x}px; top:{p.y}px">{actions[armed].label}</span>
-  {/if}
 </div>
 
 <style>
@@ -244,18 +272,21 @@
   .ico {
     position: absolute;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    gap: 3px;
     transform: translate(-50%, -50%);
     color: #cfd4d4;
     transition:
       color 90ms ease-out,
+      left 90ms ease-out,
+      top 90ms ease-out,
       transform 90ms ease-out;
   }
 
   .ico.armed {
     color: #fff;
-    transform: translate(-50%, -50%) scale(1.15);
+    transform: translate(-50%, -50%) scale(1.12);
   }
 
   .glyph {
@@ -271,17 +302,25 @@
     border-radius: 50%;
   }
 
-  /* Only the armed sector is named, and outside the ring so it never sits on
-     top of the photo detail the choice is being made about. */
+  /* Under the icon, and only for the armed sector. Absolutely placed so adding
+     it never nudges the icon it belongs to. */
   .name {
     position: absolute;
-    transform: translate(-50%, -50%);
-    padding: 2px 7px;
+    top: 100%;
+    margin-top: 3px;
+    padding: 1px 6px;
     border-radius: 999px;
     background: rgba(12, 15, 16, 0.92);
     color: #fff;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     white-space: nowrap;
   }
+
+  .gate {
+    fill: none;
+    stroke: var(--accent);
+    stroke-linecap: round;
+  }
+
 </style>

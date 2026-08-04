@@ -2,7 +2,6 @@
 
 import type { BurstMode } from "../bursts";
 import {
-  ASSIGNABLE_COMMANDS,
   DEFAULT_RADIAL_SLOTS,
   RADIAL_MAX_SECTORS,
   RADIAL_MIN_SECTORS,
@@ -434,26 +433,23 @@ class SettingsStore {
     this.saveRadialSlots();
   }
 
-  /** Append a sector, filling it with the first action not already on the ring
-   *  so a new sector is never blank. */
-  addRadialSlot() {
+  /** Append a sector holding exactly what the caller asked for. Nothing is
+   *  guessed: the panel picks the action first, so a new sector is never
+   *  something the user then has to correct. */
+  addRadialSlot(slot: RadialSlot) {
     if (this.radialSlots.length >= RADIAL_MAX_SECTORS) return;
-    const taken = new Set(this.radialSlots.map(slotKey));
-    const spare =
-      DEFAULT_RADIAL_SLOTS.find((s) => !taken.has(slotKey(s))) ??
-      ASSIGNABLE_COMMANDS.map((c) => ({ kind: "command", id: c.id }) as RadialSlot).find(
-        (s) => !taken.has(slotKey(s)),
-      );
-    if (!spare) return;
-    this.radialSlots = [...this.radialSlots, spare];
+    if (this.radialSlots.some((s) => slotKey(s) === slotKey(slot))) return;
+    this.radialSlots = [...this.radialSlots, slot];
     this.saveRadialSlots();
   }
 
-  /** Remove a sector. `more` is not removable: it is what keeps every command
-   *  reachable whatever the rest of the ring is set to. */
+  /** Whether an action is still free to be put on the ring. */
+  radialHas(slot: RadialSlot): boolean {
+    return this.radialSlots.some((s) => slotKey(s) === slotKey(slot));
+  }
+
   removeRadialSlot(index: number) {
     if (this.radialSlots.length <= RADIAL_MIN_SECTORS) return;
-    if (this.radialSlots[index]?.kind === "more") return;
     this.radialSlots = this.radialSlots.filter((_, i) => i !== index);
     this.saveRadialSlots();
   }

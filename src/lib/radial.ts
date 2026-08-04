@@ -6,10 +6,10 @@
  * ratings and colour labels have six and five values each, and spending six
  * sectors on stars would leave no room for anything else.
  *
- * One slot is always `more`, and it cannot be removed: it opens the full
- * command list, so no arrangement of the ring can leave a command unreachable.
- * It opens a LIST rather than a second ring on purpose — the unassigned set is
- * some forty commands, and a ring of forty sectors is not a menu.
+ * The `more` slot opens the full command list. It is an ordinary slot like any
+ * other — put it on the ring or leave it off. It opens a LIST rather than a
+ * second ring on purpose: the unassigned set is some forty commands, and a ring
+ * of forty sectors is not a menu.
  *
  * Slots serialize as short strings (`cmd:flag.pick`, `group:stars`, `more`) so a
  * stored layout stays readable and easy to heal against a changed command set.
@@ -149,6 +149,23 @@ export function wedgePath(i: number, n: number, rInner: number, rOuter: number, 
   );
 }
 
+/**
+ * The arc across sector `i` at radius `r` — the line the finger has to reach to
+ * open a group. Drawn so the pull a group needs is something you can see coming
+ * rather than something you have to already know about.
+ */
+export function arcPath(i: number, n: number, r: number, box: number): string {
+  const step = (Math.PI * 2) / n;
+  // Kept just inside the sector's own edges so neighbouring arcs never touch.
+  const inset = Math.min(step * 0.12, 0.12);
+  const a0 = i * step - step / 2 - Math.PI / 2 + inset;
+  const a1 = a0 + step - inset * 2;
+  const c = box / 2;
+  const p = (a: number) => `${c + r * Math.cos(a)} ${c + r * Math.sin(a)}`;
+  const large = step > Math.PI ? 1 : 0;
+  return `M ${p(a0)} A ${r} ${r} 0 ${large} 1 ${p(a1)}`;
+}
+
 /** Centre point of sector `i` at radius `r`, in the same box. */
 export function sectorPoint(i: number, n: number, r: number, box: number): { x: number; y: number } {
   const a = i * ((Math.PI * 2) / n) - Math.PI / 2;
@@ -185,9 +202,13 @@ function parseSlot(key: string): RadialSlot | null {
 
 /**
  * Read a stored layout back, healed against the current build: keys that no
- * longer resolve are dropped, duplicates collapse, `more` is forced back in if
- * it went missing, and the length is held inside the sector bounds. A layout can
- * therefore never arrive in a state that hides commands or leaves a hole.
+ * longer resolve are dropped, duplicates collapse, and the length is held inside
+ * the sector bounds.
+ *
+ * `more` is an ordinary slot here — it can be removed like any other. A ring
+ * without it can leave a command off the ring entirely, which is the user's call
+ * to make: the keyboard still reaches everything, and forcing a sector nobody
+ * wants is worse than a ring that does exactly what it was set up to do.
  */
 export function healSlots(raw: unknown): RadialSlot[] {
   const parsed = Array.isArray(raw)
@@ -200,12 +221,6 @@ export function healSlots(raw: unknown): RadialSlot[] {
     if (seen.has(key) || slots.length >= RADIAL_MAX_SECTORS) continue;
     seen.add(key);
     slots.push(slot);
-  }
-  if (!seen.has("more")) {
-    // Replacing the last sector rather than growing past the ceiling: `more` is
-    // the one slot that has to be there.
-    if (slots.length >= RADIAL_MAX_SECTORS) slots[slots.length - 1] = { kind: "more" };
-    else slots.push({ kind: "more" });
   }
   for (const fill of DEFAULT_RADIAL_SLOTS) {
     if (slots.length >= RADIAL_MIN_SECTORS) break;
