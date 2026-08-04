@@ -45,6 +45,9 @@
       <button onclick={() => session.recouple(groupId, "jpeg")}>
         Use JPEG's state
       </button>
+      <button onclick={() => session.recouple(groupId, "latest")}>
+        Use the most recent edit
+      </button>
       <button onclick={() => session.recouple(groupId, "none")}>
         Keep each as-is
       </button>

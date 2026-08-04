@@ -1599,6 +1599,13 @@ class SessionStore {
     await catalog.refresh();
   }
 
+  /** Settle a coupled pair whose halves have drifted apart. Returns the
+   *  authoritative rows, so this reconciles like any other state write and needs
+   *  no catalog refresh. */
+  async syncPair(groupId: number, syncFrom: SyncFrom) {
+    this.applyStates(await api.syncPairState(groupId, syncFrom));
+  }
+
   private localGuess(id: number, patch: Partial<CullState>): CullState {
     const current = catalog.items.find((i) => i.id === id);
     return {

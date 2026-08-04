@@ -110,7 +110,9 @@ export interface MediaCounts {
   videos: number;
 }
 
-export type SyncFrom = "raw" | "jpeg" | "none";
+/** Which member of a pair speaks for the whole group when settling it.
+ *  "latest" picks the most recently classified member. */
+export type SyncFrom = "raw" | "jpeg" | "latest" | "none";
 
 export interface FileMetadata {
   relPath: string;
@@ -304,6 +306,9 @@ export const api = {
   undoCommit: (commitId: number) => invoke<UndoOutcome>("undo_commit", { commitId }),
   undoCommitEntry: (entryId: number) => invoke<UndoOutcome>("undo_commit_entry", { entryId }),
   decoupleGroup: (groupId: number) => invoke("decouple_group", { groupId }),
+  // Settle a pair whose halves have diverged, without decoupling it.
+  syncPairState: (groupId: number, syncFrom: SyncFrom) =>
+    invoke<CullState[]>("sync_pair_state", { groupId, syncFrom }),
   recoupleGroup: (groupId: number, syncFrom: SyncFrom) =>
     invoke("recouple_group", { groupId, syncFrom }),
   listTaskTags: () => invoke<TaskTag[]>("list_task_tags"),

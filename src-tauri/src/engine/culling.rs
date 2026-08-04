@@ -33,11 +33,33 @@ pub struct CullState {
     pub orientation: i64,
 }
 
-fn now_secs() -> i64 {
+pub(crate) fn now_secs() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Read the authoritative rows for `ids`, in the order given.
+///
+/// Every state write answers with these, so the frontend reconciles an
+/// optimistic guess against one shape no matter which command produced it.
+pub(crate) fn read_states(conn: &Connection, ids: &[i64]) -> rusqlite::Result<Vec<CullState>> {
+    let mut stmt = conn
+        .prepare_cached("SELECT id, rating, flag, label, orientation FROM files WHERE id = ?1")?;
+    let mut out = Vec::with_capacity(ids.len());
+    for id in ids {
+        out.push(stmt.query_row(params![id], |r| {
+            Ok(CullState {
+                id: r.get(0)?,
+                rating: r.get(1)?,
+                flag: r.get(2)?,
+                label: r.get(3)?,
+                orientation: r.get::<_, Option<i64>>(4)?.unwrap_or(1),
+            })
+        })?);
+    }
+    Ok(out)
 }
 
 /// Expand target ids according to group fan-out rules.
@@ -78,23 +100,7 @@ where
         for id in &ids {
             update(&tx, *id, now)?;
         }
-        let mut out = Vec::with_capacity(ids.len());
-        {
-            let mut stmt = tx.prepare_cached(
-                "SELECT id, rating, flag, label, orientation FROM files WHERE id = ?1",
-            )?;
-            for id in &ids {
-                out.push(stmt.query_row(params![id], |r| {
-                    Ok(CullState {
-                        id: r.get(0)?,
-                        rating: r.get(1)?,
-                        flag: r.get(2)?,
-                        label: r.get(3)?,
-                        orientation: r.get::<_, Option<i64>>(4)?.unwrap_or(1),
-                    })
-                })?);
-            }
-        }
+        let out = read_states(&tx, &ids)?;
         tx.commit()?;
         Ok(out)
     })

@@ -265,6 +265,7 @@ pub fn run() {
             commands::culling::rotate,
             commands::groups::decouple_group,
             commands::groups::recouple_group,
+            commands::groups::sync_pair_state,
             commands::tags::list_task_tags,
             commands::tags::create_task_tag,
             commands::tags::update_task_tag,

@@ -12,7 +12,7 @@
  *   that is already set offers to clear itself instead.
  */
 
-import { api, type ItemLite } from "./api";
+import { api, type ItemLite, type SyncFrom } from "./api";
 import { GROUP_DIMS, dayKey } from "./gridGroups";
 import { runCommand } from "./keyboard/dispatcher.svelte";
 import type { CommandId } from "./keyboard/keymap";
@@ -39,6 +39,7 @@ import FolderOpen from "@lucide/svelte/icons/folder-open";
 import Group from "@lucide/svelte/icons/group";
 import Info from "@lucide/svelte/icons/info";
 import Layers from "@lucide/svelte/icons/layers";
+import Link2 from "@lucide/svelte/icons/link-2";
 import LayoutGrid from "@lucide/svelte/icons/layout-grid";
 import Maximize2 from "@lucide/svelte/icons/maximize-2";
 import SquareDashedMousePointer from "@lucide/svelte/icons/square-dashed-mouse-pointer";
@@ -231,6 +232,28 @@ function classifyBlock(item: ItemLite): MenuNode[] {
     ...(isPair
       ? ([
           { kind: "sep" },
+          // Only offered once the halves actually disagree: settling a pair that
+          // already agrees is a no-op dressed up as a choice.
+          ...(!item.decoupled && session.pairHalves(item)?.diverged
+            ? [
+                {
+                  kind: "submenu" as const,
+                  label: "Settle pair from…",
+                  icon: Link2,
+                  children: (
+                    [
+                      ["raw", "RAW"],
+                      ["jpeg", "JPEG"],
+                      ["latest", "Most recent edit"],
+                    ] as [SyncFrom, string][]
+                  ).map(([from, label]) => ({
+                    kind: "item" as const,
+                    label,
+                    run: () => void session.syncPair(item.groupId, from),
+                  })),
+                },
+              ]
+            : []),
           {
             kind: "item",
             label: item.decoupled ? "Recouple pair…" : "Decouple pair",
