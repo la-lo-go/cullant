@@ -23,6 +23,13 @@
 
   const open = $derived(view.infoTip?.title === title);
 
+  // An explanation must not outlive the control it explains: a panel that closes
+  // while its tip is up (Escape from inside it, a mode change, a project close)
+  // takes the tip with it, wherever the panel lives.
+  $effect(() => () => {
+    if (view.infoTip?.title === title) view.infoTip = null;
+  });
+
   function toggle(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     view.infoTip = open ? null : { title, text, x: r.left, y: r.bottom + 6 };
@@ -32,7 +39,9 @@
   }
 </script>
 
-<button class="tip" class:open aria-label="What does {title} do?" onclick={toggle}>
+<!-- data-info-tip marks the button as owning its own click, so the overlay's
+     dismiss-on-press leaves toggling (and swapping) explanations alone. -->
+<button class="tip" class:open data-info-tip aria-label="What does {title} do?" onclick={toggle}>
   <Info {size} />
 </button>
 

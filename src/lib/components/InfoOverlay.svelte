@@ -22,6 +22,26 @@
 
   let popEl = $state<HTMLDivElement | null>(null);
 
+  /**
+   * Any click outside the explanation dismisses it, and still reaches whatever
+   * it landed on: closing the host panel from its backdrop or its X is one tap,
+   * not one to shed the explanation and another to close the panel. The scrim
+   * below stops the clicks that have nothing under them.
+   *
+   * Capture phase, because a dialog that stops clicks from bubbling (the
+   * settings dialog does) would otherwise hide every press inside it.
+   */
+  $effect(() => {
+    if (!view.infoTip) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (!target || target.closest("[data-info-tip]") || popEl?.contains(target)) return;
+      view.infoTip = null;
+    };
+    window.addEventListener("click", onClick, true);
+    return () => window.removeEventListener("click", onClick, true);
+  });
+
   // Wide screens only: park it under the icon and let the shared clamp pull it
   // back inside the window. The sheet spans the full width by construction.
   $effect(() => {
@@ -35,6 +55,7 @@
 
 {#if view.infoTip}
   <button class="scrim" aria-label="Close explanation" onclick={() => (view.infoTip = null)}></button>
+  <div class="dim" aria-hidden="true"></div>
   <div class="pop" class:sheet={narrow} bind:this={popEl} role="tooltip">
     <span class="title">{view.infoTip.title}</span>
     <p>{view.infoTip.text}</p>
@@ -42,13 +63,27 @@
 {/if}
 
 <style>
+  /* Swallows the clicks that would otherwise act on the app underneath (a
+     thumbnail, the touch bar). Deliberately BELOW the panel layer: a press on a
+     panel's backdrop or on its X has to reach the panel, so the same tap that
+     sheds the explanation closes the panel too. */
   .scrim {
     position: fixed;
     inset: 0;
-    z-index: 90;
+    z-index: 35;
     border: 0;
     background: none;
     cursor: default;
+  }
+
+  /* The dimming is its own layer, above the panels the scrim sits under, and it
+     never takes a press. Same value the dialog backdrops use. */
+  .dim {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.55);
   }
 
   .pop {
