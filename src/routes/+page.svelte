@@ -13,7 +13,6 @@
   import FolderTree from "$lib/components/FolderTree.svelte";
   import Viewer from "$lib/components/Viewer.svelte";
   import CompareView from "$lib/components/CompareView.svelte";
-  import SurveyView from "$lib/components/SurveyView.svelte";
   import FiltersPanel from "$lib/components/FiltersPanel.svelte";
   import GridViewPanel from "$lib/components/GridViewPanel.svelte";
   import SelectionBar from "$lib/components/SelectionBar.svelte";
@@ -609,7 +608,7 @@
       {:else if view.mode === "viewer"}
         <Viewer />
       {:else if view.mode === "survey"}
-        <SurveyView />
+        <CompareView />
       {:else}
         <CompareView />
       {/if}

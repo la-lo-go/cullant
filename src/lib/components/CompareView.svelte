@@ -1,21 +1,37 @@
 <script lang="ts">
+  /**
+   * The N-up view: compare and survey are one thing.
+   *
+   * Compare used to be two fixed panes and survey an unrelated grid of buttons,
+   * so the one job they share — reduce a burst to the frame worth keeping — was
+   * done twice and badly. This draws N cells, and N is the only difference
+   * between the two doors into it: `C` opens with two, `N` with the whole
+   * selection or burst.
+   *
+   * Eliminating a cell pulls the next candidate into the hole it leaves (see
+   * `session.surveyPool`), so two cells IS the tournament: the survivor stays put
+   * and meets the next challenger. That is why pinning is gone — only the cell
+   * you empty gets refilled, which is what pinning was for.
+   *
+   * Every cell is a real `ZoomImage` WITHOUT `standalone`, so they share one zoom
+   * and pan through the `view` store. Judging sharpness between two frames of a
+   * burst is the whole point of putting them side by side, and it could not be
+   * done while each pane zoomed on its own.
+   */
   import { untrack } from "svelte";
-  import { previewUrl, type ItemLite } from "../api";
+  import { previewUrl } from "../api";
   import { session } from "../stores/session.svelte";
   import { catalog } from "../stores/catalog.svelte";
+  import { settings } from "../stores/settings.svelte";
   import { view } from "../stores/view.svelte";
   import { tags } from "../stores/tags.svelte";
   import ZoomImage from "./ZoomImage.svelte";
   import Filmstrip from "./Filmstrip.svelte";
   import X from "@lucide/svelte/icons/x";
-  import Pin from "@lucide/svelte/icons/pin";
-  import PinOff from "@lucide/svelte/icons/pin-off";
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
   import Layers from "@lucide/svelte/icons/layers";
   import { edgeBounce } from "../anim";
-
-  type Side = "left" | "right";
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -25,164 +41,126 @@
     Purple: "#9a66d6",
   };
 
-  let panes = $state<HTMLElement | null>(null);
-  // Bounce the panes when stepping past the first/last photo. Track the
-  // last-seen bump so switching into this view doesn't replay a stale bounce.
+  const items = $derived(session.surveyItems);
+
+  /** Roughly square. As the field narrows the survivors get a bigger share of
+   *  the screen, which is the reward for eliminating one; two cells land side by
+   *  side, which is what compare has always looked like. */
+  const cols = $derived(Math.max(1, Math.ceil(Math.sqrt(items.length))));
+
+  let cellsEl = $state<HTMLElement | null>(null);
+  // Bounce the cells when stepping past the first/last photo. Track the
+  // last-seen bump so switching into this view doesn't replay a stale one.
   let lastBump = session.edgeBump.n;
   $effect(() => {
     const b = session.edgeBump;
-    if (b.n === lastBump || !panes) return;
+    if (b.n === lastBump || !cellsEl) return;
     lastBump = b.n;
-    edgeBounce(panes, b.dir, "x");
+    edgeBounce(cellsEl, b.dir, "x");
   });
 
-  // 2-up compare. Each pane owns its zoom (ZoomImage `standalone`), so the two
-  // photos can be inspected at different magnifications independently.
-  //
-  // Pinning freezes one pane on a reference photo while the other follows the
-  // focus; with nothing pinned it's focused vs the next in filter order.
-  let pinnedSide = $state<Side | null>(null);
-  let pinnedItem = $state<ItemLite | null>(null);
-
-  // Prefer the live object from the session (rating/flag edits stay visible),
-  // but keep rendering the snapshot if the item drops out of the filter.
-  const pinnedLive = $derived.by(() => {
-    if (!pinnedItem) return null;
-    const id = pinnedItem.id;
-    return session.filtered.find((i) => i.id === id) ?? pinnedItem;
-  });
-
-  const left = $derived(pinnedSide === "left" ? pinnedLive : session.focused);
-  const right = $derived.by(() => {
-    if (pinnedSide === "right") return pinnedLive;
-    if (pinnedSide === "left") return session.focused;
-    const i = session.compareCompanionIndex;
-    return i === null ? undefined : session.filtered[i];
-  });
-
-  // Which pane tracks the focused photo (gets the accent caption).
-  const focusedSide = $derived<Side>(pinnedSide === "left" ? "right" : "left");
-
-  /** The other pane's photo, as an index into `filtered`, so the filmstrip can
-   *  mark both photos on screen. The focused one is marked by the strip itself
-   *  and stays the stronger mark, because it is the one the action bar hits.
-   *  A pinned photo filtered out of the strip has no cell to mark. */
-  const companionIndex = $derived.by(() => {
-    if (!pinnedSide) return session.compareCompanionIndex;
-    const id = pinnedLive?.id;
-    if (id === undefined) return null;
-    const idx = session.filtered.findIndex((i) => i.id === id);
-    return idx === -1 ? null : idx;
-  });
-
-  function togglePin(side: Side, current: ItemLite | null | undefined) {
-    if (pinnedSide === side) {
-      pinnedSide = null;
-      pinnedItem = null;
-    } else if (current) {
-      // Pinning one pane unpins the other.
-      pinnedSide = side;
-      pinnedItem = current;
-    }
+  /** Each cell pages ITSELF, so stepping the photo in one never moves another. */
+  function pageCell(index: number) {
+    return (dir: number) => session.pageSurveyCell(index, dir);
   }
 
-  /** Swipe/margin-tap paging on a PINNED pane: moving the shared focus
-   *  wouldn't change what a pinned pane shows, so page the pinned photo
-   *  itself instead, through the same filtered order. */
-  function pageWhilePinned(dir: number) {
-    if (!pinnedItem) return;
-    const idx = session.filtered.findIndex((i) => i.id === pinnedItem!.id);
-    if (idx < 0) return;
-    const next = session.filtered[idx + dir];
-    if (next) pinnedItem = next;
-  }
-
-  /** How each pane pages ITSELF.
-   *
-   *  A pane that merely follows the focus moves the focus (the default). A
-   *  pinned one moves its own pinned photo. The companion — unpinned and not
-   *  focused — used to fall through to the default too, which moved the focus
-   *  and therefore paged the OTHER pane: swiping the right-hand photo changed
-   *  the left one. It steps itself now. */
-  function pagerFor(side: Side): ((dir: number) => void) | undefined {
-    if (pinnedSide === side) return pageWhilePinned;
-    if (focusedSide === side) return undefined;
-    return (dir) => session.stepCompanion(dir);
-  }
-
-  // Warm the cache one photo ahead of the focus, so arrowing quickly through a
-  // burst always finds the next preview already decoded. Gated like Viewer.svelte:
-  // a dwell so fast flipping never floods the pool, and a skip for previews
-  // already cached (nothing to warm — the protocol serves those from disk).
+  // Warm the cache one candidate ahead so a long burst never stalls when a cell
+  // is refilled. Gated by a dwell, like the loupe: fast elimination must not
+  // flood the decode pool.
   const AHEAD_DWELL_MS = 1000;
   $effect(() => {
-    const idx = session.focusedIndex;
+    const next = session.surveyPool[0];
     const timer = setTimeout(() => {
-      const ahead = session.filtered[idx + 2];
-      if (ahead && ahead.kind !== 2 && !untrack(() => catalog.previewReady.has(ahead.id))) {
-        new Image().src = previewUrl(ahead);
+      const item = untrack(() => catalog.items.find((i) => i.id === next));
+      if (item && item.kind !== 2 && !untrack(() => catalog.previewReady.has(item.id))) {
+        new Image().src = previewUrl(item);
       }
     }, AHEAD_DWELL_MS);
     return () => clearTimeout(timer);
   });
-
-  // When a pinned pane's photo is deleted from the catalog, drop the pin so
-  // ZoomImage stops requesting a dead id (mirrors the selectedIds pruning). A
-  // photo merely filtered out still shows via pinnedLive's snapshot fallback,
-  // so this checks the catalog itself, not the visible filter.
-  $effect(() => {
-    if (pinnedItem && !catalog.items.some((i) => i.id === pinnedItem!.id)) {
-      pinnedSide = null;
-      pinnedItem = null;
-    }
-  });
 </script>
 
-<div class="compare">
-  <div class="panes" bind:this={panes}>
+<div class="multi">
+  {#if !view.fullscreen}
+    <div class="bar">
+      <span class="count">
+        {items.length} on screen
+        {#if session.surveyPool.length > 0}
+          <span class="queued">· {session.surveyPool.length} waiting</span>
+        {/if}
+        {#if session.surveyRequested > 0}
+          <span class="queued">· first {items.length} of {session.surveyRequested} selected</span>
+        {/if}
+      </span>
+      <span class="hint">
+        ← → to move · X to {settings.surveyEliminate === "reject" ? "reject" : "drop"} · Esc to leave
+      </span>
+      <button
+        class="icon-btn"
+        title="Full screen"
+        aria-label="Full screen"
+        onclick={(e) => {
+          view.toggleFullscreen();
+          (e.currentTarget as HTMLElement).blur();
+        }}
+      >
+        <Maximize size={15} />
+      </button>
+      <button
+        class="icon-btn"
+        onclick={() => session.closeSurvey()}
+        aria-label="Back to grid"
+        title="Back to grid (Esc)"
+      >
+        <X size={15} />
+      </button>
+    </div>
+  {:else}
     <button
-      class="back"
-      title="Back to grid (Esc)"
-      onclick={(e) => {
-        view.mode = "grid";
-        (e.currentTarget as HTMLElement).blur();
-      }}><X size={16} /></button
-    >
-    <button
-      class="back fullscreen-btn"
-      class:active={view.fullscreen}
-      title={view.fullscreen ? "Exit full screen" : "Full screen"}
+      class="icon-btn floating"
+      title="Exit full screen"
+      aria-label="Exit full screen"
       onclick={(e) => {
         view.toggleFullscreen();
         (e.currentTarget as HTMLElement).blur();
       }}
     >
-      {#if view.fullscreen}<Minimize size={16} />{:else}<Maximize size={16} />{/if}
+      <Minimize size={15} />
     </button>
-    {#if left}
-      <div class="pane" class:pinned={pinnedSide === "left"}>
-        <ZoomImage item={left} standalone onPage={pagerFor("left")} />
+  {/if}
+
+  <div
+    class="cells"
+    bind:this={cellsEl}
+    style="grid-template-columns: repeat({cols}, minmax(0, 1fr))"
+  >
+    {#each items as item, i (item.id)}
+      {@const focused = session.focused?.id === item.id}
+      <div class="cell" class:focused>
+        <!-- Clicking a cell focuses it. Underneath the photo, because ZoomImage
+             owns the pointer for pan, pinch and the radial menu; this only sees
+             what falls through to it. -->
         <button
-          class="pin-btn"
-          class:active={pinnedSide === "left"}
-          title={pinnedSide === "left" ? "Unpin" : "Pin this photo"}
-          onclick={(e) => {
-            togglePin("left", left);
-            e.currentTarget.blur();
-          }}
-        >
-          {#if pinnedSide === "left"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
-        </button>
+          class="focus-catch"
+          aria-label="Focus {item.name}"
+          onpointerdown={() => session.focusSurveyItem(item.id)}
+        ></button>
+        <!-- No `standalone`: every cell shares the one zoom in the view store,
+             which is what makes an A/B of sharpness possible at all. -->
+        <ZoomImage {item} onPage={pageCell(i)} />
         {#if !view.fullscreen}
-          {@const b = session.burstPositionOf(left.id)}
-          <span class="caption" class:focused-caption={focusedSide === "left"}>
-            <span style:color={left.label ? labelColors[left.label] : null}>{left.name}.{left.ext}</span>
+          {@const b = session.burstPositionOf(item.id)}
+          <span class="caption" class:focused-caption={focused}>
+            <span style:color={item.label ? labelColors[item.label] : null}>
+              {item.name}.{item.ext}
+            </span>
+            {#if item.rating > 0}<span class="stars">{"★".repeat(item.rating)}</span>{/if}
             {#if b}
               <span class="burst" title="Shot {b.position} of a burst of {b.total}">
                 <Layers size={10} />{b.position}/{b.total}
               </span>
             {/if}
-            {#each left.tagIds as tagId (tagId)}
+            {#each item.tagIds as tagId (tagId)}
               {@const t = tags.byId.get(tagId)}
               {#if t}
                 {@const c = t.color ?? "#888"}
@@ -192,209 +170,151 @@
           </span>
         {/if}
       </div>
-    {/if}
-    {#if right}
-      <div class="pane" class:pinned={pinnedSide === "right"}>
-        <ZoomImage item={right} standalone onPage={pagerFor("right")} />
-        <button
-          class="pin-btn"
-          class:active={pinnedSide === "right"}
-          title={pinnedSide === "right" ? "Unpin" : "Pin this photo"}
-          onclick={(e) => {
-            togglePin("right", right);
-            e.currentTarget.blur();
-          }}
-        >
-          {#if pinnedSide === "right"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
-        </button>
-        {#if !view.fullscreen}
-          {@const b = session.burstPositionOf(right.id)}
-          <span class="caption" class:focused-caption={focusedSide === "right"}>
-            <span style:color={right.label ? labelColors[right.label] : null}>{right.name}.{right.ext}</span>
-            {#if b}
-              <span class="burst" title="Shot {b.position} of a burst of {b.total}">
-                <Layers size={10} />{b.position}/{b.total}
-              </span>
-            {/if}
-            {#each right.tagIds as tagId (tagId)}
-              {@const t = tags.byId.get(tagId)}
-              {#if t}
-                {@const c = t.color ?? "#888"}
-                <span class="tagpill" style="border-color: {c}; background: {c}2e">{t.name}</span>
-              {/if}
-            {/each}
-          </span>
-        {/if}
-      </div>
-    {:else}
-      <div class="pane empty">End of set</div>
-    {/if}
+    {/each}
   </div>
-  {#if !view.fullscreen}
-    <Filmstrip items={session.filtered} {companionIndex} />
+
+  {#if session.showFilmstrip && !view.fullscreen}
+    <!-- The whole visible set, not just the cells: the strip is how you see
+         where the field sits inside the shoot. The focused cell is the one it
+         marks; with N cells there is no single "companion" left to mark. -->
+    <Filmstrip items={session.filtered} />
   {/if}
 </div>
 
 <style>
-  .compare {
+  .multi {
+    position: relative;
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    /* Anchor for the collapsed filmstrip's floating peek tab. */
-    position: relative;
+    gap: 6px;
   }
 
-  .panes {
-    flex: 1;
-    min-height: 0;
+  .bar {
     display: flex;
-    gap: 2px;
-    position: relative;
-  }
-
-  /* Portrait / narrow: stack the two panes vertically instead of side by side. */
-  @media (max-width: 640px), (max-aspect-ratio: 3 / 4) {
-    .panes {
-      flex-direction: column;
-    }
-  }
-
-  .back {
-    position: absolute;
-    top: 10px;
-    right: calc(10px + var(--safe-right));
-    z-index: 5;
-    width: 28px;
-    height: 28px;
-    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: 6px;
-    padding: 0;
-    font-size: 14px;
-    font-family: inherit;
-    background: rgba(0, 0, 0, 0.45);
-    color: rgba(255, 255, 255, 0.75);
-    cursor: pointer;
+    gap: 10px;
+    padding: 0 8px;
+    font-size: 12px;
+    color: #bbb;
   }
 
-  .back:hover {
-    background: rgba(0, 0, 0, 0.7);
-    color: #fff;
+  .count {
+    flex: none;
+    font-variant-numeric: tabular-nums;
   }
 
-  .fullscreen-btn {
-    top: 46px;
+  .queued {
+    opacity: 0.55;
   }
 
-  .fullscreen-btn.active {
-    background: rgba(var(--accent-rgb), 0.5);
-    color: #fff;
-  }
-
-  .pane {
+  .hint {
     flex: 1;
     min-width: 0;
-    /* Flex items default min-height to `auto` (their content's intrinsic
-       size), not 0 — without this, stacking the panes vertically (narrow /
-       portrait) let each pane's content push it past its 1/2 share of the
-       column, spilling the second pane below the viewport uncontained. */
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-    position: relative;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.55;
   }
 
-  .pane.pinned {
-    outline: 1px solid rgba(var(--accent-rgb), 0.55);
-    outline-offset: -1px;
-  }
-
-  .pin-btn {
-    position: absolute;
-    top: 10px;
-    left: 10px;
-    z-index: 5;
-    width: 28px;
-    height: 28px;
+  .icon-btn {
+    flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border: none;
-    border-radius: 6px;
+    width: 26px;
+    height: 24px;
     padding: 0;
-    font-family: inherit;
-    background: rgba(0, 0, 0, 0.45);
-    color: rgba(255, 255, 255, 0.75);
+    background: none;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    color: #bbb;
     cursor: pointer;
   }
 
-  .pin-btn:hover {
-    background: rgba(0, 0, 0, 0.7);
+  .icon-btn:hover {
     color: #fff;
   }
 
-  /* Only the first pane touches the left screen edge (side-by-side layout);
-     keep its overlays clear of a landscape navigation bar / cutout. */
-  .pane:first-child .pin-btn,
-  .pane:first-child .caption {
-    left: calc(10px + var(--safe-left));
+  .icon-btn.floating {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 3;
+    background: rgba(0, 0, 0, 0.5);
   }
 
-  .pin-btn.active {
-    color: var(--accent);
+  .cells {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .cell {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .cell.focused {
+    border-color: rgba(var(--accent-rgb), 0.55);
+  }
+
+  .focus-catch {
+    position: absolute;
+    inset: 0;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
   }
 
   .caption {
     position: absolute;
+    left: 6px;
     bottom: 6px;
-    left: 10px;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    flex-wrap: wrap;
     gap: 6px;
-    max-width: calc(100% - 20px);
-    font-size: 12px;
-    opacity: 0.7;
-    background: rgba(0, 0, 0, 0.5);
-    padding: 2px 8px;
-    border-radius: 4px;
+    max-width: calc(100% - 12px);
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #ddd;
+    font-size: 11px;
     pointer-events: none;
   }
 
-  /* The loupe's burst pill, in the caption. Compare hid it entirely before, so
-     there was no way to tell you were judging two frames of the same burst. */
+  .caption.focused-caption {
+    color: #fff;
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.5);
+  }
+
+  .stars {
+    color: #ffd166;
+    flex: none;
+  }
+
   .burst {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    padding: 1px 7px;
-    font-size: 11px;
+    gap: 2px;
+    flex: none;
     font-variant-numeric: tabular-nums;
+    opacity: 0.85;
   }
 
   .tagpill {
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 4px;
+    flex: none;
+    padding: 0 5px;
     border: 1px solid;
-    /* Border color and a ~18% alpha tint (2e suffix) are set inline from the
-       tag's #rrggbb color. */
-    color: #eee;
-  }
-
-  .focused-caption {
-    outline: 1px solid var(--accent);
-  }
-
-  .pane.empty {
-    align-items: center;
-    justify-content: center;
-    opacity: 0.4;
+    border-radius: 999px;
+    font-size: 10px;
   }
 </style>

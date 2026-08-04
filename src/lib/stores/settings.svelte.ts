@@ -35,12 +35,17 @@ const COLLAPSE_BURSTS_KEY = "cullant.collapseBursts";
 const BURST_MODE_KEY = "cullant.burstMode";
 const BURST_GAP_KEY = "cullant.burstGapSeconds";
 const PREVIEW_QUALITY_KEY = "cullant.previewQuality";
+const SURVEY_ELIMINATE_KEY = "cullant.surveyEliminate";
 const RADIAL_SLOTS_KEY = "cullant.radial.slots";
 const RADIAL_MOUSE_KEY = "cullant.radial.mouse";
 
 /** Allowed burst gaps in seconds — a whitelist for the same reason the
  *  auto-rescan intervals are one. */
 export const BURST_GAP_CHOICES = [1, 2, 3, 5, 10] as const;
+
+/** What taking a photo out of the running does. */
+export const SURVEY_ELIMINATE_CHOICES = ["reject", "hide"] as const;
+export type SurveyEliminate = (typeof SURVEY_ELIMINATE_CHOICES)[number];
 
 /** Allowed auto-rescan intervals in minutes; 0 means off. Kept as a whitelist
  *  so a stale/garbled stored value can never yield a pathological interval. */
@@ -85,6 +90,7 @@ export const DEFAULTS: {
   collapseBursts: boolean;
   burstMode: BurstMode;
   burstGapSeconds: number;
+  surveyEliminate: SurveyEliminate;
 } = {
   progressiveLoupe: true,
   rememberSession: true,
@@ -104,6 +110,7 @@ export const DEFAULTS: {
   collapseBursts: true,
   burstMode: "fixed",
   burstGapSeconds: 2,
+  surveyEliminate: "reject",
 };
 
 function loadBool(key: string, fallback: boolean): boolean {
@@ -174,6 +181,17 @@ function loadBottomBar(): { order: string[]; hidden: string[] } {
 }
 
 const initialBottomBar = loadBottomBar();
+
+function loadSurveyEliminate(): SurveyEliminate {
+  try {
+    const raw = localStorage.getItem(SURVEY_ELIMINATE_KEY);
+    if (raw === null) return DEFAULTS.surveyEliminate;
+    const v = JSON.parse(raw);
+    return SURVEY_ELIMINATE_CHOICES.includes(v) ? v : DEFAULTS.surveyEliminate;
+  } catch {
+    return DEFAULTS.surveyEliminate;
+  }
+}
 
 function loadRadialMouse(): RadialMouse {
   try {
@@ -402,6 +420,16 @@ class SettingsStore {
     this.bottomBarOrder = [...BAR_IDS];
     this.bottomBarHidden = [];
     this.saveBottomBar();
+  }
+
+  /** What eliminating in the N-up view does: queue the photo for deletion (the
+   *  productive default — nothing touches the disk until the reviewed commit),
+   *  or merely take it off screen. */
+  surveyEliminate = $state<SurveyEliminate>(loadSurveyEliminate());
+
+  setSurveyEliminate(mode: SurveyEliminate) {
+    this.surveyEliminate = mode;
+    save(SURVEY_ELIMINATE_KEY, mode);
   }
 
   // --- radial menu (press and hold over a photo) ---

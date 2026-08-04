@@ -37,18 +37,18 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     // In the survey, arrows walk the candidates rather than the whole catalog:
     // stepping out of the field on show would defeat the point of the view.
     case "nav.next":
-      if (view.mode === "survey") return session.stepSurvey(1);
+      if (session.inSurvey) return session.stepSurvey(1);
       return e?.shiftKey ? session.extendSelection(1) : session.moveFocus(1);
     case "nav.prev":
-      if (view.mode === "survey") return session.stepSurvey(-1);
+      if (session.inSurvey) return session.stepSurvey(-1);
       return e?.shiftKey ? session.extendSelection(-1) : session.moveFocus(-1);
     case "nav.down": {
-      if (view.mode === "survey") return session.stepSurvey(1);
+      if (session.inSurvey) return session.stepSurvey(1);
       const rows = session.gridCols ?? 1;
       return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
     }
     case "nav.up": {
-      if (view.mode === "survey") return session.stepSurvey(-1);
+      if (session.inSurvey) return session.stepSurvey(-1);
       const rows = -(session.gridCols ?? 1);
       return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
     }
@@ -72,6 +72,9 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     case "flag.pick":
       return session.flag(1, e);
     case "flag.reject":
+      // In the N-up view rejecting IS eliminating, and what that means is a
+      // preference — so it goes through the one place that knows.
+      if (session.inSurvey) return void session.eliminate(e);
       return session.flag(-1, e);
     case "flag.unflag":
       return session.flag(0, e);
@@ -107,8 +110,7 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       view.mode = "viewer";
       return;
     case "view.compare":
-      session.ensureFocus();
-      view.mode = "compare";
+      session.openCompare();
       return;
     case "view.survey":
       // A no-op without at least two candidates; `canSurvey` is what the entry
@@ -117,7 +119,7 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       return;
     case "view.back":
       // Esc returns to the grid from loupe/compare; in grid it clears selection.
-      if (view.mode === "survey") session.closeSurvey();
+      if (session.inSurvey) session.closeSurvey();
       else if (view.mode !== "grid") view.mode = "grid";
       else session.clearSelection();
       return;
