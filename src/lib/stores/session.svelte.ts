@@ -902,11 +902,13 @@ class SessionStore {
   /** Two up: the focused photo and the next one, with the rest of its burst
    *  queued behind them. */
   openCompare() {
+    // Collapse first: with a selection active the focus is -1 by design, and
+    // the run has to start from a real photo.
+    this.collapseSelection();
     this.ensureFocus();
     const ids = this.runFromFocus();
     if (ids.length === 0) return;
     const at = this.focusedIndex;
-    this.collapseSelection();
     this.surveyIds = ids.slice(0, 2);
     this.surveyPool = ids.slice(2);
     this.surveyRequested = 0;

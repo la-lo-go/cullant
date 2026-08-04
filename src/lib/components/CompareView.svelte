@@ -43,6 +43,19 @@
 
   const items = $derived(session.surveyItems);
 
+  /**
+   * The cells are the view's whole content, so arriving with none is a broken
+   * screen rather than an empty one. Any route in that did not fill them — a
+   * button that only set the view mode, a restored session — is repaired here
+   * instead of trusted, and a set with nothing left to show leaves rather than
+   * drawing a hole.
+   */
+  $effect(() => {
+    if (session.surveyIds.length > 0) return;
+    session.openCompare();
+    if (session.surveyIds.length === 0) session.closeSurvey();
+  });
+
   /** Roughly square. As the field narrows the survivors get a bigger share of
    *  the screen, which is the reward for eliminating one; two cells land side by
    *  side, which is what compare has always looked like. */

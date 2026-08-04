@@ -482,7 +482,7 @@
         <div class="segmented">
           <button class:active={view.mode === "grid"} title="Grid (G)" onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
           <button class:active={view.mode === "viewer"} title="Loupe (E)" onclick={blurring(() => { session.ensureFocus(); view.mode = "viewer"; })}><Search size={14} /></button>
-          <button class:active={view.mode === "compare"} title="Compare (C)" onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
+          <button class:active={session.inSurvey} title="Compare (C)" onclick={blurring(() => session.openCompare())}><Columns2 size={14} /></button>
         </div>
       </div>
       <div class="toolbar-right">
