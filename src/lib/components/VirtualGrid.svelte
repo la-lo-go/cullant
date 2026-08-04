@@ -614,6 +614,12 @@
       const inSelection = session.selectedIds.has(items[index].id);
       if (!inSelection) session.selectOnly(index);
       else index = session.focusedIndex >= 0 ? session.focusedIndex : index;
+    } else {
+      // Empty space inside the grid targets nothing, so nothing stays targeted —
+      // the same reading a left click there already has, and it matches the
+      // view-wide menu about to open.
+      session.clearSelection();
+      session.focusedIndex = -1;
     }
     menu = { x: e.clientX, y: e.clientY, items: buildGridMenu(index) };
   }

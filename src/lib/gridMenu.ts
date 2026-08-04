@@ -540,14 +540,9 @@ function fileBlock(index: number, item: ItemLite): MenuNode[] {
  *  so only the view-wide rows apply. */
 function emptySpaceMenu(): MenuNode[] {
   return [
+    // No "clear selection" row: opening this menu already dropped the selection
+    // and the focus, because the click that opened it landed on nothing.
     { kind: "item", label: "Select all", hint: "Ctrl+A", run: () => runCommand("select.all") },
-    {
-      kind: "item",
-      label: "Clear selection",
-      hint: "Esc",
-      disabled: session.selectedIds.size === 0,
-      run: () => runCommand("select.none"),
-    },
     { kind: "sep" },
     {
       kind: "item",
