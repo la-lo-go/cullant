@@ -500,8 +500,13 @@ function fileBlock(index: number, item: ItemLite): MenuNode[] {
       label: "Metadata",
       icon: Info,
       hint: "I",
+      // The metadata panel lives inside the loupe, so opening it from the grid
+      // has to take the photo there too — setting `infoOpen` alone renders
+      // nothing and reads as a dead menu entry.
       run: () => {
         session.selectOnly(index);
+        view.markOpenedFromGrid();
+        view.mode = "viewer";
         view.infoOpen = true;
       },
     },
