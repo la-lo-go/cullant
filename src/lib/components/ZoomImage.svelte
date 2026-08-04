@@ -957,7 +957,25 @@
       photoMenu = { ...at, items: buildPhotoMenu(item, radialTargets) };
       return;
     }
+    // Released on a group without travelling far enough to descend into it.
+    // Opening it as a list beats doing nothing: the gesture is never a dead end,
+    // and it is how the group is reached at all on a short flick.
+    if (action.children) {
+      photoMenu = {
+        ...at,
+        items: action.children.map((c) => ({
+          kind: "item" as const,
+          label: c.glyph ? `${c.glyph}  ${c.label}` : c.label,
+          run: () => c.run?.(),
+        })),
+      };
+      return;
+    }
     action.run?.();
+    // Auto-advance is the session's job when the photo acted on is the focused
+    // one. This pane is not, so nothing there will move it — and leaving the
+    // photo just judged on screen is the one thing fast culling exists to avoid.
+    if (session.focused?.id !== item.id && session.autoAdvanceActive) page(1);
   }
 
   // Paging to another photo mid-hold would leave the ring pointing at a photo

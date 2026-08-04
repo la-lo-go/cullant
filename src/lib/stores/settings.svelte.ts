@@ -2,9 +2,11 @@
 
 import type { BurstMode } from "../bursts";
 import {
+  ASSIGNABLE_COMMANDS,
   DEFAULT_RADIAL_SLOTS,
+  RADIAL_MAX_SECTORS,
+  RADIAL_MIN_SECTORS,
   RADIAL_MOUSE_CHOICES,
-  RADIAL_SECTOR_CHOICES,
   healSlots,
   slotKey,
   type RadialMouse,
@@ -35,7 +37,6 @@ const BURST_MODE_KEY = "cullant.burstMode";
 const BURST_GAP_KEY = "cullant.burstGapSeconds";
 const PREVIEW_QUALITY_KEY = "cullant.previewQuality";
 const RADIAL_SLOTS_KEY = "cullant.radial.slots";
-const RADIAL_SECTORS_KEY = "cullant.radial.sectors";
 const RADIAL_MOUSE_KEY = "cullant.radial.mouse";
 
 /** Allowed burst gaps in seconds — a whitelist for the same reason the
@@ -175,14 +176,6 @@ function loadBottomBar(): { order: string[]; hidden: string[] } {
 
 const initialBottomBar = loadBottomBar();
 
-/** Default number of sectors. Six fits the whole culling vocabulary without any
- *  of them getting thin enough to miss on the move. */
-const RADIAL_SECTORS_DEFAULT = 6;
-
-function loadRadialSectors(): number {
-  return loadChoice(RADIAL_SECTORS_KEY, RADIAL_SECTOR_CHOICES, RADIAL_SECTORS_DEFAULT);
-}
-
 function loadRadialMouse(): RadialMouse {
   try {
     const raw = localStorage.getItem(RADIAL_MOUSE_KEY);
@@ -194,16 +187,14 @@ function loadRadialMouse(): RadialMouse {
   }
 }
 
-function loadRadialSlots(sectors: number): RadialSlot[] {
+function loadRadialSlots(): RadialSlot[] {
   try {
     const raw = localStorage.getItem(RADIAL_SLOTS_KEY);
-    return healSlots(raw === null ? null : JSON.parse(raw), sectors);
+    return healSlots(raw === null ? null : JSON.parse(raw));
   } catch {
-    return healSlots(null, sectors);
+    return healSlots(null);
   }
 }
-
-const initialRadialSectors = loadRadialSectors();
 
 class SettingsStore {
   /** Paint the cached thumbnail instantly while the sharp preview loads. */
@@ -415,23 +406,12 @@ class SettingsStore {
   }
 
   // --- radial menu (press and hold over a photo) ---
-  /** How many sectors the ring is split into. */
-  radialSectors = $state<number>(initialRadialSectors);
-  /** What each sector holds, clockwise from the top. Always exactly
-   *  `radialSectors` long, and always including the `more` slot. */
-  radialSlots = $state<RadialSlot[]>(loadRadialSlots(initialRadialSectors));
+  /** What each sector holds, clockwise from the top. The list IS the ring: its
+   *  length is the sector count, so adding and removing a sector is adding and
+   *  removing an entry. Always contains the `more` slot. */
+  radialSlots = $state<RadialSlot[]>(loadRadialSlots());
   /** Which mouse gesture opens it. Touch always uses press-and-hold. */
   radialMouse = $state<RadialMouse>(loadRadialMouse());
-
-  setRadialSectors(n: number) {
-    if (!RADIAL_SECTOR_CHOICES.includes(n as (typeof RADIAL_SECTOR_CHOICES)[number])) return;
-    this.radialSectors = n;
-    // Resizing the ring re-heals the layout, so growing it fills the new sectors
-    // and shrinking it never drops `more`.
-    this.radialSlots = healSlots(this.radialSlots.map(slotKey), n);
-    save(RADIAL_SECTORS_KEY, n);
-    this.saveRadialSlots();
-  }
 
   setRadialMouse(mode: RadialMouse) {
     this.radialMouse = mode;
@@ -450,7 +430,31 @@ class SettingsStore {
     const existing = next.findIndex((s) => slotKey(s) === slotKey(slot));
     if (existing !== -1) next[existing] = next[index];
     next[index] = slot;
-    this.radialSlots = healSlots(next.map(slotKey), this.radialSectors);
+    this.radialSlots = healSlots(next.map(slotKey));
+    this.saveRadialSlots();
+  }
+
+  /** Append a sector, filling it with the first action not already on the ring
+   *  so a new sector is never blank. */
+  addRadialSlot() {
+    if (this.radialSlots.length >= RADIAL_MAX_SECTORS) return;
+    const taken = new Set(this.radialSlots.map(slotKey));
+    const spare =
+      DEFAULT_RADIAL_SLOTS.find((s) => !taken.has(slotKey(s))) ??
+      ASSIGNABLE_COMMANDS.map((c) => ({ kind: "command", id: c.id }) as RadialSlot).find(
+        (s) => !taken.has(slotKey(s)),
+      );
+    if (!spare) return;
+    this.radialSlots = [...this.radialSlots, spare];
+    this.saveRadialSlots();
+  }
+
+  /** Remove a sector. `more` is not removable: it is what keeps every command
+   *  reachable whatever the rest of the ring is set to. */
+  removeRadialSlot(index: number) {
+    if (this.radialSlots.length <= RADIAL_MIN_SECTORS) return;
+    if (this.radialSlots[index]?.kind === "more") return;
+    this.radialSlots = this.radialSlots.filter((_, i) => i !== index);
     this.saveRadialSlots();
   }
 
@@ -464,10 +468,8 @@ class SettingsStore {
   }
 
   resetRadial() {
-    this.radialSectors = RADIAL_SECTORS_DEFAULT;
-    this.radialSlots = healSlots(DEFAULT_RADIAL_SLOTS.map(slotKey), RADIAL_SECTORS_DEFAULT);
+    this.radialSlots = [...DEFAULT_RADIAL_SLOTS];
     this.radialMouse = "left";
-    save(RADIAL_SECTORS_KEY, this.radialSectors);
     save(RADIAL_MOUSE_KEY, this.radialMouse);
     this.saveRadialSlots();
   }

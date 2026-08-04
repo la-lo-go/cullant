@@ -11,19 +11,33 @@
    * forgiving at speed in a way a shape under the finger never is, and the
    * finger is usually somewhere past the ring's edge by the time it stops.
    *
-   * A GROUP sector descends: keep moving outwards and the whole ring is
-   * replaced by that group's members, so their sectors stay as wide as the
-   * ones they came from. Coming back to the dead zone climbs out again.
+   * Sectors carry an icon and nothing else; the name appears only for the one
+   * under the finger. Reading six labels at speed is slower than recognising six
+   * shapes, and a sector is not wide enough for "Queue delete: JPEG only".
+   *
+   * A GROUP sector descends: keep moving outwards and the whole ring is replaced
+   * by that group's members, so their sectors stay as wide as the ones they came
+   * from. Coming back to the dead zone climbs out again. Releasing ON a group
+   * without descending opens it as a list rather than doing nothing, so the
+   * gesture is never a dead end.
    */
   import { LABELS } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
-  import { slotLabel, type RadialSlot } from "../radial";
+  import { sectorPoint, slotIcon, slotLabel, wedgePath, type RadialSlot } from "../radial";
   import type { CommandId } from "../keyboard/keymap";
+  import Star from "@lucide/svelte/icons/star";
+  import Circle from "@lucide/svelte/icons/circle";
 
   /** One thing the ring can carry out. */
   export interface RadialAction {
     label: string;
+    /** Drawn in the sector. A `glyph` wins when both are present. */
+    icon?: typeof Star;
+    /** Short text drawn instead of an icon (star counts read better as stars). */
+    glyph?: string;
+    /** A colour swatch instead of an icon (labels, tags). */
+    swatch?: string;
     /** Present for a leaf; absent on a group, which descends instead. */
     run?: () => void;
     /** Members to descend into. */
@@ -59,12 +73,25 @@
 
   /** Inside this radius nothing is armed, so a release cancels. */
   const DEAD_ZONE = 34;
-  /** Past this, a group sector opens into its members. */
-  const DESCEND_R = 116;
-  /** Drawn ring geometry. */
-  const R_INNER = 44;
-  const R_OUTER = 112;
-  const LABEL_R = (R_INNER + R_OUTER) / 2;
+  /** Past this a group sector opens into its members. Deliberately well inside
+   *  the drawn ring: having to travel past the edge of what you can see is not
+   *  something anyone discovers. */
+  const DESCEND_R = 76;
+  const R_INNER = 40;
+  const R_OUTER = 108;
+  /** The box leaves room for the armed sector to grow past R_OUTER. */
+  const BOX = 250;
+  const ICON_R = (R_INNER + R_OUTER) / 2;
+  /** Where the armed sector's name sits — outside the ring, clear of the icon. */
+  const NAME_R = R_OUTER + 16;
+
+  const labelColors: Record<string, string> = {
+    Red: "#e05555",
+    Yellow: "#e0c34f",
+    Green: "#59b85e",
+    Blue: "#5588e0",
+    Purple: "#9a66d6",
+  };
 
   const rootActions = $derived(buildRoot(settings.radialSlots));
 
@@ -106,118 +133,155 @@
   $effect(() => {
     if (!released) return;
     const hit = armed >= 0 ? actions[armed] : undefined;
-    if (hit && (hit.run || hit.more)) onpick(hit);
+    if (hit && (hit.run || hit.more || hit.children)) onpick(hit);
     else oncancel();
   });
 
   function buildRoot(slots: RadialSlot[]): RadialAction[] {
     return slots.map((slot) => {
-      if (slot.kind === "more") return { label: "More…", more: true };
-      if (slot.kind === "command") {
-        return { label: slotLabel(slot), run: () => handlers.run(slot.id) };
-      }
-      return { label: slotLabel(slot), children: groupChildren(slot.id) };
+      const base = { label: slotLabel(slot), icon: slotIcon(slot) };
+      if (slot.kind === "more") return { ...base, more: true };
+      if (slot.kind === "command") return { ...base, run: () => handlers.run(slot.id) };
+      return { ...base, children: groupChildren(slot.id) };
     });
   }
 
   function groupChildren(id: "stars" | "labels" | "tags"): RadialAction[] {
     if (id === "stars") {
       return [0, 1, 2, 3, 4, 5].map((r) => ({
-        label: r === 0 ? "None" : "★".repeat(r),
+        label: r === 0 ? "No rating" : `${r} star${r > 1 ? "s" : ""}`,
+        glyph: r === 0 ? "—" : "★".repeat(r),
         run: () => handlers.rate(r),
       }));
     }
     if (id === "labels") {
       return [
-        { label: "None", run: () => handlers.label(null) },
-        ...LABELS.map((l) => ({ label: l, run: () => handlers.label(l) })),
+        { label: "No label", icon: Circle, run: () => handlers.label(null) },
+        ...LABELS.map((l) => ({
+          label: l,
+          swatch: labelColors[l],
+          run: () => handlers.label(l),
+        })),
       ];
     }
-    return tags.all.map((t) => ({ label: t.name, run: () => handlers.tag(t.id) }));
+    return tags.all
+      .filter((t) => t.scope === 2 || t.scope === 0)
+      .map((t) => ({
+        label: t.name,
+        swatch: t.color ?? "#888",
+        run: () => handlers.tag(t.id),
+      }));
   }
 
-  /** SVG wedge for sector `i` of `n`, centred on straight up. */
-  function wedge(i: number, n: number): string {
-    const step = (Math.PI * 2) / n;
-    const a0 = i * step - step / 2 - Math.PI / 2;
-    const a1 = a0 + step;
-    const p = (r: number, a: number) => `${R_OUTER + r * Math.cos(a)} ${R_OUTER + r * Math.sin(a)}`;
-    const large = step > Math.PI ? 1 : 0;
-    return (
-      `M ${p(R_INNER, a0)} A ${R_INNER} ${R_INNER} 0 ${large} 1 ${p(R_INNER, a1)} ` +
-      `L ${p(R_OUTER, a1)} A ${R_OUTER} ${R_OUTER} 0 ${large} 0 ${p(R_OUTER, a0)} Z`
-    );
-  }
-
-  function labelPos(i: number, n: number): { x: number; y: number } {
-    const a = i * ((Math.PI * 2) / n) - Math.PI / 2;
-    return { x: R_OUTER + LABEL_R * Math.cos(a), y: R_OUTER + LABEL_R * Math.sin(a) };
-  }
 </script>
 
 <div class="radial" style="left:{x}px; top:{y}px" aria-hidden="true">
-  <svg width={R_OUTER * 2} height={R_OUTER * 2} viewBox="0 0 {R_OUTER * 2} {R_OUTER * 2}">
+  <svg class="wedges" width={BOX} height={BOX} viewBox="0 0 {BOX} {BOX}">
     {#each actions as _, i (i)}
-      <path class="sector" class:armed={armed === i} d={wedge(i, actions.length)} />
+      <path
+        class="sector"
+        class:armed={armed === i}
+        d={wedgePath(i, actions.length, R_INNER, R_OUTER, BOX)}
+      />
     {/each}
-    {#each actions as action, i (i)}
-      {@const p = labelPos(i, actions.length)}
-      <text class="label" class:armed={armed === i} x={p.x} y={p.y}>{action.label}</text>
-    {/each}
-    <circle class="hub" class:armed={armed < 0} cx={R_OUTER} cy={R_OUTER} r={DEAD_ZONE} />
-    <text class="hub-label" x={R_OUTER} y={R_OUTER}>
-      {descended ? descended.label : armed < 0 ? "Cancel" : ""}
-    </text>
   </svg>
+
+  {#each actions as action, i (i)}
+    {@const p = sectorPoint(i, actions.length, ICON_R, BOX)}
+    <span class="ico" class:armed={armed === i} style="left:{p.x}px; top:{p.y}px">
+      {#if action.glyph}
+        <span class="glyph">{action.glyph}</span>
+      {:else if action.swatch}
+        <span class="swatch" style="background:{action.swatch}"></span>
+      {:else if action.icon}
+        {@const Icon = action.icon}
+        <Icon size={19} strokeWidth={2} />
+      {/if}
+    </span>
+  {/each}
+
+  {#if armed >= 0}
+    {@const p = sectorPoint(armed, actions.length, NAME_R, BOX)}
+    <span class="name" style="left:{p.x}px; top:{p.y}px">{actions[armed].label}</span>
+  {/if}
 </div>
 
 <style>
   .radial {
     position: fixed;
     z-index: 70;
+    width: 250px;
+    height: 250px;
     transform: translate(-50%, -50%);
     pointer-events: none;
   }
 
+  .wedges {
+    position: absolute;
+    inset: 0;
+  }
+
+  /* No outline: the gaps between wedges already separate them, and a stroke on
+     every sector turns the ring into a diagram. */
   .sector {
-    fill: rgba(28, 34, 35, 0.92);
-    stroke: var(--border-strong);
-    stroke-width: 1;
+    fill: rgba(24, 29, 30, 0.9);
+    stroke: none;
+    /* Grown from the ring's centre, so the armed wedge reaches outwards under
+       the finger instead of merely changing colour. Short enough to feel like
+       feedback rather than an animation. */
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    transition:
+      transform 90ms ease-out,
+      fill 90ms ease-out;
   }
 
   .sector.armed {
     fill: var(--accent-fill);
+    transform: scale(1.09);
   }
 
-  .label {
-    fill: #e8e8e8;
+  .ico {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: translate(-50%, -50%);
+    color: #cfd4d4;
+    transition:
+      color 90ms ease-out,
+      transform 90ms ease-out;
+  }
+
+  .ico.armed {
+    color: #fff;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+
+  .glyph {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    white-space: nowrap;
+  }
+
+  .swatch {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+  }
+
+  /* Only the armed sector is named, and outside the ring so it never sits on
+     top of the photo detail the choice is being made about. */
+  .name {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(12, 15, 16, 0.92);
+    color: #fff;
     font-size: 11px;
     font-weight: 600;
-    text-anchor: middle;
-    dominant-baseline: middle;
-    paint-order: stroke;
-    stroke: rgba(0, 0, 0, 0.75);
-    stroke-width: 3px;
-  }
-
-  .label.armed {
-    fill: #fff;
-  }
-
-  .hub {
-    fill: rgba(18, 22, 23, 0.94);
-    stroke: var(--border-strong);
-    stroke-width: 1;
-  }
-
-  .hub.armed {
-    stroke: var(--accent);
-  }
-
-  .hub-label {
-    fill: #9aa0a0;
-    font-size: 10px;
-    text-anchor: middle;
-    dominant-baseline: middle;
+    white-space: nowrap;
   }
 </style>

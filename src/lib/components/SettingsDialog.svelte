@@ -25,16 +25,23 @@
   import { api } from "../api";
   import { backdropDismiss } from "../backdrop";
   import DragList from "./DragList.svelte";
+  import RadialPreview from "./RadialPreview.svelte";
   import {
     ASSIGNABLE_COMMANDS,
     RADIAL_GROUPS,
-    RADIAL_SECTOR_CHOICES,
+    RADIAL_MAX_SECTORS,
+    RADIAL_MIN_SECTORS,
     slotKey,
+    slotLabel,
     type RadialGroupId,
     type RadialMouse,
     type RadialSlot,
   } from "../radial";
   import type { CommandId } from "../keyboard/keymap";
+
+  /** Which sector the panel is pointing at, so hovering a row lights up the
+   *  matching wedge in the preview and the other way round. */
+  let radialHighlight = $state(-1);
 
   /** Turn a `<select>` value back into the slot it names. Assigning a slot that
    *  is already elsewhere swaps the two, which the store handles. */
@@ -55,6 +62,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import X from "@lucide/svelte/icons/x";
+  import Plus from "@lucide/svelte/icons/plus";
 
   let {
     onclose,
@@ -382,17 +390,75 @@
       <div class="content sub">
         <p class="sub-intro">{openPanel.info}</p>
 
-        <label class="check">
-          <span>Sectors</span>
-          <select
-            value={settings.radialSectors}
-            onchange={releasing((e) => settings.setRadialSectors(Number(e.currentTarget.value)))}
-          >
-            {#each RADIAL_SECTOR_CHOICES as n (n)}
-              <option value={n}>{n}</option>
-            {/each}
-          </select>
-        </label>
+        <div class="radial-editor">
+          <!-- Beside the list on a wide dialog, above it when there is no room:
+               the ring is what is being edited, so it should be in view while
+               the rows are changed. -->
+          <RadialPreview
+            slots={settings.radialSlots}
+            highlight={radialHighlight}
+            onhighlight={(i) => (radialHighlight = i)}
+          />
+
+          <div class="radial-rows">
+            <DragList
+              items={settings.radialSlots.map((slot, i) => ({ slot, i }))}
+              keyOf={(it) => slotKey(it.slot)}
+              onMove={(from, to) => settings.moveRadialSlot(from, to)}
+              ariaLabel="Radial menu sectors"
+            >
+              {#snippet row(it)}
+                <div
+                  class="slot"
+                  class:on={radialHighlight === it.i}
+                  role="presentation"
+                  onpointerenter={() => (radialHighlight = it.i)}
+                  onpointerleave={() => (radialHighlight = -1)}
+                >
+                  {#if it.slot.kind === "more"}
+                    <!-- Not assignable and not removable: it is what keeps every
+                         command reachable whatever the rest is set to. -->
+                    <span class="fixed">{slotLabel(it.slot)} — always present</span>
+                  {:else}
+                    <select
+                      value={slotKey(it.slot)}
+                      onchange={releasing((e) => assignSlot(it.i, e.currentTarget.value))}
+                    >
+                      <optgroup label="Groups">
+                        {#each RADIAL_GROUPS as g (g.id)}
+                          <option value={`group:${g.id}`}>{g.label}</option>
+                        {/each}
+                      </optgroup>
+                      <optgroup label="Commands">
+                        {#each ASSIGNABLE_COMMANDS as c (c.id)}
+                          <option value={`cmd:${c.id}`}>{c.title}</option>
+                        {/each}
+                      </optgroup>
+                    </select>
+                    <button
+                      class="drop"
+                      title="Remove this sector"
+                      aria-label="Remove this sector"
+                      disabled={settings.radialSlots.length <= RADIAL_MIN_SECTORS}
+                      onclick={releasing(() => settings.removeRadialSlot(it.i))}
+                    >
+                      <X size={14} />
+                    </button>
+                  {/if}
+                </div>
+              {/snippet}
+            </DragList>
+
+            <button
+              class="wide"
+              disabled={settings.radialSlots.length >= RADIAL_MAX_SECTORS}
+              onclick={releasing(() => settings.addRadialSlot())}
+            >
+              <Plus size={13} />
+              <span>Add sector</span>
+            </button>
+          </div>
+        </div>
 
         <label class="check">
           <span>Mouse</span>
@@ -406,43 +472,6 @@
             <option value="both">Either</option>
           </select>
         </label>
-
-        <!-- Listed from the top of the ring, clockwise, so the order here reads
-             the way the sectors are laid out. -->
-        <p class="sub-intro">Sectors, from the top and clockwise.</p>
-        <DragList
-          items={settings.radialSlots.map((slot, i) => ({ slot, i }))}
-          keyOf={(it) => `${it.i}`}
-          onMove={(from, to) => settings.moveRadialSlot(from, to)}
-          ariaLabel="Radial menu sectors"
-        >
-          {#snippet row(it)}
-            <label class="check">
-              <span>{it.i + 1}</span>
-              {#if it.slot.kind === "more"}
-                <!-- Not assignable: it is what keeps every command reachable
-                     whatever the rest of the ring is set to. -->
-                <span class="fixed">More… (always present)</span>
-              {:else}
-                <select
-                  value={slotKey(it.slot)}
-                  onchange={releasing((e) => assignSlot(it.i, e.currentTarget.value))}
-                >
-                  <optgroup label="Groups">
-                    {#each RADIAL_GROUPS as g (g.id)}
-                      <option value={`group:${g.id}`}>{g.label}</option>
-                    {/each}
-                  </optgroup>
-                  <optgroup label="Commands">
-                    {#each ASSIGNABLE_COMMANDS as c (c.id)}
-                      <option value={`cmd:${c.id}`}>{c.title}</option>
-                    {/each}
-                  </optgroup>
-                </select>
-              {/if}
-            </label>
-          {/snippet}
-        </DragList>
 
         <button class="wide" onclick={releasing(() => settings.resetRadial())}>
           <RotateCcw size={13} />
@@ -1091,6 +1120,82 @@
     .find input {
       width: 100%;
       min-width: 0;
+    }
+  }
+
+  /* Radial editor: the ring beside the rows, stacking above them when the
+     dialog is too narrow to hold both. */
+  .radial-editor {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+  }
+
+  .radial-rows {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .slot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 2px 0;
+    border-radius: 6px;
+  }
+
+  .slot.on {
+    background: var(--hover);
+  }
+
+  .slot select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .slot .fixed {
+    flex: 1;
+    color: #8a8a93;
+    font-size: 12px;
+  }
+
+  .slot .drop {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    flex: none;
+    padding: 0;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: #9aa0a0;
+    cursor: pointer;
+  }
+
+  .slot .drop:hover:not(:disabled) {
+    color: #fff;
+    border-color: var(--border-strong);
+  }
+
+  .slot .drop:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+
+  @media (max-width: 620px) {
+    .radial-editor {
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .radial-rows {
+      width: 100%;
     }
   }
 </style>

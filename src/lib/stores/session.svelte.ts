@@ -1136,6 +1136,21 @@ class SessionStore {
     return i < this.filtered.length ? i : null;
   });
 
+  /** Whether a classification advances the focus on its own right now, with no
+   *  key event to invert it. Read by the views that have to advance something
+   *  other than the focus — compare's second pane cannot go through
+   *  `maybeAdvance`, which only ever moves the focus. */
+  autoAdvanceActive = $derived(this.autoAdvancePref || (settings.fastCulling && view.mode !== "grid"));
+
+  /** Step compare's second pane through the filtered order on its own, leaving
+   *  the focus (and therefore the other pane) exactly where it is. */
+  stepCompanion(delta: number) {
+    const at = this.compareCompanionIndex;
+    if (at === null) return;
+    const next = this.filtered[at + delta];
+    if (next) this.compareWithId = next.id;
+  }
+
   /** Show `index` alongside the currently focused photo. */
   compareWith(index: number) {
     const item = this.filtered[index];

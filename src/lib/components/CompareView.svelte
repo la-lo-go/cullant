@@ -97,6 +97,19 @@
     if (next) pinnedItem = next;
   }
 
+  /** How each pane pages ITSELF.
+   *
+   *  A pane that merely follows the focus moves the focus (the default). A
+   *  pinned one moves its own pinned photo. The companion — unpinned and not
+   *  focused — used to fall through to the default too, which moved the focus
+   *  and therefore paged the OTHER pane: swiping the right-hand photo changed
+   *  the left one. It steps itself now. */
+  function pagerFor(side: Side): ((dir: number) => void) | undefined {
+    if (pinnedSide === side) return pageWhilePinned;
+    if (focusedSide === side) return undefined;
+    return (dir) => session.stepCompanion(dir);
+  }
+
   // Warm the cache one photo ahead of the focus, so arrowing quickly through a
   // burst always finds the next preview already decoded. Gated like Viewer.svelte:
   // a dwell so fast flipping never floods the pool, and a skip for previews
@@ -148,7 +161,7 @@
     </button>
     {#if left}
       <div class="pane" class:pinned={pinnedSide === "left"}>
-        <ZoomImage item={left} standalone onPage={pinnedSide === "left" ? pageWhilePinned : undefined} />
+        <ZoomImage item={left} standalone onPage={pagerFor("left")} />
         <button
           class="pin-btn"
           class:active={pinnedSide === "left"}
@@ -182,7 +195,7 @@
     {/if}
     {#if right}
       <div class="pane" class:pinned={pinnedSide === "right"}>
-        <ZoomImage item={right} standalone onPage={pinnedSide === "right" ? pageWhilePinned : undefined} />
+        <ZoomImage item={right} standalone onPage={pagerFor("right")} />
         <button
           class="pin-btn"
           class:active={pinnedSide === "right"}
