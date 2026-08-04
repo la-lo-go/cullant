@@ -1,5 +1,6 @@
 <script lang="ts">
   import { open } from "@tauri-apps/plugin-dialog";
+  import { addPluginListener, type PluginListener } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { session } from "$lib/stores/session.svelte";
@@ -222,21 +223,62 @@
     if (catalog.project) showCloseConfirm = true;
   }
 
-  // History-API "trap" so the OS/browser back gesture never navigates away or
-  // exits the app. We seed a history entry on mount, and every popstate (Android
-  // hardware/gesture back, desktop mouse back button, Alt+Left) runs goBack()
-  // then re-seeds another entry so subsequent backs stay captured. goBack()
-  // always does something (down to showing the close-confirm), so we always
-  // re-seed and never fall off our own history. Programmatic pushState does not
-  // itself fire popstate, so there is no feedback loop.
+  // Back belongs to goBack() on every platform, but it reaches us by three
+  // routes, all wired here.
+  //
+  // Desktop only ever sees it as a history navigation (mouse button 4,
+  // Alt+Left), so we seed a history entry and let popstate stand in for it.
+  //
+  // Android hands it to native code first, and Tauri's built-in handler walks
+  // the *WebView's* history, finishing the activity as soon as that runs out.
+  // That stack is not ours to rely on — a backgrounded app can come back with a
+  // recreated activity and a fresh WebView, and then back quit the app mid-cull
+  // instead of running the hierarchy above. Registering a `back-button` plugin
+  // listener takes the press off that path: the native handler hands it
+  // straight to us and never consults history. `__cullantBack` is the second
+  // native route, for the case where Tauri's handler is gone entirely — see the
+  // callback in `src-tauri/gen/android/.../MainActivity.kt`.
   $effect(() => {
-    history.pushState(null, "", location.href);
+    const win = window as unknown as Record<string, unknown>;
+    win.__cullantBack = goBack;
+
+    const seed = () => history.pushState(null, "", location.href);
+    seed();
     const onPopState = () => {
+      // goBack() always consumes the press (down to showing the close-confirm),
+      // so re-arm unconditionally and we never fall off our own history.
+      // Programmatic pushState does not fire popstate, so there is no loop.
       goBack();
-      history.pushState(null, "", location.href);
+      seed();
+    };
+    // A resumed WebView can come back without the seeded entry. Re-arming costs
+    // one duplicate entry per resume and the engine caps the stack for us.
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") seed();
     };
     window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    let listener: PluginListener | null = null;
+    let disposed = false;
+    if (navigator.userAgent.includes("Android")) {
+      void addPluginListener("app", "back-button", () => goBack())
+        .then((l) => {
+          if (disposed) void l.unregister();
+          else listener = l;
+        })
+        .catch(() => {
+          // No such plugin command: the two other routes still cover us.
+        });
+    }
+
+    return () => {
+      disposed = true;
+      void listener?.unregister();
+      delete win.__cullantBack;
+      window.removeEventListener("popstate", onPopState);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   });
 
   // Custom window chrome is Windows-only: macOS/Linux keep native decorations
