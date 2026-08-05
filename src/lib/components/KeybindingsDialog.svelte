@@ -20,6 +20,14 @@
     panel?.focus();
   });
 
+  // A shortcut waiting for its new key must not outlive the dialog. `rebinding`
+  // is global state the window dispatcher also honours, so a dialog closed
+  // (X, backdrop, Escape) while one row said "press a key…" left the next key
+  // press anywhere in the app rebinding that command instead of running it.
+  $effect(() => () => {
+    keymap.rebinding = null;
+  });
+
   // With the panel focused, keydowns reach this handler first; it stops them
   // from bubbling to the global window dispatcher (so grid/loupe shortcuts
   // never fire behind the dialog). That also means it must capture the rebind
