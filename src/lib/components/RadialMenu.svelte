@@ -24,7 +24,14 @@
   import { LABELS } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
-  import { arcPath, sectorPoint, slotIcon, slotLabel, wedgePath, type RadialSlot } from "../radial";
+  import {
+    arcPath,
+    sectorPoint,
+    slotIcon,
+    slotShortLabel,
+    wedgePath,
+    type RadialSlot,
+  } from "../radial";
   import type { CommandId } from "../keyboard/keymap";
   import Star from "@lucide/svelte/icons/star";
   import Circle from "@lucide/svelte/icons/circle";
@@ -155,7 +162,7 @@
 
   function buildRoot(slots: RadialSlot[]): RadialAction[] {
     return slots.map((slot) => {
-      const base = { label: slotLabel(slot), icon: slotIcon(slot) };
+      const base = { label: slotShortLabel(slot), icon: slotIcon(slot) };
       if (slot.kind === "more") return { ...base, more: true };
       if (slot.kind === "command") return { ...base, run: () => handlers.run(slot.id) };
       return { ...base, children: groupChildren(slot.id) };
@@ -165,14 +172,14 @@
   function groupChildren(id: "stars" | "labels" | "tags"): RadialAction[] {
     if (id === "stars") {
       return [0, 1, 2, 3, 4, 5].map((r) => ({
-        label: r === 0 ? "No rating" : `${r} star${r > 1 ? "s" : ""}`,
+        label: r === 0 ? "None" : `${r}`,
         glyph: r === 0 ? "—" : "★".repeat(r),
         run: () => handlers.rate(r),
       }));
     }
     if (id === "labels") {
       return [
-        { label: "No label", icon: Circle, run: () => handlers.label(null) },
+        { label: "None", icon: Circle, run: () => handlers.label(null) },
         ...LABELS.map((l) => ({
           label: l,
           swatch: labelColors[l],
@@ -225,9 +232,11 @@
         {@const Icon = action.icon}
         <Icon size={19} strokeWidth={2} />
       {/if}
-      {#if on}
+      {#if on && !action.glyph}
         <!-- Named only while armed, and directly under its own icon so the eye
-             never has to travel to find out what it is about to do. -->
+             never has to travel to find out what it is about to do. A glyph
+             sector says it already: "★★★" with "3 stars" under it is the same
+             word twice. -->
         <span class="name">{action.label}</span>
       {/if}
     </span>
@@ -252,8 +261,11 @@
   /* No outline: the gaps between wedges already separate them, and a stroke on
      every sector turns the ring into a diagram. */
   .sector {
-    fill: rgba(24, 29, 30, 0.9);
-    stroke: none;
+    fill: color-mix(in srgb, var(--surface) 88%, transparent);
+    /* Not an outline: a stroke in the background colour is the gap between the
+       wedges, so they separate without the ring turning into a diagram. */
+    stroke: var(--bg-stage);
+    stroke-width: 2;
     /* Grown from the ring's centre, so the armed wedge reaches outwards under
        the finger instead of merely changing colour. Short enough to feel like
        feedback rather than an animation. */
@@ -302,19 +314,23 @@
     border-radius: 50%;
   }
 
-  /* Under the icon, and only for the armed sector. Absolutely placed so adding
-     it never nudges the icon it belongs to. */
+  /* Under the icon, and only for the armed sector. No plate behind it: the
+     sector it sits on is already the background, and a pill floating over the
+     ring read as a tooltip that had landed in the wrong place. Absolutely
+     placed so adding it never nudges the icon it belongs to. */
   .name {
     position: absolute;
     top: 100%;
-    margin-top: 3px;
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: rgba(12, 15, 16, 0.92);
+    margin-top: 2px;
+    max-width: 84px;
+    overflow: hidden;
+    text-overflow: ellipsis;
     color: #fff;
     font-size: 10px;
     font-weight: 600;
+    letter-spacing: 0.01em;
     white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
   }
 
   .gate {

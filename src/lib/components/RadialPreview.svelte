@@ -60,9 +60,12 @@
     flex: none;
   }
 
+  /* Same fill and same hairline gap as the live ring: a preview drawn to its
+     own taste is not a preview. */
   .sector {
     fill: var(--control);
-    stroke: none;
+    stroke: var(--surface-2);
+    stroke-width: 2;
     transform-box: view-box;
     transform-origin: 50% 50%;
     transition:

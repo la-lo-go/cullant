@@ -34,7 +34,6 @@
     RADIAL_MAX_SECTORS,
     RADIAL_MIN_SECTORS,
     slotKey,
-    slotLabel,
     type RadialGroupId,
     type RadialMouse,
     type RadialSlot,
@@ -100,9 +99,11 @@
   function assignSlot(index: number, key: string) {
     const [kind, id] = key.split(":", 2);
     const slot: RadialSlot =
-      kind === "group"
-        ? { kind: "group", id: id as RadialGroupId }
-        : { kind: "command", id: id as CommandId };
+      key === "more"
+        ? { kind: "more" }
+        : kind === "group"
+          ? { kind: "group", id: id as RadialGroupId }
+          : { kind: "command", id: id as CommandId };
     settings.setRadialSlot(index, slot);
   }
   import Search from "@lucide/svelte/icons/search";
@@ -467,28 +468,25 @@
                   onpointerenter={() => (radialHighlight = it.i)}
                   onpointerleave={() => (radialHighlight = -1)}
                 >
-                  {#if it.slot.kind === "more"}
-                    <!-- Not a picker: `more` is not one action among many, it is
-                         the escape hatch to all of them. It can still be dragged
-                         and removed like any other sector. -->
-                    <span class="fixed">{slotLabel(it.slot)} — the full command list</span>
-                  {:else}
-                    <select
-                      value={slotKey(it.slot)}
-                      onchange={releasing((e) => assignSlot(it.i, e.currentTarget.value))}
-                    >
-                      <optgroup label="Groups">
-                        {#each RADIAL_GROUPS as g (g.id)}
-                          <option value={`group:${g.id}`}>{g.label}</option>
-                        {/each}
-                      </optgroup>
-                      <optgroup label="Commands">
-                        {#each ASSIGNABLE_COMMANDS as c (c.id)}
-                          <option value={`cmd:${c.id}`}>{c.title}</option>
-                        {/each}
-                      </optgroup>
-                    </select>
-                  {/if}
+                  <!-- Every sector is the same control, `more` included: it is
+                       one of the things a sector can be, so making it a line of
+                       grey text was a special case with nothing behind it. -->
+                  <select
+                    value={slotKey(it.slot)}
+                    onchange={releasing((e) => assignSlot(it.i, e.currentTarget.value))}
+                  >
+                    <option value="more">More… (the full command list)</option>
+                    <optgroup label="Groups">
+                      {#each RADIAL_GROUPS as g (g.id)}
+                        <option value={`group:${g.id}`}>{g.label}</option>
+                      {/each}
+                    </optgroup>
+                    <optgroup label="Commands">
+                      {#each ASSIGNABLE_COMMANDS as c (c.id)}
+                        <option value={`cmd:${c.id}`}>{c.title}</option>
+                      {/each}
+                    </optgroup>
+                  </select>
                   <button
                     class="drop"
                     title="Remove this sector"
@@ -1206,7 +1204,7 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    padding: 2px 0;
+    padding: 2px 4px;
     border-radius: 6px;
   }
 
@@ -1214,15 +1212,13 @@
     background: var(--hover);
   }
 
+  /* The select takes the row, so the highlight ends at the row's own controls
+     instead of running on to the panel edge past everything in it. */
   .slot select {
     flex: 1;
     min-width: 0;
-  }
-
-  .slot .fixed {
-    flex: 1;
-    color: #8a8a93;
-    font-size: 12px;
+    width: 100%;
+    max-width: none;
   }
 
   .slot .drop {

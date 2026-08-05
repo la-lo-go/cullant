@@ -115,6 +115,54 @@ const GROUP_ICONS: Record<RadialGroupId, typeof Star> = {
   tags: Tag,
 };
 
+/**
+ * What a sector is called ON THE RING, as opposed to in the settings list.
+ *
+ * The registry's titles are written for a cheat sheet, where "Review & commit
+ * pending actions" is exactly right. A sector is a wedge a few centimetres
+ * across, read in the half second before the finger lifts, so the same command
+ * has to answer in one or two words or the label is noise the eye skips anyway.
+ */
+const SHORT_LABELS: Partial<Record<CommandId, string>> = {
+  "rate.0": "No stars",
+  "rate.1": "★",
+  "rate.2": "★★",
+  "rate.3": "★★★",
+  "rate.4": "★★★★",
+  "rate.5": "★★★★★",
+  "flag.pick": "Pick",
+  "flag.reject": "Reject",
+  "flag.unflag": "Unflag",
+  "flag.toggle": "Toggle pick",
+  "label.red": "Red",
+  "label.yellow": "Yellow",
+  "label.green": "Green",
+  "label.blue": "Blue",
+  "label.purple": "Purple",
+  "pair.toggleShown": "Flip half",
+  "pair.toggleCoupling": "Decouple",
+  "tag.chord": "Tag",
+  "delete.pair": "Delete",
+  "delete.rawOnly": "RAW only",
+  "delete.jpegOnly": "JPEG only",
+  "edit.rotateLeft": "Rotate ↺",
+  "edit.rotateRight": "Rotate ↻",
+  "action.moveCopy": "Move/copy",
+  "commit.open": "Commit",
+};
+
+const SHORT_GROUPS: Record<RadialGroupId, string> = {
+  stars: "Rating",
+  labels: "Labels",
+  tags: "Tags",
+};
+
+export function slotShortLabel(slot: RadialSlot): string {
+  if (slot.kind === "more") return "More";
+  if (slot.kind === "group") return SHORT_GROUPS[slot.id];
+  return SHORT_LABELS[slot.id] ?? slotLabel(slot);
+}
+
 export function slotIcon(slot: RadialSlot): typeof Star {
   if (slot.kind === "more") return Ellipsis;
   if (slot.kind === "group") return GROUP_ICONS[slot.id];
