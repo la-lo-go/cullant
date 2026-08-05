@@ -249,6 +249,7 @@ pub fn run() {
             commands::project::ingest_pending,
             commands::project::rescan_project,
             commands::project::close_project,
+            commands::project::reimport_project,
             commands::project::set_generate_video_thumbs,
             commands::project::set_preview_quality,
             commands::project::preview_quality_choices,

@@ -103,6 +103,7 @@
     open();
   }
   let showCloseConfirm = $state(false);
+  let showReimportConfirm = $state(false);
   // Set when the open project's folder/volume becomes unreachable while working.
   let folderLostMsg = $state("");
   // Mirrors the storage watcher's last verdict, so the auto-rescan below can skip
@@ -194,6 +195,10 @@
     if (session.moveDialogOpen) {
       session.moveDialogOpen = false;
       return;
+    }
+    if (showReimportConfirm) {
+      showReimportConfirm = false;
+      return true;
     }
     if (showCloseConfirm) {
       showCloseConfirm = false;
@@ -448,6 +453,7 @@
       onOpenRecent={(path) => void openProject(path)}
       onCloseProject={() => (showCloseConfirm = true)}
       onRescan={() => void api.rescanProject()}
+      onReimport={() => (showReimportConfirm = true)}
     />
   {/if}
   {#if catalog.project}
@@ -777,6 +783,19 @@
 
   {#if session.moveDialogOpen}
     <MoveDialog />
+  {/if}
+
+  {#if showReimportConfirm}
+    <ConfirmDialog
+      title="Reimport this project?"
+      message="Cullant forgets everything it has stored about this project and reads the folder again from nothing: every rating, flag, colour label and tag, the queue of pending actions, and the commit history. Your photos and videos are not touched, and anything already exported to XMP sidecars comes back on the rescan."
+      confirmLabel="Reimport"
+      onconfirm={() => {
+        showReimportConfirm = false;
+        void catalog.reimport();
+      }}
+      oncancel={() => (showReimportConfirm = false)}
+    />
   {/if}
 
   {#if showCloseConfirm}

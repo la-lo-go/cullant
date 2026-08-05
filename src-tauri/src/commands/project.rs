@@ -428,8 +428,86 @@ pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<(
     Ok(())
 }
 
+/// Forget everything Cullant has stored about the open project and read the
+/// folder again from nothing.
+///
+/// The photos are never touched. What goes is Cullant's own data directory —
+/// the database (ratings, flags, labels, tags, the pending queue and the commit
+/// history) and the generated thumbnail and preview cache. On desktop that is
+/// `<project>/.cullant`; on Android it is the private app directory holding the
+/// same things, which is why the path comes from the database's own location
+/// rather than from an assumption about where it lives.
+///
+/// XMP sidecars survive on disk, so a project exported to them comes back with
+/// its ratings, flags and labels — the rescan reads them in like any other
+/// library arriving from elsewhere.
 #[tauri::command]
-pub fn close_project(state: State<'_, AppState>) {
+pub fn reimport_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<ProjectInfo> {
+    if state.scan_active.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(AppError::Other(
+            "Cullant is still reading this project. Wait for it to finish, then try again.".into(),
+        ));
+    }
+
+    let (root_path, data_dir) = {
+        let guard = state.project.lock().unwrap();
+        let project = guard.as_ref().ok_or(AppError::NoProject)?;
+        // The string this project was opened with: a folder on desktop, a SAF
+        // tree URI on Android. Reopening has to use the same one.
+        let root_path: String = project.db.call_read(|conn| {
+            Ok(
+                conn.query_row("SELECT root_path FROM project WHERE id = 1", [], |r| {
+                    r.get(0)
+                })?,
+            )
+        })?;
+        let data_dir = project
+            .db
+            .path()
+            .parent()
+            .ok_or_else(|| AppError::Other("project database has no directory".into()))?
+            .to_path_buf();
+        (root_path, data_dir)
+    };
+
+    // Close first, and completely: the database file cannot be removed while its
+    // writer thread still holds it open, and the thumbnail pool would keep
+    // writing into a directory that is going away.
+    close_project_inner(&state);
+
+    if data_dir.exists() {
+        remove_dir_with_retry(&data_dir)?;
+    }
+
+    do_open_project(&root_path, &app, &state)
+}
+
+/// Windows refuses to unlink a file anything still holds open, and SQLite
+/// releases its `-wal`/`-shm` companions a moment after the connection itself
+/// goes. The workers are joined before we get here, so a failure now is that
+/// last moment rather than a leak — the same reason `Db::open` retries.
+fn remove_dir_with_retry(dir: &std::path::Path) -> AppResult<()> {
+    const ATTEMPTS: u32 = 10;
+    let mut last: Option<std::io::Error> = None;
+    for attempt in 1..=ATTEMPTS {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                if attempt < ATTEMPTS {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                last = Some(e);
+            }
+        }
+    }
+    Err(AppError::Other(format!(
+        "could not remove {}: {}",
+        dir.to_string_lossy(),
+        last.map(|e| e.to_string()).unwrap_or_default()
+    )))
+}
+
+fn close_project_inner(state: &AppState) {
     // Take the project out AND shut its ThumbPool down. Clearing the state alone
     // is not enough: the scanner thread running ingest Phase B holds its own
     // `Arc<ThumbPool>` clone, so without an explicit shutdown the background
@@ -442,6 +520,11 @@ pub fn close_project(state: State<'_, AppState>) {
     // Cache keys embed file ids, which are only unique within one project's
     // database, so the next project must not inherit any of them.
     crate::thumbs::memcache::clear();
+}
+
+#[tauri::command]
+pub fn close_project(state: State<'_, AppState>) {
+    close_project_inner(&state);
 }
 
 /// Frontend push of the preview-quality preference (localStorage on the UI

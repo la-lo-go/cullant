@@ -169,6 +169,10 @@ struct Queue {
 /// read-only. Interactive requests always preempt background ones.
 pub struct ThumbPool {
     queue: Arc<Queue>,
+    /// Kept so shutdown can wait for the workers rather than merely ask them to
+    /// stop — see `shutdown`. Taken on the first shutdown, so a later drop joins
+    /// nothing and cannot block.
+    handles: Mutex<Vec<thread::JoinHandle<()>>>,
 }
 
 impl ThumbPool {
@@ -203,18 +207,24 @@ impl ThumbPool {
             max_interactive: (workers * 4).max(128),
         });
 
+        let mut handles = Vec::with_capacity(workers);
         for i in 0..workers {
             let queue = queue.clone();
             let db = db.clone();
             let store = store.clone();
             let root = root.clone();
-            thread::Builder::new()
-                .name(format!("thumb-{i}"))
-                .spawn(move || worker_loop(queue, db, store, root))
-                .expect("failed to spawn thumb worker");
+            handles.push(
+                thread::Builder::new()
+                    .name(format!("thumb-{i}"))
+                    .spawn(move || worker_loop(queue, db, store, root))
+                    .expect("failed to spawn thumb worker"),
+            );
         }
 
-        ThumbPool { queue }
+        ThumbPool {
+            queue,
+            handles: Mutex::new(handles),
+        }
     }
 
     /// Enqueue an interactive request (served before any background work, LIFO).
@@ -327,6 +337,19 @@ impl ThumbPool {
     /// every pending request's `respond` with an error, so a caller blocked on a
     /// completion channel (ingest Phase B) is always released.
     pub fn shutdown(&self) {
+        self.stop_queue();
+        // Then WAIT for the workers to go. Each holds its own `Arc<Db>`, so
+        // until they have exited the database is still open — which on Windows
+        // means its file cannot be deleted, and reimporting a project is exactly
+        // an attempt to delete it. Waking them is not the same as them being
+        // gone: one mid-decode finishes the frame it is on first.
+        let handles = std::mem::take(&mut *self.handles.lock().unwrap());
+        for h in handles {
+            let _ = h.join();
+        }
+    }
+
+    fn stop_queue(&self) {
         let mut guard = self.queue.items.lock().unwrap();
         if let Some(dropped) = guard.take() {
             drop(guard);

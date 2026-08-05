@@ -119,6 +119,34 @@ class CatalogStore {
     }
   }
 
+  /**
+   * Throw away everything stored about the open project and read the folder
+   * again from nothing.
+   *
+   * Same shape as `open`, because from here it IS an open: the backend wipes its
+   * data directory and reopens the same folder in one step, and the frontend has
+   * the same job afterwards — clear the caches keyed on file ids that no longer
+   * exist, and refresh as if the project had just been picked.
+   */
+  async reimport() {
+    this.error = "";
+    await flushSessionSave();
+    this.scanning = true;
+    this.scanFound = 0;
+    this.preloading = true;
+    this.metaProgress = { done: 0, total: 0 };
+    try {
+      this.project = await api.reimportProject();
+      this.thumbLoaded.clear();
+      this.previewReady.clear();
+      await this.refreshForOpen();
+    } catch (e) {
+      this.scanning = false;
+      this.preloading = false;
+      this.error = String(e);
+    }
+  }
+
   /// Pull the set of files that already have a loupe preview from the backend and
   /// merge it in (add-only: a preview never disappears mid-session). Called as
   /// the background preview pass makes progress so per-cell spinners clear.

@@ -12,6 +12,7 @@
   import LogOut from "@lucide/svelte/icons/log-out";
   import Album from "@lucide/svelte/icons/album";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import DatabaseBackup from "@lucide/svelte/icons/database-backup";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Usb from "@lucide/svelte/icons/usb";
   import Network from "@lucide/svelte/icons/network";
@@ -33,11 +34,13 @@
     onOpenRecent,
     onCloseProject,
     onRescan,
+    onReimport,
   }: {
     onOpenNew: () => void;
     onOpenRecent: (path: string) => void;
     onCloseProject: () => void;
     onRescan: () => void;
+    onReimport: () => void;
   } = $props();
 
   // Frameless custom chrome. Only ever mounted on desktop Windows (the parent
@@ -159,6 +162,15 @@
           >
             <RefreshCw size={15} />
             <span>Rescan project folder</span>
+          </button>
+          <button
+            class="item danger"
+            role="menuitem"
+            title="Throw away everything Cullant knows about this project and read the folder again"
+            onclick={() => choose(onReimport)}
+          >
+            <DatabaseBackup size={15} />
+            <span>Reimport project…</span>
           </button>
           <button
             class="item danger"

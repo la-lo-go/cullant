@@ -112,6 +112,7 @@
   import Tag from "@lucide/svelte/icons/tag";
   import Heart from "@lucide/svelte/icons/heart";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import DatabaseBackup from "@lucide/svelte/icons/database-backup";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
@@ -268,6 +269,7 @@
   }
 
   let confirmResetAll = $state(false);
+  let confirmReimport = $state(false);
 
   /** Both destinations need a project, so the whole section waits for one. */
   const elsewhere = $derived(
@@ -652,6 +654,15 @@
               <span>Reset all settings</span>
             </button>
           {/if}
+          {#if catalog.project}
+            <!-- The escape hatch for a project that has gone strange. Down here
+                 with the other reset, because it is one: it throws away what
+                 Cullant stored, not a preference. -->
+            <button class="reset-all" onclick={releasing(() => (confirmReimport = true))}>
+              <DatabaseBackup size={13} />
+              <span>Reimport this project…</span>
+            </button>
+          {/if}
           {/if}
         {/if}
       </div>
@@ -677,6 +688,20 @@
     y={addMenu.y}
     items={addMenu.items}
     onclose={() => (addMenu = null)}
+  />
+{/if}
+
+{#if confirmReimport}
+  <ConfirmDialog
+    title="Reimport this project?"
+    message="Cullant forgets everything it has stored about this project and reads the folder again from nothing: every rating, flag, colour label and tag, the queue of pending actions, and the commit history. Your photos and videos are not touched, and anything already exported to XMP sidecars comes back on the rescan."
+    confirmLabel="Reimport"
+    onconfirm={() => {
+      confirmReimport = false;
+      onclose();
+      void catalog.reimport();
+    }}
+    oncancel={() => (confirmReimport = false)}
   />
 {/if}
 

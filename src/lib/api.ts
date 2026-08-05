@@ -268,6 +268,9 @@ export const api = {
   ingestPending: () => invoke<number>("ingest_pending"),
   closeProject: () => invoke("close_project"),
   rescanProject: () => invoke("rescan_project"),
+  // Discard everything stored about the open project and read the folder again
+  // from nothing. Never touches the photos — only Cullant's own data directory.
+  reimportProject: () => invoke<ProjectInfo>("reimport_project"),
   // Push the "pregenerate video thumbnails" preference to the backend; the
   // ingest pass reads it before its final (slow) video-poster tier.
   setGenerateVideoThumbs: (on: boolean) => invoke("set_generate_video_thumbs", { on }),
