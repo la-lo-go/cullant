@@ -13,6 +13,7 @@
   import FolderTree from "$lib/components/FolderTree.svelte";
   import Viewer from "$lib/components/Viewer.svelte";
   import CompareView from "$lib/components/CompareView.svelte";
+  import SurveyView from "$lib/components/SurveyView.svelte";
   import FiltersPanel from "$lib/components/FiltersPanel.svelte";
   import GridViewPanel from "$lib/components/GridViewPanel.svelte";
   import SelectionBar from "$lib/components/SelectionBar.svelte";
@@ -482,7 +483,7 @@
         <div class="segmented">
           <button class:active={view.mode === "grid"} title="Grid (G)" onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
           <button class:active={view.mode === "viewer"} title="Loupe (E)" onclick={blurring(() => { session.ensureFocus(); view.mode = "viewer"; })}><Search size={14} /></button>
-          <button class:active={session.inSurvey} title="Compare (C)" onclick={blurring(() => session.openCompare())}><Columns2 size={14} /></button>
+          <button class:active={view.mode === "compare"} title="Compare (C)" onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
         </div>
       </div>
       <div class="toolbar-right">
@@ -608,7 +609,7 @@
       {:else if view.mode === "viewer"}
         <Viewer />
       {:else if view.mode === "survey"}
-        <CompareView />
+        <SurveyView />
       {:else}
         <CompareView />
       {/if}

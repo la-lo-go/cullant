@@ -13,7 +13,7 @@
  * confirm before it applies because it invalidates every generated preview.
  */
 
-import { BOTTOM_BAR_ITEMS, DEFAULTS, settings, type SurveyEliminate } from "./stores/settings.svelte";
+import { BOTTOM_BAR_ITEMS, DEFAULTS, settings } from "./stores/settings.svelte";
 import { DEFAULT_RADIAL_SLOTS, slotKey } from "./radial";
 import type { BurstMode } from "./bursts";
 import { AUTO_RESCAN_CHOICES, BURST_GAP_CHOICES } from "./stores/settings.svelte";
@@ -269,22 +269,6 @@ export const SETTINGS: Setting[] = [
     },
     modified: () => settings.bottomBarHidden.length > 0 || barReordered(),
     reset: () => settings.resetBottomBar(),
-  },
-  {
-    kind: "choice",
-    id: "surveyEliminate",
-    group: "bursts",
-    label: "Eliminating a photo",
-    info: "What taking a photo out of the compare view does. Queuing the delete makes working through a burst leave real decisions behind — and nothing touches the disk until the reviewed commit. Hiding keeps the view a pure shortlist.",
-    keywords: "survey compare tournament reject discard shortlist",
-    options: [
-      { value: "reject", label: "Queues its delete" },
-      { value: "hide", label: "Only takes it off screen" },
-    ],
-    get: () => settings.surveyEliminate,
-    set: (v) => settings.setSurveyEliminate(v as SurveyEliminate),
-    modified: () => settings.surveyEliminate !== DEFAULTS.surveyEliminate,
-    reset: () => settings.setSurveyEliminate(DEFAULTS.surveyEliminate),
   },
   {
     kind: "panel",

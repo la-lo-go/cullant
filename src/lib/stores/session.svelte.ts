@@ -297,9 +297,14 @@ class SessionStore {
    *  honest — the arrow keys assign the index directly and never call
    *  `clampFocus`. */
   set focusedIndex(i: number) {
+    const moved = i !== this.#focusedIndex;
     this.#focusedIndex = i;
     const it = this.filtered[i];
     if (it) this.stickyFocusId = it.id;
+    // An explicit compare pairing lasts only while the focus stays put: once it
+    // walks on, a second pane still showing the old partner would be a mode the
+    // user never asked to enter.
+    if (moved) this.compareWithId = null;
   }
   /** Id of the item the focus last landed on. An index means nothing once a
    *  filter changes `filtered` underneath it; the id is what lets the focus
@@ -837,33 +842,22 @@ class SessionStore {
     this.selectionAnchor = this.focusedIndex;
   }
 
-  // --- the N-up view (compare and survey are one thing) ---
+  // --- survey (N-up elimination) ---
 
-  /** The photos ON SCREEN, in cell order. It shrinks as photos are eliminated,
-   *  which is the whole point of the view, and it is deliberately its own list
-   *  rather than a window over `filtered`. */
+  /** Candidate file ids while the survey is open. It SHRINKS as photos are
+   *  eliminated — that is the whole point of the view, and why this is its own
+   *  list rather than a filter over `filtered`. */
   surveyIds = $state<number[]>([]);
 
-  /** Candidates waiting to take a vacated cell, in order.
-   *
-   *  This is what makes two cells a tournament: eliminate one and the next frame
-   *  of the burst moves into the hole it left, so the survivor stays on screen
-   *  and meets the next challenger. No "champion" concept is needed — the cell
-   *  you did not empty simply keeps its photo. */
-  surveyPool = $state<number[]>([]);
-
-  /** The live items behind `surveyIds`, in CELL order (not filtered order): a
-   *  refilled cell must keep its place. An id that has left the filter — rejected
-   *  while "Picks only" is on, say — simply drops out. */
+  /** The survey's live items, in filtered order. An id that has left the filter
+   *  (rejected while "Picks only" is on, say) simply drops out. */
   surveyItems = $derived.by(() => {
     if (this.surveyIds.length === 0) return [];
-    const byId = new Map(this.filtered.map((i) => [i.id, i]));
-    return this.surveyIds
-      .map((id) => byId.get(id))
-      .filter((i): i is ItemLite => i !== undefined);
+    const wanted = new Set(this.surveyIds);
+    return this.filtered.filter((i) => wanted.has(i.id));
   });
 
-  /** Ceiling on the field. Every cell loads a full loupe preview, and past this
+  /** Ceiling on a survey. Every tile loads a full loupe preview, and past this
    *  many they are too small to judge anyway. */
   static readonly MAX_SURVEY = 16;
 
@@ -887,48 +881,18 @@ class SessionStore {
    *  offer it at all, so the command is never a silent no-op. */
   canSurvey = $derived(this.selectedIds.size >= 2 || this.focusedBurst !== null);
 
-  /** Everything from the focused photo onwards, as ids: its burst when it is in
-   *  one, otherwise the rest of the visible set. What the two-up view draws
-   *  from, and then refills from. */
-  private runFromFocus(): number[] {
-    const at = this.focusedIndex;
-    if (at < 0) return [];
-    const burst = this.focusedBurst;
-    const order = burst ? burst.members : this.filtered.map((_, i) => i);
-    const start = order.indexOf(at);
-    return (start >= 0 ? order.slice(start) : [at]).map((i) => this.filtered[i].id);
-  }
-
-  /** Two up: the focused photo and the next one, with the rest of its burst
-   *  queued behind them. */
-  openCompare() {
-    // Collapse first: with a selection active the focus is -1 by design, and
-    // the run has to start from a real photo.
-    this.collapseSelection();
-    this.ensureFocus();
-    const ids = this.runFromFocus();
-    if (ids.length === 0) return;
-    const at = this.focusedIndex;
-    this.surveyIds = ids.slice(0, 2);
-    this.surveyPool = ids.slice(2);
-    this.surveyRequested = 0;
-    this.focusedIndex = at;
-    view.mode = "compare";
-  }
-
   openSurvey() {
     const all = this.surveyCandidates();
     if (all.length < 2) return;
     this.surveyRequested = all.length > SessionStore.MAX_SURVEY ? all.length : 0;
     const ids = all.slice(0, SessionStore.MAX_SURVEY);
-    const first = this.filtered.findIndex((i) => i.id === ids[0]);
-    // Dropping the selection is not tidiness: `targets()` prefers a selection
-    // over the focus, so leaving it would make every reject hit all N at once
-    // — the exact opposite of eliminating one at a time.
-    this.collapseSelection();
     this.surveyIds = ids;
-    this.surveyPool = all.slice(SessionStore.MAX_SURVEY);
+    const first = this.filtered.findIndex((i) => i.id === ids[0]);
     if (first >= 0) {
+      // Dropping the selection is not tidiness: `targets()` prefers a selection
+      // over the focus, so leaving it would make every reject hit all N at once
+      // — the exact opposite of eliminating one at a time.
+      this.collapseSelection();
       this.focusedIndex = first;
       this.selectionAnchor = first;
     }
@@ -937,12 +901,11 @@ class SessionStore {
 
   closeSurvey() {
     this.surveyIds = [];
-    this.surveyPool = [];
     this.surveyRequested = 0;
     view.mode = "grid";
   }
 
-  /** Move focus to the next/previous cell, stopping at the ends. */
+  /** Move focus to the next/previous survey candidate, stopping at the ends. */
   stepSurvey(delta: number) {
     const items = this.surveyItems;
     if (items.length === 0) return;
@@ -953,93 +916,30 @@ class SessionStore {
     if (idx >= 0) this.focusedIndex = idx;
   }
 
-  /** Focus a cell directly (click/tap). */
+  /** Focus a survey tile directly (click/tap). */
   focusSurveyItem(id: number) {
     const idx = this.filtered.findIndex((i) => i.id === id);
     if (idx >= 0) this.focusedIndex = idx;
   }
 
-  /** Take photos out of the running, pulling the next candidates into the cells
-   *  they vacate. With two cells that is the whole tournament; with more it is
-   *  the field narrowing as it always did. */
+  /** Take a photo out of the running. The survey narrows to the remainder and
+   *  focus lands on a neighbour, so eliminating is a single keystroke that
+   *  leaves you ready for the next one. */
   eliminateFromSurvey(ids: number[]) {
     if (this.surveyIds.length === 0) return;
     const gone = new Set(ids);
-    const at = this.surveyIds.findIndex((id) => gone.has(id));
-    if (at === -1) return;
-
-    const pool = [...this.surveyPool];
-    const next: number[] = [];
-    for (const id of this.surveyIds) {
-      if (!gone.has(id)) {
-        next.push(id);
-        continue;
-      }
-      const fill = pool.shift();
-      if (fill !== undefined) next.push(fill);
-    }
-    this.surveyIds = next;
-    this.surveyPool = pool;
+    const before = this.surveyItems;
+    const at = before.findIndex((i) => gone.has(i.id));
+    this.surveyIds = this.surveyIds.filter((id) => !gone.has(id));
 
     const left = this.surveyItems;
     if (left.length === 0) {
       this.closeSurvey();
       return;
     }
-    // Prefer whatever slid into the vacated cell, else the new last one.
-    const target = left[Math.min(at, left.length - 1)];
+    // Prefer whatever slid into the vacated slot, else the new last one.
+    const target = left[Math.min(at < 0 ? 0 : at, left.length - 1)];
     this.focusSurveyItem(target.id);
-  }
-
-  /** Step ONE cell through what is left to judge, leaving every other cell
-   *  where it is. Swiping a photo used to move the shared focus and therefore
-   *  page a different cell than the one under the finger. */
-  pageSurveyCell(index: number, dir: number) {
-    const current = this.surveyIds[index];
-    if (current === undefined) return;
-    const at = this.filtered.findIndex((i) => i.id === current);
-    if (at === -1) return;
-    const next = this.filtered[at + dir];
-    // Never show the same photo twice: step over anything already on screen.
-    if (!next || this.surveyIds.includes(next.id)) return;
-    const ids = [...this.surveyIds];
-    ids[index] = next.id;
-    this.surveyIds = ids;
-    if (this.focused?.id === current) this.focusSurveyItem(next.id);
-  }
-
-  /** Whether the N-up view is the one on screen. */
-  get inSurvey(): boolean {
-    return view.mode === "survey" || view.mode === "compare";
-  }
-
-  /** Eliminate the current target, meaning whatever the setting says it means.
-   *
-   *  Rejecting is the productive reading and the default: nothing touches the
-   *  disk until the reviewed commit, so a burst worked through this way leaves
-   *  real decisions behind rather than only a shortlist. "Hide" keeps the view a
-   *  pure filter for anyone who wants to decide later. */
-  async eliminate(event?: KeyboardEvent) {
-    const t = this.targets();
-    if (!t) return;
-    if (settings.surveyEliminate === "reject") {
-      // `flag` re-enters here through its own survey hook, so the cells and the
-      // queue can never disagree about what left the running.
-      await this.flag(-1, event);
-    } else {
-      this.eliminateFromSurvey(t.ids);
-    }
-    // Down to one with nothing queued behind it: that photo won. Marking it is
-    // the point of having run the tournament at all.
-    if (
-      settings.surveyEliminate === "reject" &&
-      this.surveyIds.length === 1 &&
-      this.surveyPool.length === 0
-    ) {
-      const keeper = this.surveyIds[0];
-      await this.flag(1, undefined, { ids: [keeper], asGroups: this.mirrorMode });
-      this.closeSurvey();
-    }
   }
 
   /** Flip which half of the focused pair is displayed (J). */
@@ -1214,29 +1114,51 @@ class SessionStore {
     return item.flag === -1 || this.pendingDeleteIds.has(item.id);
   }
 
+  /** Which photo compare puts in its second pane while nothing is pinned: the
+   *  next one after the focus, stepping over the ones already marked for
+   *  deletion when the setting asks for it. Offering a photo you have already
+   *  decided against as the thing to judge against is wasted screen. null when
+   *  there is nothing left to pair with. */
+  /** A photo picked to fill compare's second pane, instead of the one after the
+   *  focus. Set by "Compare with focused"; cleared as soon as the focus moves,
+   *  so it is a one-shot pairing and never a mode the user has to undo. */
+  compareWithId = $state<number | null>(null);
+
+  compareCompanionIndex = $derived.by<number | null>(() => {
+    if (this.compareWithId !== null) {
+      const at = this.filtered.findIndex((i) => i.id === this.compareWithId);
+      if (at !== -1) return at;
+    }
+    let i = this.focusedIndex + 1;
+    if (settings.skipRejected) {
+      while (i < this.filtered.length && this.markedForDeletion(this.filtered[i])) i++;
+    }
+    return i < this.filtered.length ? i : null;
+  });
+
   /** Whether a classification advances the focus on its own right now, with no
    *  key event to invert it. Read by the views that have to advance something
-   *  other than the focus — an N-up cell cannot go through `maybeAdvance`,
-   *  which only ever moves the focus. */
+   *  other than the focus — compare's second pane cannot go through
+   *  `maybeAdvance`, which only ever moves the focus. */
   autoAdvanceActive = $derived(this.autoAdvancePref || (settings.fastCulling && view.mode !== "grid"));
 
-  /** Put `index` on screen alongside the focused photo, and nothing else.
-   *
-   *  The grid's "compare with focused". It is the one pairing the N-up view
-   *  cannot reach on its own, because that always draws from the focus forwards
-   *  through the burst. */
+  /** Step compare's second pane through the filtered order on its own, leaving
+   *  the focus (and therefore the other pane) exactly where it is. */
+  stepCompanion(delta: number) {
+    const at = this.compareCompanionIndex;
+    if (at === null) return;
+    const next = this.filtered[at + delta];
+    if (next) this.compareWithId = next.id;
+  }
+
+  /** Show `index` alongside the currently focused photo. */
   compareWith(index: number) {
     const item = this.filtered[index];
     if (!item) return;
     this.ensureFocus();
-    const focused = this.focused;
-    if (!focused || focused.id === item.id) return;
-    const at = this.focusedIndex;
+    if (this.focused?.id === item.id) return;
     this.collapseSelection();
-    this.surveyIds = [focused.id, item.id];
-    this.surveyPool = [];
-    this.surveyRequested = 0;
-    this.focusedIndex = at;
+    this.compareWithId = item.id;
     view.mode = "compare";
   }
 
@@ -1558,7 +1480,7 @@ class SessionStore {
     // In the survey, rejecting is how you eliminate: the photo leaves the
     // running and the survivors grow. Hooked here rather than in the view so it
     // holds for every route to a reject — key, action bar or touch.
-    if (flag === -1 && this.inSurvey) this.eliminateFromSurvey(t.ids);
+    if (flag === -1 && view.mode === "survey") this.eliminateFromSurvey(t.ids);
     // The pending:changed listener refreshes too; this keeps ordering explicit.
     await this.refreshPending();
   }
