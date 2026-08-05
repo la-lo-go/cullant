@@ -84,11 +84,8 @@ export interface ChoiceSetting extends SettingBase {
 export interface PanelSetting extends SettingBase {
   kind: "panel";
   panel: SubPanelId;
-  /** Drawn on the row. A panel row is a door, and a door with a picture on it
-   *  reads as one from across the dialog. */
+  /** Drawn on the door, so it reads as one from across the dialog. */
   icon: typeof Zap;
-  /** Shown on the row, so entering the panel is often unnecessary. */
-  summary(): string;
 }
 
 export interface CustomSetting extends SettingBase {
@@ -255,7 +252,6 @@ export const SETTINGS: Setting[] = [
     label: "Filmstrip badges",
     info: "Which badges the filmstrip thumbnails carry. Set apart from the grid's, because a filmstrip cell is small enough for a badge to sit outside the photo.",
     keywords: "raw jpg star rating color label flag tags",
-    summary: () => `${FILMSTRIP_BADGES.filter((b) => b.get()).length} of 5 shown`,
     modified: () => FILMSTRIP_BADGES.some((b, i) => b.get() !== BADGE_DEFAULTS[i]),
     reset: () => FILMSTRIP_BADGES.forEach((b, i) => b.set(BADGE_DEFAULTS[i])),
   },
@@ -268,13 +264,6 @@ export const SETTINGS: Setting[] = [
     label: "Touch action bar",
     info: "The order of the classification groups in the bottom bar, and which of them show at all.",
     keywords: "bottom bar reorder hide mobile rating labels tags",
-    summary: () => {
-      const total = BOTTOM_BAR_ITEMS.length;
-      const shown = total - settings.bottomBarHidden.length;
-      const reordered = barReordered();
-      if (shown === total) return reordered ? "Custom order" : "Default";
-      return reordered ? `Custom, ${shown} of ${total}` : `${shown} of ${total} shown`;
-    },
     modified: () => settings.bottomBarHidden.length > 0 || barReordered(),
     reset: () => settings.resetBottomBar(),
   },
@@ -287,7 +276,6 @@ export const SETTINGS: Setting[] = [
     label: "Radial menu",
     info: "Press and hold a photo in the loupe or compare to open the ring.",
     keywords: "hold press gesture wheel pie sectors touch thumb mouse right click",
-    summary: () => `${settings.radialSlots.length} sectors`,
     modified: () =>
       settings.radialMouse !== "left" ||
       settings.radialSlots.map(slotKey).join() !== DEFAULT_RADIAL_SLOTS.map(slotKey).join(),

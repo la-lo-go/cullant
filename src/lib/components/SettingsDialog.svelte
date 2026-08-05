@@ -164,6 +164,11 @@
 
   const visibleGroups = $derived(GROUPS.filter((g) => rows(g.id).length > 0));
 
+  /** The panels, gathered out of their groups. Each is a door onto a screenful
+   *  of its own, so they belong with the other doors at the foot of the dialog
+   *  rather than sitting as a card in the middle of a column of preferences. */
+  const panelRows = $derived(SETTINGS.filter((s) => s.kind === "panel" && matches(s, query)));
+
   /** Split the groups into two desktop columns of roughly equal height, counting
    *  a header plus its rows. Balancing rather than hardcoding keeps the columns
    *  even as settings are added, and as the search empties groups out. */
@@ -304,7 +309,6 @@
     >
       <s.icon size={14} />
       <span>{s.label}</span>
-      <span class="summary">{s.summary()}</span>
       <ChevronRight size={14} />
     </button>
   {:else}
@@ -377,7 +381,7 @@
         </button>
       {/if}
     </header>
-    {#each rows(g.id) as s (s.id)}
+    {#each rows(g.id).filter((s) => s.kind !== "panel") as s (s.id)}
       {@render settingRow(s)}
     {/each}
     {#if g.id === "quality" && previewMsg}
@@ -591,20 +595,26 @@
           </div>
         {/if}
 
-        {#if !query}
+        {#if panelRows.length > 0 || !query}
           <div class="jump">
-            <button class="wide" onclick={releasing(onshowkeybindings)}>
-              <Keyboard size={14} />
-              <span>Keyboard shortcuts</span>
-              <ChevronRight size={14} />
-            </button>
-            <button class="wide" onclick={releasing(onshowtags)}>
-              <Tag size={14} />
-              <span>Task tags</span>
-              <ChevronRight size={14} />
-            </button>
+            {#each panelRows as s (s.id)}
+              {@render settingRow(s)}
+            {/each}
+            {#if !query}
+              <button class="wide" onclick={releasing(onshowkeybindings)}>
+                <Keyboard size={14} />
+                <span>Keyboard shortcuts</span>
+                <ChevronRight size={14} />
+              </button>
+              <button class="wide" onclick={releasing(onshowtags)}>
+                <Tag size={14} />
+                <span>Task tags</span>
+                <ChevronRight size={14} />
+              </button>
+            {/if}
           </div>
 
+          {#if !query}
           <!-- Deliberately not a third grey row like the two above. Nothing funds
                this app, so the one ask it makes gets to be seen. -->
           <button class="support" onclick={releasing(onshowsupport)}>
@@ -641,6 +651,7 @@
               <RotateCcw size={13} />
               <span>Reset all settings</span>
             </button>
+          {/if}
           {/if}
         {/if}
       </div>
@@ -1367,14 +1378,9 @@
     outline-offset: 2px;
   }
 
-  .wide.door {
-    padding: 7px 10px;
-  }
-
-  .wide.door .summary {
-    margin-left: auto;
-    font-size: 11.5px;
-    opacity: 0.65;
+  .wide.door span:first-of-type {
+    flex: 1;
+    text-align: left;
   }
 
   .wide.door.changed span:first-of-type::after {
@@ -1386,5 +1392,12 @@
     border-radius: 50%;
     background: var(--accent);
     vertical-align: middle;
+  }
+
+  /* Values end at the edge their controls hug. Left-aligned inside boxes of
+     four different widths, they started in four different places. */
+  .row select {
+    text-align: right;
+    text-align-last: right;
   }
 </style>
