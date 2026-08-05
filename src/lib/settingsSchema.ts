@@ -22,6 +22,9 @@ import Eye from "@lucide/svelte/icons/eye";
 import Gauge from "@lucide/svelte/icons/gauge";
 import Layers from "@lucide/svelte/icons/layers";
 import FolderOpen from "@lucide/svelte/icons/folder-open";
+import Film from "@lucide/svelte/icons/film";
+import PanelBottom from "@lucide/svelte/icons/panel-bottom";
+import CircleDot from "@lucide/svelte/icons/circle-dot";
 
 export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project";
 
@@ -81,6 +84,9 @@ export interface ChoiceSetting extends SettingBase {
 export interface PanelSetting extends SettingBase {
   kind: "panel";
   panel: SubPanelId;
+  /** Drawn on the row. A panel row is a door, and a door with a picture on it
+   *  reads as one from across the dialog. */
+  icon: typeof Zap;
   /** Shown on the row, so entering the panel is often unnecessary. */
   summary(): string;
 }
@@ -243,6 +249,7 @@ export const SETTINGS: Setting[] = [
   {
     kind: "panel",
     panel: "filmstripBadges",
+    icon: Film,
     id: "filmstripBadges",
     group: "appearance",
     label: "Filmstrip badges",
@@ -255,6 +262,7 @@ export const SETTINGS: Setting[] = [
   {
     kind: "panel",
     panel: "touchBar",
+    icon: PanelBottom,
     id: "touchBar",
     group: "appearance",
     label: "Touch action bar",
@@ -273,6 +281,7 @@ export const SETTINGS: Setting[] = [
   {
     kind: "panel",
     panel: "radial",
+    icon: CircleDot,
     id: "radial",
     group: "culling",
     label: "Radial menu",

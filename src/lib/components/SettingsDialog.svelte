@@ -291,51 +291,74 @@
 </script>
 
 {#snippet settingRow(s: Setting)}
-  <div class="row" class:changed={s.modified()}>
-    <span class="name">
-      <span class="label">{s.label}</span>
-      <InfoTip title={s.label} text={s.info} />
-    </span>
+  {#if s.kind === "panel"}
+    <!-- A door, drawn like the doors at the foot of the dialog rather than like
+         a preference sitting next to its control. It leads somewhere with its
+         own screenful of settings, and that was not visible when it was a row
+         with a small chevron on the end of it. No info affordance: the panel
+         opens with the same explanation as its first line. -->
+    <button
+      class="wide door"
+      class:changed={s.modified()}
+      onclick={releasing(() => (view.settingsPanel = s.id))}
+    >
+      <s.icon size={14} />
+      <span>{s.label}</span>
+      <span class="summary">{s.summary()}</span>
+      <ChevronRight size={14} />
+    </button>
+  {:else}
+    <!-- A toggle row IS the label of its checkbox, so the whole row flips it and
+         the switch stays one real control with one tab stop. The info button
+         inside is interactive content, which a label does not forward to. -->
+    <svelte:element
+      this={s.kind === "toggle" ? "label" : "div"}
+      class="row"
+      class:changed={s.modified()}
+      class:whole-row={s.kind === "toggle"}
+    >
+      {#if s.kind === "toggle"}
+        <input
+          class="sw-input"
+          type="checkbox"
+          aria-label={s.label}
+          checked={s.get()}
+          onchange={releasing((e) => s.set(e.currentTarget.checked))}
+        />
+      {/if}
+      <span class="name">
+        <span class="label">{s.label}</span>
+        <InfoTip title={s.label} text={s.info} />
+      </span>
 
-    {#if s.kind === "toggle"}
-      <button
-        class="switch"
-        class:on={s.get()}
-        role="switch"
-        aria-checked={s.get()}
-        aria-label={s.label}
-        onclick={releasing(() => s.set(!s.get()))}
-      >
-        <span class="knob"></span>
-      </button>
-    {:else if s.kind === "choice"}
-      <select
-        aria-label={s.label}
-        value={s.get()}
-        onchange={releasing((e) => s.set(e.currentTarget.value))}
-      >
-        {#each s.options as o (o.value)}
-          <option value={o.value}>{o.label}</option>
-        {/each}
-      </select>
-    {:else if s.kind === "panel"}
-      <button class="drill" onclick={releasing(() => (view.settingsPanel = s.id))}>
-        <span class="summary">{s.summary()}</span>
-        <ChevronRight size={14} />
-      </button>
-    {:else if s.slot === "previewQuality"}
-      <select
-        aria-label={s.label}
-        disabled={previewBusy}
-        value={settings.previewQuality}
-        onchange={changePreviewQuality}
-      >
-        {#each PREVIEW_QUALITY_CHOICES as choice (choice)}
-          <option value={choice}>{choice} px · {PREVIEW_QUALITY_LABELS[choice]}</option>
-        {/each}
-      </select>
-    {/if}
-  </div>
+      {#if s.kind === "toggle"}
+        <span class="switch" class:on={s.get()}>
+          <span class="knob"></span>
+        </span>
+      {:else if s.kind === "choice"}
+        <select
+          aria-label={s.label}
+          value={s.get()}
+          onchange={releasing((e) => s.set(e.currentTarget.value))}
+        >
+          {#each s.options as o (o.value)}
+            <option value={o.value}>{o.label}</option>
+          {/each}
+        </select>
+      {:else if s.slot === "previewQuality"}
+        <select
+          aria-label={s.label}
+          disabled={previewBusy}
+          value={settings.previewQuality}
+          onchange={changePreviewQuality}
+        >
+          {#each PREVIEW_QUALITY_CHOICES as choice (choice)}
+            <option value={choice}>{choice} px · {PREVIEW_QUALITY_LABELS[choice]}</option>
+          {/each}
+        </select>
+      {/if}
+    </svelte:element>
+  {/if}
 {/snippet}
 
 {#snippet groupBlock(g: SettingGroup)}
@@ -1318,5 +1341,50 @@
     padding-top: 10px;
     border-top: 1px solid var(--border);
     border-radius: 0;
+  }
+
+  /* Whole-row toggling: the row is the checkbox's label. */
+  .row.whole-row {
+    cursor: pointer;
+  }
+
+  .row.whole-row:hover {
+    background: var(--hover);
+  }
+
+  /* Off screen but still focusable, so the switch keeps its place in the tab
+     order and its focus ring — which the visual switch borrows below. */
+  .sw-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .sw-input:focus-visible ~ .switch {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .wide.door {
+    padding: 7px 10px;
+  }
+
+  .wide.door .summary {
+    margin-left: auto;
+    font-size: 11.5px;
+    opacity: 0.65;
+  }
+
+  .wide.door.changed span:first-of-type::after {
+    content: "";
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-left: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    vertical-align: middle;
   }
 </style>
