@@ -276,7 +276,7 @@ export const SETTINGS: Setting[] = [
     id: "radial",
     group: "culling",
     label: "Radial menu",
-    info: "Press and hold a photo in the loupe or compare to open it. Set what each sector does, how the ring sits, and which button opens it.",
+    info: "Press and hold a photo in the loupe or compare to open the ring.",
     keywords: "hold press gesture wheel pie sectors touch thumb mouse right click",
     summary: () => `${settings.radialSlots.length} sectors`,
     modified: () =>

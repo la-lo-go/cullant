@@ -82,9 +82,12 @@
       fill 90ms ease-out;
   }
 
+  /* A tint, not a slab. With two sectors the highlight is half the ring, and
+     filling that with the accent made the diagram read as a state rather than
+     as a pointer at the row under the cursor. */
   .sector.on {
-    fill: var(--accent-fill);
-    transform: scale(1.07);
+    fill: color-mix(in srgb, var(--accent-fill) 45%, var(--control));
+    transform: scale(1.05);
   }
 
   .ico {
@@ -99,7 +102,7 @@
   }
 
   .ico.on {
-    color: #fff;
+    color: var(--accent);
   }
 
   .glyph {

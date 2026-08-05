@@ -501,18 +501,22 @@
               {/snippet}
             </DragList>
 
+            <!-- Quiet, and left where the list ends: adding a sector is a step
+                 you take now and then, not the thing this panel is for. As a
+                 full-width bar it outweighed the sectors above it and split the
+                 options below off from them. -->
             <button
-              class="wide"
+              class="add"
               disabled={settings.radialSlots.length >= RADIAL_MAX_SECTORS}
               onclick={openAddMenu}
             >
-              <Plus size={13} />
+              <Plus size={12} />
               <span>Add sector…</span>
             </button>
 
-            <!-- In the same column as the sectors, and built like them: these
-                 belong to the ring being edited, not to the dialog. -->
-            <div class="slot">
+            <!-- Below the ring's own contents, and marked off from them: these
+                 are about the ring rather than in it. -->
+            <div class="slot ring-opt">
               <span class="slot-label">Opens with</span>
               <select
                 value={settings.radialMouse}
@@ -1280,5 +1284,39 @@
     .radial-rows {
       width: 100%;
     }
+  }
+
+  .radial-rows .add {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 2px;
+    padding: 3px 8px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: #9aa0a0;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .radial-rows .add:hover:not(:disabled) {
+    color: #fff;
+    border-color: var(--border-strong);
+  }
+
+  .radial-rows .add:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  /* A hairline, not a heading: the two rows under it belong to the same block,
+     they are just about the ring rather than in it. */
+  .slot.ring-opt {
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
   }
 </style>
