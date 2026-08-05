@@ -1,4 +1,15 @@
+<script module lang="ts">
+  /**
+   * Where the grid was left, kept across mounts. The component is destroyed
+   * every time the view switches to the loupe/compare/survey, so the offset
+   * cannot live in component state: returning would always land at the top.
+   * Keyed by project, so opening another one starts from its own beginning.
+   */
+  let savedScroll: { root: string; top: number } | null = null;
+</script>
+
 <script lang="ts">
+  import { tick } from "svelte";
   import { api, thumbUrl, displayDims, type ItemLite } from "../api";
   import { SvelteMap } from "svelte/reactivity";
   import { catalog } from "../stores/catalog.svelte";
@@ -443,18 +454,63 @@
     return lo;
   }
 
-  // Keep the focused cell in view: on keyboard navigation, and once on mount
-  // (e.g. returning from the loupe/compare). Skipped when nothing is focused
-  // (-1) — a selection in progress deliberately drops focus (see beginMarquee).
-  // Also skipped until `height` reports a real measurement (a tick after mount).
-  // Uses the laid-out y so it stays correct with headers between groups.
-  $effect(() => {
-    if (!viewport || session.focusedIndex === -1 || height === 0) return;
+  /** Scroll the focused cell into view, moving as little as possible. Uses the
+   *  laid-out y, so it stays correct with headers between groups. */
+  function followFocus() {
+    if (!viewport || session.focusedIndex === -1) return;
     const top = layout.itemY[session.gridCellAt(session.focusedIndex)];
     if (top === undefined) return;
     const bottom = top + CELL;
     if (top < viewport.scrollTop) viewport.scrollTo({ top });
     else if (bottom > viewport.scrollTop + height) viewport.scrollTo({ top: bottom - height });
+  }
+
+  // True once the offset saved by the previous visit has been re-applied. Until
+  // then `followFocus` must not run: it would scroll from the top of the grid
+  // and win over the restore that is about to happen.
+  let restored = false;
+
+  // Come back to the grid where it was left. The offset alone is not enough:
+  // the loupe can page far away from what the grid last showed, so the saved
+  // position only stands if the focused photo is still on screen under it —
+  // otherwise the focused cell is centred instead.
+  //
+  // Deliberately awaits `tick()`. This effect is created before the template's,
+  // so on the flush that first reports the viewport size the canvas still
+  // carries the height computed from the pre-measurement layout (a few hundred
+  // px). Scrolling then would be clamped to that stale height — the grid landed
+  // near its top no matter which photo was open.
+  async function restoreScroll() {
+    if (!viewport) return;
+    await tick();
+    if (!viewport) return;
+    const saved =
+      savedScroll && savedScroll.root === catalog.project?.rootPath ? savedScroll.top : 0;
+    viewport.scrollTop = saved;
+    const top =
+      session.focusedIndex === -1
+        ? undefined
+        : layout.itemY[session.gridCellAt(session.focusedIndex)];
+    if (top !== undefined && (top < saved || top + CELL > saved + height)) {
+      viewport.scrollTop = Math.max(0, top - (height - CELL) / 2);
+    }
+    scrollTop = viewport.scrollTop;
+  }
+
+  // Keep the focused cell in view on keyboard navigation. Skipped when nothing
+  // is focused (-1) — a selection in progress deliberately drops focus (see
+  // beginMarquee) — and until `height`/`width` report a real measurement (a
+  // tick after mount), which is also when the restore above can run.
+  $effect(() => {
+    void session.focusedIndex;
+    void layout;
+    if (!viewport || width === 0 || height === 0) return;
+    if (!restored) {
+      restored = true;
+      void restoreScroll();
+      return;
+    }
+    followFocus();
   });
 
   // Only the visible window is materialized. The #each below is keyed by file
@@ -509,7 +565,11 @@
   });
 
   function onScroll() {
-    if (viewport) scrollTop = viewport.scrollTop;
+    if (!viewport) return;
+    scrollTop = viewport.scrollTop;
+    // Recorded as it changes rather than on unmount, so the last position is
+    // already stored whatever order the teardown runs in.
+    if (restored) savedScroll = { root: catalog.project?.rootPath ?? "", top: scrollTop };
   }
 
   // --- pointer selection: click routing + drag marquee ---
