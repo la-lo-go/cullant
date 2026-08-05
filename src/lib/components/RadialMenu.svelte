@@ -17,9 +17,11 @@
    *
    * A GROUP sector descends: keep moving outwards and the whole ring is replaced
    * by that group's members, so their sectors stay as wide as the ones they came
-   * from. Coming back to the dead zone climbs out again. Releasing ON a group
-   * without descending opens it as a list rather than doing nothing, so the
-   * gesture is never a dead end.
+   * from. Climbing back out asks for the middle of the hub, deeper than the
+   * radius that merely disarms — leaving a group is a decision, and it used to
+   * happen by accident while crossing the dead zone between two sectors.
+   * Releasing ON a group without descending opens it as a list rather than doing
+   * nothing, so the gesture is never a dead end.
    */
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
@@ -84,6 +86,10 @@
    *  the drawn ring: having to travel past the edge of what you can see is not
    *  something anyone discovers. */
   const DESCEND_R = 76;
+  /** And well inside the dead zone to climb back OUT of one. Sharing the cancel
+   *  radius made a group fall open and shut again on the way past, since the
+   *  same few pixels meant both "nothing armed" and "leave this group". */
+  const CLIMB_R = 15;
   const R_INNER = 40;
   const R_OUTER = 108;
   /** The box leaves room for the armed sector to grow past R_OUTER. */
@@ -145,7 +151,7 @@
     if (descended === null) {
       const hit = armed >= 0 ? rootActions[armed] : undefined;
       if (hit?.children && dist > DESCEND_R) descended = hit;
-    } else if (dist <= DEAD_ZONE) {
+    } else if (dist <= CLIMB_R) {
       descended = null;
     }
   });
@@ -204,6 +210,24 @@
         d={wedgePath(i, actions.length, R_INNER, R_OUTER, BOX, rot)}
       />
     {/each}
+
+    {#if descended}
+      <!-- The way out, drawn where it is: without a mark the hub is a hole, and
+           the only clue that going back in closes the group was knowing. -->
+      <circle
+        class="climb"
+        class:armed={dist <= CLIMB_R}
+        cx={BOX / 2}
+        cy={BOX / 2}
+        r={CLIMB_R + 6}
+      />
+      <path
+        class="climb-x"
+        class:armed={dist <= CLIMB_R}
+        d="M {BOX / 2 - 5} {BOX / 2 - 5} L {BOX / 2 + 5} {BOX / 2 + 5}
+           M {BOX / 2 + 5} {BOX / 2 - 5} L {BOX / 2 - 5} {BOX / 2 + 5}"
+      />
+    {/if}
 
     {#if pulling}
       <!-- The line the finger has to cross to open this group. It brightens and
@@ -334,6 +358,32 @@
     fill: none;
     stroke: var(--accent);
     stroke-linecap: round;
+  }
+
+  .climb {
+    fill: rgba(18, 22, 23, 0.85);
+    stroke: var(--border-strong);
+    stroke-width: 1;
+    transition:
+      fill 90ms ease-out,
+      stroke 90ms ease-out;
+  }
+
+  .climb.armed {
+    fill: var(--accent-fill);
+    stroke: var(--accent);
+  }
+
+  .climb-x {
+    fill: none;
+    stroke: #9aa0a0;
+    stroke-width: 2;
+    stroke-linecap: round;
+    transition: stroke 90ms ease-out;
+  }
+
+  .climb-x.armed {
+    stroke: #fff;
   }
 
 </style>
