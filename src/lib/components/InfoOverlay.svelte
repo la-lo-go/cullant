@@ -55,9 +55,18 @@
 
 {#if view.infoTip}
   <button class="scrim" aria-label="Close explanation" onclick={() => (view.infoTip = null)}></button>
-  <div class="dim" aria-hidden="true"></div>
+  <!-- The sheet covers the bottom of a phone, so the app behind it is dimmed to
+       say which layer is live. A popover parked under its own icon is already
+       tied to what it explains: dimming the window around it, and repeating the
+       label the icon sits next to, only make a one-line aside feel like a
+       modal. -->
+  {#if narrow}
+    <div class="dim" aria-hidden="true"></div>
+  {/if}
   <div class="pop" class:sheet={narrow} bind:this={popEl} role="tooltip">
-    <span class="title">{view.infoTip.title}</span>
+    {#if narrow}
+      <span class="title">{view.infoTip.title}</span>
+    {/if}
     <p>{view.infoTip.text}</p>
   </div>
 {/if}
