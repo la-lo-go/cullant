@@ -29,7 +29,7 @@ is kept as the record of what was decided and why, plus what is still open.
 | XMP conflict | Newer wins, `state_updated_at` against the sidecar mtime, reported once per scan |
 | XMP import | Never sets `xmp_dirty` — that would queue a write-back of what was just read |
 | Burst threshold | Fixed gap or adaptive; adaptive declines rather than guessing when the intervals are not bimodal, and shows the value it settled on |
-| Burst invariants | Never spans two cameras; never splits a RAW+JPEG pair; a missing pHash never splits a burst |
+| Burst invariants | Never spans two cameras; never splits a RAW+JPEG pair; a pHash that will never arrive (undecodable thumbnail) never splits a burst — one that has merely not arrived yet holds the frame out of any burst until it does, or an import shows every photo as one |
 | Survey | Opening it drops the selection, because `targets()` prefers a selection over the focus and every reject would otherwise hit all N |
 
 ## Known limits

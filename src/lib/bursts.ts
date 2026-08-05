@@ -42,6 +42,9 @@ interface Shot {
   time: number;
   camera: string;
   phash: string | null;
+  /** No hash YET, as opposed to no hash ever: its thumbnail is still queued.
+   *  The two look identical on the row and mean opposite things here. */
+  pending: boolean;
 }
 
 function popcount32(n: number): number {
@@ -74,6 +77,7 @@ function shotsOf(items: ItemLite[]): Shot[] {
         existing.time = item.captureTime ?? item.mtime;
         existing.camera = item.camera ?? "";
         existing.phash = item.phash;
+        existing.pending = item.phash === null && !item.thumbFailed;
       }
       continue;
     }
@@ -83,6 +87,7 @@ function shotsOf(items: ItemLite[]): Shot[] {
       time: item.captureTime ?? item.mtime,
       camera: item.camera ?? "",
       phash: item.phash,
+      pending: item.phash === null && !item.thumbFailed,
     });
   }
   return [...byGroup.values()].sort(
@@ -157,11 +162,17 @@ export function computeBursts(items: ItemLite[], gapSeconds: number): Bursts {
     if (prev) {
       const sameDevice = shot.camera === prev.camera;
       const closeInTime = shot.time - prev.time <= gapSeconds;
-      // A missing hash (thumbnail not generated yet) must not split a burst —
-      // it degrades to time-only, which is what the whole project has until
-      // the background pass catches up.
+      // A hash that will never arrive (the thumbnail could not be decoded)
+      // degrades to time-only, so one broken frame cannot split a burst around
+      // it. A hash that has merely not arrived YET is a different thing and must
+      // not be read as "these look alike": during an import nothing has a hash,
+      // and time alone says every photo of a fast shoot is one enormous burst
+      // that then breaks apart as the thumbnails land. Waiting shows nothing for
+      // a moment; guessing shows something wrong.
+      const undecided = shot.pending || prev.pending;
       const looksAlike =
-        !shot.phash || !prev.phash || hammingHex(shot.phash, prev.phash) <= MAX_BURST_DISTANCE;
+        !undecided &&
+        (!shot.phash || !prev.phash || hammingHex(shot.phash, prev.phash) <= MAX_BURST_DISTANCE);
       if (!sameDevice || !closeInTime || !looksAlike) flush();
     }
     run.push(shot);
