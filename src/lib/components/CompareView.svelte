@@ -8,6 +8,7 @@
   import ZoomImage from "./ZoomImage.svelte";
   import Filmstrip from "./Filmstrip.svelte";
   import X from "@lucide/svelte/icons/x";
+  import Check from "@lucide/svelte/icons/check";
   import Pin from "@lucide/svelte/icons/pin";
   import PinOff from "@lucide/svelte/icons/pin-off";
   import Maximize from "@lucide/svelte/icons/maximize";
@@ -177,6 +178,8 @@
           {@const b = session.burstPositionOf(left.id)}
           <span class="caption" class:focused-caption={focusedSide === "left"}>
             <span style:color={left.label ? labelColors[left.label] : null}>{left.name}.{left.ext}</span>
+            {#if left.flag === 1}<span class="pick" title="Picked"><Check size={13} /></span>{/if}
+            {#if left.flag === -1}<span class="reject" title="Rejected"><X size={13} /></span>{/if}
             {#if b}
               <span class="burst" title="Shot {b.position} of a burst of {b.total}">
                 <Layers size={10} />{b.position}/{b.total}
@@ -211,6 +214,8 @@
           {@const b = session.burstPositionOf(right.id)}
           <span class="caption" class:focused-caption={focusedSide === "right"}>
             <span style:color={right.label ? labelColors[right.label] : null}>{right.name}.{right.ext}</span>
+            {#if right.flag === 1}<span class="pick" title="Picked"><Check size={13} /></span>{/if}
+            {#if right.flag === -1}<span class="reject" title="Rejected"><X size={13} /></span>{/if}
             {#if b}
               <span class="burst" title="Shot {b.position} of a burst of {b.total}">
                 <Layers size={10} />{b.position}/{b.total}
@@ -362,6 +367,21 @@
     padding: 2px 8px;
     border-radius: 4px;
     pointer-events: none;
+  }
+
+  /* Pick/reject marks, next to the name and never conditional: the dimming of a
+     rejected preview is opt-in, so it cannot be the only report of a verdict
+     the two panes exist to compare. */
+  .pick {
+    display: inline-flex;
+    align-items: center;
+    color: #6be675;
+  }
+
+  .reject {
+    display: inline-flex;
+    align-items: center;
+    color: #ff6b6b;
   }
 
   /* The loupe's burst pill, in the caption. Compare hid it entirely before, so
