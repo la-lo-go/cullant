@@ -21,17 +21,17 @@
    * without descending opens it as a list rather than doing nothing, so the
    * gesture is never a dead end.
    */
-  import { LABELS } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
   import {
     arcPath,
     sectorPoint,
-    slotIcon,
+    slotFace,
     slotShortLabel,
     wedgePath,
     type RadialSlot,
   } from "../radial";
+  import { LABELS, LABEL_COLORS } from "../labels";
   import type { CommandId } from "../keyboard/keymap";
   import Star from "@lucide/svelte/icons/star";
   import Circle from "@lucide/svelte/icons/circle";
@@ -94,13 +94,9 @@
    *  happen to share an angle. */
   const ICON_R_ARMED = ICON_R + 9;
 
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
+  /** The whole ring turned, so the first sector can sit where a given hand
+   *  actually reaches rather than always straight up. */
+  const rot = $derived((settings.radialRotation * Math.PI) / 180);
 
   const rootActions = $derived(buildRoot(settings.radialSlots));
 
@@ -122,7 +118,8 @@
     const n = actions.length;
     const step = (Math.PI * 2) / n;
     // atan2(dx, -dy) is 0 straight up and grows clockwise.
-    let a = Math.atan2(dx, -dy);
+    let a = Math.atan2(dx, -dy) - rot;
+    a %= Math.PI * 2;
     if (a < 0) a += Math.PI * 2;
     return Math.floor((a + step / 2) / step) % n;
   });
@@ -162,7 +159,7 @@
 
   function buildRoot(slots: RadialSlot[]): RadialAction[] {
     return slots.map((slot) => {
-      const base = { label: slotShortLabel(slot), icon: slotIcon(slot) };
+      const base = { label: slotShortLabel(slot), ...slotFace(slot) };
       if (slot.kind === "more") return { ...base, more: true };
       if (slot.kind === "command") return { ...base, run: () => handlers.run(slot.id) };
       return { ...base, children: groupChildren(slot.id) };
@@ -182,7 +179,7 @@
         { label: "None", icon: Circle, run: () => handlers.label(null) },
         ...LABELS.map((l) => ({
           label: l,
-          swatch: labelColors[l],
+          swatch: LABEL_COLORS[l],
           run: () => handlers.label(l),
         })),
       ];
@@ -204,7 +201,7 @@
       <path
         class="sector"
         class:armed={armed === i}
-        d={wedgePath(i, actions.length, R_INNER, R_OUTER, BOX)}
+        d={wedgePath(i, actions.length, R_INNER, R_OUTER, BOX, rot)}
       />
     {/each}
 
@@ -214,7 +211,7 @@
            is visible while it is being made instead of only once it works. -->
       <path
         class="gate"
-        d={arcPath(armed, actions.length, DESCEND_R, BOX)}
+        d={arcPath(armed, actions.length, DESCEND_R, BOX, rot)}
         style="opacity:{0.22 + pull * 0.78}; stroke-width:{1.5 + pull * 3}"
       />
     {/if}
@@ -222,7 +219,7 @@
 
   {#each actions as action, i (i)}
     {@const on = armed === i}
-    {@const p = sectorPoint(i, actions.length, on ? ICON_R_ARMED : ICON_R, BOX)}
+    {@const p = sectorPoint(i, actions.length, on ? ICON_R_ARMED : ICON_R, BOX, rot)}
     <span class="ico" class:armed={on} style="left:{p.x}px; top:{p.y}px">
       {#if action.glyph}
         <span class="glyph">{action.glyph}</span>

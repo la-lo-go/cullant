@@ -134,8 +134,10 @@ function isInFolder(relPath: string, folder: string): boolean {
   return dir === folder || dir.startsWith(`${folder}/`);
 }
 
-export const LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
-export type Label = (typeof LABELS)[number];
+// Re-exported so the many existing `from "../stores/session.svelte"` imports
+// keep working; the list itself lives in `labels.ts`, reachable from modules
+// this store imports (and therefore cannot import back).
+export { LABELS, type Label } from "../labels";
 
 /** Grid thumbnail size. `medium` is the historical default. */
 export type GridDensity = "small" | "medium" | "large";

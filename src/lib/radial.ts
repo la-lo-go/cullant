@@ -16,9 +16,11 @@
  */
 
 import { COMMANDS, type CommandId } from "./keyboard/keymap";
+import { LABEL_COLORS } from "./labels";
 
-import Check from "@lucide/svelte/icons/check";
 import Circle from "@lucide/svelte/icons/circle";
+import Flag from "@lucide/svelte/icons/flag";
+import FlagOff from "@lucide/svelte/icons/flag-off";
 import Ellipsis from "@lucide/svelte/icons/ellipsis";
 import FolderInput from "@lucide/svelte/icons/folder-input";
 import Link2 from "@lucide/svelte/icons/link-2";
@@ -28,6 +30,7 @@ import RotateCw from "@lucide/svelte/icons/rotate-cw";
 import Scissors from "@lucide/svelte/icons/scissors";
 import SplitSquareHorizontal from "@lucide/svelte/icons/square-split-horizontal";
 import Star from "@lucide/svelte/icons/star";
+import StarOff from "@lucide/svelte/icons/star-off";
 import Tag from "@lucide/svelte/icons/tag";
 import Trash2 from "@lucide/svelte/icons/trash-2";
 import UploadCloud from "@lucide/svelte/icons/upload-cloud";
@@ -50,6 +53,10 @@ export const RADIAL_GROUPS: { id: RadialGroupId; label: string }[] = [
  *  make; above ten a sector is thinner than a thumb can aim at while moving. */
 export const RADIAL_MIN_SECTORS = 2;
 export const RADIAL_MAX_SECTORS = 10;
+
+/** Quarter turns the whole ring can be rotated by, so the first sector can be
+ *  put where a given hand actually reaches. */
+export const RADIAL_ROTATION_CHOICES = [0, 90, 180, 270] as const;
 
 /** Which mouse gesture opens the ring on the desktop. */
 export const RADIAL_MOUSE_CHOICES = ["left", "right", "both"] as const;
@@ -82,21 +89,12 @@ export const ASSIGNABLE_COMMANDS = COMMANDS.filter(
  *  a shape, and a sector is not wide enough for "Queue delete: JPEG only". The
  *  name appears only for the sector currently under the finger. */
 const COMMAND_ICONS: Partial<Record<CommandId, typeof Star>> = {
-  "flag.pick": Check,
+  // The three flag states as one family: raised, struck through, gone.
+  "flag.pick": Flag,
   "flag.reject": X,
-  "flag.unflag": Circle,
-  "flag.toggle": Check,
-  "rate.0": Star,
-  "rate.1": Star,
-  "rate.2": Star,
-  "rate.3": Star,
-  "rate.4": Star,
-  "rate.5": Star,
-  "label.red": Palette,
-  "label.yellow": Palette,
-  "label.green": Palette,
-  "label.blue": Palette,
-  "label.purple": Palette,
+  "flag.unflag": FlagOff,
+  "flag.toggle": Flag,
+  "rate.0": StarOff,
   "delete.pair": Trash2,
   "delete.rawOnly": Trash2,
   "delete.jpegOnly": Trash2,
@@ -169,14 +167,60 @@ export function slotIcon(slot: RadialSlot): typeof Star {
   return COMMAND_ICONS[slot.id] ?? Circle;
 }
 
+/** How a sector is drawn: an icon, a short glyph, or a colour swatch. */
+export interface SlotFace {
+  icon?: typeof Star;
+  glyph?: string;
+  swatch?: string;
+}
+
+const RATE_STARS: Partial<Record<CommandId, number>> = {
+  "rate.1": 1,
+  "rate.2": 2,
+  "rate.3": 3,
+  "rate.4": 4,
+  "rate.5": 5,
+};
+
+const LABEL_OF_COMMAND: Partial<Record<CommandId, string>> = {
+  "label.red": "Red",
+  "label.yellow": "Yellow",
+  "label.green": "Green",
+  "label.blue": "Blue",
+  "label.purple": "Purple",
+};
+
+/**
+ * A rating or a colour label is drawn AS the rating or the colour, wherever it
+ * appears. A sector set to "Yellow label" showed a generic palette while the
+ * labels group two levels in showed actual yellow — the same command wearing two
+ * faces depending on how you got to it.
+ */
+export function slotFace(slot: RadialSlot): SlotFace {
+  if (slot.kind === "command") {
+    const stars = RATE_STARS[slot.id];
+    if (stars) return { glyph: "★".repeat(stars) };
+    const label = LABEL_OF_COMMAND[slot.id];
+    if (label) return { swatch: LABEL_COLORS[label] };
+  }
+  return { icon: slotIcon(slot) };
+}
+
 /**
  * Sector `i` of `n` as an SVG wedge, centred on straight up and running
  * clockwise, drawn in a box `2 * rOuter` across. Shared by the live ring and the
  * settings preview so the two can never disagree about the shape.
  */
-export function wedgePath(i: number, n: number, rInner: number, rOuter: number, box: number): string {
+export function wedgePath(
+  i: number,
+  n: number,
+  rInner: number,
+  rOuter: number,
+  box: number,
+  rot = 0,
+): string {
   const step = (Math.PI * 2) / n;
-  const a0 = i * step - step / 2 - Math.PI / 2;
+  const a0 = i * step - step / 2 - Math.PI / 2 + rot;
   const a1 = a0 + step;
   const c = box / 2;
   const p = (r: number, a: number) => `${c + r * Math.cos(a)} ${c + r * Math.sin(a)}`;
@@ -202,11 +246,11 @@ export function wedgePath(i: number, n: number, rInner: number, rOuter: number, 
  * open a group. Drawn so the pull a group needs is something you can see coming
  * rather than something you have to already know about.
  */
-export function arcPath(i: number, n: number, r: number, box: number): string {
+export function arcPath(i: number, n: number, r: number, box: number, rot = 0): string {
   const step = (Math.PI * 2) / n;
   // Kept just inside the sector's own edges so neighbouring arcs never touch.
   const inset = Math.min(step * 0.12, 0.12);
-  const a0 = i * step - step / 2 - Math.PI / 2 + inset;
+  const a0 = i * step - step / 2 - Math.PI / 2 + inset + rot;
   const a1 = a0 + step - inset * 2;
   const c = box / 2;
   const p = (a: number) => `${c + r * Math.cos(a)} ${c + r * Math.sin(a)}`;
@@ -215,8 +259,14 @@ export function arcPath(i: number, n: number, r: number, box: number): string {
 }
 
 /** Centre point of sector `i` at radius `r`, in the same box. */
-export function sectorPoint(i: number, n: number, r: number, box: number): { x: number; y: number } {
-  const a = i * ((Math.PI * 2) / n) - Math.PI / 2;
+export function sectorPoint(
+  i: number,
+  n: number,
+  r: number,
+  box: number,
+  rot = 0,
+): { x: number; y: number } {
+  const a = i * ((Math.PI * 2) / n) - Math.PI / 2 + rot;
   const c = box / 2;
   return { x: c + r * Math.cos(a), y: c + r * Math.sin(a) };
 }

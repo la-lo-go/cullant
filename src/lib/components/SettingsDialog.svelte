@@ -33,6 +33,7 @@
     RADIAL_GROUPS,
     RADIAL_MAX_SECTORS,
     RADIAL_MIN_SECTORS,
+    RADIAL_ROTATION_CHOICES,
     slotKey,
     type RadialGroupId,
     type RadialMouse,
@@ -508,21 +509,36 @@
               <Plus size={13} />
               <span>Add sector…</span>
             </button>
+
+            <!-- In the same column as the sectors, and built like them: these
+                 belong to the ring being edited, not to the dialog. -->
+            <div class="slot">
+              <span class="slot-label">Opens with</span>
+              <select
+                value={settings.radialMouse}
+                onchange={releasing((e) =>
+                  settings.setRadialMouse(e.currentTarget.value as RadialMouse))}
+              >
+                <option value="left">Hold left button</option>
+                <option value="right">Right button</option>
+                <option value="both">Either button</option>
+              </select>
+            </div>
+
+            <div class="slot">
+              <span class="slot-label">Rotation</span>
+              <select
+                value={settings.radialRotation}
+                onchange={releasing((e) =>
+                  settings.setRadialRotation(Number(e.currentTarget.value)))}
+              >
+                {#each RADIAL_ROTATION_CHOICES as deg (deg)}
+                  <option value={deg}>{deg}°</option>
+                {/each}
+              </select>
+            </div>
           </div>
         </div>
-
-        <label class="check">
-          <span>Mouse</span>
-          <select
-            value={settings.radialMouse}
-            onchange={releasing((e) =>
-              settings.setRadialMouse(e.currentTarget.value as RadialMouse))}
-          >
-            <option value="left">Hold left button</option>
-            <option value="right">Right button</option>
-            <option value="both">Either</option>
-          </select>
-        </label>
 
         <button class="wide" onclick={releasing(() => settings.resetRadial())}>
           <RotateCcw size={13} />
@@ -1219,6 +1235,15 @@
     min-width: 0;
     width: 100%;
     max-width: none;
+  }
+
+  /* Same width as a sector row's drag handle plus its gap, so these labels line
+     the selects up with the ones above rather than beside them. */
+  .slot-label {
+    flex: none;
+    width: 74px;
+    color: #8a8a93;
+    font-size: 12px;
   }
 
   .slot .drop {

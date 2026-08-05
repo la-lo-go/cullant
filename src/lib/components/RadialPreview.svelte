@@ -7,7 +7,8 @@
    * A preview drawn from its own copy of the layout would be free to disagree
    * with the thing it claims to be previewing.
    */
-  import { sectorPoint, slotIcon, slotLabel, wedgePath, type RadialSlot } from "../radial";
+  import { sectorPoint, slotFace, slotLabel, wedgePath, type RadialSlot } from "../radial";
+  import { settings } from "../stores/settings.svelte";
 
   interface Props {
     slots: RadialSlot[];
@@ -24,6 +25,7 @@
   const R_OUTER = 92;
   const ICON_R = (R_INNER + R_OUTER) / 2;
   const scale = $derived(size / BOX);
+  const rot = $derived((settings.radialRotation * Math.PI) / 180);
 </script>
 
 <div class="preview" style="width:{size}px; height:{size}px">
@@ -32,7 +34,7 @@
       <path
         class="sector"
         class:on={highlight === i}
-        d={wedgePath(i, slots.length, R_INNER, R_OUTER, BOX)}
+        d={wedgePath(i, slots.length, R_INNER, R_OUTER, BOX, rot)}
         role="presentation"
         onpointerenter={() => onhighlight?.(i)}
       >
@@ -42,14 +44,21 @@
   </svg>
 
   {#each slots as slot, i (i)}
-    {@const p = sectorPoint(i, slots.length, ICON_R, BOX)}
-    {@const Icon = slotIcon(slot)}
+    {@const p = sectorPoint(i, slots.length, ICON_R, BOX, rot)}
+    {@const face = slotFace(slot)}
     <span
       class="ico"
       class:on={highlight === i}
       style="left:{p.x * scale}px; top:{p.y * scale}px"
     >
-      <Icon size={16} strokeWidth={2} />
+      {#if face.glyph}
+        <span class="glyph">{face.glyph}</span>
+      {:else if face.swatch}
+        <span class="swatch" style="background:{face.swatch}"></span>
+      {:else if face.icon}
+        {@const Icon = face.icon}
+        <Icon size={16} strokeWidth={2} />
+      {/if}
     </span>
   {/each}
 </div>
@@ -91,5 +100,18 @@
 
   .ico.on {
     color: #fff;
+  }
+
+  .glyph {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    white-space: nowrap;
+  }
+
+  .swatch {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
   }
 </style>

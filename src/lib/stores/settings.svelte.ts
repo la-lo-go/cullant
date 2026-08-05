@@ -4,6 +4,7 @@ import type { BurstMode } from "../bursts";
 import {
   DEFAULT_RADIAL_SLOTS,
   RADIAL_MAX_SECTORS,
+  RADIAL_ROTATION_CHOICES,
   RADIAL_MIN_SECTORS,
   RADIAL_MOUSE_CHOICES,
   healSlots,
@@ -37,6 +38,7 @@ const BURST_GAP_KEY = "cullant.burstGapSeconds";
 const PREVIEW_QUALITY_KEY = "cullant.previewQuality";
 const RADIAL_SLOTS_KEY = "cullant.radial.slots";
 const RADIAL_MOUSE_KEY = "cullant.radial.mouse";
+const RADIAL_ROTATION_KEY = "cullant.radial.rotation";
 
 /** Allowed burst gaps in seconds — a whitelist for the same reason the
  *  auto-rescan intervals are one. */
@@ -411,6 +413,16 @@ class SettingsStore {
   radialSlots = $state<RadialSlot[]>(loadRadialSlots());
   /** Which mouse gesture opens it. Touch always uses press-and-hold. */
   radialMouse = $state<RadialMouse>(loadRadialMouse());
+  /** Quarter turns applied to the whole ring, in degrees. */
+  radialRotation = $state<number>(
+    loadChoice(RADIAL_ROTATION_KEY, RADIAL_ROTATION_CHOICES, 0),
+  );
+
+  setRadialRotation(deg: number) {
+    if (!RADIAL_ROTATION_CHOICES.includes(deg as (typeof RADIAL_ROTATION_CHOICES)[number])) return;
+    this.radialRotation = deg;
+    save(RADIAL_ROTATION_KEY, deg);
+  }
 
   setRadialMouse(mode: RadialMouse) {
     this.radialMouse = mode;
@@ -466,7 +478,9 @@ class SettingsStore {
   resetRadial() {
     this.radialSlots = [...DEFAULT_RADIAL_SLOTS];
     this.radialMouse = "left";
+    this.radialRotation = 0;
     save(RADIAL_MOUSE_KEY, this.radialMouse);
+    save(RADIAL_ROTATION_KEY, this.radialRotation);
     this.saveRadialSlots();
   }
 }
