@@ -1,15 +1,16 @@
 # Cullant
 
-**Fast, keyboard-first photo culling for Windows.**
+**Fast, free, 100% local, keyboard-first photo/video culling app for Windows, Linux, MacOS, Android, iOS and iPadOS.**
+
+> [!WARNING]
+> ⚠️ Beta software. Cullant is not a finished product. Use at your own risk.
 
 Open a project folder, subfolders included. Move through the previews at speed.
 Rate, flag, label and queue actions entirely from the keyboard.
 
 Nothing touches your files until you say so. Cullant records every decision in a
-local SQLite database, then carries them out in one **commit** step that you
+local database, then carries them out in one **commit** step that you
 review first. Auto mode carries them out immediately instead.
-
-> ⚠️ Early development. Not yet usable.
 
 ## Why another culling tool?
 
