@@ -38,7 +38,7 @@ Frontend: `lib/api.ts` (typed invoke wrappers), `lib/stores/*.svelte.ts` (rune-c
 
 ## Milestones
 
-M0–M7 done + two UX polish rounds. See `docs/PLAN.md` for the full plan (Spanish). Remaining (M8): dedicated settings pane, move/copy rules UI, commit history/undo UI, video posters (ffprobe), installer signing, and a real-RAW test pass (needs the user's own camera files — synthetic JPEGs have no EXIF).
+M0–M7 done + two UX polish rounds + HEIF. Remaining (M8): dedicated settings pane, move/copy rules UI, commit history/undo UI, installer signing. Open items live in `docs/backlog.md`; the original plan was deleted once every milestone in it landed — `git log -- docs/PLAN.md` still has it.
 
 Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters`), focus peaking, embedded XMP in JPEG.
 

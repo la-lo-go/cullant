@@ -40,13 +40,13 @@ Frontend: `lib/api.ts` (typed invoke wrappers), `lib/stores/*.svelte.ts` (rune-c
 
 ## Milestones
 
-M0–M7 done + two UX polish rounds. See `docs/PLAN.md` for the full plan (Spanish). Remaining (M8): dedicated settings pane, move/copy rules UI, commit history/undo UI, video posters (ffprobe), installer signing, and a real-RAW test pass (needs the user's own camera files — synthetic JPEGs have no EXIF).
+M0–M7 done + two UX polish rounds + HEIF. Remaining (M8): dedicated settings pane, move/copy rules UI, commit history/undo UI, installer signing. Open items live in `docs/backlog.md`; the original plan was deleted once every milestone in it landed — `git log -- docs/PLAN.md` still has it.
 
 Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters`), focus peaking, embedded XMP in JPEG.
 
 **HEIF.** `decode::HEIF_EXTS` (`heic/heif/hif/hsp`) are catalogued, grouped, deleted, moved and XMP-exported like any photo — an unknown extension used to be skipped outright, which left a rejected shot's `.HIF` behind as an orphan. **EXIF is read**: `kamadak-exif` parses the ISO-BMFF item structure, so a HEIF-only library (every stock iPhone) sorts by real capture time and fills every filter facet. Dimensions come from `PixelXDimension`/`PixelYDimension`, because no header probe here can open the container.
 
-The pixels come from a **capability ladder** in `decode/heif.rs` — platform-native first, generalist fallback under it, the same shape as the video playback ladder. Two rungs exist: **WIC** on Windows (`decode/heif/wic.rs`, pure-Rust bindings via the `windows` crate, which Tauri already pulls in — keep the version pinned to Tauri's or the build grows a second copy), and **`ffmpeg`** underneath (already an optional runtime dep; needs **7.0+**, since 6.x decodes HEVC but cannot demux a still). **`ImageDecoder`** on Android is the third, through the SAF plugin (`ProjectStore::decodes_heif`/`heif_still` is the seam; `decodes_heif` is a *runtime* question, since HEIF decode is API 28 and `minSdk` is 24). iOS ImageIO is the one left, and drops in as another arm behind `local_path`. `libheif` is rejected — it would be the first real C/system dependency, and `docs/PLAN.md` turns those down twice.
+The pixels come from a **capability ladder** in `decode/heif.rs` — platform-native first, generalist fallback under it, the same shape as the video playback ladder. Two rungs exist: **WIC** on Windows (`decode/heif/wic.rs`, pure-Rust bindings via the `windows` crate, which Tauri already pulls in — keep the version pinned to Tauri's or the build grows a second copy), and **`ffmpeg`** underneath (already an optional runtime dep; needs **7.0+**, since 6.x decodes HEVC but cannot demux a still). **`ImageDecoder`** on Android is the third, through the SAF plugin (`ProjectStore::decodes_heif`/`heif_still` is the seam; `decodes_heif` is a *runtime* question, since HEIF decode is API 28 and `minSdk` is 24). iOS ImageIO is the one left, and drops in as another arm behind `local_path`. `libheif` is rejected — it would be the first real C/system dependency, and the project has turned that down twice before (libvips, LibRaw).
 
 A rung that has the codec and still refuses a file **falls through to the next one**. Decoders disagree about what a HEIF is: WIC wants the item-based structure a camera writes and rejects a lone HEVC frame in an MP4 that ffmpeg reads happily.
 
@@ -72,6 +72,7 @@ npm run tauri build          # NSIS + MSI installers
 - Real camera files: `npm run fixtures` populates `fixtures/media/` from CC0 samples (gitignored, checksummed — see `fixtures/README.md`). `cargo test the_corpus -- --nocapture` runs the ingest over them. It has already found three decode gaps that synthetic JPEGs cannot expose.
 - Backend checks: from `src-tauri/` → `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
 - Frontend check: `npm run check` (must end 0 errors, 0 warnings).
+- Full testing guide, including the checks that need hardware: `docs/testing.md`. Format support and grouping rules: `docs/formats.md`.
 
 ### Driving the UI from outside
 

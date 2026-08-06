@@ -2,50 +2,110 @@
 
 **Fast, keyboard-first photo culling for Windows.**
 
-Cullant is an open-source desktop app for going through a shoot fast: load a project folder (subfolders included), flick through instant previews, and rate / flag / label / queue actions entirely from the keyboard. Nothing touches your files until you say so — every decision is stored in a local SQLite database and executed in a single reviewed **commit** step (or immediately, if you prefer auto mode).
+Load a project folder — subfolders included — flick through instant previews,
+and rate, flag, label and queue actions entirely from the keyboard. Nothing
+touches your files until you say so: every decision lives in a local SQLite
+database and is executed in one reviewed **commit** step, or immediately if you
+prefer auto mode.
 
 > ⚠️ Early development. Not yet usable.
 
 ## Why another culling tool?
 
-- **RAW+JPEG mirror mode** — the headline feature. Files sharing a basename (`IMG_0421.CR3` + `IMG_0421.JPG`) are treated as *one* photo. Rate one, both are rated; delete one, both go. Flip a switch and they're independent again. Decouple a single pair when you want to keep the JPEG but drop the RAW.
-- **Speed first** — previews come from the camera's embedded JPEG (the Photo Mechanic trick), served straight to the UI through a custom protocol. No import step, no waiting for RAW demosaic.
-- **Keyboard everything** — Lightroom-style defaults (`P`/`X`/`U`, `1–5`, `6–9`, Caps Lock auto-advance), every binding remappable, plus custom task tags ("retouch", "trim", "stabilize"…) with their own shortcuts.
-- **Deferred, reviewable actions** — deletes, moves and copies queue up and run in one confirmed commit, with history and undo. Deletion goes to the Recycle Bin by default (permanent or `_trash` folder also available).
-- **Plays well with others** — optional XMP sidecars readable by Lightroom Classic and Capture One.
+- **Mirror mode is the headline.** Files sharing a directory and basename are
+  *one* photo. Rate one, both are rated; delete one, both go. Flip a switch and
+  they are independent again, or decouple a single shot to keep the JPEG and
+  drop the RAW.
+
+  A shot is not always two files, and Cullant does not assume it is: OM System
+  writes `ORF`+`ORI`+`JPG` in Live ND, and RAW+HEIF cameras add a `.HIF`.
+  Grouping is N-ary, so rejecting a shot takes every file of it — the alternative
+  is an orphan the user never knew existed.
+
+- **Speed first.** Previews come from the camera's own embedded JPEG (the Photo
+  Mechanic trick), served straight to the UI through a custom protocol. No
+  import step, no waiting for a demosaic.
+
+- **Keyboard everything.** Lightroom-style defaults (`P`/`X`/`U`, `1–5`, `6–9`,
+  Caps Lock auto-advance), every binding remappable, plus custom task tags
+  ("retouch", "trim", "stabilize"…) with their own shortcuts.
+
+- **Deferred, reviewable actions.** Deletes, moves and copies queue up and run
+  in one confirmed commit, with history and undo. Deletion goes to the Recycle
+  Bin by default; permanent and `_trash` folder are also available.
+
+- **Plays well with others.** Optional XMP sidecars readable by Lightroom
+  Classic and Capture One.
+
 - Basic **video culling** (MP4/MOV) in a separate tab, same workflow.
 
-## Status / roadmap
+## Formats
 
-- [x] M0 — scaffold: Tauri v2 + Svelte 5, SQLite schema, `cullant://` protocol, folder picker
-- [x] M1 — recursive scan, thumbnail pipeline, virtualized grid
-- [x] M2 — culling state, keyboard engine, filters
-- [x] M3 — viewer, filmstrip, compare, 100% zoom
-- [x] M4 — RAW+JPEG mirror mode (decouple/recouple, J/Ctrl+J)
-- [x] M5 — task tags (custom, scoped, T+digit chord)
-- [x] M6 — pending actions, commit dialog, XMP sidecars, deletion modes
-- [x] M7 — video tab (Range-streamed playback)
-- [ ] M8 — polish: settings pane, move/copy rules UI, commit history/undo UI, installer signing, real-RAW test pass
+Every mainstream RAW format, plus HEIF and the usual images and video. The full
+matrix — including which files render and which only get catalogued, and why the
+two are separate — is in [docs/formats.md](docs/formats.md).
 
-Default shortcuts (all remappable via the ⌨ dialog): `P`/`X`/`U` flags · `1-5` stars ·
-`6-9`/`-` color labels · `T`+`1-9` task tags · `←→↑↓` navigate · Caps Lock auto-advance
-(Shift inverts) · `G`/`E`/`C` grid/loupe/compare · `Z`/`Space` 100% zoom · `J` RAW↔JPEG ·
-`Ctrl+J` decouple pair · `M` mirror mode · `Del` / `Alt+Del` / `Shift+Del` queue delete
-(pair / RAW only / JPEG only) · `Ctrl+Enter` commit · `\` filter bar
+Two things worth knowing up front:
 
-Post-MVP: AI-assisted culling (similar-shot grouping, best-of-burst suggestions), focus peaking, face zoom.
+- **HEIF metadata always works**, so an iPhone library sorts by real capture
+  time and fills every filter facet. The pixels need a decoder borrowed from the
+  platform (WIC, Android `ImageDecoder`, or `ffmpeg` 7.0+), because Cullant has
+  no HEVC decoder of its own and will not grow a C dependency to get one.
+- **Olympus and OM System RAWs currently show blank cells.** The preview is in
+  the MakerNote and the code does not look there yet. Metadata reads fine.
+
+## Shortcuts
+
+All remappable via the ⌨ dialog.
+
+`P`/`X`/`U` flags · `1-5` stars · `6-9`/`-` color labels · `T`+`1-9` task tags ·
+`←→↑↓` navigate · Caps Lock auto-advance (Shift inverts) · `G`/`E`/`C`
+grid/loupe/compare · `Z`/`Space` 100% zoom · `J` RAW↔JPEG · `Ctrl+J` decouple ·
+`M` mirror mode · `Del` / `Alt+Del` / `Shift+Del` queue delete (group / RAW only
+/ JPEG only) · `Ctrl+Enter` commit · `\` filter bar
+
+## Status
+
+M0–M7 are done, plus two UX polish rounds and HEIF support. M8 is polish:
+settings pane, move/copy rules UI, commit history/undo UI, installer signing.
+
+What is still open, and what is a known limitation rather than an oversight, is
+in [docs/backlog.md](docs/backlog.md).
+
+Post-MVP: AI-assisted culling (similar-shot grouping, best-of-burst
+suggestions), focus peaking, face zoom.
 
 ## Development
 
-Prerequisites: Rust (stable), Node 20+, npm.
+Prerequisites: Rust (stable) with the MSVC toolchain, Node 20+, npm.
 
 ```sh
 npm install
 npm run tauri dev
 ```
 
-The frontend is SvelteKit (static adapter) in `src/`; the Rust backend is in `src-tauri/`. Project state lives in `<project folder>/.cullant/cullant.db`.
+The frontend is SvelteKit (static adapter) in `src/`; the Rust backend is in
+`src-tauri/`. Project state lives in `<project folder>/.cullant/cullant.db`.
+
+Before committing:
+
+```sh
+cd src-tauri && cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test
+cd .. && npm run check
+```
+
+## Documentation
+
+| | |
+|---|---|
+| [docs/testing.md](docs/testing.md) | The three kinds of test data, what each cannot tell you, and the checks that need hardware |
+| [docs/formats.md](docs/formats.md) | What is catalogued, what renders, and the grouping rules |
+| [docs/building.md](docs/building.md) | Windows and Android builds, signing, size tradeoffs |
+| [docs/backlog.md](docs/backlog.md) | What is open |
+| [fixtures/README.md](fixtures/README.md) | The corpus of real camera files, and what it found |
+| [CLAUDE.md](CLAUDE.md) | Working context: architecture, conventions, gotchas |
 
 ## License
 
-[GPL-3.0-or-later](LICENSE). RAW decoding will use [rawler](https://github.com/dnglab/dnglab) (LGPL-2.1).
+[GPL-3.0-or-later](LICENSE). RAW decoding uses
+[rawler](https://github.com/dnglab/dnglab) (LGPL-2.1); the test corpus is CC0.
