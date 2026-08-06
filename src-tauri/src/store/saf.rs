@@ -16,7 +16,7 @@ use tauri::AppHandle;
 use tauri_plugin_saf::{SafEntry, SafExt};
 
 use super::{
-    split_parent, ProjectStore, StoreEntry, VideoPoster, MIME_DIRECTORY, WALK_PROGRESS_EVERY,
+    split_parent, PlatformFrame, ProjectStore, StoreEntry, MIME_DIRECTORY, WALK_PROGRESS_EVERY,
 };
 use crate::db::Db;
 use crate::error::{AppError, AppResult};
@@ -339,17 +339,19 @@ impl ProjectStore for SafStore {
         true
     }
 
-    fn video_poster(&self, rel: &str, max_edge: u32) -> AppResult<VideoPoster> {
+    fn video_poster(&self, rel: &str, max_edge: u32) -> AppResult<PlatformFrame> {
         let doc = self.resolve(rel)?;
         super::stats::backend_call();
         let (jpeg, width, height) = self
             .saf()
             .video_poster(&self.tree_uri, &doc, max_edge)
             .map_err(Self::err)?;
-        Ok(VideoPoster {
+        Ok(PlatformFrame {
             jpeg,
             width,
             height,
+            // MediaMetadataRetriever bakes in the clip's display rotation.
+            oriented: true,
         })
     }
 

@@ -402,7 +402,7 @@ pub fn run_ingest_inner(
     // Video posters come last: extracting one spins up a whole video decoder per
     // file (an ffmpeg process on desktop, a platform decoder on Android), so
     // deferring them keeps the photo library browsable before that tier competes.
-    let decodable = crate::db::sql::decodable_photo("f");
+    let decodable = crate::db::sql::decodable_photo("f", decode::heif::available(store));
     let thumb_sql = |extra: &str| {
         format!(
             "SELECT f.id, f.mtime, f.orientation
@@ -889,11 +889,125 @@ mod tests {
         assert_eq!((w, h), (4032, 3024));
     }
 
-    /// The pixels stay out of reach. A HEIF next to a JPEG is one cell rendered
-    /// from the JPEG, and the HEIF itself is never decoded — asserted the hard
-    /// way, since a failed decode would leave a tombstone.
+    /// The invariant the whole HEIF ladder rests on. When no rung can decode a
+    /// container, that is "not now", never "undecodable" — so no tombstone is
+    /// written. A tombstone is keyed on mtime, and installing a decoder changes
+    /// no file's mtime, so one written here would leave the photo blank forever
+    /// after the upgrade. Asserted for the grid cell and for the focus check,
+    /// which reach the decode by different routes.
     #[test]
-    fn an_opaque_image_is_never_decoded() {
+    fn a_heif_without_a_decoder_is_never_tombstoned() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Contents are irrelevant: the refusal happens before the read.
+        std::fs::write(root.join("IMG_0200.heic"), b"").unwrap();
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+
+        crate::decode::heif::disable_for_test();
+        let store = LocalFsStore::new(root);
+        let id: i64 = db
+            .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
+            .unwrap();
+        for kind in [ThumbKind::Thumb, ThumbKind::Preview, ThumbKind::Full] {
+            let out = crate::thumbs::produce_cached(
+                &db,
+                &store,
+                root,
+                crate::thumbs::Produce {
+                    file_id: id,
+                    kind,
+                    known: None,
+                    record_hit: false,
+                    also_thumb: false,
+                    cache_checked: false,
+                },
+            );
+            assert!(out.is_err(), "{kind:?} must refuse without a decoder");
+        }
+        crate::decode::heif::reenable_for_test();
+
+        let tombstones: i64 = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM thumbnails WHERE failed = 1",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(tombstones, 0, "a refusal must not outlive the decoder");
+    }
+
+    /// Encode `src` as HEVC in a HEIF-branded container, using the machine's own
+    /// ffmpeg. `None` when it has none, or none that can encode HEVC — no
+    /// encoder in this build can produce a HEIF, so the only alternative would be
+    /// checking a camera file into the repo.
+    fn ffmpeg_made_heif(src: &Path, dest: &Path) -> Option<()> {
+        let out = std::process::Command::new("ffmpeg")
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+            .arg(src)
+            .args([
+                "-c:v", "libx265", "-tag:v", "hvc1", "-f", "mp4", "-brand", "mif1",
+            ])
+            .arg(dest)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        (out.status.success() && dest.exists()).then_some(())
+    }
+
+    /// The ffmpeg rung, end to end: a real HEVC frame becomes a real thumbnail.
+    /// Everything else about HEIF is testable with a synthetic fixture, but the
+    /// pixels are not — so this builds one with the machine's own ffmpeg and
+    /// skips where there is none.
+    #[test]
+    fn the_ffmpeg_rung_renders_a_heif() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let img = image::RgbImage::from_fn(800, 600, |x, y| {
+            image::Rgb([(x % 255) as u8, (y % 255) as u8, 120])
+        });
+        let png = root.join("source.png");
+        img.save(&png).unwrap();
+        let heif = root.join("IMG_0300.heic");
+        if ffmpeg_made_heif(&png, &heif).is_none() {
+            eprintln!("skipped: no ffmpeg that can encode HEVC");
+            return;
+        }
+        std::fs::remove_file(&png).unwrap();
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let (_, thumbs, previews) = run_all(&db, root);
+        assert_eq!((thumbs, previews), (1, 1), "the HEIF is a rendered cell");
+
+        let (cache_rel, failed): (String, i64) = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT cache_path, failed FROM thumbnails WHERE kind = 0",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(failed, 0);
+        let cached = root.join(".cullant").join("thumbs").join(&cache_rel);
+        let bytes = std::fs::read(&cached).expect("the thumbnail reached the cache");
+        let decoded = image::load_from_memory(&bytes).expect("a real JPEG");
+        assert_eq!(decoded.width().max(decoded.height()), 384);
+    }
+
+    /// A HEIF next to a JPEG is one cell, and the JPEG renders it. The HEIF is
+    /// not pregenerated even where a decoder exists: it is not the group's
+    /// primary, and paying a subprocess for a frame no grid cell shows would be
+    /// the most expensive way to render nothing.
+    #[test]
+    fn a_heif_beside_a_jpeg_is_not_pregenerated() {
         let _guard = ingest_guard();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

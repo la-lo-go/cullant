@@ -32,12 +32,28 @@ pub fn secondary_raw_exts() -> &'static str {
     &SQL
 }
 
+/// [`OPAQUE_IMAGE_EXTS`] as a SQL value list.
+pub fn heif_exts() -> &'static str {
+    static SQL: std::sync::LazyLock<String> =
+        std::sync::LazyLock::new(|| value_list(crate::decode::OPAQUE_IMAGE_EXTS));
+    &SQL
+}
+
 /// Predicate for "this row's bytes decode into a frame": any RAW, or an image in
 /// a container we can open. Thumbnail pregeneration filters on it, so a library
 /// of opaque HEIFs is not read end to end to produce nothing — those cells stay
 /// empty until something actually displays them.
-pub fn decodable_photo(alias: &str) -> String {
-    format!("({alias}.kind = 0 OR {alias}.ext IN ({}))", image_exts())
+///
+/// `heif` says whether a HEIF decoder is reachable on this machine, so the
+/// answer legitimately differs between machines. It feeds a SELECT and never a
+/// write, so nothing persistent depends on it.
+pub fn decodable_photo(alias: &str, heif: bool) -> String {
+    let mut exts = image_exts().to_string();
+    if heif {
+        exts.push(',');
+        exts.push_str(heif_exts());
+    }
+    format!("({alias}.kind = 0 OR {alias}.ext IN ({exts}))")
 }
 
 #[cfg(test)]
@@ -45,10 +61,11 @@ mod tests {
     use super::*;
     use crate::decode::OPAQUE_IMAGE_EXTS;
 
-    /// The list is what keeps a sibling read off an undecodable file, so it must
-    /// not drift from the extensions the decoder actually handles.
+    /// A HEIF must stay out of this list even once a decoder exists: it governs
+    /// the sibling *borrow*, and borrowing a HEIF to render a RAW's thumbnail
+    /// would trade the RAW's own embedded JPEG for a subprocess or a JNI hop.
     #[test]
-    fn the_image_list_matches_the_decodable_extensions() {
+    fn the_image_list_never_holds_a_heif() {
         let sql = image_exts();
         for ext in IMAGE_EXTS {
             assert!(
@@ -62,5 +79,19 @@ mod tests {
                 "{ext} must not be listed"
             );
         }
+    }
+
+    /// Pregeneration must queue a HEIF exactly when something can decode it.
+    #[test]
+    fn the_pregeneration_predicate_follows_the_decoder() {
+        let with = decodable_photo("f", true);
+        let without = decodable_photo("f", false);
+        for ext in OPAQUE_IMAGE_EXTS {
+            assert!(with.contains(&format!("'{ext}'")), "{ext} missing");
+            assert!(!without.contains(&format!("'{ext}'")), "{ext} must not be");
+        }
+        // A RAW and a JPEG are queued either way.
+        assert!(without.contains("f.kind = 0"));
+        assert!(without.contains("'jpg'"));
     }
 }

@@ -1,4 +1,5 @@
 pub mod exif;
+pub mod heif;
 pub mod jpeg;
 pub mod raw;
 pub mod video;

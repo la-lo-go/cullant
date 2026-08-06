@@ -52,7 +52,7 @@ pub fn set_preview_long_edge(value: u32) -> u32 {
     value
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ThumbKind {
     Thumb = 0,
     Preview = 1,
@@ -542,17 +542,36 @@ fn paired_jpeg(db: &Arc<Db>, file_id: i64) -> Option<String> {
     .flatten()
 }
 
+/// What one decode produced.
+pub(crate) struct Decoded {
+    pub image: DynamicImage,
+    /// The ORIGINAL pixel dimensions, when reliably known (a JPEG/PNG header, a
+    /// full-size embedded RAW image, or a platform decoder reporting them).
+    /// A scaled decode must never be recorded as the file's real dimensions.
+    pub src_dims: Option<(u32, u32)>,
+    /// See [`SourceMeta::pre_oriented`].
+    pub pre_oriented: bool,
+}
+
+impl Decoded {
+    /// A decode that leaves rotation to the caller — every in-process one.
+    fn new(image: DynamicImage, src_dims: Option<(u32, u32)>) -> Self {
+        Decoded {
+            image,
+            src_dims,
+            pre_oriented: false,
+        }
+    }
+}
+
 /// Decode a source image with a long edge of at least `min_long_edge`,
 /// reading as little as possible (mmap + scaled/adequate-size decodes).
-/// Also returns the ORIGINAL pixel dimensions when they are reliably known
-/// (JPEG/PNG header, or a full-size embedded RAW image) — scaled decodes must
-/// never be recorded as the file's real dimensions.
 pub(crate) fn decode_for(
     store: &dyn ProjectStore,
     rel_path: &str,
     file_kind: i64,
     min_long_edge: u32,
-) -> AppResult<(DynamicImage, Option<(u32, u32)>)> {
+) -> AppResult<Decoded> {
     match file_kind {
         0 => {
             let source = decode::open_source(store, rel_path)?;
@@ -569,7 +588,7 @@ pub(crate) fn decode_for(
                             .with_guessed_format()
                             .ok()
                             .and_then(|r| r.into_dimensions().ok());
-                        return Ok((img, dims));
+                        return Ok(Decoded::new(img, dims));
                     }
                     // A corrupt embedded JPEG is rare; fall back to rawler rather
                     // than tombstoning a file rawler might still decode.
@@ -580,7 +599,19 @@ pub(crate) fn decode_for(
             }
             let raw = decode::raw::embedded_preview_scaled(&source, min_long_edge, rel_path)?;
             let dims = raw.is_full.then(|| (raw.image.width(), raw.image.height()));
-            Ok((raw.image, dims))
+            Ok(Decoded::new(raw.image, dims))
+        }
+        1 if decode::is_opaque_image(rel_path) => {
+            // A HEIF is never opened here: no in-process decoder can read one,
+            // so the bytes go to whichever rung of the platform ladder this
+            // machine has. Callers guard on `heif::possible` first, so an absent
+            // decoder never reaches here as a "failure".
+            let (img, dims, pre_oriented) = decode::heif::decode(store, rel_path, min_long_edge)?;
+            Ok(Decoded {
+                image: img,
+                src_dims: Some(dims),
+                pre_oriented,
+            })
         }
         1 => {
             let source = decode::open_source(store, rel_path)?;
@@ -590,7 +621,7 @@ pub(crate) fn decode_for(
                 .ok()
                 .and_then(|r| r.into_dimensions().ok());
             let img = decode::jpeg::decode_scaled(source.buf(), min_long_edge, rel_path)?;
-            Ok((img, dims))
+            Ok(Decoded::new(img, dims))
         }
         2 => {
             // Videos: extract a poster frame through whichever extractor this
@@ -600,7 +631,12 @@ pub(crate) fn decode_for(
             // (see `produce`), so an absent extractor never reaches here as a
             // "failure".
             let (img, dims) = decode::video::extract_poster(store, rel_path, min_long_edge)?;
-            Ok((img, Some(dims)))
+            // Every poster extractor bakes in the clip's display rotation.
+            Ok(Decoded {
+                image: img,
+                src_dims: Some(dims),
+                pre_oriented: true,
+            })
         }
         _ => Err(AppError::Decode(format!(
             "no thumbnail source for kind {file_kind}"
@@ -614,6 +650,14 @@ pub(crate) struct SourceMeta {
     pub file_id: i64,
     pub mtime: i64,
     pub orientation: i64,
+    /// The decoder already applied the source's rotation, so `orientation` must
+    /// not be applied a second time. True for a platform HEIF decoder, which
+    /// honours the container's own `irot` property, and for a video poster.
+    ///
+    /// It suppresses the rotation and nothing else: `orientation` still keys the
+    /// cache path, because that is what the DB holds and what the frontend puts
+    /// in the request URL.
+    pub pre_oriented: bool,
     /// ORIGINAL image dimensions when reliably known (JPEG header or full-size
     /// embedded RAW image); only then are `files.width/height` backfilled.
     pub src_dims: Option<(u32, u32)>,
@@ -681,6 +725,7 @@ pub(crate) fn render_to_cache(
         file_id,
         mtime,
         orientation,
+        pre_oriented,
         src_dims,
     } = *meta;
     let (long_edge, quality) = match kind {
@@ -689,7 +734,7 @@ pub(crate) fn render_to_cache(
         ThumbKind::Full => (u32::MAX, 90),
     };
     let resized = resize_long_edge(decoded, long_edge)?;
-    let oriented = apply_orientation(resized, orientation);
+    let oriented = apply_orientation(resized, if pre_oriented { 1 } else { orientation });
     let jpeg = encode_jpeg(&oriented, quality)?;
 
     let cache_rel = cache_rel_path(file_id, CacheVersion { mtime, orientation }, kind);
@@ -875,15 +920,10 @@ pub(crate) fn produce_cached(
     let orientation = orientation.unwrap_or(1);
 
     // Full view of a plain image: stream the original, no transcode, no cache.
-    // Refused for an opaque container before the read, not after: streaming it
-    // would pull the whole file (on Android SAF there is no mmap to avoid that)
-    // and hand the webview bytes it cannot render either.
-    if kind == ThumbKind::Full && file_kind == 1 {
-        if decode::is_opaque_image(&rel_path) {
-            return Err(AppError::Decode(format!(
-                "{rel_path}: no decoder for this container yet"
-            )));
-        }
+    // A HEIF takes the normal render path instead, exactly as a RAW does: the
+    // webview cannot render the original bytes, so they have to be decoded and
+    // re-encoded like any other artifact.
+    if kind == ThumbKind::Full && file_kind == 1 && !decode::is_opaque_image(&rel_path) {
         return read_all(store, &rel_path);
     }
 
@@ -913,13 +953,14 @@ pub(crate) fn produce_cached(
         )));
     }
 
-    // Same shape, same reason: an opaque container has no decoder here yet. It
-    // must fail BEFORE the read (on Android SAF there is no mmap, so a HEIC-only
-    // library would be pulled into memory one cell at a time to learn nothing)
-    // and WITHOUT a tombstone. A tombstone is keyed on mtime, and shipping a HEIF
-    // decoder changes no file's mtime — every one of those photos would stay an
-    // empty cell after the upgrade.
-    if decode::is_opaque_image(&rel_path) {
+    // Same shape, same reason: a HEIF needs a decoder borrowed from the platform,
+    // and every rung of that ladder can be absent. It must fail BEFORE the read
+    // (on Android SAF there is no mmap, so a HEIC-only library would be pulled
+    // into memory one cell at a time to learn nothing) and WITHOUT a tombstone.
+    // A tombstone is keyed on mtime, and installing a decoder changes no file's
+    // mtime — every one of those photos would stay an empty cell after the
+    // upgrade.
+    if decode::is_opaque_image(&rel_path) && !decode::heif::possible(store, &rel_path) {
         return Err(AppError::Decode(format!(
             "{rel_path}: no decoder for this container yet"
         )));
@@ -936,27 +977,28 @@ pub(crate) fn produce_cached(
         },
     };
 
-    let (decoded, src_dims) =
-        match decode_for(store, &source_rel, source_kind, min_long_edge_for(kind)) {
-            Ok(d) => d,
-            Err(e) => {
-                record_decode_failure(db, file_id, mtime, kind)?;
-                return Err(e);
-            }
-        };
+    let decoded = match decode_for(store, &source_rel, source_kind, min_long_edge_for(kind)) {
+        Ok(d) => d,
+        Err(e) => {
+            record_decode_failure(db, file_id, mtime, kind)?;
+            return Err(e);
+        }
+    };
     let meta = SourceMeta {
         file_id,
         mtime,
         orientation,
+        pre_oriented: decoded.pre_oriented,
         // Dimensions describe whatever was decoded. Backfilling a RAW's row
         // from its JPEG would record the wrong numbers, so only a decode of the
         // file itself may claim them.
         src_dims: if source_rel == rel_path {
-            src_dims
+            decoded.src_dims
         } else {
             None
         },
     };
+    let decoded = decoded.image;
     // The preview decode is at least as large as a thumbnail needs, so the grid
     // thumbnail is one more resize and encode of a buffer already in hand --
     // against a whole second read and decode of the source if it were left to
@@ -1529,6 +1571,7 @@ mod tests {
             file_id: id,
             mtime,
             orientation: 1,
+            pre_oriented: false,
             src_dims: None,
         };
         render_and_store(&db, root, &meta, &decoded, ThumbKind::Thumb).unwrap();

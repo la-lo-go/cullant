@@ -46,23 +46,71 @@ fn configure(cmd: &mut Command) {
 #[cfg(not(windows))]
 fn configure(_cmd: &mut Command) {}
 
-fn ffmpeg() -> Command {
+pub(crate) fn ffmpeg() -> Command {
     let mut cmd = Command::new("ffmpeg");
     configure(&mut cmd);
     cmd
 }
 
-/// Whether an `ffmpeg` binary is reachable on `PATH`. Probed once and cached
-/// for the process lifetime — the answer cannot change mid-session, and the
-/// probe would otherwise run for every video in the project.
-fn is_available() -> bool {
-    static AVAILABLE: OnceLock<bool> = OnceLock::new();
-    *AVAILABLE.get_or_init(|| {
+/// What the one `ffmpeg -version` probe learned.
+pub(crate) struct FfmpegInfo {
+    /// A binary is reachable on `PATH` and ran.
+    pub present: bool,
+    /// Its major version, when the version line was parseable. `None` for a git
+    /// or nightly build, whose version string carries no release number.
+    pub major: Option<u32>,
+}
+
+/// The major version in an `ffmpeg -version` first line, when it states one.
+///
+/// A release says `ffmpeg version 7.1.1-full_build-…` or `ffmpeg version n7.0`.
+/// A git or nightly build says `ffmpeg version N-119583-g…` or
+/// `ffmpeg version 2025-01-01-git-…`, which carry no release number — a caller
+/// must read `None` as "newer than any release", not as "too old".
+pub(crate) fn ffmpeg_major(version_line: &str) -> Option<u32> {
+    let rest = version_line.strip_prefix("ffmpeg version ")?;
+    let token = rest.split_whitespace().next()?;
+    let token = token.strip_prefix('n').unwrap_or(token);
+    let digits = token.split(['.', '-']).next()?;
+    // A date-stamped nightly ("2025-01-01-git-…") parses as a plausible major
+    // version, so reject anything far past a real release number.
+    match digits.parse::<u32>() {
+        Ok(n) if n < 1000 => Some(n),
+        _ => None,
+    }
+}
+
+/// Probe `ffmpeg` once and cache the answer for the process lifetime — it cannot
+/// change mid-session, and the probe would otherwise run for every media file in
+/// the project.
+pub(crate) fn ffmpeg_info() -> &'static FfmpegInfo {
+    static INFO: OnceLock<FfmpegInfo> = OnceLock::new();
+    INFO.get_or_init(|| {
         let mut cmd = ffmpeg();
-        cmd.args(["-hide_banner", "-loglevel", "error", "-version"]);
+        cmd.args(["-hide_banner", "-version"]);
         cmd.stdin(std::process::Stdio::null());
-        cmd.output().map(|o| o.status.success()).unwrap_or(false)
+        let Ok(out) = cmd.output() else {
+            return FfmpegInfo {
+                present: false,
+                major: None,
+            };
+        };
+        if !out.status.success() {
+            return FfmpegInfo {
+                present: false,
+                major: None,
+            };
+        }
+        let first = String::from_utf8_lossy(&out.stdout);
+        FfmpegInfo {
+            present: true,
+            major: first.lines().next().and_then(ffmpeg_major),
+        }
     })
+}
+
+fn is_available() -> bool {
+    ffmpeg_info().present
 }
 
 /// Run ffmpeg to grab one frame at `seek` seconds, decoded from the PNG it

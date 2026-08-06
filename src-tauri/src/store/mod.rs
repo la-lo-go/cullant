@@ -36,13 +36,18 @@ pub struct StoreEntry {
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub const MIME_DIRECTORY: &str = "vnd.android.document/directory";
 
-/// A video poster frame produced by a backend's own platform media API, for the
-/// backends that have one. `width`/`height` are the clip's display dimensions,
-/// which `jpeg` may be scaled down from.
-pub struct VideoPoster {
+/// A frame produced by a backend's own platform media API, for the backends
+/// that have one — a video's poster, or a still nothing here can decode.
+/// `width`/`height` are the source's real dimensions, which `jpeg` may be scaled
+/// down from.
+pub struct PlatformFrame {
     pub jpeg: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// Whether the platform already applied the source's rotation. Android's
+    /// decoders do; the caller must then not apply the EXIF orientation again,
+    /// or a portrait photo comes out sideways.
+    pub oriented: bool,
 }
 
 /// How often a walk reports its running count. Frequent enough to look alive on
@@ -111,9 +116,26 @@ pub trait ProjectStore: Send + Sync {
     /// edge is at most `max_edge` (0 = the frame's native size). Only backends
     /// that report [`extracts_video_posters`](ProjectStore::extracts_video_posters)
     /// implement this.
-    fn video_poster(&self, _rel: &str, _max_edge: u32) -> AppResult<VideoPoster> {
+    fn video_poster(&self, _rel: &str, _max_edge: u32) -> AppResult<PlatformFrame> {
         Err(crate::error::AppError::Other(
             "video_poster is not supported by this store".into(),
+        ))
+    }
+
+    /// Whether this backend decodes HEIF stills itself, through a platform image
+    /// API. Unlike [`extracts_video_posters`](ProjectStore::extracts_video_posters)
+    /// this is a runtime fact, not a property of the backend: Android decodes
+    /// HEIF only from API 28, and the app supports 24.
+    fn decodes_heif(&self) -> bool {
+        false
+    }
+
+    /// Decode the HEIF still at `rel`, scaled so its longest edge is at most
+    /// `max_edge` (0 = native size). Only backends that report
+    /// [`decodes_heif`](ProjectStore::decodes_heif) implement this.
+    fn heif_still(&self, _rel: &str, _max_edge: u32) -> AppResult<PlatformFrame> {
+        Err(crate::error::AppError::Other(
+            "heif_still is not supported by this store".into(),
         ))
     }
 
