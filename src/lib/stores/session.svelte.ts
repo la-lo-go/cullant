@@ -142,10 +142,11 @@ export { LABELS, type Label } from "../labels";
 /** Grid thumbnail size. `medium` is the historical default. */
 export type GridDensity = "small" | "medium" | "large";
 
-/** One member of a pair, as the split RAW+JPG chip needs to draw it. */
+/** One member of a group, as the split RAW+JPG chip needs to draw it. */
 export interface PairHalf {
   id: number;
-  /** Short display name: "RAW" for a raw file, else its extension ("JPG"). */
+  /** Short display name: "RAW" when the group holds exactly one raw file, else
+   *  the extension ("JPG", "ORI"). */
   name: string;
   flag: number;
   rating: number;
@@ -448,11 +449,12 @@ class SessionStore {
   });
 
   /**
-   * The members of a pair, RAW first, with what each half is actually going to
-   * get. null for anything that is not a present multi-file group.
+   * The members of a group — primary first, then by kind, then by extension —
+   * with what each one is actually going to get. null for anything that is not a
+   * present multi-file group.
    *
-   * Mirror mode shows one row per group — the primary's — so a pair whose halves
-   * disagree renders as whatever the RAW says and the JPEG's state is invisible.
+   * Mirror mode shows one row per group, the primary's, so a group whose members
+   * disagree renders as whatever the primary says and the rest is invisible.
    * That matters because diverging is a legitimate workflow, not a mistake:
    * queueing the RAWs for deletion and keeping the JPEGs is exactly what
    * `delete.rawOnly` is for, and until now the grid drew no trace of it.
@@ -464,18 +466,31 @@ class SessionStore {
   pairHalves(item: ItemLite): { halves: PairHalf[]; diverged: boolean } | null {
     const members = this.groupIndex.get(item.groupId);
     if (!members || members.length < 2) return null;
-    const halves: PairHalf[] = members
+    // A RAW is called RAW whatever its extension. A shot can hold two of them
+    // though (OM System writes ORF+ORI), and two rows both reading "RAW" name
+    // nothing — so a collision falls back to the extensions.
+    let rawCount = 0;
+    for (const m of members) if (m.kind === 0) rawCount++;
+    // The backend already decided which file stands for the shot, so the chip
+    // leads with that one rather than re-deriving the rule here. A JPG+HEIF
+    // group is what breaks without it: both are kind 1, and every HEIF spelling
+    // sorts before "jpg", so the member nothing can even decode would head the
+    // chip.
+    const halves: PairHalf[] = [...members]
+      .sort(
+        (a, b) =>
+          Number(b.isPrimary) - Number(a.isPrimary) ||
+          a.kind - b.kind ||
+          (a.ext < b.ext ? -1 : a.ext > b.ext ? 1 : 0),
+      )
       .map((m) => ({
         id: m.id,
-        // A RAW is called RAW whatever its extension; the other half speaks for
-        // itself, so a pair of unusual formats still labels both sides honestly.
-        name: m.kind === 0 ? "RAW" : m.ext.toUpperCase(),
+        name: m.kind === 0 && rawCount === 1 ? "RAW" : m.ext.toUpperCase(),
         flag: m.flag,
         rating: m.rating,
         label: m.label,
         queuedDelete: this.pendingDeleteIds.has(m.id),
-      }))
-      .sort((a, b) => (a.name === "RAW" ? -1 : b.name === "RAW" ? 1 : 0));
+      }));
     const first = halves[0];
     const diverged = halves.some(
       (h) =>
