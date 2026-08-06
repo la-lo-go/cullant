@@ -181,7 +181,7 @@ impl ThumbPool {
         // each in-flight decode holds the source bytes plus a full-size decode
         // plus a resize buffer, so an 8-core phone spawning 7 workers reached
         // ~400 MB of native allocations in a process with no largeHeap.
-        let workers = if cfg!(target_os = "android") {
+        let workers = if cfg!(any(target_os = "android", target_os = "ios")) {
             thread::available_parallelism()
                 .map(|n| n.get().min(3))
                 .unwrap_or(2)

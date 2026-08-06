@@ -282,7 +282,7 @@ pub fn run() {
     // Mobile: cap the decode pool. Phones report 8 cores but sustain far
     // fewer under thermal/memory pressure, and each in-flight decode holds
     // multi-MB buffers. Best-effort — a later init error just keeps defaults.
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let threads = std::thread::available_parallelism()
             .map(|n| n.get().min(4))
