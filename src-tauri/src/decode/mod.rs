@@ -61,14 +61,16 @@ pub const SECONDARY_RAW_EXTS: &[&str] = &["ori"];
 /// Still images Cullant can decode.
 pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "tif", "tiff", "webp", "bmp", "gif"];
 
-/// Still images Cullant catalogues but cannot yet decode: HEIF and its camera
-/// spellings. They are `FileKind::Image` so that grouping, deletion, move rules
-/// and XMP treat them as the photos they are — before this, an unknown extension
-/// was skipped outright, and deleting a rejected shot left its `.HIF` behind as
-/// an orphan the user never knew existed.
+/// Still images Cullant catalogues and reads metadata from, but cannot yet
+/// decode: HEIF and its camera spellings. They are `FileKind::Image` so that
+/// grouping, deletion, move rules and XMP treat them as the photos they are —
+/// before this, an unknown extension was skipped outright, and deleting a
+/// rejected shot left its `.HIF` behind as an orphan the user never knew existed.
 ///
-/// Nothing may read pixels or EXIF from one until a HEIF decoder exists, so the
-/// sibling-borrow queries filter on [`IMAGE_EXTS`] rather than on `kind`.
+/// EXIF *is* readable: `kamadak-exif` parses the ISO-BMFF item structure, so a
+/// HEIF-only library sorts by real capture time and fills every filter facet.
+/// Only the pixels are out of reach, so the sibling-borrow queries filter on
+/// [`IMAGE_EXTS`] rather than on `kind`, and the cells stay empty.
 pub const OPAQUE_IMAGE_EXTS: &[&str] = &["heic", "heif", "hif", "hsp"];
 
 pub const VIDEO_EXTS: &[&str] = &["mp4", "mov", "m4v"];

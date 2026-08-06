@@ -115,21 +115,19 @@ pub mod bench {
         pub iso: u16,
     }
 
-    /// Encode an image as JPEG (q90) with a real EXIF APP1 block, so synthetic
-    /// test data exercises the metadata-extraction path instead of the mtime
-    /// fallback. Built with kamadak-exif's experimental writer (the same
-    /// library the app reads with, so round-tripping is guaranteed): the
-    /// writer emits a TIFF blob, which becomes `APP1 = "Exif\0\0" + TIFF`
-    /// spliced right after the JPEG SOI marker.
-    pub fn jpeg_with_exif(img: &image::RgbImage, meta: &SyntheticExif) -> Vec<u8> {
+    /// The EXIF fields of a [`SyntheticExif`] as a TIFF blob, which is the
+    /// payload every container wants. Built with kamadak-exif's experimental
+    /// writer — the same library the app reads with, so round-tripping is
+    /// guaranteed.
+    ///
+    /// `dims` writes `PixelXDimension`/`PixelYDimension`. A JPEG leaves it
+    /// `None`, because its own header is the better answer; a HEIF needs it,
+    /// because nothing here can read a HEIF header.
+    fn exif_tiff(meta: &SyntheticExif, dims: Option<(u32, u32)>) -> Vec<u8> {
         use exif::experimental::Writer;
         use exif::{Field, In, Tag, Value};
 
-        let mut jpeg = Vec::new();
-        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90);
-        img.write_with_encoder(enc).expect("jpeg encode failed");
-
-        let fields = [
+        let mut fields = vec![
             Field {
                 tag: Tag::DateTimeOriginal,
                 ifd_num: In::PRIMARY,
@@ -156,13 +154,47 @@ pub mod bench {
                 value: Value::Short(vec![meta.iso]),
             },
         ];
+        if let Some((w, h)) = dims {
+            fields.push(Field {
+                tag: Tag::PixelXDimension,
+                ifd_num: In::PRIMARY,
+                value: Value::Long(vec![w]),
+            });
+            fields.push(Field {
+                tag: Tag::PixelYDimension,
+                ifd_num: In::PRIMARY,
+                value: Value::Long(vec![h]),
+            });
+        }
+
         let mut writer = Writer::new();
         for f in &fields {
             writer.push_field(f);
         }
         let mut tiff = std::io::Cursor::new(Vec::new());
         writer.write(&mut tiff, false).expect("exif write failed");
-        let tiff = tiff.into_inner();
+        tiff.into_inner()
+    }
+
+    /// Wrap `body` in an ISO-BMFF box of type `kind`.
+    fn bmff_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(body.len() + 8);
+        out.extend_from_slice(&((body.len() + 8) as u32).to_be_bytes());
+        out.extend_from_slice(kind);
+        out.extend_from_slice(body);
+        out
+    }
+
+    /// Encode an image as JPEG (q90) with a real EXIF APP1 block, so synthetic
+    /// test data exercises the metadata-extraction path instead of the mtime
+    /// fallback. The writer emits a TIFF blob, which becomes
+    /// `APP1 = "Exif\0\0" + TIFF` spliced right after the JPEG SOI marker.
+    pub fn jpeg_with_exif(img: &image::RgbImage, meta: &SyntheticExif) -> Vec<u8> {
+        let mut jpeg = Vec::new();
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 90);
+        img.write_with_encoder(enc).expect("jpeg encode failed");
+
+        let tiff = exif_tiff(meta, None);
 
         // Splice APP1 right after SOI: FF E1 <len> "Exif\0\0" <tiff>.
         // <len> counts itself (2) plus the Exif header (6) plus the payload.
@@ -173,6 +205,59 @@ pub mod bench {
         out.extend_from_slice(b"Exif\0\0");
         out.extend_from_slice(&tiff);
         out.extend_from_slice(&jpeg[2..]);
+        out
+    }
+
+    /// A HEIF file that carries EXIF and nothing else — no HEVC, no pixels.
+    ///
+    /// It exists because the metadata half of HEIF support is testable in CI
+    /// and the pixel half is not: no encoder here can produce a real HEIC, and
+    /// checking a camera file into the repo has provenance questions. This
+    /// builds the smallest structure `kamadak-exif` accepts — `ftyp` declaring
+    /// the `mif1` brand, then `meta` holding `iloc`, `iinf`/`infe` naming an
+    /// `Exif` item, and `idat` holding it.
+    ///
+    /// The extent uses construction method 1, so its offsets are relative to
+    /// `idat` rather than to the file. That keeps the fixture correct whatever
+    /// its boxes end up sized at.
+    pub fn heif_with_exif(meta: &SyntheticExif, dims: (u32, u32)) -> Vec<u8> {
+        const ITEM_ID: u16 = 1;
+
+        // An Exif item is a 4-byte offset to the TIFF header, then the TIFF.
+        let mut item = vec![0, 0, 0, 0];
+        item.extend_from_slice(&exif_tiff(meta, Some(dims)));
+
+        let mut infe = vec![2, 0, 0, 0]; // ItemInfoEntry version 2
+        infe.extend_from_slice(&ITEM_ID.to_be_bytes());
+        infe.extend_from_slice(&[0, 0]); // item_protection_index
+        infe.extend_from_slice(b"Exif");
+
+        let mut iinf = vec![0, 0, 0, 0]; // version 0
+        iinf.extend_from_slice(&1u16.to_be_bytes()); // entry_count
+        iinf.extend_from_slice(&bmff_box(b"infe", &infe));
+
+        let mut iloc = vec![1, 0, 0, 0]; // version 1
+        iloc.extend_from_slice(&0u16.to_be_bytes()); // offset/length/base/index sizes
+        iloc.extend_from_slice(&1u16.to_be_bytes()); // item_count
+        iloc.extend_from_slice(&ITEM_ID.to_be_bytes());
+        iloc.extend_from_slice(&[0, 1]); // construction_method = 1 (idat)
+        iloc.extend_from_slice(&[0, 0]); // data_reference_index
+        iloc.extend_from_slice(&1u16.to_be_bytes()); // extent_count
+                                                     // Every size field above is 0, so the extent itself occupies no bytes
+                                                     // and reads as "all of the ItemDataBox".
+
+        let mut meta_body = vec![0, 0, 0, 0]; // version 0
+        meta_body.extend_from_slice(&bmff_box(b"iloc", &iloc));
+        meta_body.extend_from_slice(&bmff_box(b"iinf", &iinf));
+        meta_body.extend_from_slice(&bmff_box(b"idat", &item));
+
+        let mut ftyp = Vec::new();
+        ftyp.extend_from_slice(b"mif1"); // major brand
+        ftyp.extend_from_slice(&0u32.to_be_bytes()); // minor version
+        ftyp.extend_from_slice(b"mif1"); // compatible brands
+
+        let mut out = bmff_box(b"ftyp", &ftyp);
+        out.extend_from_slice(&bmff_box(b"meta", &meta_body));
         out
     }
 }
@@ -300,7 +385,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod bench_tests {
-    use super::bench::{jpeg_with_exif, SyntheticExif};
+    use super::bench::{heif_with_exif, jpeg_with_exif, SyntheticExif};
 
     /// The synthetic-EXIF writer must round-trip through the app's own reader.
     #[test]
@@ -322,5 +407,29 @@ mod bench_tests {
         assert_eq!(meta.camera.as_deref(), Some("Canon EOS R5"));
         assert_eq!(meta.iso, Some(400));
         assert_eq!((meta.width, meta.height), (Some(120), Some(80)));
+    }
+
+    /// The HEIF fixture must round-trip through the same reader. If this fails,
+    /// the fixture is malformed and every HEIF metadata test above it is
+    /// meaningless.
+    #[test]
+    fn synthetic_heif_roundtrips() {
+        let bytes = heif_with_exif(
+            &SyntheticExif {
+                date_time_original: "2024:06:15 14:30:05",
+                orientation: 8,
+                make: "Apple",
+                model: "iPhone 15 Pro",
+                iso: 125,
+            },
+            (4032, 3024),
+        );
+        let meta = crate::decode::exif::read_metadata(&bytes).unwrap();
+        assert_eq!(meta.capture_time, Some(1718461805));
+        assert_eq!(meta.orientation, Some(8));
+        assert_eq!(meta.camera.as_deref(), Some("Apple iPhone 15 Pro"));
+        assert_eq!(meta.iso, Some(125));
+        // No decoder can read a HEIF header, so these come from EXIF alone.
+        assert_eq!((meta.width, meta.height), (Some(4032), Some(3024)));
     }
 }

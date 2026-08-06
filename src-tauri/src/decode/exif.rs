@@ -86,6 +86,20 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
             })
     };
 
+    // The header probe above beats EXIF when it works: it reports what the
+    // pixels actually are, where EXIF reports what the camera wrote. It does
+    // not work on a HEIF, which no decoder here can open, so fall back to the
+    // tags. Both are pre-rotation, so `files.width`/`height` keep one meaning.
+    if meta.width.is_none() {
+        if let (Some(w), Some(h)) = (
+            field_uint(exif::Tag::PixelXDimension),
+            field_uint(exif::Tag::PixelYDimension),
+        ) {
+            meta.width = Some(w);
+            meta.height = Some(h);
+        }
+    }
+
     meta.capture_time = field_ascii(exif::Tag::DateTimeOriginal)
         .or_else(|| field_ascii(exif::Tag::DateTime))
         .and_then(|s| parse_exif_datetime(s.trim_end_matches('\0')));

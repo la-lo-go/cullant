@@ -44,7 +44,11 @@ M0–M7 done + two UX polish rounds. See `docs/PLAN.md` for the full plan (Spani
 
 Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters`), focus peaking, embedded XMP in JPEG.
 
-**HEIF is half-done.** `decode::OPAQUE_IMAGE_EXTS` (`heic/heif/hif/hsp`) are catalogued, grouped, deleted, moved and XMP-exported like any photo — an unknown extension used to be skipped outright, which left a rejected shot's `.HIF` behind as an orphan. Nothing decodes them yet: they are never opened (not for EXIF, not for a thumbnail), so a HEIF *next to* a RAW or JPEG renders fine from its sibling, while a HEIF-only library (every stock iPhone) shows empty cells. The remaining half is a decoder — candidates, cheapest first: the platform's (Android already borrows one for video posters), the embedded thumbnail item (HEIF is ISO-BMFF, the same boxes `raw.rs`'s `cr3_walk` already walks), or `libheif`.
+**HEIF: metadata yes, pixels no.** `decode::OPAQUE_IMAGE_EXTS` (`heic/heif/hif/hsp`) are catalogued, grouped, deleted, moved and XMP-exported like any photo — an unknown extension used to be skipped outright, which left a rejected shot's `.HIF` behind as an orphan. **EXIF is read**: `kamadak-exif` parses the ISO-BMFF item structure, so a HEIF-only library (every stock iPhone) sorts by real capture time and fills every filter facet. Dimensions come from `PixelXDimension`/`PixelYDimension`, because no header probe here can open the container.
+
+What is missing is the pixels, so those cells stay empty (a HEIF *next to* a RAW or JPEG renders from its sibling). The decoder will be a **capability ladder** — platform-native first, generalist fallback under it, the same shape as the video playback ladder: Android `ImageDecoder` through the SAF plugin, iOS ImageIO later, Windows WIC, and `ffmpeg` (already an optional runtime dep, needs 7.0+ for the HEIF demuxer) underneath on desktop. `libheif` is rejected — it would be the first real C/system dependency, and `docs/PLAN.md` turns those down twice.
+
+Two traps the code already guards, and that any decoder work must keep: a HEIF is refused **before the read** (on SAF the whole file would be pulled in to learn nothing) and **without a tombstone** (a tombstone is keyed on mtime, and shipping a decoder changes no file's mtime — every touched photo would stay blank after the upgrade). `bench::heif_with_exif` builds a synthetic EXIF-only HEIF so the metadata half is testable without a real camera file.
 
 ## Dev / test
 
