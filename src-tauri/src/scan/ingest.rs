@@ -959,12 +959,14 @@ mod tests {
         (out.status.success() && dest.exists()).then_some(())
     }
 
-    /// The ffmpeg rung, end to end: a real HEVC frame becomes a real thumbnail.
-    /// Everything else about HEIF is testable with a synthetic fixture, but the
-    /// pixels are not — so this builds one with the machine's own ffmpeg and
-    /// skips where there is none.
+    /// The ladder, end to end: a real HEVC frame becomes a real thumbnail.
+    /// Which rung answers depends on the machine — WIC where the HEIF extensions
+    /// are installed, ffmpeg otherwise — and that is the point: the pipeline
+    /// above them must not care. Everything else about HEIF is testable with a
+    /// synthetic fixture; the pixels are not, so this builds one with the
+    /// machine's own ffmpeg and skips where there is none.
     #[test]
-    fn the_ffmpeg_rung_renders_a_heif() {
+    fn the_platform_ladder_renders_a_heif() {
         let _guard = ingest_guard();
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

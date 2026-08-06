@@ -20,8 +20,11 @@
 //! a decoder changes no file's mtime — every photo touched would stay an empty
 //! cell forever after the upgrade.
 
+#[cfg(windows)]
+mod wic;
+
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use image::DynamicImage;
 
@@ -33,30 +36,51 @@ use crate::store::ProjectStore;
 /// on `PATH` is not capability.
 const FFMPEG_HEIF_MAJOR: u32 = 7;
 
-/// Cleared when the ffmpeg rung fails on the first HEIF of the session, which
-/// means the binary cannot do stills whatever its version string claimed.
+/// A backstop for a version string that lies: some builds report a release new
+/// enough and still cannot open a still.
 ///
-/// Only the *first* attempt may clear it. A later failure is far more likely to
-/// be one corrupt file than a bad ffmpeg, and one corrupt file must not disable
-/// the rung for the whole library.
-static FFMPEG_STILLS: AtomicBool = AtomicBool::new(true);
-static FFMPEG_TRIED: AtomicBool = AtomicBool::new(false);
+/// The rung is written off only after [`FFMPEG_GIVE_UP`] failures with no
+/// success in between. Both halves of that rule matter. Writing it off on the
+/// first failure would let one corrupt file at the head of a library disable a
+/// perfectly good ffmpeg for the whole session; never writing it off would pay a
+/// process per photo forever to learn the same thing.
+static FFMPEG_OK: AtomicBool = AtomicBool::new(false);
+static FFMPEG_FAILS: AtomicU32 = AtomicU32::new(0);
+const FFMPEG_GIVE_UP: u32 = 3;
 
-/// Pretend no rung exists, so a test can exercise the "no decoder" path on a
-/// machine that does have ffmpeg. Serialise callers: the latch is process-wide.
+/// Pretend the whole ladder is missing, so a test can exercise the "no decoder"
+/// path on a machine that has one. Serialise callers: it is process-wide.
+#[cfg(test)]
+static DISABLED: AtomicBool = AtomicBool::new(false);
+
 #[cfg(test)]
 pub(crate) fn disable_for_test() {
-    FFMPEG_STILLS.store(false, Ordering::Relaxed);
+    DISABLED.store(true, Ordering::Relaxed);
 }
 
 #[cfg(test)]
 pub(crate) fn reenable_for_test() {
-    FFMPEG_STILLS.store(true, Ordering::Relaxed);
+    DISABLED.store(false, Ordering::Relaxed);
+}
+
+fn disabled() -> bool {
+    #[cfg(test)]
+    {
+        DISABLED.load(Ordering::Relaxed)
+    }
+    #[cfg(not(test))]
+    {
+        false
+    }
 }
 
 /// Whether `ffmpeg` on this machine can be expected to open a HEIF still.
 fn ffmpeg_capable() -> bool {
-    if !FFMPEG_STILLS.load(Ordering::Relaxed) {
+    if disabled() {
+        return false;
+    }
+    if !FFMPEG_OK.load(Ordering::Relaxed) && FFMPEG_FAILS.load(Ordering::Relaxed) >= FFMPEG_GIVE_UP
+    {
         return false;
     }
     let info = super::video::ffmpeg_info();
@@ -73,7 +97,23 @@ fn ffmpeg_capable() -> bool {
 /// offer: an optimistic answer here becomes a decode failure downstream, and a
 /// decode failure becomes a tombstone that survives installing the decoder.
 pub fn available(store: &dyn ProjectStore) -> bool {
-    store.decodes_heif() || ffmpeg_capable()
+    store.decodes_heif() || platform_capable() || ffmpeg_capable()
+}
+
+/// Whether an in-process platform decoder is built AND installed. Windows today;
+/// iOS ImageIO is the next arm.
+fn platform_capable() -> bool {
+    if disabled() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        wic::available()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
 }
 
 /// Whether this particular file can be decoded — asked before any work is
@@ -84,7 +124,7 @@ pub fn possible(store: &dyn ProjectStore, rel_path: &str) -> bool {
         return true;
     }
     // Every remaining rung needs a real path.
-    store.local_path(rel_path).is_some() && ffmpeg_capable()
+    store.local_path(rel_path).is_some() && (platform_capable() || ffmpeg_capable())
 }
 
 /// Decode a HEIF still, together with its real dimensions — which are NOT the
@@ -121,6 +161,23 @@ pub fn decode(
         AppError::Decode(format!("{rel_path}: no decoder for this container yet"))
     })?;
 
+    // In-process before subprocess: WIC decodes inside this thread, where ffmpeg
+    // costs a whole process per photo.
+    //
+    // A rung that HAS the codec and still refuses the file falls through to the
+    // next one rather than failing the photo. Decoders disagree about what a
+    // HEIF is — WIC wants the item-based structure a camera writes and rejects a
+    // single HEVC frame in an MP4 that ffmpeg reads happily — and a file only
+    // one of them accepts should still render.
+    #[cfg(windows)]
+    if platform_capable() {
+        match wic::decode(&path, max_long_edge) {
+            Ok((img, dims)) => return Ok((img, dims, true)),
+            Err(e) if !ffmpeg_capable() => return Err(e),
+            Err(e) => tracing::debug!("{rel_path}: WIC declined, trying ffmpeg: {e}"),
+        }
+    }
+
     ffmpeg_still(&path, rel_path)
 }
 
@@ -139,14 +196,8 @@ fn ffmpeg_still(path: &Path, rel_path: &str) -> AppResult<(DynamicImage, (u32, u
         .output()
         .map_err(|e| AppError::Decode(format!("ffmpeg spawn failed: {e}")))?;
 
-    let first_try = !FFMPEG_TRIED.swap(true, Ordering::Relaxed);
     if !output.status.success() || output.stdout.is_empty() {
-        // The binary ran and refused the file. On the very first HEIF of the
-        // session that means it cannot do stills at all, whatever it reported
-        // as its version — so stop paying a process per photo to find out again.
-        if first_try {
-            FFMPEG_STILLS.store(false, Ordering::Relaxed);
-        }
+        FFMPEG_FAILS.fetch_add(1, Ordering::Relaxed);
         return Err(AppError::Decode(format!(
             "{rel_path}: ffmpeg read no frame"
         )));
@@ -154,6 +205,9 @@ fn ffmpeg_still(path: &Path, rel_path: &str) -> AppResult<(DynamicImage, (u32, u
 
     let img = image::load_from_memory(&output.stdout)
         .map_err(|e| AppError::Decode(format!("{rel_path}: ffmpeg frame decode: {e}")))?;
+    // One success proves the binary can do stills; from here only a real decode
+    // error is ever reported, never "this ffmpeg is no good".
+    FFMPEG_OK.store(true, Ordering::Relaxed);
     let dims = (img.width(), img.height());
     // ffmpeg applies the container's rotation on the way out, the same as it
     // does for a video frame.

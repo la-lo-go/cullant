@@ -57,3 +57,13 @@ codegen-units = 1
 android_logger = { version = "0.15.1", default-features = false }
 log = "0.4.33"
 
+# WIC, for the Windows rung of the HEIF decode ladder (decode/heif.rs). Pure
+# Rust bindings to system DLLs — no C toolchain, no system library. Pinned to
+# the minor version Tauri already pulls in, so this adds no second copy of a
+# large crate; bump both together or the build grows one.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com",
+] }
+
