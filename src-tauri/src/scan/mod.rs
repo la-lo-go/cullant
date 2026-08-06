@@ -6,7 +6,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::params;
+use rusqlite::{params, Transaction};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -65,11 +65,8 @@ fn collect_found(entries: Vec<StoreEntry>) -> Vec<FoundFile> {
     let mut found = Vec::new();
     for entry in entries {
         let last = entry.rel_path.rsplit('/').next().unwrap_or(&entry.rel_path);
-        // Extension = text after the last '.' in the final segment, but a
-        // leading-dot-only name (".gitignore") has no extension.
-        let ext = match last.rfind('.') {
-            Some(i) if i > 0 => last[i + 1..].to_lowercase(),
-            _ => continue,
+        let Some(ext) = crate::decode::ext_of(&entry.rel_path) else {
+            continue;
         };
         let Some(kind) = classify(&ext) else {
             continue;
@@ -98,9 +95,9 @@ fn collect_found(entries: Vec<StoreEntry>) -> Vec<FoundFile> {
 
 /// Scan the project folder and reconcile with the database:
 /// insert new files (each in a fresh singleton group), update changed ones,
-/// mark vanished ones missing, then pair RAW+image files that share
-/// dir+basename — but only ever merge *singleton* groups, so existing pairs
-/// (including decoupled ones) are never silently rebuilt.
+/// mark vanished ones missing, then group the photo files that share
+/// dir+basename. A latecomer joins the group its shot already has; a decoupled
+/// group is never rebuilt.
 pub fn scan_project(
     app: &AppHandle,
     db: &Arc<Db>,
@@ -123,6 +120,88 @@ pub fn scan_project_inner(
 ) -> AppResult<ScanDone> {
     let store = crate::store::LocalFsStore::new(root);
     scan_with_store(db, &store, progress)
+}
+
+/// One live photo file in a dir+basename bucket, as the pairing pass sees it.
+struct Candidate {
+    id: i64,
+    group_id: i64,
+    ext: String,
+    /// Live members already in this file's group. More than one means an
+    /// *established* group: an earlier scan built it, or the user shaped it.
+    group_size: i64,
+    decoupled: bool,
+}
+
+/// Merge one dir+basename bucket into a single group, and give that group its
+/// best-ranked member as primary.
+///
+/// The bucket can already hold an established group — the common case, because a
+/// RAW+JPEG pair is built on the first scan and the `.HIF` or `.ORI` of the same
+/// shot arrives on a later one, or in a later copy. That group is the survivor
+/// and the latecomers join it. Merging the latecomers with each other instead
+/// would split one shot across two cells, and rejecting the shot would then
+/// delete only half of its files.
+///
+/// Two cases refuse to merge, because both mean the user has shaped the grouping
+/// and a scan must not silently undo that: a decoupled group, and a bucket that
+/// somehow spans two established groups.
+///
+/// `members` is ordered by rel_path, so the rank tie break is stable across
+/// rescans.
+fn merge_group(tx: &Transaction, members: &[Candidate]) -> rusqlite::Result<()> {
+    if members.len() < 2 {
+        return Ok(());
+    }
+    // Checked over every member, not only over an established group: a decoupled
+    // pair that has lost a half looks like a singleton, and merging a latecomer
+    // into it would revive a grouping the user took apart.
+    if members.iter().any(|m| m.decoupled) {
+        return Ok(());
+    }
+
+    let mut established: Vec<i64> = members
+        .iter()
+        .filter(|m| m.group_size > 1)
+        .map(|m| m.group_id)
+        .collect();
+    established.sort_unstable();
+    established.dedup();
+
+    let best = members
+        .iter()
+        .min_by_key(|m| crate::decode::primary_rank(&m.ext));
+    let survivor = match (established.as_slice(), best) {
+        ([], Some(m)) => m.group_id,
+        ([group_id], _) => *group_id,
+        _ => return Ok(()),
+    };
+
+    for m in members {
+        if m.group_id == survivor {
+            continue;
+        }
+        // Moves the whole group, not just this row. `group_size` counts live
+        // members only, so a group can also hold a committed delete (status = 2)
+        // — and `files.group_id` is a foreign key with `foreign_keys = ON`, so
+        // leaving that row behind and dropping its group would fail the scan
+        // transaction, and every scan after it.
+        tx.prepare_cached("UPDATE files SET group_id = ?1 WHERE group_id = ?2")?
+            .execute(params![survivor, m.group_id])?;
+        tx.prepare_cached(
+            "DELETE FROM groups WHERE id = ?1
+               AND NOT EXISTS (SELECT 1 FROM files WHERE group_id = ?1)",
+        )?
+        .execute(params![m.group_id])?;
+    }
+
+    // Recomputed over the whole membership, not carried over: when a real RAW
+    // joins a group a JPEG was representing, the RAW takes the cell.
+    if let Some(primary) = best {
+        tx.prepare_cached("UPDATE groups SET primary_file_id = ?2 WHERE id = ?1")?
+            .execute(params![survivor, primary.id])?;
+    }
+    Ok(())
 }
 
 /// Core scan, over any [`ProjectStore`] backend and separated from Tauri event
@@ -219,32 +298,61 @@ pub fn scan_with_store(
             }
         }
 
-        // Pairing pass: merge singleton raw+image groups sharing dir+basename.
-        let pairs: Vec<(i64, i64, i64, i64)> = {
+        // Pairing pass: gather the live photo files of each dir+basename that do
+        // not yet share one group, and merge them. A shot is not always two files
+        // — OM System writes ORF+ORI+JPG in Live ND, and a RAW+HEIF camera adds a
+        // .HIF — so the members are collected per basename rather than matched in
+        // pairs.
+        //
+        // The selection asks for a basename spanning more than one group, not for
+        // singletons: a latecomer must be able to join the group its shot already
+        // has. It also means a settled library selects nothing, so the cost of
+        // this pass falls to zero once everything is grouped.
+        let candidates: Vec<(String, String, Candidate)> = {
             let mut stmt = tx.prepare(
-                "SELECT raw.id, raw.group_id, img.id, img.group_id
-                 FROM files raw
-                 JOIN files img ON img.dir = raw.dir AND img.basename = raw.basename
-                 WHERE raw.kind = 0 AND img.kind = 1
-                   AND raw.status = 0 AND img.status = 0
-                   AND raw.group_id <> img.group_id
-                   AND (SELECT COUNT(*) FROM files m WHERE m.group_id = raw.group_id) = 1
-                   AND (SELECT COUNT(*) FROM files m WHERE m.group_id = img.group_id) = 1",
+                "SELECT f.dir, f.basename, f.id, f.group_id, f.ext,
+                        (SELECT COUNT(*) FROM files m
+                          WHERE m.group_id = f.group_id AND m.status = 0),
+                        g.decoupled
+                 FROM files f
+                 JOIN groups g ON g.id = f.group_id
+                 WHERE f.status = 0 AND f.kind IN (0, 1)
+                   AND (SELECT COUNT(DISTINCT n.group_id) FROM files n
+                          WHERE n.dir = f.dir AND n.basename = f.basename
+                            AND n.status = 0 AND n.kind IN (0, 1)) > 1
+                 ORDER BY f.dir, f.basename, f.rel_path",
             )?;
-            let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    Candidate {
+                        id: r.get(2)?,
+                        group_id: r.get(3)?,
+                        ext: r.get(4)?,
+                        group_size: r.get(5)?,
+                        decoupled: r.get::<_, i64>(6)? != 0,
+                    },
+                ))
+            })?;
             rows.collect::<Result<_, _>>()?
         };
-        for (raw_id, raw_group, img_id, img_group) in pairs {
-            tx.execute(
-                "UPDATE files SET group_id = ?1 WHERE id = ?2",
-                params![raw_group, img_id],
-            )?;
-            tx.execute("DELETE FROM groups WHERE id = ?1", params![img_group])?;
-            tx.execute(
-                "UPDATE groups SET primary_file_id = ?2 WHERE id = ?1",
-                params![raw_group, raw_id],
-            )?;
+
+        // Already ordered by (dir, basename), so equal keys arrive together.
+        let mut members: Vec<Candidate> = Vec::new();
+        let mut key: Option<(String, String)> = None;
+        for (dir, basename, candidate) in candidates {
+            let same = key
+                .as_ref()
+                .is_some_and(|(d, b)| d.as_str() == dir && b.as_str() == basename);
+            if !same {
+                merge_group(&tx, &members)?;
+                members.clear();
+                key = Some((dir, basename));
+            }
+            members.push(candidate);
         }
+        merge_group(&tx, &members)?;
 
         let missing: i64 =
             tx.query_row("SELECT COUNT(*) FROM files WHERE status = 1", [], |r| {
@@ -595,6 +703,235 @@ mod tests {
             })
             .unwrap();
         assert_eq!(pair_size, 2);
+    }
+
+    /// The size of the group `rel_path` belongs to, and its group's primary.
+    fn group_of_path(db: &Arc<Db>, rel_path: &str) -> (i64, String) {
+        let rel = rel_path.to_string();
+        db.call(move |c| {
+            Ok(c.query_row(
+                "SELECT (SELECT COUNT(*) FROM files m WHERE m.group_id = f.group_id),
+                        (SELECT p.rel_path FROM files p JOIN groups g ON g.id = f.group_id
+                          WHERE p.id = g.primary_file_id)
+                 FROM files f WHERE f.rel_path = ?1",
+                params![rel],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?)
+        })
+        .unwrap()
+    }
+
+    /// OM System writes three files for one Live ND frame. All three are one
+    /// photo, and the ORF — not the companion ORI — stands for it.
+    #[test]
+    fn groups_a_three_file_shot_behind_its_raw() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "P1010001.ORF");
+        touch(root, "P1010001.ORI");
+        touch(root, "P1010001.JPG");
+        let db = Arc::new(Db::open(root).unwrap());
+
+        let done = scan(&db, root);
+        assert_eq!(done.file_count, 3);
+
+        let (size, primary) = group_of_path(&db, "P1010001.ORI");
+        assert_eq!(size, 3, "the whole shot is one group");
+        assert_eq!(primary, "P1010001.ORF");
+    }
+
+    /// A RAW+HEIF shot has no JPEG at all. The HEIF must still join the group —
+    /// otherwise deleting the rejected shot leaves the .HIF behind — while the
+    /// CR3 keeps representing it, since nothing here can decode the HEIF.
+    #[test]
+    fn a_heif_joins_its_raw_and_never_represents_the_shot() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_0421.CR3");
+        touch(root, "IMG_0421.HIF");
+        let db = Arc::new(Db::open(root).unwrap());
+
+        let done = scan(&db, root);
+        assert_eq!(done.file_count, 2, "the HIF is catalogued, not skipped");
+
+        let (size, primary) = group_of_path(&db, "IMG_0421.HIF");
+        assert_eq!(size, 2);
+        assert_eq!(primary, "IMG_0421.CR3");
+    }
+
+    /// With no RAW present the decodable JPEG represents the shot, not the HEIF
+    /// sitting next to it.
+    #[test]
+    fn a_jpeg_outranks_a_heif_when_there_is_no_raw() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_9.JPG");
+        touch(root, "IMG_9.HEIC");
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+
+        let (size, primary) = group_of_path(&db, "IMG_9.HEIC");
+        assert_eq!(size, 2);
+        assert_eq!(primary, "IMG_9.JPG");
+    }
+
+    fn group_id_of(db: &Arc<Db>, rel_path: &str) -> i64 {
+        let rel = rel_path.to_string();
+        db.call(move |c| {
+            Ok(c.query_row(
+                "SELECT group_id FROM files WHERE rel_path = ?1",
+                params![rel],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap()
+    }
+
+    /// Every existing library already holds RAW+JPEG groups, so a `.HIF` or an
+    /// `.ORI` almost always arrives *after* its group exists — on a later scan,
+    /// or in a second copy. It must join that group. If it did not, the orphan
+    /// this change removes would survive in every library built before it.
+    #[test]
+    fn a_latecomer_joins_the_group_its_shot_already_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_1.CR3");
+        touch(root, "IMG_1.JPG");
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+        let group_before = group_id_of(&db, "IMG_1.CR3");
+
+        touch(root, "IMG_1.HIF");
+        scan(&db, root);
+
+        let (size, primary) = group_of_path(&db, "IMG_1.HIF");
+        assert_eq!(size, 3);
+        assert_eq!(group_id_of(&db, "IMG_1.HIF"), group_before, "same group");
+        assert_eq!(primary, "IMG_1.CR3");
+    }
+
+    /// Two latecomers arriving together must not pair with *each other*. A scan
+    /// runs on an interval, so it can land between two copies. If the two split
+    /// off into a second group, one shot would draw two cells, and rejecting it
+    /// would delete only half its files.
+    #[test]
+    fn two_latecomers_join_the_existing_group_not_each_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "P101.ORF");
+        touch(root, "P101.JPG");
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+        let group_before = group_id_of(&db, "P101.ORF");
+
+        touch(root, "P101.ORI");
+        touch(root, "P101.HIF");
+        scan(&db, root);
+
+        assert_eq!(group_of_path(&db, "P101.ORI").0, 4, "one shot, one group");
+        assert_eq!(group_id_of(&db, "P101.ORI"), group_before);
+        assert_eq!(group_id_of(&db, "P101.HIF"), group_before);
+    }
+
+    /// Decoupling is the user saying "these are separate photos". A scan must
+    /// not undo that by pulling a new sibling into the group.
+    #[test]
+    fn a_latecomer_leaves_a_decoupled_group_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_2.CR3");
+        touch(root, "IMG_2.JPG");
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+        crate::engine::groups::decouple(&db, group_id_of(&db, "IMG_2.CR3")).unwrap();
+
+        touch(root, "IMG_2.HIF");
+        scan(&db, root);
+
+        assert_eq!(group_of_path(&db, "IMG_2.CR3").0, 2, "pair untouched");
+        assert_eq!(group_of_path(&db, "IMG_2.HIF").0, 1, "stays alone");
+    }
+
+    /// `group_size` counts live members, so a group holding a committed delete
+    /// can look like a singleton and get absorbed. `files.group_id` is a foreign
+    /// key with `foreign_keys = ON`, so dropping that group while the dead row
+    /// still points at it fails the scan transaction — and every scan after it.
+    #[test]
+    fn a_group_holding_a_committed_delete_still_absorbs_a_latecomer() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_4.CR3");
+        touch(root, "IMG_4.HIF");
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+        // The user ran "delete RAW only" and committed it.
+        std::fs::remove_file(root.join("IMG_4.CR3")).unwrap();
+        db.call(|c| {
+            c.execute("UPDATE files SET status = 2 WHERE ext = 'cr3'", [])?;
+            Ok(())
+        })
+        .unwrap();
+
+        touch(root, "IMG_4.JPG");
+        scan(&db, root);
+
+        assert_eq!(group_of_path(&db, "IMG_4.HIF").1, "IMG_4.JPG");
+        assert_eq!(
+            group_id_of(&db, "IMG_4.CR3"),
+            group_id_of(&db, "IMG_4.HIF"),
+            "the deleted row follows its shot instead of dangling"
+        );
+    }
+
+    /// The other refusal in `merge_group`, and the only branch of it no normal
+    /// operation reaches: one basename spanning two groups that both already
+    /// hold members. Merging would pick a winner and silently dissolve the
+    /// other, so the pass leaves both alone. Driven straight through the DB,
+    /// because no command builds this state.
+    #[test]
+    fn a_bucket_spanning_two_established_groups_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_5.CR3");
+        touch(root, "IMG_5.JPG");
+        touch(root, "other/IMG_5.ORF");
+        touch(root, "other/IMG_5.ORI");
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+
+        // Force the second shot's members into the first shot's dir, so one
+        // dir+basename now spans two groups of two.
+        db.call(|c| {
+            c.execute("UPDATE files SET dir = '' WHERE dir = 'other'", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let cr3_group = group_id_of(&db, "IMG_5.CR3");
+        let orf_group = group_id_of(&db, "other/IMG_5.ORF");
+
+        scan(&db, root);
+
+        assert_ne!(cr3_group, orf_group, "the two shots started apart");
+        assert_eq!(group_id_of(&db, "IMG_5.CR3"), cr3_group, "untouched");
+        assert_eq!(group_id_of(&db, "other/IMG_5.ORF"), orf_group, "untouched");
+    }
+
+    /// A RAW arriving beside a JPEG-only group takes the cell from it: the
+    /// primary is recomputed over the whole membership, not carried over.
+    #[test]
+    fn a_late_raw_takes_over_as_primary() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "IMG_3.JPG");
+        touch(root, "IMG_3.HEIC");
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+        assert_eq!(group_of_path(&db, "IMG_3.JPG").1, "IMG_3.JPG");
+
+        touch(root, "IMG_3.CR3");
+        scan(&db, root);
+
+        assert_eq!(group_of_path(&db, "IMG_3.HEIC").1, "IMG_3.CR3");
     }
 
     #[test]

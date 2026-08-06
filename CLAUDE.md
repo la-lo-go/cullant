@@ -15,7 +15,9 @@ This file is the working context for anyone (human or Claude Code) picking the p
 
 Load a "project" = a folder (recursive, with subfolders). Preview every photo fast, then rate / flag / label / tag / queue actions entirely from the keyboard. Nothing touches the files until a reviewed **commit** step (or immediately, in auto mode). All state lives in a per-project SQLite DB — the source of truth; XMP sidecars are an optional export layer.
 
-**Killer feature — RAW+JPEG mirror mode**: files sharing a basename (`IMG_0421.CR3` + `IMG_0421.JPG`) are treated as one logical photo. A global switch flips between mirror (actions fan out to the pair) and separate (independent files). Pairs can be decoupled, and there are "delete RAW only" / "delete JPEG only" commands.
+**Killer feature — RAW+JPEG mirror mode**: files sharing a dir+basename (`IMG_0421.CR3` + `IMG_0421.JPG`) are treated as one logical photo. A global switch flips between mirror (actions fan out to the group) and separate (independent files). Groups can be decoupled, and there are "delete RAW only" / "delete JPEG only" commands.
+
+A shot is not always two files: OM System writes `ORF+ORI+JPG` in Live ND, and RAW+HEIF cameras add a `.HIF` — so grouping is N-ary, not pairwise. The group's **primary** (the member whose frame stands for the shot in the grid, and the only one whose thumbnail is pregenerated) is chosen by `decode::primary_rank`: RAW > decodable image > companion/opaque.
 
 ## Stack & layout
 
@@ -40,7 +42,9 @@ Frontend: `lib/api.ts` (typed invoke wrappers), `lib/stores/*.svelte.ts` (rune-c
 
 M0–M7 done + two UX polish rounds. See `docs/PLAN.md` for the full plan (Spanish). Remaining (M8): dedicated settings pane, move/copy rules UI, commit history/undo UI, video posters (ffprobe), installer signing, and a real-RAW test pass (needs the user's own camera files — synthetic JPEGs have no EXIF).
 
-Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters`), HEIC, focus peaking, embedded XMP in JPEG.
+Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters`), focus peaking, embedded XMP in JPEG.
+
+**HEIF is half-done.** `decode::OPAQUE_IMAGE_EXTS` (`heic/heif/hif/hsp`) are catalogued, grouped, deleted, moved and XMP-exported like any photo — an unknown extension used to be skipped outright, which left a rejected shot's `.HIF` behind as an orphan. Nothing decodes them yet: they are never opened (not for EXIF, not for a thumbnail), so a HEIF *next to* a RAW or JPEG renders fine from its sibling, while a HEIF-only library (every stock iPhone) shows empty cells. The remaining half is a decoder — candidates, cheapest first: the platform's (Android already borrows one for video posters), the embedded thumbnail item (HEIF is ISO-BMFF, the same boxes `raw.rs`'s `cr3_walk` already walks), or `libheif`.
 
 ## Dev / test
 

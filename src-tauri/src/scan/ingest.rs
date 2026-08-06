@@ -90,9 +90,20 @@ struct ThumbsDone {
     total: usize,
 }
 
-/// One row of the Phase-A selection: `(id, kind, rel_path, sibling id, sibling
-/// rel_path)`, where the sibling is the live JPEG half of a RAW+JPEG pair.
-type MetaRow = (i64, i64, String, Option<i64>, Option<String>);
+/// One row of the Phase-A selection: the file, plus the siblings whose read it
+/// could take instead of its own. Both siblings are live members of the same
+/// coupled group.
+struct MetaRow {
+    id: i64,
+    kind: i64,
+    rel_path: String,
+    /// The decodable image half — what a RAW borrows, because it is the same
+    /// frame for a fraction of the bytes.
+    image_sibling: Option<(i64, String)>,
+    /// A RAW half. Only an opaque file falls back to this: a RAW is no cheaper
+    /// to read than the file asking, so nothing else gains by borrowing it.
+    raw_sibling: Option<String>,
+}
 
 /// One source file to open, and every row that takes its metadata from that one
 /// read (Phase A).
@@ -247,57 +258,103 @@ pub fn run_ingest_inner(
     // Each row reports the file itself plus, for a RAW in a live pair, its JPEG
     // sibling. Grouping by whichever file will actually be opened turns a pair
     // into a single read.
+    //
+    // The sibling must be a decodable image, not merely `kind = 1`: the HEIF half
+    // of a RAW+HEIF shot carries the EXIF but no parser here can reach it, so a
+    // RAW that borrowed it would end up undated.
     let rows: Vec<MetaRow> = db.call_read(|conn| {
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             "SELECT f.id, f.kind, f.rel_path,
-                    (SELECT s.id FROM files s JOIN groups g ON g.id = s.group_id
+                    (SELECT s.id FROM files s
                       WHERE s.group_id = f.group_id AND s.kind = 1 AND s.status = 0
-                        AND g.decoupled = 0 LIMIT 1),
-                    (SELECT s.rel_path FROM files s JOIN groups g ON g.id = s.group_id
+                        AND s.ext IN ({exts}) AND g.decoupled = 0 LIMIT 1),
+                    (SELECT s.rel_path FROM files s
                       WHERE s.group_id = f.group_id AND s.kind = 1 AND s.status = 0
-                        AND g.decoupled = 0 LIMIT 1)
+                        AND s.ext IN ({exts}) AND g.decoupled = 0 LIMIT 1),
+                    (SELECT s.rel_path FROM files s
+                      WHERE s.group_id = f.group_id AND s.kind = 0 AND s.status = 0
+                        AND s.id <> f.id AND g.decoupled = 0
+                        AND s.ext NOT IN ({secondary})
+                      ORDER BY s.rel_path LIMIT 1)
              FROM files f
+             JOIN groups g ON g.id = f.group_id
              WHERE f.status = 0 AND f.kind IN (0, 1, 2) AND f.capture_time IS NULL",
-        )?;
+            exts = crate::db::sql::image_exts(),
+            secondary = crate::db::sql::secondary_raw_exts()
+        ))?;
         let rows = stmt.query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            Ok(MetaRow {
+                id: r.get(0)?,
+                kind: r.get(1)?,
+                rel_path: r.get(2)?,
+                image_sibling: r.get::<_, Option<i64>>(3)?.zip(r.get(4)?),
+                raw_sibling: r.get(5)?,
+            })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     })?;
 
     let mut by_source: std::collections::HashMap<String, MetaWork> =
         std::collections::HashMap::new();
-    for (id, kind, rel_path, sib_id, sib_rel) in rows {
-        // A RAW with a live JPEG sibling borrows that read; everything else
-        // (including the JPEG itself) is its own source.
-        let borrow = match (kind, sib_id, sib_rel) {
-            (0, Some(sid), Some(srel)) if sid != id => Some((sid, srel)),
-            _ => None,
+
+    for row in rows {
+        let opaque = decode::is_opaque_image(&row.rel_path);
+        // A RAW with a live JPEG sibling borrows that read. An opaque file has to
+        // borrow from somewhere — nothing here can open it — and prefers the same
+        // JPEG, falling back to the RAW. Everything else is its own source.
+        //
+        // The borrow is what keeps a shot together in a capture-time sort. A
+        // camera writes one capture time into every file of the shot, and the
+        // mtime fallback would strand the opaque half at the copy time, which on
+        // a freshly copied card is the far end of the grid. That matters most
+        // when the .HIF arrives on a later scan than the rest of its shot: the
+        // rest is already dated, so only the sibling read can still date it.
+        //
+        // A companion RAW borrows nothing. It is the frame *before* the camera
+        // composited it, so the sibling JPEG's EXIF describes a different
+        // exposure — a Live Composite `.ORI` would report the composite's 60 s
+        // instead of its own 2 s, and the shutter-speed filter would repeat the
+        // lie. `PAIRED_JPEG_SQL` refuses the same borrow for the same reason.
+        let from_image = row
+            .image_sibling
+            .filter(|(sid, _)| *sid != row.id)
+            .map(|(_, rel)| (rel, 1));
+        let companion_raw = crate::decode::ext_of(&row.rel_path)
+            .is_some_and(|e| crate::decode::SECONDARY_RAW_EXTS.contains(&e.as_str()));
+        let borrow = if opaque {
+            from_image.or_else(|| row.raw_sibling.map(|rel| (rel, 0)))
+        } else if row.kind == 0 && !companion_raw {
+            from_image
+        } else {
+            None
         };
         match borrow {
-            Some((_, srel)) => {
+            Some((source_rel, source_kind)) => {
                 by_source
-                    .entry(srel.clone())
+                    .entry(source_rel.clone())
                     .or_insert_with(|| MetaWork {
-                        source_rel: srel,
-                        source_kind: 1,
+                        source_rel,
+                        source_kind,
                         source_id: None,
                         borrowers: Vec::new(),
                     })
                     .borrowers
-                    .push(id);
+                    .push(row.id);
             }
+            // Its own source. For an opaque file that means a HEIF-only library:
+            // `extract_metadata` refuses to open it, so the batched COALESCE
+            // falls its capture time back to mtime.
             None => {
                 let entry = by_source
-                    .entry(rel_path.clone())
+                    .entry(row.rel_path.clone())
                     .or_insert_with(|| MetaWork {
-                        source_rel: rel_path,
-                        source_kind: kind,
+                        source_rel: row.rel_path,
+                        source_kind: row.kind,
                         source_id: None,
                         borrowers: Vec::new(),
                     });
-                entry.source_id = Some(id);
-                entry.source_kind = kind;
+                entry.source_id = Some(row.id);
+                entry.source_kind = row.kind;
             }
         }
     }
@@ -367,13 +424,14 @@ pub fn run_ingest_inner(
     // Video posters come last: extracting one spins up a whole video decoder per
     // file (an ffmpeg process on desktop, a platform decoder on Android), so
     // deferring them keeps the photo library browsable before that tier competes.
+    let decodable = crate::db::sql::decodable_photo("f");
     let thumb_sql = |extra: &str| {
         format!(
             "SELECT f.id, f.mtime, f.orientation
              FROM files f
              JOIN groups g ON g.id = f.group_id
              LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
-             WHERE f.status = 0 AND f.kind IN (0, 1)
+             WHERE f.status = 0 AND f.kind IN (0, 1) AND {decodable}
            AND (g.primary_file_id = f.id OR g.decoupled = 1)
                AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
              ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC
@@ -408,7 +466,7 @@ pub fn run_ingest_inner(
              FROM files f
              JOIN groups g ON g.id = f.group_id
              LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
-             WHERE f.status = 0 AND f.kind IN (0, 1)
+             WHERE f.status = 0 AND f.kind IN (0, 1) AND {decodable}
            AND (g.primary_file_id = f.id OR g.decoupled = 1)
                AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime
                     OR (tp.long_edge <> 0 AND tp.long_edge <> {}))
@@ -552,9 +610,10 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
     };
     let blank = || ids().map(Extracted::empty).collect::<Vec<_>>();
 
-    // Videos carry no image-path EXIF; capture_time falls back to mtime via the
-    // batched COALESCE update, no file read needed.
-    if work.source_kind == 2 {
+    // Videos carry no image-path EXIF, and an opaque container has EXIF nothing
+    // here can reach; either way capture_time falls back to mtime via the batched
+    // COALESCE update, with no file read at all.
+    if work.source_kind == 2 || decode::is_opaque_image(&work.source_rel) {
         return blank();
     }
 
@@ -808,6 +867,98 @@ mod tests {
         run_all(&db, root);
         // Everything fresh: a second pass finds nothing to do.
         assert_eq!(run_all(&db, root), (0, 0, 0));
+    }
+
+    /// An opaque container is catalogued and grouped but never read: not for
+    /// metadata, not for a thumbnail. Asserted the hard way — the `.hif` holds
+    /// perfectly good JPEG bytes, so anything that opened it would succeed and
+    /// record dimensions. Only the decodable sibling represents the shot.
+    #[test]
+    fn an_opaque_image_is_grouped_but_never_opened() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let img = image::RgbImage::from_fn(640, 480, |x, _| image::Rgb([(x % 255) as u8, 10, 90]));
+        img.save(root.join("IMG_0002.jpg")).unwrap();
+        std::fs::copy(root.join("IMG_0002.jpg"), root.join("IMG_0002.hif")).unwrap();
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+
+        let (_, thumbs, previews) = run_all(&db, root);
+        // The shot is one cell, rendered from the JPEG.
+        assert_eq!((thumbs, previews), (1, 1));
+
+        let hif_dims: (Option<i64>, Option<i64>) = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT width, height FROM files WHERE ext = 'hif'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(hif_dims, (None, None), "decodable bytes, still never read");
+
+        // Undated files sort to the bottom forever, so the fallback must apply
+        // to a file we deliberately refuse to open.
+        let dated: i64 = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM files WHERE capture_time IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(dated, 2);
+    }
+
+    /// The common arrival order: the shot is scanned and dated, and its `.hif`
+    /// turns up on a later pass, when nothing else in the group is pending. It
+    /// must still take the shot's capture time. Falling back to mtime would
+    /// strand it at the copy time — the far end of a capture-time sort — and the
+    /// value would never correct itself, because it is no longer NULL.
+    #[test]
+    fn an_opaque_latecomer_takes_the_capture_time_of_its_shot() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let img = image::RgbImage::from_fn(320, 240, |x, _| image::Rgb([(x % 255) as u8, 20, 60]));
+        let bytes = crate::bench::jpeg_with_exif(
+            &img,
+            &crate::bench::SyntheticExif {
+                date_time_original: "2024:06:15 14:30:05",
+                orientation: 1,
+                make: "OM Digital",
+                model: "OM-1",
+                iso: 200,
+            },
+        );
+        std::fs::write(root.join("IMG_7.jpg"), &bytes).unwrap();
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        run_all(&db, root);
+
+        // The HEIF arrives afterwards. Its own mtime is "now", not the shot's.
+        std::fs::write(root.join("IMG_7.hif"), &bytes).unwrap();
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        run_all(&db, root);
+
+        let (jpg_time, hif_time): (i64, i64) = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT (SELECT capture_time FROM files WHERE ext = 'jpg'),
+                            (SELECT capture_time FROM files WHERE ext = 'hif')",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(hif_time, jpg_time, "the shot keeps one capture time");
     }
 
     /// A RAW+JPEG pair costs one read of the JPEG half, and the RAW is never

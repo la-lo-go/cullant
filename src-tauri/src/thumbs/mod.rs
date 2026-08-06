@@ -503,19 +503,39 @@ fn file_row(db: &Arc<Db>, file_id: i64) -> AppResult<(String, i64, i64, Option<i
 /// Deliberately a fact about the database, not about the mirror-mode view: a
 /// decoupled pair is excluded because the user has said those two files are to
 /// be treated as separate photos.
+///
+/// The sibling must be a *decodable* image, not merely `kind = 1`: a RAW+HEIF
+/// shot has an image-kind sibling whose pixels no decoder here can reach, and
+/// borrowing it would turn a RAW that renders perfectly into a failed thumbnail.
+///
+/// A companion RAW is excluded, because for it the premise is false. An `.ORI`
+/// is the frame *before* the camera composited it, and the sibling JPEG is the
+/// frame after — showing the JPEG would draw the two files identically and hide
+/// the only difference the user opened the `.ORI` to see.
+///
+/// Built once, because this runs per rendered RAW: over the whole library in the
+/// fused ingest pass, and again on every interactive zoom into a RAW cell.
+static PAIRED_JPEG_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    format!(
+        "SELECT s.rel_path
+         FROM files f
+         JOIN groups g ON g.id = f.group_id
+         JOIN files s ON s.group_id = f.group_id AND s.kind = 1 AND s.status = 0
+           AND s.ext IN ({images})
+         WHERE f.id = ?1 AND f.kind = 0 AND f.status = 0 AND g.decoupled = 0
+           AND f.ext NOT IN ({secondary})
+         LIMIT 1",
+        images = crate::db::sql::image_exts(),
+        secondary = crate::db::sql::secondary_raw_exts()
+    )
+});
+
 fn paired_jpeg(db: &Arc<Db>, file_id: i64) -> Option<String> {
     db.call_read(move |conn| {
         Ok(conn
-            .query_row(
-                "SELECT s.rel_path
-                 FROM files f
-                 JOIN groups g ON g.id = f.group_id
-                 JOIN files s ON s.group_id = f.group_id AND s.kind = 1 AND s.status = 0
-                 WHERE f.id = ?1 AND f.kind = 0 AND f.status = 0 AND g.decoupled = 0
-                 LIMIT 1",
-                params![file_id],
-                |r| r.get::<_, String>(0),
-            )
+            .query_row(&PAIRED_JPEG_SQL, params![file_id], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()?)
     })
     .ok()
@@ -855,7 +875,15 @@ pub(crate) fn produce_cached(
     let orientation = orientation.unwrap_or(1);
 
     // Full view of a plain image: stream the original, no transcode, no cache.
+    // Refused for an opaque container before the read, not after: streaming it
+    // would pull the whole file (on Android SAF there is no mmap to avoid that)
+    // and hand the webview bytes it cannot render either.
     if kind == ThumbKind::Full && file_kind == 1 {
+        if decode::is_opaque_image(&rel_path) {
+            return Err(AppError::Decode(format!(
+                "{rel_path}: no decoder for this container yet"
+            )));
+        }
         return read_all(store, &rel_path);
     }
 
@@ -882,6 +910,18 @@ pub(crate) fn produce_cached(
     if file_kind == 2 && !decode::video::poster_possible(store, &rel_path) {
         return Err(AppError::Decode(format!(
             "{rel_path}: no video poster extractor available"
+        )));
+    }
+
+    // Same shape, same reason: an opaque container has no decoder here yet. It
+    // must fail BEFORE the read (on Android SAF there is no mmap, so a HEIC-only
+    // library would be pulled into memory one cell at a time to learn nothing)
+    // and WITHOUT a tombstone. A tombstone is keyed on mtime, and shipping a HEIF
+    // decoder changes no file's mtime — every one of those photos would stay an
+    // empty cell after the upgrade.
+    if decode::is_opaque_image(&rel_path) {
+        return Err(AppError::Decode(format!(
+            "{rel_path}: no decoder for this container yet"
         )));
     }
 

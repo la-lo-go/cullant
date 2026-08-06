@@ -1,4 +1,5 @@
 pub mod migrations;
+pub mod sql;
 
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Condvar, Mutex};
