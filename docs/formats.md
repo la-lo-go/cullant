@@ -1,21 +1,32 @@
 # Formats
 
-What Cullant catalogues, what it renders, and where the two differ. The
-extension lists live in `src-tauri/src/decode/mod.rs`; this explains them.
+This document tells you which files Cullant catalogues, which files it renders,
+and where the two differ. The extension lists are in
+`src-tauri/src/decode/mod.rs`.
 
-**Catalogued** means the file gets a database row: it is counted, grouped with
-its siblings, filtered, rated, deleted, moved and XMP-exported like any photo.
-**Rendered** means a thumbnail and a loupe preview exist.
+**Catalogued** means the file gets a database row. The app then treats it
+exactly like any other photo. It:
 
-The two are deliberately separate. An extension Cullant does not recognise is
-skipped entirely — which is how a rejected shot used to leave its `.HIF` behind
-as an orphan the user never knew existed.
+- counts it
+- groups it with its siblings
+- filters, rates and labels it
+- deletes and moves it
+- exports it to XMP
+
+**Rendered** means a thumbnail and a loupe preview exist for it.
+
+The two are separate on purpose. Cullant skips any extension it does not know.
+Before N-ary grouping, that behaviour left a `.HIF` on disk after the user
+rejected the shot it belonged to.
 
 ## RAW
 
-Every extension below is catalogued and grouped. Rendering comes from the
-camera's own embedded JPEG preview (the Photo Mechanic trick), extracted by
-`decode/raw.rs` where it can, and by `rawler` otherwise. No demosaic.
+Cullant catalogues and groups every extension below.
+
+To render one, it extracts the JPEG preview that the camera embedded in the
+file. This is the Photo Mechanic method. `decode/raw.rs` does the extraction
+where it can, and `rawler` does it otherwise. Neither one demosaics the sensor
+data.
 
 | Maker | Extensions |
 |---|---|
@@ -33,106 +44,120 @@ camera's own embedded JPEG preview (the Photo Mechanic trick), extracted by
 | Phase One | `iiq` |
 | Epson, Mamiya, Kodak, Leaf | `erf` `mef` `mos` `kdc` `dcr` |
 
-Compression variants (Canon C-RAW, Nikon HE★, Sony lossless L/M/S, Phase One
-IIQ S v2 …) are mostly irrelevant: the preview is extracted without touching the
-RAW payload. They only matter when no preview is found and `rawler` has to
-decode the sensor data itself.
+Compression variants usually do not matter. Canon C-RAW, Nikon HE★, Sony
+lossless L/M/S and Phase One IIQ S v2 all store a preview. The extraction never
+touches the compressed sensor data.
+
+A variant matters only when the file holds no preview. `rawler` must then decode
+the sensor data itself.
 
 ### Known gaps
 
-Found by the real-file corpus (see [testing.md](testing.md)), pinned in that
-test's `KNOWN_UNRENDERABLE` so they cannot be forgotten:
+The real-file corpus found these. See [testing.md](testing.md). The corpus test
+pins each one in its `KNOWN_UNRENDERABLE` list, so nobody can forget them.
 
-- **Olympus / OM System `orf` and `ori` do not render.** The file holds a ~1 MB
-  JPEG preview and nothing here reaches it: Olympus keeps the offset in the
-  MakerNote, and `raw.rs` walks IFD0, the chained IFDs and the SubIFDs only.
-  Metadata is read fine, so those photos sort and filter correctly — they just
-  draw a blank cell.
-- **Panasonic `.RAW` (older bodies)** can hold no JPEG at all. Only a demosaic
-  would render it.
-- **Some `.DNG`** carry a thumbnail too small to use — a Sigma fp writes 8 KB
+- **Olympus and OM System `orf` and `ori` do not render.** The file holds a JPEG
+  preview of about 1 MB, and no code here reaches it. Olympus stores the offset
+  in the MakerNote. `raw.rs` walks IFD0, the chained IFDs and the SubIFDs only.
+  The app still reads the metadata correctly, so these photos sort and filter
+  correctly. They show an empty cell.
+- **Older Panasonic `.RAW` files hold no JPEG.** Only a demosaic can render one.
+- **Some `.DNG` files hold a preview that is too small.** A Sigma fp writes 8 KB
   and nothing larger.
 
 ## HEIF
 
 `heic` `heif` `hif` `hsp`
 
-**Metadata always.** `kamadak-exif` parses the ISO-BMFF item structure, so a
-HEIF-only library — every stock iPhone — sorts by real capture time and fills
-every filter facet, whatever the pixels do. Dimensions come from
-`PixelXDimension`/`PixelYDimension`, because no header probe here can open the
-container.
+**Cullant always reads the metadata.** `kamadak-exif` parses the ISO-BMFF item
+structure. A library that holds only HEIF files — every unmodified iPhone —
+therefore sorts by real capture time and fills every filter facet. The
+dimensions come from the `PixelXDimension` and `PixelYDimension` tags, because
+no header probe here can open the container.
 
-**Pixels depend on the machine.** Cullant has no HEVC decoder and will not grow
-one: everything that decodes HEVC is a C dependency, which would be the first in
-this build and would have to cross-compile for four Android ABIs. So
-`decode/heif.rs` borrows one, trying in order:
+**The pixels depend on the machine.** Cullant has no HEVC decoder and will not
+get one. Every library that decodes HEVC is a C dependency. Such a dependency
+would be the first in this build, and it would have to cross-compile for four
+Android ABIs.
 
-| Rung | Where | Needs |
+`decode/heif.rs` borrows a decoder instead. It tries each rung in this order:
+
+| Rung | Platform | Requirement |
 |---|---|---|
-| Store's own | Android SAF | `ImageDecoder`, API 28+ (`minSdk` is 24, so it is asked at runtime) |
-| In process | Windows | WIC + Microsoft's HEIF/HEVC extensions, which many machines lack |
-| Subprocess | any desktop | `ffmpeg` **7.0+** — 6.x decodes HEVC but cannot demux a still |
-| — | iOS | not built yet; drops in beside WIC |
+| The store's own decoder | Android SAF | `ImageDecoder`, API 28 or later. `minSdk` is 24, so the app asks at runtime. |
+| An in-process decoder | Windows | WIC, plus Microsoft's HEIF and HEVC extensions. Many machines do not have them. |
+| A subprocess | Any desktop | `ffmpeg` 7.0 or later. Version 6 decodes HEVC but cannot demux a still image. |
+| — | iOS | Not built yet. It fits beside the WIC rung. |
 
-A rung that has the codec and still refuses a file falls through to the next
-one. Decoders disagree about what a HEIF is: WIC wants the item-based structure
-a camera writes and rejects a lone HEVC frame in an MP4 that ffmpeg reads
-happily.
+A rung that has the codec, and still refuses the file, hands the file to the next
+rung. Decoders disagree about what a HEIF is. WIC expects the item-based
+structure that a camera writes, and refuses a single HEVC frame inside an MP4.
+`ffmpeg` reads that same file without complaint.
 
-Where no rung answers, the cell stays empty and **no tombstone is written** — a
-tombstone is keyed on the file's mtime, and installing a decoder changes no
-file's mtime, so one written here would leave that photo blank forever after the
+When no rung answers, the cell stays empty and the app writes **no tombstone**.
+The app keys a tombstone on the file's mtime, and installing a decoder changes no
+file's mtime. A tombstone written here would keep that photo blank after the
 upgrade.
 
 ## Images
 
 `jpg` `jpeg` `png` `tif` `tiff` `webp` `bmp` `gif`
 
-Decoded in process. JPEG takes an IDCT-scaled path (`decode/jpeg.rs`) that
-decodes a quarter or a sixteenth of the pixels when the target is small enough.
+Cullant decodes these in its own process. For JPEG it uses an IDCT-scaled path in
+`decode/jpeg.rs`, which decodes a quarter or a sixteenth of the pixels when the
+target size allows it.
 
-This list is also what governs the **sibling borrow**: a RAW's thumbnail is
-rendered from its paired JPEG, because that is the same frame for a fraction of
-the bytes. HEIF is deliberately excluded even where it decodes, since borrowing
-it would trade the RAW's own embedded JPEG for a subprocess or a JNI hop.
+This list also controls the **sibling borrow**. The app renders a RAW's thumbnail
+from the JPEG beside it, because that JPEG holds the same frame in far fewer
+bytes. HEIF stays off this list, even where a rung decodes it. Borrowing a HEIF
+would replace the RAW's own embedded JPEG with a subprocess or a JNI call.
 
 ## Video
 
 `mp4` `mov` `m4v`
 
-Poster frames are borrowed from the platform the same way: `ffmpeg` on a real
-filesystem, `MediaMetadataRetriever` through the SAF plugin on Android. ffmpeg
-is an optional runtime dependency — absent, video thumbnailing is skipped
-gracefully, and installing it later retries on the next scan.
+Cullant borrows a poster-frame extractor the same way it borrows a HEIF decoder.
+On a real filesystem it calls `ffmpeg`. On Android it calls
+`MediaMetadataRetriever` through the SAF plugin.
 
-Playback is a separate three-rung ladder (`VideoPlayer.svelte`): native
-`<video>`, then an in-app transmux with mediabunny, then an external app.
+`ffmpeg` is an optional runtime dependency. When it is absent, the app skips
+video thumbnails and writes no tombstone. Installing it later makes the next scan
+try again.
+
+Playback uses a separate ladder of three rungs, in `VideoPlayer.svelte`: the
+native `<video>` element, then an in-app transmux with mediabunny, then an
+external application.
 
 ## Sidecars
 
-`xmp`, read on scan and written on commit. Rating, flag, label and orientation.
-Both halves of a group share `IMG.xmp` while they agree; a group that diverges
-exports the primary to `IMG.xmp` and the other half to `IMG.JPG.xmp`, the form
-Bridge and exiftool use.
+Cullant reads `xmp` on each scan and writes it on each commit. A sidecar carries
+the rating, the flag, the label and the orientation.
+
+Both members of a group share one `IMG.xmp` file while their states agree. When
+the states differ, the app writes the primary to `IMG.xmp` and the other member
+to `IMG.JPG.xmp`. Adobe Bridge and exiftool both use that second form.
 
 ## Grouping
 
-Files sharing a directory and basename are one shot, however many there are.
-`IMG_0421.CR3` + `IMG_0421.JPG` is the common case; `ORF`+`ORI`+`JPG` (OM System
-Live ND) and RAW+`HIF` are not.
+Files that share a directory and a basename are one shot, whatever their number.
+`IMG_0421.CR3` plus `IMG_0421.JPG` is the common case. `ORF` plus `ORI` plus
+`JPG`, which OM System writes in Live ND, is not. Nor is RAW plus `HIF`.
 
-The group's **primary** — the file whose frame stands for the shot, and the only
-one whose thumbnail is pregenerated — comes from `decode::primary_rank`:
+Each group has one **primary**. The primary supplies the frame that represents
+the shot, and it is the only member whose thumbnail the app pregenerates.
+`decode::primary_rank` chooses it in this order:
 
-1. RAW
-2. an in-process decodable image
-3. a companion RAW (`.ORI`)
-4. HEIF
+1. a RAW
+2. an image the app decodes in process
+3. a companion RAW, such as `.ORI`
+4. a HEIF
 5. anything else
 
-A companion `.ORI` outranks a HEIF even though the HEIF is the better picture,
-because the `.ORI` decodes unconditionally and a HEIF only where the ladder has
-a rung. The ranking is static on purpose: it is persisted in
-`groups.primary_file_id`, which travels with the project folder, so a
-runtime-dependent rank would move the shot's cell on every other machine.
+A companion `.ORI` outranks a HEIF, although the HEIF holds the better picture.
+The reason is certainty: the `.ORI` decodes on every machine, and a HEIF decodes
+only where the ladder has a rung.
+
+This ranking never changes at runtime. The database stores the result in
+`groups.primary_file_id`, and that file travels with the project folder. A
+ranking that depended on the machine would move the shot's cell each time the
+user opened the project somewhere else.
