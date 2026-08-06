@@ -230,6 +230,37 @@ impl<R: Runtime> Saf<R> {
         Ok((jpeg, res.width, res.height))
     }
 
+    /// Whether this device decodes HEIF. `ImageDecoder` reads it from API 28 and
+    /// the app supports 24, so this is a runtime question, not a build one.
+    pub fn heif_supported(&self) -> Result<bool> {
+        let res: HeifSupportedResponse = self.0.run_mobile_plugin("heifSupported", ())?;
+        Ok(res.supported)
+    }
+
+    /// Decode a HEIF still via Android's `ImageDecoder`, sampled so its longest
+    /// edge is at most `max_edge` (0 = native size, itself capped in Kotlin).
+    /// Returns `(jpeg, width, height)`, where the dimensions describe the
+    /// *file*, not the possibly-sampled image.
+    pub fn heif_still(
+        &self,
+        tree_uri: &str,
+        document_id: &str,
+        max_edge: u32,
+    ) -> Result<(Vec<u8>, u32, u32)> {
+        let res: HeifStillResponse = self.0.run_mobile_plugin(
+            "heifStill",
+            HeifStillPayload {
+                tree_uri: tree_uri.to_string(),
+                document_id: document_id.to_string(),
+                max_edge,
+            },
+        )?;
+        let jpeg = base64::engine::general_purpose::STANDARD
+            .decode(&res.jpeg_base64)
+            .map_err(|e| Error::Other(format!("heif still is not valid base64: {e}")))?;
+        Ok((jpeg, res.width, res.height))
+    }
+
     /// Permanently delete a document.
     pub fn delete_document(&self, tree_uri: &str, document_id: &str) -> Result<()> {
         // Kotlin resolves `{ "ok": true }`; reuse AccessResponse to decode it.

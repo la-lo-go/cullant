@@ -8,6 +8,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -95,6 +96,14 @@ class VideoPosterArgs {
     lateinit var treeUri: String
     lateinit var documentId: String
     // Longest edge the returned frame may have; 0 = native size.
+    var maxEdge: Int = 0
+}
+
+@InvokeArg
+class HeifStillArgs {
+    lateinit var treeUri: String
+    lateinit var documentId: String
+    // Longest edge the returned image may have; 0 = native size.
     var maxEdge: Int = 0
 }
 
@@ -475,6 +484,64 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    // Whether this device can decode HEIF at all. ImageDecoder reads it from
+    // API 28; the app supports 24, so the Rust side must ask rather than assume.
+    @Command
+    fun heifSupported(invoke: Invoke) {
+        val res = JSObject()
+        res.put("supported", Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+        invoke.resolve(res)
+    }
+
+    // Decode a HEIF still through the platform, because Cullant has no HEVC
+    // decoder of its own and a phone has no ffmpeg binary to borrow one from.
+    // The image comes back base64-encoded for the same reason a video poster
+    // does: the Rust <-> Kotlin bridge carries JSON and nothing else.
+    //
+    // `width`/`height` in the response are the file's REAL dimensions, not the
+    // returned image's — the caller records them as the photo's size, and a
+    // sampled decode would otherwise teach it the thumbnail's size instead.
+    @Command
+    fun heifStill(invoke: Invoke) {
+        val args = invoke.parseArgs(HeifStillArgs::class.java)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+            invoke.reject("this device has no HEIF decoder")
+            return
+        }
+        try {
+            val uri = docUri(args.treeUri, args.documentId)
+            var original = 0 to 0
+            val source = ImageDecoder.createSource(resolver, uri)
+            val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                original = info.size.width to info.size.height
+                // Sample down during the decode. A 48 MP HEIC is ~190 MB of
+                // ARGB, and this process has no largeHeap — decoding it whole to
+                // throw all but a grid cell away is how the app gets killed.
+                val cap = if (args.maxEdge > 0) args.maxEdge else MAX_STILL_EDGE
+                val longEdge = maxOf(info.size.width, info.size.height)
+                if (longEdge > cap) {
+                    val scale = cap.toDouble() / longEdge
+                    decoder.setTargetSize(
+                        maxOf(1, Math.round(info.size.width * scale).toInt()),
+                        maxOf(1, Math.round(info.size.height * scale).toInt())
+                    )
+                }
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+
+            val out = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, POSTER_QUALITY, out)
+
+            val res = JSObject()
+            res.put("jpegBase64", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP))
+            res.put("width", if (original.first > 0) original.first else bitmap.width)
+            res.put("height", if (original.second > 0) original.second else bitmap.height)
+            invoke.resolve(res)
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "failed to decode a HEIF still")
+        }
+    }
+
     // A frame from a second in, falling back to the very start for clips shorter
     // than that. Mirrors the desktop ffmpeg path: a small skip past the start
     // avoids the black leader frames many clips open on.
@@ -545,5 +612,10 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         // The frame is re-encoded downstream at the cache's own quality, so this
         // only has to survive one round trip without visible loss.
         const val POSTER_QUALITY = 90
+
+        // Hard ceiling on a decoded still, whatever the caller asks for. The
+        // focus check asks for native size, and a 48 MP HEIC at native size is
+        // ~190 MB of ARGB in a process with no largeHeap.
+        const val MAX_STILL_EDGE = 4096
     }
 }

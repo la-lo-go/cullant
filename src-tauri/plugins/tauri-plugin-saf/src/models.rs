@@ -160,3 +160,31 @@ pub(crate) struct VideoPosterResponse {
     pub width: u32,
     pub height: u32,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HeifStillPayload {
+    pub tree_uri: String,
+    pub document_id: String,
+    /// Longest edge the decoded image may have; 0 for its native size.
+    pub max_edge: u32,
+}
+
+/// Same shape as [`VideoPosterResponse`], and deliberately a separate type: the
+/// two commands are free to diverge, and one `width`/`height` pair meaning "the
+/// clip" and another meaning "the photo" should not share a name.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HeifStillResponse {
+    pub jpeg_base64: String,
+    /// The file's real dimensions, which the returned image may be sampled down
+    /// from.
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HeifSupportedResponse {
+    pub supported: bool,
+}

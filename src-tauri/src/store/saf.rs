@@ -355,6 +355,34 @@ impl ProjectStore for SafStore {
         })
     }
 
+    /// Asked once and cached. It is a device fact — `ImageDecoder` reads HEIF
+    /// from API 28, and `minSdk` is 24 — so it cannot change mid-session, and a
+    /// binder round-trip per photo to re-learn it would be pure waste.
+    fn decodes_heif(&self) -> bool {
+        static SUPPORTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *SUPPORTED.get_or_init(|| {
+            super::stats::backend_call();
+            self.saf().heif_supported().unwrap_or(false)
+        })
+    }
+
+    fn heif_still(&self, rel: &str, max_edge: u32) -> AppResult<PlatformFrame> {
+        let doc = self.resolve(rel)?;
+        super::stats::backend_call();
+        let (jpeg, width, height) = self
+            .saf()
+            .heif_still(&self.tree_uri, &doc, max_edge)
+            .map_err(Self::err)?;
+        Ok(PlatformFrame {
+            jpeg,
+            width,
+            height,
+            // ImageDecoder honours the container's `irot`, so the EXIF
+            // orientation must not be applied a second time.
+            oriented: true,
+        })
+    }
+
     fn open_external(&self, rel: &str) -> AppResult<()> {
         let doc = self.resolve(rel)?;
         // Pass no MIME: the SAF provider reports the document's real type via
