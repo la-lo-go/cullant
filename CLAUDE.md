@@ -68,7 +68,8 @@ npm run tauri:debug          # dev app + CDP on port 9222 (UI automation)
 npm run tauri build          # NSIS + MSI installers
 ```
 
-- Synthetic test data: `cd src-tauri && cargo run --release --example gen_testdata -- C:\dev\cullant-testdata 600`.
+- Synthetic test data: `cd src-tauri && cargo run --release --example gen_testdata -- C:\dev\cullant-testdata 600`. Good for counts, ordering and state; useless for the decoder.
+- Real camera files: `npm run fixtures` populates `fixtures/media/` from CC0 samples (gitignored, checksummed — see `fixtures/README.md`). `cargo test the_corpus -- --nocapture` runs the ingest over them. It has already found three decode gaps that synthetic JPEGs cannot expose.
 - Backend checks: from `src-tauri/` → `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`.
 - Frontend check: `npm run check` (must end 0 errors, 0 warnings).
 
@@ -96,6 +97,7 @@ Use it for UX/discoverability passes; it is not a substitute for `cargo test`.
 - Requires the MSVC toolchain (VS 2022 Build Tools, "Desktop development with C++") — without `link.exe` nothing compiles on Windows.
 - `walkdir` filter must not skip the depth-0 root (temp dirs start with `.` and were being filtered).
 - `rawler`'s API is not SemVer-stable — keep it pinned and wrapped in `decode/`.
+- **Olympus and OM System RAWs do not render.** An `.ORF`/`.ORI` holds a ~1 MB JPEG preview, and neither `raw.rs`'s TIFF walk nor rawler reaches it: Olympus keeps the offset in the MakerNote, and the walk covers IFD0, the chained IFDs and the SubIFDs only. Every shot from those bodies draws a blank cell. Found by the real-file corpus (`fixtures/`), which pins it in `KNOWN_UNRENDERABLE`.
 - **Video poster frames borrow a decoder from the platform** — Cullant has none of its own. `decode/video.rs` picks the extractor from the store: a real filesystem (every desktop project) shells out to `ffmpeg`; Android SAF calls `MediaMetadataRetriever` through the SAF plugin, because a phone has no ffmpeg binary and it could not read a `content://` URI anyway. Both hand their frame to the exact image-thumbnail resize/JPEG/cache path.
   - `ffmpeg` is an *optional runtime* dependency on desktop (not a build/crate dependency). When it's absent, video thumbnailing is skipped gracefully (no crash, no tombstone — installing ffmpeg later retries on the next scan). A corrupt/undecodable video *is* tombstoned like a broken image.
   - The Android frame crosses the Kotlin bridge base64-encoded — that bridge carries JSON and nothing else. It is extracted pre-scaled to the thumbnail's own size, so it stays tens of kilobytes.

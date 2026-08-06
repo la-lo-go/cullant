@@ -117,13 +117,13 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
             Some(s)
         }
     };
-    let make = field_str(exif::Tag::Make).and_then(clean);
-    let model = field_str(exif::Tag::Model).and_then(clean);
-    meta.camera = match (make, model) {
-        (Some(make), Some(model)) => Some(format!("{make} {model}")),
-        (m, None) => m,
-        (None, m) => m,
-    };
+    let make = field_str(exif::Tag::Make)
+        .and_then(clean)
+        .unwrap_or_default();
+    let model = field_str(exif::Tag::Model)
+        .and_then(clean)
+        .unwrap_or_default();
+    meta.camera = super::camera_name(&make, &model);
     // Raw ASCII first component, NOT display_value(): some cameras (e.g. Fuji)
     // store LensModel as a multi-string ASCII field whose extra components are
     // empty, and display_value() renders that as `"XF18-55mmF2.8-4 R LM OIS", "",

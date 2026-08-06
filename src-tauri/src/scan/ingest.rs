@@ -1004,6 +1004,151 @@ mod tests {
         assert_eq!(decoded.width().max(decoded.height()), 384);
     }
 
+    /// Run the whole ingest over `fixtures/media/` — files a camera actually
+    /// wrote. See `fixtures/README.md`; `npm run fixtures` populates it.
+    ///
+    /// Skips when the corpus is absent, so it never fails on a machine that has
+    /// not fetched a few hundred megabytes. Run it deliberately:
+    ///
+    /// ```sh
+    /// cargo test the_corpus -- --nocapture
+    /// ```
+    ///
+    /// What it protects: a synthetic JPEG has no maker notes, no embedded
+    /// preview at a vendor's private offset, and no sibling belonging to the
+    /// same shot. This asserts every real file is dated, sized and rendered, and
+    /// prints what it read from each so a regression names the camera.
+    #[test]
+    fn the_corpus_of_real_files_is_read_and_rendered() {
+        let corpus = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .join("fixtures")
+            .join("media");
+        let Ok(entries) = std::fs::read_dir(&corpus) else {
+            eprintln!(
+                "skip: no corpus at {} — run `npm run fixtures`",
+                corpus.display()
+            );
+            return;
+        };
+        let files: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
+        if files.is_empty() {
+            eprintln!("skip: corpus is empty");
+            return;
+        }
+
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for src in &files {
+            std::fs::copy(src, root.join(src.file_name().unwrap())).unwrap();
+        }
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        run_all(&db, root);
+
+        #[allow(clippy::type_complexity)]
+        let rows: Vec<(String, i64, Option<String>, Option<i64>, i64, i64, i64)> = db
+            .call(|c| {
+                let mut stmt = c.prepare(
+                    "SELECT f.rel_path, f.capture_time, f.camera, f.width,
+                            (SELECT COUNT(*) FROM files m WHERE m.group_id = f.group_id),
+                            COALESCE((SELECT MAX(t.failed) FROM thumbnails t
+                                       WHERE t.file_id = f.id), -1),
+                            f.mtime
+                     FROM files f ORDER BY f.rel_path",
+                )?;
+                let rows = stmt.query_map([], |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                })?;
+                Ok(rows.collect::<Result<Vec<_>, _>>()?)
+            })
+            .unwrap();
+
+        assert_eq!(rows.len(), files.len(), "every file must be catalogued");
+
+        // Files the corpus has already proved this build cannot render. Listed
+        // one by one rather than tolerated in bulk, so anything NEW that stops
+        // rendering fails the test -- and so the list itself is the to-do.
+        //
+        // - `.ORF`/`.ORI`: Olympus puts the preview in the MakerNote, and
+        //   `raw.rs`'s TIFF walk covers IFD0, the chained IFDs and the SubIFDs
+        //   but not that. The file holds a ~1 MB JPEG nothing here reaches, so
+        //   every Olympus and OM System shot draws a blank cell.
+        // - Panasonic `.RAW` (DMC-FZ8): holds no JPEG at all. Only a demosaic
+        //   would render it, which the embedded-preview path never asks for.
+        // - Sigma `.DNG` (fp): holds an 8 KB thumbnail and nothing larger.
+        const KNOWN_UNRENDERABLE: &[&str] = &[
+            "Olympus - E-M1MarkII - 16bit (4-3).ORF",
+            "Panasonic - DMC-FZ8 - 4-3.RAW",
+            "Sigma - fp - 8bit (16-9).DNG",
+        ];
+
+        let mut undated = Vec::new();
+        let mut unexpected = Vec::new();
+        let mut fixed = Vec::new();
+        for (rel, capture, camera, width, group, failed, mtime) in &rows {
+            let known = KNOWN_UNRENDERABLE.contains(&rel.as_str());
+            eprintln!(
+                "  {rel:56} capture={:<11} camera={:24} dims={:?} group={group} thumb={}",
+                if capture == mtime {
+                    "MTIME".into()
+                } else {
+                    capture.to_string()
+                },
+                camera.as_deref().unwrap_or("-"),
+                width,
+                match failed {
+                    -1 => "not attempted",
+                    0 => "ok",
+                    _ if known => "failed (known)",
+                    _ => "FAILED",
+                }
+            );
+            if capture == mtime {
+                undated.push(rel.clone());
+            }
+            if *failed > 0 && !known {
+                unexpected.push(rel.clone());
+            }
+            if *failed == 0 && known {
+                fixed.push(rel.clone());
+            }
+        }
+
+        // Dimensions are deliberately NOT asserted: a RAW's own are the sensor's,
+        // and `files.width/height` are backfilled only when the decode was
+        // full-size, so most rows here legitimately have none.
+        assert!(
+            undated.is_empty(),
+            "no capture time, fell back to mtime: {undated:?}"
+        );
+        assert!(unexpected.is_empty(), "newly undecodable: {unexpected:?}");
+        assert!(
+            fixed.is_empty(),
+            "these render now -- drop them from KNOWN_UNRENDERABLE: {fixed:?}"
+        );
+
+        // The Live ND pair shares a basename, so it must be one group of two.
+        if let Some((rel, .., group, _, _)) = rows.iter().find(|r| r.0.ends_with(".ORI")) {
+            assert_eq!(*group, 2, "{rel} must be grouped with its ORF");
+        }
+    }
+
     /// Run the whole ladder against a real camera or phone file.
     ///
     /// Nothing in this repo can produce one — no encoder here writes HEVC, and

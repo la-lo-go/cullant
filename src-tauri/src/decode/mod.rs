@@ -109,6 +109,26 @@ pub fn ext_of(rel: &str) -> Option<String> {
     }
 }
 
+/// One camera name from the EXIF Make and Model, which the RAW path and the
+/// image path both have to build.
+///
+/// Most cameras write Make "Canon" and Model "EOS R6", so the pair reads as one
+/// name. Some repeat themselves — a Sigma fp writes Make "SIGMA" and Model
+/// "SIGMA fp" — and joining those blindly puts "SIGMA SIGMA fp" in the camera
+/// filter as its own entry, beside whatever the same body wrote elsewhere.
+pub fn camera_name(make: &str, model: &str) -> Option<String> {
+    let (make, model) = (make.trim(), model.trim());
+    match (make.is_empty(), model.is_empty()) {
+        (true, true) => None,
+        (true, false) => Some(model.to_string()),
+        (false, true) => Some(make.to_string()),
+        (false, false) if model.to_lowercase().starts_with(&make.to_lowercase()) => {
+            Some(model.to_string())
+        }
+        (false, false) => Some(format!("{make} {model}")),
+    }
+}
+
 /// Whether this path names a HEIF, and so needs a borrowed decoder rather than
 /// an in-process one.
 pub fn is_heif(rel: &str) -> bool {
@@ -184,6 +204,27 @@ mod tests {
     #[test]
     fn a_heif_still_outranks_an_unknown_extension() {
         assert!(primary_rank("heic") < primary_rank("xyz"));
+    }
+
+    /// Real files, from the corpus: a Sigma fp repeats its maker in the model
+    /// and would otherwise get its own "SIGMA SIGMA fp" entry in the filter.
+    #[test]
+    fn a_camera_name_never_repeats_its_maker() {
+        assert_eq!(
+            camera_name("SIGMA", "SIGMA fp").as_deref(),
+            Some("SIGMA fp")
+        );
+        assert_eq!(
+            camera_name("Canon", "EOS R6").as_deref(),
+            Some("Canon EOS R6")
+        );
+        assert_eq!(
+            camera_name("  Nikon ", " Z 8 ").as_deref(),
+            Some("Nikon Z 8")
+        );
+        assert_eq!(camera_name("", "OM-1").as_deref(), Some("OM-1"));
+        assert_eq!(camera_name("Leica", "").as_deref(), Some("Leica"));
+        assert_eq!(camera_name("", ""), None);
     }
 
     #[test]

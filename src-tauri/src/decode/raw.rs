@@ -32,10 +32,7 @@ impl<'a> RawSession<'a> {
             .raw_metadata(self.source, &RawDecodeParams::default())
             .map_err(|e| AppError::Decode(format!("{e}")))?;
 
-        let camera = match (md.make.trim(), md.model.trim()) {
-            ("", "") => None,
-            (make, model) => Some(format!("{make} {model}").trim().to_string()),
-        };
+        let camera = super::camera_name(&md.make, &md.model);
         let iso = md
             .exif
             .iso_speed
