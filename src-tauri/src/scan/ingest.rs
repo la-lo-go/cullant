@@ -1050,6 +1050,30 @@ mod tests {
         assert_eq!(failed, 0, "a real HEIF must not tombstone");
         assert_eq!(thumbs, 1, "the ladder must render it");
         assert!(w.is_some() && h.is_some(), "dimensions must be known");
+
+        // The mean colour of what actually reached the cache. Compare it against
+        // the same file decoded by something else: a swapped channel or a
+        // misread stride still produces a plausible-looking JPEG, and only the
+        // numbers give it away.
+        let cache_rel: String = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT cache_path FROM thumbnails WHERE kind = 0",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        let bytes = std::fs::read(root.join(".cullant").join("thumbs").join(&cache_rel)).unwrap();
+        let rgb = image::load_from_memory(&bytes).unwrap().to_rgb8();
+        let n = (rgb.width() * rgb.height()) as u64;
+        let mut sum = [0u64; 3];
+        for px in rgb.pixels() {
+            for (s, v) in sum.iter_mut().zip(px.0) {
+                *s += u64::from(v);
+            }
+        }
+        eprintln!("rendered mean RGB = {:?}", sum.map(|s| s / n));
     }
 
     /// A HEIF next to a JPEG is one cell, and the JPEG renders it. The HEIF is
