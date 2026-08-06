@@ -21,7 +21,7 @@ A shot is not always two files: OM System writes `ORF+ORI+JPG` in Live ND, and R
 
 ## Stack & layout
 
-- **Backend**: Rust + Tauri v2 (`src-tauri/`). rusqlite (bundled) for the per-project DB at `<project>/.cullant/cullant.db`. `rawler` (LGPL-2.1, pinned `=0.7.2`, API not SemVer-stable) for RAW decode + embedded-JPEG preview extraction (the Photo Mechanic fast path). `kamadak-exif` for JPEG EXIF. `fast_image_resize` + `image` for thumbnails. `trash`, `quick-xml`, `xxhash-rust`, `walkdir`, `rayon`.
+- **Backend**: Rust + Tauri v2 (`src-tauri/`). rusqlite (bundled) for the per-project DB at `<project>/.cullant/cullant.db`. `rawler` (LGPL-2.1, pinned `=0.7.2`, API not SemVer-stable) for RAW decode + embedded-JPEG preview extraction (the Photo Mechanic fast path). `kamadak-exif` for JPEG EXIF. `fast_image_resize` + `image` for thumbnails. `quick-xml`, `xxhash-rust`, `walkdir`, `rayon`.
 - **Frontend**: Svelte 5 (runes) + TypeScript + Vite, SvelteKit static adapter (`src/`). Icons: **`@lucide/svelte`, per-icon imports** (`import X from "@lucide/svelte/icons/x"`). **No system emojis anywhere.**
 - **Images never cross IPC as base64** — a custom async `cullant://` protocol serves them (`thumb/`, `preview/`, `full/`, `video/` with HTTP Range). Served as `http://cullant.localhost/…` on Windows.
 
