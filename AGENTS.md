@@ -40,7 +40,9 @@ Frontend: `lib/api.ts` (typed invoke wrappers), `lib/stores/*.svelte.ts` (rune-c
 
 M0–M7 done + two UX polish rounds. See `docs/PLAN.md` for the full plan (Spanish). Remaining (M8): dedicated settings pane, move/copy rules UI, commit history/undo UI, video posters (ffprobe), installer signing, and a real-RAW test pass (needs the user's own camera files — synthetic JPEGs have no EXIF).
 
-Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters`), HEIC, focus peaking, embedded XMP in JPEG.
+Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters`), focus peaking, embedded XMP in JPEG.
+
+HEIF is supported: catalogued and grouped like any photo, EXIF read with `kamadak-exif`, and pixels decoded by borrowing a decoder from the platform (`decode/heif.rs` — WIC on Windows, `ImageDecoder` on Android, `ffmpeg` 7.0+ underneath). See `CLAUDE.md` for the two traps that shape it.
 
 ## Dev / test
 

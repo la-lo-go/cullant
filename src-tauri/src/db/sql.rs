@@ -32,10 +32,10 @@ pub fn secondary_raw_exts() -> &'static str {
     &SQL
 }
 
-/// [`OPAQUE_IMAGE_EXTS`] as a SQL value list.
+/// [`HEIF_EXTS`] as a SQL value list.
 pub fn heif_exts() -> &'static str {
     static SQL: std::sync::LazyLock<String> =
-        std::sync::LazyLock::new(|| value_list(crate::decode::OPAQUE_IMAGE_EXTS));
+        std::sync::LazyLock::new(|| value_list(crate::decode::HEIF_EXTS));
     &SQL
 }
 
@@ -59,7 +59,7 @@ pub fn decodable_photo(alias: &str, heif: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decode::OPAQUE_IMAGE_EXTS;
+    use crate::decode::HEIF_EXTS;
 
     /// A HEIF must stay out of this list even once a decoder exists: it governs
     /// the sibling *borrow*, and borrowing a HEIF to render a RAW's thumbnail
@@ -73,7 +73,7 @@ mod tests {
                 "{ext} missing from {sql}"
             );
         }
-        for ext in OPAQUE_IMAGE_EXTS {
+        for ext in HEIF_EXTS {
             assert!(
                 !sql.contains(&format!("'{ext}'")),
                 "{ext} must not be listed"
@@ -86,7 +86,7 @@ mod tests {
     fn the_pregeneration_predicate_follows_the_decoder() {
         let with = decodable_photo("f", true);
         let without = decodable_photo("f", false);
-        for ext in OPAQUE_IMAGE_EXTS {
+        for ext in HEIF_EXTS {
             assert!(with.contains(&format!("'{ext}'")), "{ext} missing");
             assert!(!without.contains(&format!("'{ext}'")), "{ext} must not be");
         }

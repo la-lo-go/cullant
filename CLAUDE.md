@@ -44,9 +44,9 @@ M0–M7 done + two UX polish rounds. See `docs/PLAN.md` for the full plan (Spani
 
 Post-MVP (DB tables reserved): AI culling (`file_analysis`, `similarity_clusters`), focus peaking, embedded XMP in JPEG.
 
-**HEIF: metadata yes, pixels no.** `decode::OPAQUE_IMAGE_EXTS` (`heic/heif/hif/hsp`) are catalogued, grouped, deleted, moved and XMP-exported like any photo — an unknown extension used to be skipped outright, which left a rejected shot's `.HIF` behind as an orphan. **EXIF is read**: `kamadak-exif` parses the ISO-BMFF item structure, so a HEIF-only library (every stock iPhone) sorts by real capture time and fills every filter facet. Dimensions come from `PixelXDimension`/`PixelYDimension`, because no header probe here can open the container.
+**HEIF.** `decode::HEIF_EXTS` (`heic/heif/hif/hsp`) are catalogued, grouped, deleted, moved and XMP-exported like any photo — an unknown extension used to be skipped outright, which left a rejected shot's `.HIF` behind as an orphan. **EXIF is read**: `kamadak-exif` parses the ISO-BMFF item structure, so a HEIF-only library (every stock iPhone) sorts by real capture time and fills every filter facet. Dimensions come from `PixelXDimension`/`PixelYDimension`, because no header probe here can open the container.
 
-The pixels come from a **capability ladder** in `decode/heif.rs` — platform-native first, generalist fallback under it, the same shape as the video playback ladder. Two rungs exist: **WIC** on Windows (`decode/heif/wic.rs`, pure-Rust bindings via the `windows` crate, which Tauri already pulls in — keep the version pinned to Tauri's or the build grows a second copy), and **`ffmpeg`** underneath (already an optional runtime dep; needs **7.0+**, since 6.x decodes HEVC but cannot demux a still). Android `ImageDecoder` and iOS ImageIO are still to build: `ProjectStore::decodes_heif`/`heif_still` is their seam, and the in-process ones go behind `local_path`. `libheif` is rejected — it would be the first real C/system dependency, and `docs/PLAN.md` turns those down twice.
+The pixels come from a **capability ladder** in `decode/heif.rs` — platform-native first, generalist fallback under it, the same shape as the video playback ladder. Two rungs exist: **WIC** on Windows (`decode/heif/wic.rs`, pure-Rust bindings via the `windows` crate, which Tauri already pulls in — keep the version pinned to Tauri's or the build grows a second copy), and **`ffmpeg`** underneath (already an optional runtime dep; needs **7.0+**, since 6.x decodes HEVC but cannot demux a still). **`ImageDecoder`** on Android is the third, through the SAF plugin (`ProjectStore::decodes_heif`/`heif_still` is the seam; `decodes_heif` is a *runtime* question, since HEIF decode is API 28 and `minSdk` is 24). iOS ImageIO is the one left, and drops in as another arm behind `local_path`. `libheif` is rejected — it would be the first real C/system dependency, and `docs/PLAN.md` turns those down twice.
 
 A rung that has the codec and still refuses a file **falls through to the next one**. Decoders disagree about what a HEIF is: WIC wants the item-based structure a camera writes and rejects a lone HEVC frame in an MP4 that ffmpeg reads happily.
 
@@ -54,7 +54,9 @@ A rung that has the codec and still refuses a file **falls through to the next o
 
 Orientation is the other trap: a HEIF carries rotation in both `irot` and EXIF, and every platform decoder applies `irot` itself — so `Decoded::pre_oriented` suppresses the second application. It suppresses the *rotation* only; `orientation` still keys the cache path.
 
-Testing: `bench::heif_with_exif` builds a synthetic EXIF-only HEIF (no HEVC) for the metadata half, and `the_ffmpeg_rung_renders_a_heif` builds a real one with the machine's own ffmpeg and skips where there is none.
+`primary_rank` puts a companion `.ORI` ABOVE a HEIF, because the `.ORI` decodes unconditionally and a HEIF only where the ladder has a rung. The rank is static on purpose: it is persisted through `groups.primary_file_id`, which travels with the project folder.
+
+Testing: `bench::heif_with_exif` builds a synthetic EXIF-only HEIF (no HEVC) for the metadata half; `the_platform_ladder_renders_a_heif` builds a real one with the machine's own ffmpeg and skips where there is none; `a_heif_without_a_decoder_is_never_tombstoned` guards the upgrade path. `db::sql::image_exts` must never list a HEIF — a test enforces it — because that list governs the sibling borrow.
 
 ## Dev / test
 

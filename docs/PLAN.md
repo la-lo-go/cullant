@@ -213,14 +213,14 @@ cullant/
 | **M7 — Pestaña vídeo** (1 sem) | Scan MP4/MOV, metadatos ffprobe, posters, `<video>` vía protocolo con Range, paridad completa de culling/tags/commit, tags de ámbito vídeo activos | Pestaña con posters; puntuar/etiquetar/encolar-borrar/commit de un vídeo de punta a punta |
 | **M8 — Pulido + empaquetado** (1–1.5 sem) | Paneles de ajustes (modo borrado, modos de acción, preferencia decode RAW, ubicación BD), reconciliación de archivos perdidos al re-escanear, toasts de error, instalador NSIS/MSI vía `tauri bundle`, README/capturas, CONTRIBUTING.md. *Stretch (solo si sale gratis)*: pHash en el scan + agrupación de ráfagas por ventana temporal | El instalador funciona en un Windows 11 limpio; sesión real de culling de 20 min sin crashes |
 
-**Post-MVP** (diseñado pero no construido): culling IA (clusters de similitud, mejor-de-ráfaga con blur/exposición — columnas `embedding`/`file_analysis` reservadas), XMP embebido en JPEG/DNG, HEIC, feature LibRaw, segunda ventana/monitor dual, renombrado por plantilla en commit.
+**Post-MVP** (diseñado pero no construido): culling IA (clusters de similitud, mejor-de-ráfaga con blur/exposición — columnas `embedding`/`file_analysis` reservadas), XMP embebido en JPEG/DNG, feature LibRaw, segunda ventana/monitor dual, renombrado por plantilla en commit.
 
 ## Riesgos y mitigaciones
 
 1. **OneDrive** — (a) *repo de desarrollo*: resuelto — el repo vive en `C:\dev\cullant`, fuera de OneDrive; (b) *proyectos de fotos del usuario en OneDrive*: los placeholders Files-On-Demand pueden disparar descargas al leer → el scanner detecta el atributo y marca `cloud-only` en vez de atascar el pool; el WAL de SQLite provoca churn de sync → ajuste de BD en appdata y considerar `journal_mode=TRUNCATE` si se detecta ruta OneDrive.
 2. **Huecos de CR3 en rawler** (API no SemVer, quirks por modelo) → pin exacto, trait `RawDecoder`, corpus de RAWs reales en M1, feature LibRaw como escape.
 3. **Memoria de WebView2 con grids enormes** → reciclado DOM estricto (~100 celdas montadas), thumbs JPEG pequeños, `Cache-Control` del protocolo en vez de blob URLs, limpiar `src` al reciclar. Objetivo <600MB con 50k fotos.
-4. **HEIC en Windows**: WebView2 no lo renderiza ni con el códec del SO → excluir del MVP (listar como "no soportado"); post-MVP transcodificar vía WIC (crate `windows`).
+4. ~~**HEIC en Windows**~~ — **resuelto.** WebView2 sigue sin renderizarlo, así que Cullant lo transcodifica él mismo. La solución fue más amplia que la prevista: no solo WIC, sino una escalera de capacidades (`decode/heif.rs`) que prueba el decodificador nativo de cada plataforma y cae a `ffmpeg` debajo, porque ni Android ni iOS tienen binario de ffmpeg. Un peldaño que tiene el códec y aun así rechaza el archivo cede al siguiente.
 5. **MOV HEVC puede no reproducir en WebView2** → detectar códec con ffprobe; mostrar poster + botón "generar proxy H.264" (ffmpeg-sidecar) en vez de fallar en silencio.
 6. **Quirks de interop XMP** (Lightroom es quisquilloso con la estructura) → tests golden-file contra sidecars exportados de Lightroom/C1; nunca destruir propiedades desconocidas al fusionar.
 7. **Rutas Windows**: rutas >260 chars y nombres no-ASCII → APIs conscientes de `\\?\`, tests con nombres Unicode.

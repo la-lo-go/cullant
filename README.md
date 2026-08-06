@@ -33,7 +33,7 @@ Default shortcuts (all remappable via the ⌨ dialog): `P`/`X`/`U` flags · `1-5
 `Ctrl+J` decouple pair · `M` mirror mode · `Del` / `Alt+Del` / `Shift+Del` queue delete
 (pair / RAW only / JPEG only) · `Ctrl+Enter` commit · `\` filter bar
 
-Post-MVP: AI-assisted culling (similar-shot grouping, best-of-burst suggestions), HEIC, focus peaking, face zoom.
+Post-MVP: AI-assisted culling (similar-shot grouping, best-of-burst suggestions), focus peaking, face zoom.
 
 ## Development
 

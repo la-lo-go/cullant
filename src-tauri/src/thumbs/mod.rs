@@ -601,7 +601,7 @@ pub(crate) fn decode_for(
             let dims = raw.is_full.then(|| (raw.image.width(), raw.image.height()));
             Ok(Decoded::new(raw.image, dims))
         }
-        1 if decode::is_opaque_image(rel_path) => {
+        1 if decode::is_heif(rel_path) => {
             // A HEIF is never opened here: no in-process decoder can read one,
             // so the bytes go to whichever rung of the platform ladder this
             // machine has. Callers guard on `heif::possible` first, so an absent
@@ -923,7 +923,7 @@ pub(crate) fn produce_cached(
     // A HEIF takes the normal render path instead, exactly as a RAW does: the
     // webview cannot render the original bytes, so they have to be decoded and
     // re-encoded like any other artifact.
-    if kind == ThumbKind::Full && file_kind == 1 && !decode::is_opaque_image(&rel_path) {
+    if kind == ThumbKind::Full && file_kind == 1 && !decode::is_heif(&rel_path) {
         return read_all(store, &rel_path);
     }
 
@@ -960,7 +960,7 @@ pub(crate) fn produce_cached(
     // A tombstone is keyed on mtime, and installing a decoder changes no file's
     // mtime — every one of those photos would stay an empty cell after the
     // upgrade.
-    if decode::is_opaque_image(&rel_path) && !decode::heif::possible(store, &rel_path) {
+    if decode::is_heif(&rel_path) && !decode::heif::possible(store, &rel_path) {
         return Err(AppError::Decode(format!(
             "{rel_path}: no decoder for this container yet"
         )));
