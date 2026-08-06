@@ -99,12 +99,13 @@ The second rule keeps the list accurate.
 
 The app dated and named all eight from real EXIF. Three did not render:
 
-- **Olympus `.ORF` and `.ORI`.** The file holds a JPEG preview of about 1 MB,
-  and no code here reaches it. Olympus stores the offset in the MakerNote.
-  `decode/raw.rs` walks IFD0, the chained IFDs and the SubIFDs, and stops there.
-  **Every Olympus and OM System shot therefore shows an empty cell**, including
-  the Live ND pair that this corpus exists to test. This is the clearest defect
-  the corpus has found.
+- **Olympus `.ORF` and `.ORI`.** The file holds a JPEG preview of about 1 MB
+  that no code here reached. Olympus stores the offset in the MakerNote, and
+  `decode/raw.rs` walked IFD0, the chained IFDs and the SubIFDs only. **Every
+  Olympus and OM System shot showed an empty cell**, including the Live ND pair
+  that this corpus exists to test. This is the clearest defect the corpus has
+  found. **Fixed:** `raw.rs` now reads the MakerNote. See
+  [formats.md](../docs/formats.md#where-a-maker-hides-the-preview).
 - **Panasonic `.RAW` from a DMC-FZ8.** The file holds no JPEG at all. Only a
   demosaic can render it. The failure is correct. The tombstone is arguable.
 - **Sigma `.DNG` from an fp.** The file holds an 8 KB thumbnail and nothing

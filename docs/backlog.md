@@ -6,9 +6,6 @@ plan.
 
 ## Decoding
 
-- **Olympus and OM System RAWs do not render.** Olympus stores the preview
-  offset in the MakerNote, and `raw.rs` does not read that. See
-  [formats.md](formats.md#known-gaps).
 - **The app tombstones a RAW that holds no usable preview.** Older Panasonic
   bodies write no embedded JPEG, so the cell stays empty although `rawler` could
   demosaic the file. The open question is when to demosaic. One frame takes

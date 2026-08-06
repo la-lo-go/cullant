@@ -51,16 +51,29 @@ touches the compressed sensor data.
 A variant matters only when the file holds no preview. `rawler` must then decode
 the sensor data itself.
 
+### Where a maker hides the preview
+
+Most makers put the preview in the TIFF tree, and one walk finds them all.
+Three do not, and each needs its own reader in `raw.rs`:
+
+- **Fujifilm `raf`** keeps the offset and the length in the fixed header.
+- **Canon `cr3`** is not a TIFF at all. It is ISO-BMFF. The preview sits in a
+  `PRVW` box inside Canon's `uuid` box.
+- **Olympus and OM System `orf` and `ori`** put nothing in the TIFF tree. The
+  preview of about 1 MB is reachable only through the MakerNote:
+  `IFD0` → `ExifIFD` → MakerNote → CameraSettings (`0x2020`) →
+  `PreviewImageStart` and `PreviewImageLength` (`0x0101` and `0x0102`).
+  A MakerNote stores its offsets relative to its own start under the modern
+  `OLYMPUS\0` header, and relative to the file under the older `OLYMP\0` one.
+  `raw.rs` tries both bases and keeps the one that lands on a JPEG marker.
+  This reader runs before the TIFF walk. The walk would otherwise accept a
+  small thumbnail from a body that writes one into the IFD tree too.
+
 ### Known gaps
 
 The real-file corpus found these. See [testing.md](testing.md). The corpus test
 pins each one in its `KNOWN_UNRENDERABLE` list, so nobody can forget them.
 
-- **Olympus and OM System `orf` and `ori` do not render.** The file holds a JPEG
-  preview of about 1 MB, and no code here reaches it. Olympus stores the offset
-  in the MakerNote. `raw.rs` walks IFD0, the chained IFDs and the SubIFDs only.
-  The app still reads the metadata correctly, so these photos sort and filter
-  correctly. They show an empty cell.
 - **Older Panasonic `.RAW` files hold no JPEG.** Only a demosaic can render one.
 - **Some `.DNG` files hold a preview that is too small.** A Sigma fp writes 8 KB
   and nothing larger.

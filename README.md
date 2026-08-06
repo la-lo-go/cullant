@@ -49,15 +49,13 @@ and video. [docs/formats.md](docs/formats.md) holds the full matrix. It also
 explains which files render, which files the app only catalogues, and why those
 two sets differ.
 
-Two points to know before you start:
+One point to know before you start:
 
 - **HEIF metadata always works.** An iPhone library therefore sorts by real
   capture time and fills every filter facet. The pixels need a decoder borrowed
   from the platform: WIC, Android `ImageDecoder`, or `ffmpeg` 7.0 or later.
   Cullant has no HEVC decoder of its own, and it will not add a C dependency to
   get one.
-- **Olympus and OM System RAWs show empty cells today.** The preview sits in the
-  MakerNote, and the code does not read that yet. The metadata reads correctly.
 
 ## Shortcuts
 

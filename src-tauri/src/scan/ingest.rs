@@ -1085,15 +1085,10 @@ mod tests {
         // one by one rather than tolerated in bulk, so anything NEW that stops
         // rendering fails the test -- and so the list itself is the to-do.
         //
-        // - `.ORF`/`.ORI`: Olympus puts the preview in the MakerNote, and
-        //   `raw.rs`'s TIFF walk covers IFD0, the chained IFDs and the SubIFDs
-        //   but not that. The file holds a ~1 MB JPEG nothing here reaches, so
-        //   every Olympus and OM System shot draws a blank cell.
         // - Panasonic `.RAW` (DMC-FZ8): holds no JPEG at all. Only a demosaic
         //   would render it, which the embedded-preview path never asks for.
         // - Sigma `.DNG` (fp): holds an 8 KB thumbnail and nothing larger.
         const KNOWN_UNRENDERABLE: &[&str] = &[
-            "Olympus - E-M1MarkII - 16bit (4-3).ORF",
             "Panasonic - DMC-FZ8 - 4-3.RAW",
             "Sigma - fp - 8bit (16-9).DNG",
         ];

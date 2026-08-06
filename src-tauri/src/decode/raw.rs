@@ -183,6 +183,10 @@ pub fn embedded_preview_scaled(
 /// exactly like a plain JPEG (scaled IDCT + convolution resize).
 pub fn embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
     raf_embedded_jpeg(bytes)
+        // Olympus before the generic TIFF walk: an ORF's preview lives only in
+        // the MakerNote, and the walk would otherwise settle for a small
+        // thumbnail on any body that also writes one into the IFD tree.
+        .or_else(|| olympus_embedded_jpeg(bytes))
         .or_else(|| tiff_embedded_jpeg(bytes))
         .or_else(|| cr3_embedded_jpeg(bytes))
 }
@@ -270,6 +274,23 @@ fn tiff_entry_long_list(b: &[u8], e: usize, cnt: u32, le: bool) -> Vec<u32> {
         }
     }
     out
+}
+
+/// The 12-byte entry for `tag` in the IFD at `ifd_off`, as
+/// `(type, count, entry offset)`. Used by readers that look up a handful of
+/// known tags instead of walking every entry.
+fn tiff_find_entry(b: &[u8], ifd_off: usize, le: bool, tag: u16) -> Option<(u16, u32, usize)> {
+    if ifd_off < 8 || ifd_off >= b.len() {
+        return None;
+    }
+    let count = rd_u16(b, ifd_off, le)? as usize;
+    for i in 0..count {
+        let e = ifd_off + 2 + i * 12;
+        if rd_u16(b, e, le)? == tag {
+            return Some((rd_u16(b, e + 2, le)?, rd_u32(b, e + 4, le)?, e));
+        }
+    }
+    None
 }
 
 /// Keep `[off, off+len)` as the new best when it is in bounds, starts with a JPEG
@@ -401,6 +422,85 @@ fn tiff_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
                 if let (Some(o), Some(l)) = (strip_off, strip_len) {
                     consider_jpeg(bytes, o as usize, l as usize, &mut best);
                 }
+            }
+        }
+    }
+
+    best.map(|(o, l)| &bytes[o..o + l])
+}
+
+/// Olympus and OM System `.ORF`/`.ORI`: the TIFF tree carries no preview at all
+/// — IFD0 has no SubIFDs and no JPEGInterchangeFormat — so the walk above finds
+/// nothing and every shot from those bodies draws a blank cell. The full-size
+/// preview (~1 MB) is reachable only through the MakerNote:
+///
+/// ```text
+/// IFD0 -> ExifIFD (0x8769) -> MakerNote (0x927C)
+///           |- 0x0100  a small (~8 KB) thumbnail, inline blob
+///           `- 0x2020  CameraSettings IFD
+///                |- 0x0101  PreviewImageStart
+///                `- 0x0102  PreviewImageLength
+/// ```
+///
+/// Every offset inside the MakerNote is stored relative to the MakerNote's own
+/// start under the modern `OLYMPUS\0` header, and relative to the file under the
+/// older `OLYMP\0` one. Rather than key that off the header, both bases are
+/// tried and `consider_jpeg` decides: a wrong base does not land on an SOI.
+fn olympus_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
+    let le = match bytes.get(0..2)? {
+        b"II" => true,
+        b"MM" => false,
+        _ => return None,
+    };
+    let ifd0 = rd_u32(bytes, 4, le)? as usize;
+
+    let (typ, _, e) = tiff_find_entry(bytes, ifd0, le, 0x8769)?;
+    let exif = tiff_entry_scalar(bytes, e, typ, le)? as usize;
+
+    // The MakerNote is an UNDEFINED blob far longer than 4 bytes, so its value
+    // field is always an offset.
+    let (_, mn_len, e) = tiff_find_entry(bytes, exif, le, 0x927C)?;
+    let mn = rd_u32(bytes, e + 8, le)? as usize;
+    if mn_len < 16 || mn.checked_add(mn_len as usize)? > bytes.len() {
+        return None;
+    }
+
+    // The MakerNote declares its own byte order; the older header has none and
+    // follows the file's.
+    let hdr = bytes.get(mn..mn + 12)?;
+    let (mn_le, mn_ifd) = if hdr.starts_with(b"OLYMPUS\0") {
+        (&hdr[8..10] != b"MM", mn + 12)
+    } else if hdr.starts_with(b"OLYMP\0") {
+        (le, mn + 8)
+    } else {
+        return None;
+    };
+
+    let mut best: Option<(usize, usize)> = None;
+    for base in [mn, 0] {
+        let at = |off: u32| base.checked_add(off as usize);
+
+        // 0x0100: offset in the value field, length in the element count.
+        if let Some((_, cnt, e)) = tiff_find_entry(bytes, mn_ifd, mn_le, 0x0100) {
+            if let Some(off) = rd_u32(bytes, e + 8, mn_le).and_then(at) {
+                consider_jpeg(bytes, off, cnt as usize, &mut best);
+            }
+        }
+
+        // 0x2020: an IFD whose offset is stored like a LONG.
+        let Some(cs) = tiff_find_entry(bytes, mn_ifd, mn_le, 0x2020)
+            .and_then(|(_, _, e)| rd_u32(bytes, e + 8, mn_le))
+            .and_then(at)
+        else {
+            continue;
+        };
+        let scalar = |tag| {
+            tiff_find_entry(bytes, cs, mn_le, tag)
+                .and_then(|(t, _, e)| tiff_entry_scalar(bytes, e, t, mn_le))
+        };
+        if let (Some(start), Some(len)) = (scalar(0x0101), scalar(0x0102)) {
+            if let Some(off) = at(start) {
+                consider_jpeg(bytes, off, len as usize, &mut best);
             }
         }
     }
@@ -627,6 +727,68 @@ mod tests {
 
         // Not a TIFF/RAF/CR3 container at all.
         assert_eq!(embedded_jpeg(&[0u8; 64]), None);
+    }
+
+    // --- Olympus MakerNote ---
+
+    /// A little-endian ORF-shaped container: IFD0 -> ExifIFD -> MakerNote, whose
+    /// own IFD holds the small 0x0100 thumbnail and a CameraSettings sub-IFD
+    /// pointing at the large preview. Every offset inside the MakerNote is
+    /// relative to its start, as a modern Olympus body writes them. An IFD of
+    /// `n` entries is `2 + n*12 + 4` bytes, which fixes the layout:
+    ///   0  header(8)   8  IFD0(18)   26  ExifIFD(18)   44  MakerNote header(12)
+    ///   56 MN IFD(42)  98  CameraSettings(30)  128 thumb(6)  134 preview(10)
+    const ORF_MN: u32 = 44;
+
+    fn fake_orf() -> Vec<u8> {
+        let (exif, mn) = (26u32, ORF_MN);
+        let mn_ifd = mn + 12; // past the `OLYMPUS\0II` header
+        let cs = mn_ifd + 42;
+        let (thumb, preview) = (cs + 30, cs + 36);
+
+        let mut buf = vec![0u8; 8];
+        buf[0..2].copy_from_slice(b"II");
+        buf[2..4].copy_from_slice(&0x4F52u16.to_le_bytes()); // ORF's own magic
+        buf[4..8].copy_from_slice(&8u32.to_le_bytes());
+
+        buf.extend_from_slice(&ifd(&[(0x8769, 4, 1, exif)], 0));
+        assert_eq!(buf.len(), exif as usize);
+        buf.extend_from_slice(&ifd(&[(0x927C, 7, 100, mn)], 0));
+        assert_eq!(buf.len(), mn as usize);
+
+        buf.extend_from_slice(b"OLYMPUS\0II\x03\x00");
+        assert_eq!(buf.len(), mn_ifd as usize);
+        buf.extend_from_slice(&ifd(
+            &[
+                (0x0100, 7, 6, thumb - mn),
+                (0x2020, 13, 1, cs - mn),
+                (0x2030, 13, 1, 0), // an unrelated sub-IFD must not confuse the lookup
+            ],
+            0,
+        ));
+        assert_eq!(buf.len(), cs as usize);
+        buf.extend_from_slice(&ifd(&[(0x0101, 4, 1, preview - mn), (0x0102, 4, 1, 10)], 0));
+        assert_eq!(buf.len(), thumb as usize);
+
+        buf.extend_from_slice(&[0xFF, 0xD8, 0, 0, 0xFF, 0xD9]); // thumbnail (6)
+        buf.extend_from_slice(&[0xFF, 0xD8, 1, 2, 3, 4, 5, 6, 0xFF, 0xD9]); // preview (10)
+        assert_eq!(buf.len(), preview as usize + 10);
+        buf
+    }
+
+    #[test]
+    fn olympus_prefers_the_makernote_preview_over_its_thumbnail() {
+        let orf = fake_orf();
+        let got = embedded_jpeg(&orf).expect("the CameraSettings preview");
+        assert_eq!(got, &[0xFF, 0xD8, 1, 2, 3, 4, 5, 6, 0xFF, 0xD9]);
+    }
+
+    #[test]
+    fn a_makernote_that_is_not_olympus_is_ignored() {
+        let mut orf = fake_orf();
+        let mn = ORF_MN as usize;
+        orf[mn..mn + 8].copy_from_slice(b"Nikon\0\0\0");
+        assert_eq!(embedded_jpeg(&orf), None);
     }
 
     // --- CR3 (ISO-BMFF) ---
