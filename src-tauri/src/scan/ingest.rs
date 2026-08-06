@@ -1004,6 +1004,54 @@ mod tests {
         assert_eq!(decoded.width().max(decoded.height()), 384);
     }
 
+    /// Run the whole ladder against a real camera or phone file.
+    ///
+    /// Nothing in this repo can produce one — no encoder here writes HEVC, and
+    /// checking a camera file in has provenance questions — so this is the hook
+    /// for verifying by hand:
+    ///
+    /// ```sh
+    /// CULLANT_HEIF_FIXTURE=/path/to/IMG_1234.HEIC cargo test a_real_heif -- --nocapture
+    /// ```
+    ///
+    /// It reports the capture time and dimensions it read, so an EXIF block too
+    /// large for `kamadak-exif` shows up as a missing date rather than silently.
+    #[test]
+    fn a_real_heif_renders_and_is_described() {
+        let Ok(fixture) = std::env::var("CULLANT_HEIF_FIXTURE") else {
+            eprintln!("skip: set CULLANT_HEIF_FIXTURE to a real .HEIC/.HIF");
+            return;
+        };
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let src = Path::new(&fixture);
+        let name = src.file_name().expect("a file name");
+        std::fs::copy(src, root.join(name)).expect("fixture is readable");
+
+        let db = Arc::new(crate::db::Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let (_, thumbs, _) = run_all(&db, root);
+
+        let (capture, camera, w, h, failed): (i64, Option<String>, Option<i64>, Option<i64>, i64) =
+            db.call(|c| {
+                Ok(c.query_row(
+                    "SELECT f.capture_time, f.camera, f.width, f.height,
+                            COALESCE((SELECT MAX(t.failed) FROM thumbnails t
+                                       WHERE t.file_id = f.id), 0)
+                     FROM files f",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )?)
+            })
+            .unwrap();
+        eprintln!("capture_time={capture} camera={camera:?} dims={w:?}x{h:?} thumbs={thumbs}");
+
+        assert_eq!(failed, 0, "a real HEIF must not tombstone");
+        assert_eq!(thumbs, 1, "the ladder must render it");
+        assert!(w.is_some() && h.is_some(), "dimensions must be known");
+    }
+
     /// A HEIF next to a JPEG is one cell, and the JPEG renders it. The HEIF is
     /// not pregenerated even where a decoder exists: it is not the group's
     /// primary, and paying a subprocess for a frame no grid cell shows would be

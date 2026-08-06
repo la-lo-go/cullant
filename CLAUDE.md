@@ -56,7 +56,7 @@ Orientation is the other trap: a HEIF carries rotation in both `irot` and EXIF, 
 
 `primary_rank` puts a companion `.ORI` ABOVE a HEIF, because the `.ORI` decodes unconditionally and a HEIF only where the ladder has a rung. The rank is static on purpose: it is persisted through `groups.primary_file_id`, which travels with the project folder.
 
-Testing: `bench::heif_with_exif` builds a synthetic EXIF-only HEIF (no HEVC) for the metadata half; `the_platform_ladder_renders_a_heif` builds a real one with the machine's own ffmpeg and skips where there is none; `a_heif_without_a_decoder_is_never_tombstoned` guards the upgrade path. `db::sql::image_exts` must never list a HEIF — a test enforces it — because that list governs the sibling borrow.
+Testing: `bench::heif_with_exif` builds a synthetic EXIF-only HEIF (no HEVC) for the metadata half; `the_platform_ladder_renders_a_heif` builds a real one with the machine's own ffmpeg and skips where there is none; `a_heif_without_a_decoder_is_never_tombstoned` guards the upgrade path; and `a_real_heif_renders_and_is_described` is the by-hand hook for a real camera file — `CULLANT_HEIF_FIXTURE=/path/to/IMG.HEIC cargo test a_real_heif -- --nocapture`, which reports what EXIF it managed to read. `db::sql::image_exts` must never list a HEIF — a test enforces it — because that list governs the sibling borrow.
 
 ## Dev / test
 
