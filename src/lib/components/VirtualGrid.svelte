@@ -20,6 +20,7 @@
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import { buildGridMenu } from "../gridMenu";
+  import { IS_TOUCH } from "../platform";
   import type { MenuNode } from "../menu";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
@@ -193,11 +194,7 @@
   const DENSITY: Record<string, number> = { small: 0.72, medium: 1, large: 1.34 };
   const isNarrow = $derived(width > 0 && width < 520);
   const BASE_CELL = $derived((isNarrow ? 116 : 188) * (DENSITY[session.gridDensity] ?? 1));
-  // Same mobile test as the rest of the app. Read once: a device does not grow
-  // a mouse mid-session.
-  const isTouch =
-    navigator.userAgent.includes("Android") ||
-    window.matchMedia("(pointer: coarse)").matches;
+  const isTouch = IS_TOUCH;
   // Never collapse below two columns: on very narrow viewports keep 2 columns
   // and shrink the cells to fit instead.
   const MIN_COLS = 2;

@@ -24,6 +24,7 @@
   import { view } from "../stores/view.svelte";
   import { api } from "../api";
   import { backdropDismiss } from "../backdrop";
+  import { IS_TOUCH } from "../platform";
   import DragList from "./DragList.svelte";
   import RadialPreview from "./RadialPreview.svelte";
   import ContextMenu from "./ContextMenu.svelte";
@@ -134,9 +135,9 @@
     onshowsupport: () => void;
   } = $props();
 
-  // Touch platform (Android) reaches the manual rescan via pull-to-refresh;
-  // desktop uses the title-bar menu. The tail hint reflects whichever this has.
-  const isTouch = navigator.userAgent.includes("Android");
+  // A touch platform reaches the manual rescan via pull-to-refresh; desktop uses
+  // the title-bar menu. The tail hint reflects whichever this has.
+  const isTouch = IS_TOUCH;
 
   const dismiss = backdropDismiss(() => onclose());
 

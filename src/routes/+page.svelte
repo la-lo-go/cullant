@@ -2,6 +2,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import { addPluginListener, type PluginListener } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { IS_ANDROID, IS_TOUCH, IS_WINDOWS } from "$lib/platform";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { session } from "$lib/stores/session.svelte";
   import { settings } from "$lib/stores/settings.svelte";
@@ -266,7 +267,7 @@
 
     let listener: PluginListener | null = null;
     let disposed = false;
-    if (navigator.userAgent.includes("Android")) {
+    if (IS_ANDROID) {
       void addPluginListener("app", "back-button", () => goBack())
         .then((l) => {
           if (disposed) void l.unregister();
@@ -288,12 +289,7 @@
 
   // Custom window chrome is Windows-only: macOS/Linux keep native decorations
   // (restored in the Rust setup hook), and touch/mobile never gets a titlebar.
-  // Detected via userAgent (consistent with the rest of the app) plus a
-  // coarse-pointer check so Windows tablets in touch mode stay native.
-  const showTitleBar =
-    navigator.userAgent.includes("Windows") &&
-    !navigator.userAgent.includes("Android") &&
-    !window.matchMedia("(pointer: coarse)").matches;
+  const showTitleBar = IS_WINDOWS && !IS_TOUCH;
 
   // The project name lives in the window title (OS taskbar/Alt-Tab, and the
   // custom TitleBar below) rather than the toolbar — kept out of the way
@@ -388,7 +384,7 @@
   async function pickProject() {
     // Android has no filesystem folder dialog, so use the SAF tree picker, which
     // returns a content:// URI. Desktop uses the native directory dialog.
-    if (navigator.userAgent.includes("Android")) {
+    if (IS_ANDROID) {
       const uri = await api.pickSafTree();
       if (uri) await openProject(uri);
       return;

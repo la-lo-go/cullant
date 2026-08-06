@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { IS_ANDROID, IS_WINDOWS } from "./platform";
 
 export interface ProjectInfo {
   rootPath: string;
@@ -359,9 +360,7 @@ export const api = {
 // Android (WebView2 / Android WebView rewrite), and as cullant://localhost/ on
 // macOS/iOS/Linux.
 const CULLANT_BASE =
-  navigator.userAgent.includes("Windows") || navigator.userAgent.includes("Android")
-    ? "http://cullant.localhost/"
-    : "cullant://localhost/";
+  IS_WINDOWS || IS_ANDROID ? "http://cullant.localhost/" : "cullant://localhost/";
 
 export function cullantUrl(path: string): string {
   return CULLANT_BASE + path;

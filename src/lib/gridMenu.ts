@@ -17,6 +17,7 @@ import { GROUP_DIMS, dayKey } from "./gridGroups";
 import { runCommand } from "./keyboard/dispatcher.svelte";
 import type { CommandId } from "./keyboard/keymap";
 import { pruneMenu, type MenuNode } from "./menu";
+import { HAS_FILE_MANAGER } from "./platform";
 import { catalog } from "./stores/catalog.svelte";
 import {
   apertureBucket,
@@ -51,10 +52,6 @@ import Star from "@lucide/svelte/icons/star";
 import Tag from "@lucide/svelte/icons/tag";
 import Trash2 from "@lucide/svelte/icons/trash-2";
 import X from "@lucide/svelte/icons/x";
-
-/** Reveal-in-file-manager needs a real filesystem path; a SAF project has none.
- *  Read once — a device does not grow a file manager mid-session. */
-const IS_ANDROID = typeof navigator !== "undefined" && navigator.userAgent.includes("Android");
 
 /** Rating commands by star count, so the submenu indexes them instead of
  *  building a `CommandId` out of string pieces. */
@@ -491,7 +488,7 @@ function selectBlock(index: number, item: ItemLite): MenuNode[] {
 
 function fileBlock(index: number, item: ItemLite): MenuNode[] {
   return [
-    ...(IS_ANDROID
+    ...(!HAS_FILE_MANAGER
       ? []
       : ([
           {
