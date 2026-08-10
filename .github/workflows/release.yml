@@ -1,0 +1,219 @@
+name: Release
+
+# Publishing a Release in the GitHub web interface starts this workflow. The
+# binaries are attached to that same Release, so the tag you chose there is the
+# only version input.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  guard:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # A tag that disagrees with the manifests would publish binaries whose
+      # file names contradict the Release they hang from. Stop before building.
+      - name: The tag must agree with the manifests
+        id: version
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          tag="${tag#v}"
+          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$conf" ] || [ "$tag" != "$pkg" ]; then
+            echo "::error::tag=$tag tauri.conf.json=$conf package.json=$pkg — all three must agree"
+            exit 1
+          fi
+          echo "version=$tag" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag"
+
+  checks:
+    name: Checks
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - name: rustfmt
+        run: cargo fmt --check
+        working-directory: src-tauri
+      - name: clippy
+        run: cargo clippy --all-targets -- -D warnings
+        working-directory: src-tauri
+      - name: tests
+        run: cargo test
+        working-directory: src-tauri
+
+  desktop:
+    name: ${{ matrix.name }}
+    needs: [guard, checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows (nsis + msi)
+          # Not ubuntu-latest: an AppImage carries the glibc of the machine that
+          # built it, so the oldest available runner reaches the most distros.
+          - os: ubuntu-22.04
+            name: Linux (deb + AppImage)
+          - os: macos-latest
+            name: macOS (dmg)
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux system dependencies
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            patchelf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # tauri.conf.json has beforeBuildCommand=npm run build, so this also
+      # builds the frontend.
+      - run: npm run tauri build
+      - name: Attach the bundles to the Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          shopt -s nullglob
+          count=0
+          for f in src-tauri/target/release/bundle/*/*.{exe,msi,deb,AppImage,dmg}; do
+            echo "uploading $f"
+            gh release upload "$TAG" "$f" --clobber
+            count=$((count + 1))
+          done
+          if [ "$count" -eq 0 ]; then
+            echo "::error::the build produced no bundle"
+            ls -R src-tauri/target/release/bundle || true
+            exit 1
+          fi
+
+  android:
+    name: Android (apk)
+    needs: [guard, checks]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Without the keystore Gradle silently emits an unsigned APK, which
+      # nobody can install. Say so now instead of after a ten-minute build.
+      - name: The signing secrets must exist
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::ANDROID_KEYSTORE_B64 is empty — see 'Signing in CI' in docs/building.md"
+            exit 1
+          fi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Point Tauri at the runner's NDK
+        run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+      # printf, not a heredoc: a password holding a $ must survive verbatim.
+      - name: Write the keystore
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          jks="$RUNNER_TEMP/cullant-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$jks"
+          {
+            printf 'storeFile=%s\n' "$jks"
+            printf 'storePassword=%s\n' "$ANDROID_STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+          } > src-tauri/gen/android/keystore.properties
+      # arm64-v8a only. A universal APK bundles four copies of the native
+      # library for four times the size, and covers only pre-2017 phones more.
+      - run: npx tauri android build --apk --target aarch64
+      - name: Verify the signature and attach the APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          out=src-tauri/gen/android/app/build/outputs/apk/arm64/release
+          apk=""
+          for f in "$out"/*.apk; do
+            case "$f" in *-unsigned.apk) continue ;; esac
+            apk="$f"
+          done
+          if [ -z "$apk" ]; then
+            echo "::error::no signed APK — the keystore did not apply"
+            ls -l "$out" || true
+            exit 1
+          fi
+          bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$bt/apksigner" verify --print-certs "$apk"
+          name="cullant-$VERSION-arm64.apk"
+          cp "$apk" "$name"
+          gh release upload "$TAG" "$name" --clobber

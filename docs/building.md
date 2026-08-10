@@ -231,3 +231,36 @@ BT=/c/Android/sdk/build-tools/35.0.0
   --out cullant-release.apk app-aligned.apk
 "$BT/apksigner.bat" verify -v cullant-release.apk
 ```
+
+### Signing in CI
+
+`.github/workflows/release.yml` builds the APK on a GitHub runner, which has
+no access to the local keystore. The runner rebuilds `keystore.properties`
+from four repository secrets, then Gradle signs as it does locally.
+
+| Secret | Value |
+|---|---|
+| `ANDROID_KEYSTORE_B64` | the `.jks` file, base64-encoded |
+| `ANDROID_STORE_PASSWORD` | the store password |
+| `ANDROID_KEY_ALIAS` | `cullant` |
+| `ANDROID_KEY_PASSWORD` | the key password |
+
+Add them at **Settings → Secrets and variables → Actions → New repository
+secret**. To get the base64 text:
+
+```sh
+base64 -w0 "C:/Users/lalop/.android/cullant-release.jks" > keystore.b64
+```
+
+Copy the full contents of `keystore.b64` into the secret, then delete the
+file. `-w0` keeps the output on one line; without it, the line breaks make
+the decode fail on the runner.
+
+The workflow stops before the build if `ANDROID_KEYSTORE_B64` is empty, and
+stops after the build if no signed APK is present. It then runs `apksigner
+verify` on the result, so an unsigned or badly signed APK can never reach a
+Release.
+
+**A password that holds a backslash breaks this.** The `.properties` format
+reads `\` as an escape character. The local file has the same limit — see
+the `storeFile` note above.

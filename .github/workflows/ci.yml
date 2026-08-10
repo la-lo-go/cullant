@@ -1,9 +1,9 @@
 name: CI
 
+# Manual only: press "Run workflow" in the Actions tab. The release workflow
+# runs the same checks on its own before it builds anything.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
