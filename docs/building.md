@@ -264,3 +264,23 @@ Release.
 **A password that holds a backslash breaks this.** The `.properties` format
 reads `\` as an escape character. The local file has the same limit — see
 the `storeFile` note above.
+
+### One key for every channel
+
+`cullant-release.jks` is the identity of the app on every channel that is
+planned. Android refuses an update whose signature changed, so a user can
+only move between channels if all of them sign with this one key.
+
+- **GitHub Releases** signs with it today. This is the only channel now.
+- **IzzyOnDroid** republishes the GitHub APK without a rebuild, so it keeps
+  this signature. No new key is necessary.
+- **Google Play**, later: at Play App Signing enrollment, **upload this key**
+  as the app signing key. Do not let Google make one. The choice is made
+  once and cannot be reversed.
+- **f-droid.org** cannot share it: they build from source and sign with
+  their own key. Only a reproducible build gets around that, which Rust
+  makes expensive — see the notes on remapped paths, the pinned NDK, and R8.
+
+**Keep a copy of the keystore and of both passwords away from this machine.**
+The file has no backup in the repo, by design. After the first user installs
+an APK, a lost keystore means every user must uninstall to move on.
