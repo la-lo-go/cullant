@@ -188,6 +188,21 @@ jobs:
         run: |
           jks="$RUNNER_TEMP/cullant-release.jks"
           printf '%s' "$ANDROID_KEYSTORE_B64" | tr -d '\r\n' | base64 -d > "$jks"
+          # A JKS checks its own integrity with the store password, so a
+          # truncated upload and a wrong password fail with the same message.
+          # The magic number separates them before either one is blamed.
+          magic=$(head -c4 "$jks" | od -An -tx1 | tr -d ' \n')
+          case "$magic" in
+            feedfeed) echo "format: JKS" ;;
+            3082*|3081*) echo "format: PKCS12" ;;
+            *)
+              echo "::error::the decoded file is no keystore (first bytes $magic). ANDROID_KEYSTORE_B64 is truncated or mangled."
+              exit 1
+              ;;
+          esac
+          # Compare these two against the local file to prove the upload is whole.
+          echo "size: $(stat -c%s "$jks") bytes"
+          echo "sha256: $(sha256sum "$jks" | cut -d' ' -f1)"
           {
             printf 'storeFile=%s\n' "$jks"
             printf 'storePassword=%s\n' "$(printf '%s' "$ANDROID_STORE_PASSWORD" | tr -d '\r\n')"
