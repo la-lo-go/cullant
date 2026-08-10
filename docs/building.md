@@ -186,8 +186,9 @@ default scaffold.
 
 The actual keystore lives outside the repo entirely:
 `C:\Users\lalop\.android\cullant-release.jks` (alias `cullant`, RSA 2048,
-10000-day validity, self-signed — fine for sideloading, would need a
-Play-App-Signing-compatible key if this ever ships to the Play Store).
+10000-day validity, self-signed). Those properties also satisfy Play App
+Signing, which asks for RSA 2048 or more and validity past October 2033 —
+see "One key for every channel" below.
 `keystore.properties` holds the store/key passwords in plaintext locally —
 that's the normal (if imperfect) pattern for local Android release signing;
 don't move the passwords into any tracked file.
