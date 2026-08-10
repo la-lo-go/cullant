@@ -177,6 +177,8 @@ jobs:
       - name: Point Tauri at the runner's NDK
         run: echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
       # printf, not a heredoc: a password holding a $ must survive verbatim.
+      # tr drops CR and LF, which a paste into the secret box can add, and
+      # which a .properties value can never carry anyway.
       - name: Write the keystore
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
@@ -185,13 +187,42 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           jks="$RUNNER_TEMP/cullant-release.jks"
-          printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$jks"
+          printf '%s' "$ANDROID_KEYSTORE_B64" | tr -d '\r\n' | base64 -d > "$jks"
           {
             printf 'storeFile=%s\n' "$jks"
-            printf 'storePassword=%s\n' "$ANDROID_STORE_PASSWORD"
-            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
-            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
+            printf 'storePassword=%s\n' "$(printf '%s' "$ANDROID_STORE_PASSWORD" | tr -d '\r\n')"
+            printf 'keyAlias=%s\n' "$(printf '%s' "$ANDROID_KEY_ALIAS" | tr -d '\r\n')"
+            printf 'keyPassword=%s\n' "$(printf '%s' "$ANDROID_KEY_PASSWORD" | tr -d '\r\n')"
           } > src-tauri/gen/android/keystore.properties
+      # Gradle opens the keystore at the packaging task, eight minutes into the
+      # build. keytool answers the same three questions in one second, and it
+      # says which of the three secrets is wrong.
+      - name: The keystore must open
+        env:
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          jks="$RUNNER_TEMP/cullant-release.jks"
+          store=$(printf '%s' "$ANDROID_STORE_PASSWORD" | tr -d '\r\n')
+          alias=$(printf '%s' "$ANDROID_KEY_ALIAS" | tr -d '\r\n')
+          key=$(printf '%s' "$ANDROID_KEY_PASSWORD" | tr -d '\r\n')
+          if ! keytool -list -keystore "$jks" -storepass "$store" >/dev/null 2>&1; then
+            echo "::error::ANDROID_STORE_PASSWORD does not open the keystore"
+            exit 1
+          fi
+          if ! keytool -list -keystore "$jks" -storepass "$store" -alias "$alias" >/dev/null 2>&1; then
+            echo "::error::ANDROID_KEY_ALIAS names no key in this keystore"
+            exit 1
+          fi
+          # -certreq reads the private key, so a wrong key password fails here.
+          # It only writes a request to stdout, and changes no file.
+          if ! keytool -certreq -keystore "$jks" -storepass "$store" \
+                 -alias "$alias" -keypass "$key" >/dev/null 2>&1; then
+            echo "::error::ANDROID_KEY_PASSWORD does not unlock the key"
+            exit 1
+          fi
+          echo "keystore, alias and both passwords agree"
       # arm64-v8a only. A universal APK bundles four copies of the native
       # library for four times the size, and covers only pre-2017 phones more.
       - run: npx tauri android build --apk --target aarch64
