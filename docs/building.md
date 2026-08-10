@@ -247,15 +247,16 @@ from four repository secrets, then Gradle signs as it does locally.
 | `ANDROID_KEY_PASSWORD` | the key password |
 
 Add them at **Settings → Secrets and variables → Actions → New repository
-secret**. To get the base64 text:
+secret**. To put the base64 text on the clipboard, in PowerShell:
 
-```sh
-base64 -w0 "C:/Users/lalop/.android/cullant-release.jks" > keystore.b64
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\.android\cullant-release.jks")) | Set-Clipboard
 ```
 
-Copy the full contents of `keystore.b64` into the secret, then delete the
-file. `-w0` keeps the output on one line; without it, the line breaks make
-the decode fail on the runner.
+Then paste it into `ANDROID_KEYSTORE_B64`. The text must stay on one line:
+a line break makes the decode fail on the runner. `ToBase64String` writes
+one line, and so does `base64 -w0` if you prefer Git Bash. Do not write the
+text to a file unless you delete the file afterwards.
 
 The workflow stops before the build if `ANDROID_KEYSTORE_B64` is empty, and
 stops after the build if no signed APK is present. It then runs `apksigner
