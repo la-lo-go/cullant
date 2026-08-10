@@ -232,17 +232,22 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
           VERSION: ${{ needs.guard.outputs.version }}
         run: |
-          out=src-tauri/gen/android/app/build/outputs/apk/arm64/release
+          # The flavour directory is not fixed. A single --target still runs
+          # Gradle's packageUniversalRelease task, so the APK lands under
+          # apk/universal/, while --split-per-abi would put it under apk/arm64/.
+          # Search the whole tree instead of naming one of them.
+          root=src-tauri/gen/android/app/build/outputs/apk
           apk=""
-          for f in "$out"/*.apk; do
-            case "$f" in *-unsigned.apk) continue ;; esac
+          for f in $(find "$root" -name '*.apk' | sort); do
+            case "$f" in *-unsigned.apk|*/debug/*) continue ;; esac
             apk="$f"
           done
           if [ -z "$apk" ]; then
-            echo "::error::no signed APK — the keystore did not apply"
-            ls -l "$out" || true
+            echo "::error::no signed release APK under $root"
+            find "$root" -name '*.apk' || true
             exit 1
           fi
+          echo "found $apk"
           bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$bt/apksigner" verify --print-certs "$apk"
           name="cullant-$VERSION-arm64.apk"
