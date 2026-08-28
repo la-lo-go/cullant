@@ -19,7 +19,6 @@
   import Unplug from "@lucide/svelte/icons/unplug";
   import type { StorageKind } from "../api";
 
-  // Storage-kind icon per classification (mirrors the recent-projects gallery).
   const kindIcon: Record<StorageKind, typeof HardDrive> = {
     internal: HardDrive,
     removable: Usb,
@@ -27,8 +26,6 @@
     unknown: HardDrive,
   };
 
-  // Project-management actions live in +page (which owns the open/close flow);
-  // this bar just renders the menu and calls back.
   let {
     onOpenNew,
     onOpenRecent,
@@ -76,8 +73,6 @@
     };
   });
 
-  // Project switcher dropdown (JetBrains-style) — only shown while a project is
-  // open. The name doubles as the menu trigger.
   let menuOpen = $state(false);
 
   // Up to five most-recently-opened projects other than the current one, for
@@ -260,7 +255,6 @@
     padding: 0 4px;
   }
 
-  /* Project name doubles as the menu trigger. */
   .project-btn {
     display: inline-flex;
     align-items: center;

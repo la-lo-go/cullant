@@ -75,26 +75,21 @@ pub trait ProjectStore: Send + Sync {
     /// `Read`/`Seek`.
     fn open_read(&self, rel: &str) -> AppResult<std::fs::File>;
 
-    /// Create (or truncate) a file for writing and return it.
+    /// Create or truncate a file and return it for writing.
     fn open_write(&self, rel: &str, mime_type: &str) -> AppResult<std::fs::File>;
 
-    /// Ensure the directory at `rel` (and any missing ancestors) exists.
     fn create_dir_all(&self, rel: &str) -> AppResult<()>;
 
-    /// Rename a file/dir in place (same parent). Returns the new rel_path.
     fn rename_in_place(&self, rel: &str, new_name: &str) -> AppResult<String>;
 
-    /// Move a file/dir into `new_parent_rel` (which must already exist).
-    /// Returns the new rel_path.
+    /// Move an entry into an existing directory and return its new relative path.
     fn move_to(&self, rel: &str, new_parent_rel: &str) -> AppResult<String>;
 
-    /// Copy the file at `from_rel` to `to_rel` (parent of `to_rel` must exist).
+    /// Copy a file. The parent of `to_rel` must already exist.
     fn copy(&self, from_rel: &str, to_rel: &str) -> AppResult<()>;
 
-    /// Permanently delete the file at `rel`.
     fn remove_file(&self, rel: &str) -> AppResult<()>;
 
-    /// Whether anything exists at `rel`.
     fn exists(&self, rel: &str) -> AppResult<bool>;
 
     /// The real OS path for `rel`, if this backend has one. `Some` only for the

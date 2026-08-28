@@ -105,7 +105,6 @@
   }
   let showCloseConfirm = $state(false);
   let showReimportConfirm = $state(false);
-  // Set when the open project's folder/volume becomes unreachable while working.
   let folderLostMsg = $state("");
   // Mirrors the storage watcher's last verdict, so the auto-rescan below can skip
   // ticks while a drive is disconnected instead of probing a second time.
@@ -125,7 +124,6 @@
     void api.setPreviewQuality(settings.previewQuality);
   });
 
-  // Load the project's tag list + pending queue whenever a project opens.
   $effect(() => {
     if (catalog.project) {
       void tags.refresh();
@@ -298,12 +296,8 @@
     document.title = catalog.project ? `${catalog.project.displayName} · Cullant` : "Cullant";
   });
 
-  // Whether the open project has any subfolders — used to hide the folder
-  // tree toggle when there's nothing to scope by.
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
 
-  // Whether the active tab has any RAW files — separate mode only means
-  // something where there are pairs to separate.
   const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
 
   // The grid view differs from its defaults — colours the View toolbar button,

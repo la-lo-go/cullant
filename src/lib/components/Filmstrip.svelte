@@ -272,7 +272,6 @@
 
 {#if session.showFilmstrip}
   <div class="filmstrip" class:pending-collapse={pendingCollapse} style="height: {stripH}px">
-    <!-- Top-edge resize handle. -->
     <div
       class="resize-handle"
       class:resizing

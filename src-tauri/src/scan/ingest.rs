@@ -251,7 +251,6 @@ pub fn run_ingest_inner(
     video_progress: &mut dyn FnMut(usize, usize, &[i64]),
     generate_videos: bool,
 ) -> AppResult<()> {
-    // --- Phase A: metadata ---
     // Each row reports the file itself plus, for a RAW in a live pair, its JPEG
     // sibling. Grouping by whichever file will actually be opened turns a pair
     // into a single read.
@@ -383,7 +382,6 @@ pub fn run_ingest_inner(
     );
     meta_done(meta_updated);
 
-    // --- Phase B: photos first, videos last, all background ---
     // Submitted to the shared ThumbPool as *background* work: interactive
     // requests (the cells/photo the user is looking at) always preempt it, and
     // there is no second thread pool to oversubscribe the CPU.
@@ -454,7 +452,6 @@ pub fn run_ingest_inner(
         preview_progress,
     )?;
 
-    // 3. Stragglers.
     generate_pass(
         db,
         thumbs,

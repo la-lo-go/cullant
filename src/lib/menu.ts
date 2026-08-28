@@ -39,7 +39,6 @@ export type MenuNode =
   | { kind: "sep" }
   | { kind: "header"; label: string };
 
-/** Whether a node can take focus — separators and headers cannot. */
 export function isSelectable(node: MenuNode): node is MenuItemNode | MenuSubmenuNode {
   return (node.kind === "item" || node.kind === "submenu") && !node.disabled;
 }

@@ -1,4 +1,3 @@
-// Storage Access Framework bridge for Cullant.
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 package app.tauri.saf
@@ -114,8 +113,6 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     private fun docUri(treeUri: String, documentId: String): Uri =
         DocumentsContract.buildDocumentUriUsingTree(Uri.parse(treeUri), documentId)
 
-    // ---- folder picker ----
-
     @Command
     fun openTree(invoke: Invoke) {
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
@@ -209,8 +206,6 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    // ---- listing ----
-
     @Command
     fun listChildren(invoke: Invoke) {
         val args = invoke.parseArgs(ListChildrenArgs::class.java)
@@ -255,8 +250,6 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    // ---- file descriptor bridge ----
-
     @Command
     fun getFileDescriptor(invoke: Invoke) {
         val args = invoke.parseArgs(FdArgs::class.java)
@@ -270,8 +263,6 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject(e.message ?: "failed to open file descriptor")
         }
     }
-
-    // ---- mutations ----
 
     @Command
     fun createDocument(invoke: Invoke) {
@@ -426,8 +417,6 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject(e.message ?: "failed to open document")
         }
     }
-
-    // ---- video poster frames ----
 
     // Extract one frame from a video as a JPEG. This is Cullant's only way to
     // thumbnail a video on Android: the desktop path shells out to ffmpeg, which

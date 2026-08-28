@@ -10,7 +10,6 @@
   let meta = $state<FileMetadata | null>(null);
   let loading = $state(false);
 
-  // Refetch whenever the focused photo changes while the panel is open.
   $effect(() => {
     const id = item.id;
     loading = true;
@@ -53,7 +52,6 @@
       : null
   );
 
-  // label / value rows; entries whose value is unknown ("—") are omitted.
   const rows = $derived.by(() => {
     if (!meta) return [];
     const dims =

@@ -22,15 +22,14 @@ use tauri::{AppHandle, Runtime};
 #[derive(Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum StorageState {
-    /// The folder is present and reachable.
+    /// The project folder is reachable.
     Ok,
-    /// The volume holding the project isn't currently connected/mounted.
+    /// The volume that contains the project is not connected.
     Disconnected,
-    /// The volume is present but the folder itself is gone or access revoked.
+    /// The volume is present, but the folder is missing or access was revoked.
     NotFound,
 }
 
-/// Coarse classification of where a project lives, for a UI badge.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)] // Some variants are only produced once per-OS detail lands.
@@ -41,18 +40,17 @@ pub enum StorageKind {
     Unknown,
 }
 
-/// Probed storage status for one remembered project.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageInfo {
     pub state: StorageState,
     pub kind: StorageKind,
-    /// Friendly volume name for the UI (drive letter/label, "SD card", …).
+    /// A friendly volume name for the UI.
     pub volume_name: Option<String>,
 }
 
 impl StorageInfo {
-    /// Back-compat convenience: the project is openable iff its folder is present.
+    /// Preserve the former boolean availability contract for existing callers.
     pub fn available(&self) -> bool {
         self.state == StorageState::Ok
     }
@@ -69,7 +67,6 @@ pub fn probe<R: Runtime>(app: &AppHandle<R>, id: &str) -> StorageInfo {
     probe_path(id)
 }
 
-/// Desktop / filesystem-path probe.
 fn probe_path(id: &str) -> StorageInfo {
     let (kind, volume_name) = classify(id);
     if std::path::Path::new(id).is_dir() {
@@ -79,7 +76,6 @@ fn probe_path(id: &str) -> StorageInfo {
             volume_name,
         };
     }
-    // Folder missing: is the volume it lives on still present?
     let state = if volume_present(id) {
         StorageState::NotFound
     } else {
@@ -218,7 +214,6 @@ fn volume_present(id: &str) -> bool {
     }
 }
 
-/// True if `mp` is `path` itself or a path-boundary ancestor of it.
 #[cfg(target_os = "linux")]
 fn path_has_prefix(path: &str, mp: &str) -> bool {
     mp == "/" || path == mp || path.starts_with(&format!("{mp}/"))
@@ -254,8 +249,6 @@ fn ancestor_exists(id: &str) -> bool {
     false
 }
 
-/// Android SAF probe: classify the volume from the `content://` tree URI and
-/// check whether the persisted tree permission is still granted.
 #[cfg(target_os = "android")]
 fn probe_saf<R: Runtime>(app: &AppHandle<R>, id: &str) -> StorageInfo {
     use tauri_plugin_saf::SafExt;
@@ -294,9 +287,8 @@ fn probe_saf<R: Runtime>(app: &AppHandle<R>, id: &str) -> StorageInfo {
     }
 }
 
-/// Classify a SAF tree URI's volume from its document-id prefix
-/// (`primary%3A…` = internal shared storage; a `UUID%3A…` = removable).
 #[cfg(target_os = "android")]
+/// Classify `primary:` as internal storage and a UUID as removable storage.
 fn saf_volume(id: &str) -> (StorageKind, Option<String>) {
     let doc_id = id.rsplit('/').next().unwrap_or(id).to_ascii_lowercase();
     if doc_id.starts_with("primary%3a") || doc_id.starts_with("primary:") {

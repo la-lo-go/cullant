@@ -39,7 +39,6 @@
     Purple: "#9a66d6",
   };
 
-  // Tags applicable to the current media type (same derivation as SelectionBar/FiltersPanel).
   const scopedTags = $derived(
     tags.all.filter(
       (t) => t.scope === 2 || (catalog.media === "photos" ? t.scope === 0 : t.scope === 1),
@@ -240,14 +239,12 @@
     scrollbar-width: none;
   }
 
-  /* Always on where touch is the primary pointer. */
   @media (pointer: coarse) {
     .touchbar {
       display: flex;
     }
   }
 
-  /* Desktop opt-in via the toolbar toggle. */
   .touchbar.forced {
     display: flex;
   }

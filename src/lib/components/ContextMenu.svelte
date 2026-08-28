@@ -91,7 +91,6 @@
     return nodesAt(path.slice(0, -1))[path[path.length - 1]];
   }
 
-  /** Next selectable index from `from` in `dir`, wrapping at the ends. */
   function step(nodes: MenuNode[], from: number, dir: number): number {
     if (nodes.length === 0) return -1;
     for (let n = 1; n <= nodes.length; n++) {

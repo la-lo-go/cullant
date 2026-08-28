@@ -191,7 +191,6 @@ pub fn pick_saf_tree(app: AppHandle) -> AppResult<Option<String>> {
     }
 }
 
-/// Shared by the IPC command and the CULLANT_OPEN_PROJECT dev/startup hook.
 pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResult<ProjectInfo> {
     // On Android a project is a SAF `content://` tree, not a filesystem path.
     #[cfg(target_os = "android")]
@@ -363,8 +362,6 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
     })
 }
 
-/// Project already open in this session, if any (used by the frontend on
-/// startup, e.g. after an auto-open via CULLANT_OPEN_PROJECT).
 #[tauri::command]
 pub fn current_project(state: State<'_, AppState>) -> AppResult<Option<ProjectInfo>> {
     let (db, root) = {
@@ -393,11 +390,8 @@ pub fn current_project(state: State<'_, AppState>) -> AppResult<Option<ProjectIn
     }))
 }
 
-/// How many present files still lack metadata (Phase A work outstanding). Used
-/// by the frontend to recover from a missed `metadata:done` on the startup
-/// auto-open path: if the backend finished ingesting before the webview attached
-/// its event listeners, the gate would otherwise stay closed forever. Zero here
-/// (with files present) means the grid is safe to show.
+/// Return how many present files still lack metadata. A zero count means the
+/// grid is safe to show, even if the `metadata:done` event was missed.
 #[tauri::command]
 pub fn ingest_pending(state: State<'_, AppState>) -> AppResult<i64> {
     let db = state.project.lock().unwrap().as_ref().map(|p| p.db.clone());
@@ -527,11 +521,9 @@ pub fn close_project(state: State<'_, AppState>) {
     close_project_inner(&state);
 }
 
-/// Frontend push of the preview-quality preference (localStorage on the UI
-/// side). Idempotent and non-destructive, so the startup push costs nothing:
-/// throwing the old previews away is [`discard_previews`], a separate step the
-/// user confirms. Returns the value actually in force, which is the previous one
-/// if `long_edge` is not an offered choice.
+/// Set the preview-quality preference without discarding existing previews.
+/// Returns the effective value, which remains unchanged for an unsupported
+/// `long_edge`.
 #[tauri::command]
 pub fn set_preview_quality(long_edge: u32) -> u32 {
     crate::thumbs::set_preview_long_edge(long_edge)
@@ -548,9 +540,8 @@ pub fn preview_quality_choices() -> Vec<u32> {
 /// JPEGs first, then the rows pointing at them. Grid thumbnails, video posters
 /// and `Full` renders are untouched, and no user file is ever involved.
 ///
-/// Called after the user confirms a preview-quality change; the following
-/// rescan regenerates at the new size. Refuses while a scan is running rather
-/// than deleting rows the ingest pass is in the middle of writing.
+/// The following rescan regenerates previews at the new size. Refuses while a
+/// scan is running rather than deleting rows the ingest pass is writing.
 #[tauri::command]
 pub fn discard_previews(state: State<'_, AppState>) -> AppResult<usize> {
     if state.scan_active.load(std::sync::atomic::Ordering::Relaxed) {
@@ -588,8 +579,8 @@ pub fn discard_previews(state: State<'_, AppState>) -> AppResult<usize> {
     Ok(removed)
 }
 
-/// Frontend push of the "generate video thumbnails" preference (localStorage on
-/// the UI side). Read by the ingest pass before its final video-poster tier.
+/// Set the video-thumbnail preference. The ingest pass reads it before its
+/// final video-poster tier.
 #[tauri::command]
 pub fn set_generate_video_thumbs(on: bool, state: State<'_, AppState>) {
     state

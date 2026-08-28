@@ -1,0 +1,15 @@
+# Project-scoped Codex configuration.
+# Codex loads this file only after the project is trusted.
+
+[mcp_servers.playwright]
+command = "npx"
+args = [
+  "-y",
+  "@playwright/mcp@latest",
+  "--cdp-endpoint",
+  "http://127.0.0.1:9222",
+  "--caps",
+  "vision",
+  "--codegen",
+  "none",
+]

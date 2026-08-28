@@ -51,8 +51,6 @@ impl SafStore {
         AppError::Other(format!("saf: {e}"))
     }
 
-    // ---- rel_path -> document_id cache (saf_documents) ----
-
     fn cache_get(&self, rel: &str) -> AppResult<Option<String>> {
         let rel = rel.to_string();
         // A pure read, and one that happens once per file the ingest touches --
@@ -101,7 +99,6 @@ impl SafStore {
     }
 
     fn cache_forget(&self, rel: &str) -> AppResult<()> {
-        // Forget the entry and, if it's a directory, everything beneath it.
         let rel = rel.to_string();
         let prefix = format!("{rel}/%");
         self.db.call(move |conn| {
@@ -122,7 +119,6 @@ impl SafStore {
         if let Some(doc) = self.cache_get(rel)? {
             return Ok(doc);
         }
-        // Walk from the root segment by segment, using the cache as a shortcut.
         let mut parent_doc = self.root_document_id.clone();
         let mut prefix = String::new();
         for segment in rel.split('/') {
@@ -168,7 +164,6 @@ impl ProjectStore for SafStore {
         progress: &mut dyn FnMut(usize),
     ) -> AppResult<Vec<StoreEntry>> {
         let mut files = Vec::new();
-        // (rel_prefix, document_id) worklist, starting at the root.
         let mut stack: Vec<(String, String)> = vec![(String::new(), self.root_document_id.clone())];
 
         while let Some((prefix, parent_doc)) = stack.pop() {
@@ -213,8 +208,6 @@ impl ProjectStore for SafStore {
     }
 
     fn open_write(&self, rel: &str, mime_type: &str) -> AppResult<std::fs::File> {
-        // Ensure the file exists (creating it under its parent if needed), then
-        // open truncating for write.
         if !self.exists(rel)? {
             let (parent, name) = split_parent(rel);
             self.create_dir_all(parent)?;
@@ -243,7 +236,6 @@ impl ProjectStore for SafStore {
             let doc = match self.cache_get(&child_rel)? {
                 Some(doc) => doc,
                 None => {
-                    // Look for an existing child first, else create the dir.
                     let existing = self
                         .saf()
                         .list_children(&self.tree_uri, &parent_doc)

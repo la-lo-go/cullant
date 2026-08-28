@@ -162,7 +162,6 @@ export const GROUP_DIMS: GroupDim[] = [
     of: (i) => ({
       key: `r${i.rating}`,
       label: i.rating > 0 ? "★".repeat(i.rating) : "Unrated",
-      // Highest rating first, unrated last.
       sort: -i.rating,
     }),
   },

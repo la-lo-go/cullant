@@ -15,7 +15,6 @@
     text,
     size = 13,
   }: {
-    /** Heading of the explanation, normally the control's own label. */
     title: string;
     text: string;
     size?: number;

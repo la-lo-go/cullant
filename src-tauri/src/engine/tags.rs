@@ -264,7 +264,7 @@ mod tests {
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
 
         let tags = list(&db).unwrap();
-        let retouch = tags.iter().find(|t| t.name == "Retouch").unwrap(); // photo-only
+        let retouch = tags.iter().find(|t| t.name == "Retouch").unwrap();
         let raw_id: i64 = db
             .call(|c| Ok(c.query_row("SELECT id FROM files WHERE ext='cr3'", [], |r| r.get(0))?))
             .unwrap();
@@ -272,7 +272,6 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files WHERE ext='mp4'", [], |r| r.get(0))?))
             .unwrap();
 
-        // Fan-out: tagging the RAW tags the JPEG too.
         let changes = toggle(
             &db,
             Targets {
@@ -285,7 +284,6 @@ mod tests {
         assert_eq!(changes.len(), 2);
         assert!(changes.iter().all(|c| c.tagged));
 
-        // Photo-only tag is inert on a video.
         let none = toggle(
             &db,
             Targets {
@@ -297,7 +295,6 @@ mod tests {
         .unwrap();
         assert!(none.is_empty());
 
-        // Toggling again removes from both.
         let removed = toggle(
             &db,
             Targets {
@@ -331,7 +328,6 @@ mod tests {
             as_groups: true,
         };
 
-        // Apply two tags across the pair (fan-out → both members).
         toggle(
             &db,
             Targets {
@@ -355,7 +351,6 @@ mod tests {
             .unwrap();
         assert_eq!(before, 4, "2 tags × 2 members");
 
-        // Clearing the pair drops every pairing and reports each removal.
         let changes = clear(&db, pair).unwrap();
         assert_eq!(changes.len(), 4);
         assert!(changes.iter().all(|c| !c.tagged));
@@ -364,7 +359,6 @@ mod tests {
             .unwrap();
         assert_eq!(after, 0);
 
-        // Clearing again is a no-op (nothing to remove, nothing reported).
         assert!(clear(
             &db,
             Targets {

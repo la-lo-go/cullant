@@ -275,7 +275,6 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
     })
 }
 
-/// Digest of a move/copy section: id, file id and destination of each action.
 fn hash_pending(items: &[PendingAction]) -> String {
     let mut h = Xxh3::new();
     for p in items {
@@ -342,8 +341,6 @@ impl UndoInfo {
     }
 }
 
-/// Delete one file (by rel_path) according to the mode, through the store.
-/// Returns the undo info describing where it went.
 fn delete_via_store(
     store: &dyn ProjectStore,
     rel: &str,
@@ -958,7 +955,6 @@ mod tests {
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
         set_setting(&db, "deletionMode", "trash").unwrap();
 
-        // Rate the RAW so it becomes xmp_dirty.
         crate::engine::culling::set_rating(
             &db,
             Targets {
@@ -969,7 +965,6 @@ mod tests {
         )
         .unwrap();
 
-        // Delete bad.jpg, move sel.jpg to selects/
         let bad_id: i64 = db
             .call(|c| {
                 Ok(
@@ -1026,7 +1021,6 @@ mod tests {
         assert!(root.join("selects").join("sel.jpg").exists());
         assert!(root.join("keep.xmp").exists());
 
-        // DB reflects reality.
         let remaining: i64 = db
             .call(|c| {
                 Ok(
@@ -1052,7 +1046,6 @@ mod tests {
             .unwrap();
         assert_eq!(pending_left, 0);
 
-        // Stale hash is rejected.
         enqueue(
             &db,
             Targets {
@@ -1129,7 +1122,6 @@ mod tests {
         assert_eq!(plan.deletes.len(), 1);
         assert_eq!(plan.moves.len(), 1);
 
-        // Commit ONLY the deletes section.
         let outcome =
             execute_section(&db, &store, "deletes", &plan.deletes_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
@@ -1140,7 +1132,6 @@ mod tests {
             "move section must NOT have run"
         );
 
-        // The move is still pending, and its hash is unchanged by the delete commit.
         let plan2 = preview(&db, &store).unwrap();
         assert_eq!(plan2.deletes.len(), 0);
         assert_eq!(plan2.moves.len(), 1);
@@ -1149,10 +1140,8 @@ mod tests {
             "an untouched section's hash stays valid across a sibling commit"
         );
 
-        // A stale section hash is rejected.
         assert!(execute_section(&db, &store, "moves", "deadbeef", |_, _, _| {}).is_err());
 
-        // Now commit the move section.
         let outcome =
             execute_section(&db, &store, "moves", &plan2.moves_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
@@ -1204,7 +1193,7 @@ mod tests {
         .unwrap();
 
         let plan = preview(&db, &store).unwrap();
-        assert_eq!(plan.xmp_count, 1); // still dirty at preview time
+        assert_eq!(plan.xmp_count, 1);
         let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
         assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
         assert!(!root.join("bad.cr3").exists());
@@ -1223,7 +1212,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         fs::write(root.join("keep.cr3"), b"raw").unwrap();
-        // Pre-existing sidecar with foreign content (Lightroom develop settings).
         fs::write(
             root.join("keep.xmp"),
             r#"<x:xmpmeta xmlns:x="adobe:ns:meta/">
@@ -1278,7 +1266,6 @@ mod tests {
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
         set_setting(&db, "deletionMode", "trash").unwrap();
 
-        // Rate the pair and commit, so IMG_1.xmp exists and both members are clean.
         rate(&db, &["cr3", "jpg"], 5);
         let plan = preview(&db, &store).unwrap();
         execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
@@ -1308,7 +1295,6 @@ mod tests {
         );
     }
 
-    /// A scanned RAW+JPEG pair with a store, ready to be rated apart.
     fn paired_project() -> (tempfile::TempDir, Arc<Db>, crate::store::LocalFsStore) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -1325,7 +1311,6 @@ mod tests {
         let (dir, db, store) = paired_project();
         let root = dir.path();
 
-        // Per-file rating, so the halves genuinely disagree.
         rate(&db, &["cr3"], 5);
         rate(&db, &["jpg"], 2);
 
@@ -1429,7 +1414,6 @@ mod tests {
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
         set_setting(&db, "deletionMode", "trash").unwrap();
 
-        // Rate then commit so a sidecar exists next to the RAW.
         rate(&db, &["cr3"], 3);
         let plan = preview(&db, &store).unwrap();
         execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
@@ -1484,7 +1468,6 @@ mod tests {
         let store = crate::store::LocalFsStore::new(root);
         crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
 
-        // Both members dirty (mirrors what group fan-out produces).
         rate(&db, &["cr3", "jpg"], 4);
 
         let plan = preview(&db, &store).unwrap();
@@ -1498,7 +1481,6 @@ mod tests {
             !root.join("IMG_1.jpg.xmp").exists(),
             "halves that agree need no per-file sidecar"
         );
-        // Both members got their dirty flag cleared by the single write.
         let dirty: i64 = db
             .call(|c| {
                 Ok(

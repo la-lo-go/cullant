@@ -80,8 +80,6 @@ pub fn get_file_metadata(file_id: i64, state: State<'_, AppState>) -> AppResult<
     Ok(meta)
 }
 
-// --- RAW (rawler) ---
-
 fn read_raw_exif(source: &rawler::rawsource::RawSource, meta: &mut FileMetadata) {
     use rawler::decoders::RawDecodeParams;
 
@@ -127,8 +125,6 @@ fn gps_component(
     let neg = matches!(reference, Some("S") | Some("W") | Some("s") | Some("w"));
     Some(if neg { -deg } else { deg })
 }
-
-// --- plain images (kamadak-exif) ---
 
 fn read_image_exif(bytes: &[u8], meta: &mut FileMetadata) {
     let mut cursor = Cursor::new(bytes);

@@ -16,11 +16,16 @@ vite.config.ts.timestamp-*
 .idea/
 .vscode/
 
-# Local agent tooling (Claude Code / skills) — never part of the project
+# Local Claude Code state — never part of the project
 .claude/
-.agents/
 .mcp.json
 .playwright-mcp/
+
+# Repository skills are shared with Codex and are intentionally versionable.
+.agents/*
+!.agents/skills/
+# Prevent an accidental nested skill repository from being discovered twice.
+.agents/skills/skills/
 
 # Adversarial review run artifacts (ledger, reports, backlog)
 .cullant-review/

@@ -99,7 +99,6 @@
     border-color: var(--accent);
   }
 
-  /* Default action, filled (no colored border). */
   button.ok {
     border-color: transparent;
     background: var(--accent-fill);

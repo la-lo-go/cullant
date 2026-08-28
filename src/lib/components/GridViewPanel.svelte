@@ -296,7 +296,6 @@
     letter-spacing: 0.03em;
   }
 
-  /* Keeps an InfoTip on the label's baseline instead of hanging below it. */
   .lbl {
     display: inline-flex;
     align-items: center;
@@ -416,7 +415,7 @@
     background: #fff;
   }
 
-  /* Look comes from the app-wide :global(select) rule; only layout here. */
+  /* The global select rule owns the appearance. This class owns layout only. */
   .dimsel {
     flex: 1;
     min-width: 0;

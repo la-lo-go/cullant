@@ -89,7 +89,6 @@ export const ASSIGNABLE_COMMANDS = COMMANDS.filter(
  *  a shape, and a sector is not wide enough for "Queue delete: JPEG only". The
  *  name appears only for the sector currently under the finger. */
 const COMMAND_ICONS: Partial<Record<CommandId, typeof Star>> = {
-  // The three flag states as one family: raised, struck through, gone.
   "flag.pick": Flag,
   "flag.reject": X,
   "flag.unflag": FlagOff,
@@ -258,7 +257,6 @@ export function arcPath(i: number, n: number, r: number, box: number, rot = 0): 
   return `M ${p(a0)} A ${r} ${r} 0 ${large} 1 ${p(a1)}`;
 }
 
-/** Centre point of sector `i` at radius `r`, in the same box. */
 export function sectorPoint(
   i: number,
   n: number,

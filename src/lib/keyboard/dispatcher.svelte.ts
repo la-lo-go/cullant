@@ -177,7 +177,6 @@ function execute(id: CommandId, e?: KeyboardEvent) {
   }
 }
 
-// --- T + digit chord for task tags ---
 let chordTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const chord = $state({ armed: false });
@@ -250,7 +249,6 @@ export function handleKeydown(e: KeyboardEvent) {
     return;
   }
 
-  // Per-tag custom shortcuts (assigned in the tag editor).
   const tag = tags.all.find((t) => t.shortcut === normalized);
   if (tag) {
     e.preventDefault();

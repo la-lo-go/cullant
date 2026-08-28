@@ -241,7 +241,6 @@ class CatalogStore {
 export const catalog = new CatalogStore();
 catalog.adoptCurrent();
 
-// Backend events keep the catalog fresh while scan/metadata run.
 listen<ScanProgress>("scan:progress", (e) => {
   catalog.scanning = true;
   catalog.scanFound = e.payload.found;
@@ -260,7 +259,6 @@ listen<ScanDone>("scan:done", async (e) => {
   catalog.preloading = false;
 });
 listen<{ done: number; total: number }>("metadata:progress", (e) => {
-  // Non-blocking pill. Reset to idle once the read completes.
   catalog.metaProgress =
     e.payload.done >= e.payload.total ? { done: 0, total: 0 } : e.payload;
 });
@@ -275,7 +273,6 @@ listen("metadata:done", async () => {
   void catalog.refreshPreviewReady();
 });
 listen<{ done: number; total: number }>("thumbs:progress", (e) => {
-  // Non-blocking pill. Reset to idle once the background tier completes.
   catalog.thumbProgress =
     e.payload.done >= e.payload.total ? { done: 0, total: 0 } : e.payload;
 });
@@ -284,7 +281,6 @@ listen<{ total: number }>("thumbs:done", () => {
 });
 listen<{ done: number; total: number; ids?: number[] }>("previews:progress", (e) => {
   const { done, total, ids } = e.payload;
-  // Reset to idle once the background tier completes.
   catalog.previewProgress = done >= total ? { done: 0, total: 0 } : { done, total };
   // The event carries exactly which files finished, so their per-cell spinners
   // clear without re-reading the whole catalogue on a timer.
@@ -302,13 +298,12 @@ listen<{ done: number; total: number; ids?: number[] }>("previews:progress", (e)
   }
 });
 listen<{ done: number; total: number }>("videos:progress", (e) => {
-  // The final (video-poster) tier. Reset to idle once it completes.
   catalog.videoProgress =
     e.payload.done >= e.payload.total ? { done: 0, total: 0 } : e.payload;
 });
 listen<string>("scan:error", (e) => {
   catalog.scanning = false;
-  // Safety valve: never leave the user trapped behind the preload panel.
+  // Never leave the preload panel blocking the UI after a scan failure.
   catalog.preloading = false;
   catalog.error = e.payload;
 });

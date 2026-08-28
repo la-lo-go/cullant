@@ -206,7 +206,6 @@ mod tests {
         let version = db.call(|conn| migrations::current_version(conn)).unwrap();
         assert_eq!(version, 10);
 
-        // All core tables exist and are queryable.
         let table_count = db
             .call(|conn| {
                 Ok(conn.query_row(
@@ -264,7 +263,6 @@ mod tests {
             write_via_reader.is_err(),
             "query_only reader must reject writes"
         );
-        // Value is unchanged.
         let still: String = db
             .call_read(|conn| {
                 Ok(

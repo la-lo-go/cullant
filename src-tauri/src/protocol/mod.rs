@@ -419,11 +419,9 @@ mod tests {
 
     #[test]
     fn parses_version_params_defensively() {
-        // Present and well-formed, in either order and among other params.
         assert_eq!(query_version(Some("v=123&o=6")), v(123, 6));
         assert_eq!(query_version(Some("o=1&v=0")), v(0, 1));
         assert_eq!(query_version(Some("x=1&v=456&y=2&o=8")), v(456, 8));
-        // Absent query, or either part missing/garbled → None (fallback path).
         assert_eq!(query_version(None), None);
         assert_eq!(query_version(Some("")), None);
         assert_eq!(query_version(Some("x=1")), None);

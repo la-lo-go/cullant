@@ -37,7 +37,6 @@ pub const PREVIEW_LONG_EDGE_CHOICES: [u32; 3] = [1600, 2560, 3840];
 
 static PREVIEW_LONG_EDGE: AtomicU32 = AtomicU32::new(PREVIEW_LONG_EDGE_DEFAULT);
 
-/// The configured preview long edge.
 pub fn preview_long_edge() -> u32 {
     PREVIEW_LONG_EDGE.load(Ordering::Relaxed)
 }
@@ -381,7 +380,7 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             let mut guard = queue.items.lock().unwrap();
             loop {
                 match guard.as_mut() {
-                    None => return, // pool shut down
+                    None => return,
                     Some(q) => {
                         // Interactive first (LIFO), then background (FIFO).
                         if let Some(p) = q
@@ -542,7 +541,6 @@ fn paired_jpeg(db: &Arc<Db>, file_id: i64) -> Option<String> {
     .flatten()
 }
 
-/// What one decode produced.
 pub(crate) struct Decoded {
     pub image: DynamicImage,
     /// The ORIGINAL pixel dimensions, when reliably known (a JPEG/PNG header, a
@@ -816,7 +814,6 @@ pub(crate) fn render_and_store(
     Ok(jpeg)
 }
 
-/// What one worker was asked to produce.
 #[derive(Clone, Copy)]
 pub(crate) struct Produce {
     pub file_id: i64,
@@ -1036,7 +1033,6 @@ pub(crate) fn record_decode_failure(
     })
 }
 
-/// Whether a decode-failure tombstone exists for this (file, kind) at `mtime`.
 fn is_tombstoned(db: &Arc<Db>, file_id: i64, kind: ThumbKind, mtime: i64) -> AppResult<bool> {
     let kind_i = kind as i64;
     db.call_read(move |conn| {
@@ -1277,7 +1273,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
-        // A real JPEG on disk.
         let img = image::RgbImage::from_fn(800, 600, |x, _| image::Rgb([(x % 255) as u8, 80, 120]));
         img.save(root.join("photo.jpg")).unwrap();
 
@@ -1301,7 +1296,6 @@ mod tests {
         assert_eq!(thumb.width(), 384);
         assert_eq!(thumb.height(), 288);
 
-        // Second call must hit the disk cache (row exists + same bytes).
         let again = produce_cached(
             &db,
             &store,
@@ -1338,7 +1332,6 @@ mod tests {
             orientation: 1,
         };
 
-        // Generate + cache the thumb.
         let bytes = produce_cached(
             &db,
             &store,
@@ -1347,7 +1340,6 @@ mod tests {
         )
         .unwrap();
 
-        // Fast path with the correct version returns the cached bytes.
         let hit = produce_cached(
             &db,
             &store,
@@ -1391,14 +1383,12 @@ mod tests {
         });
         let base = DynamicImage::ImageRgb8(base);
 
-        // The next frame of a burst: the same scene nudged slightly.
         let shifted = image::RgbImage::from_fn(200, 150, |x, y| {
             let x = (x + 2).min(199);
             image::Rgb([((x * 255) / 200) as u8, ((y * 255) / 150) as u8, 60])
         });
         let shifted = DynamicImage::ImageRgb8(shifted);
 
-        // A different scene entirely: gradient running the other way.
         let other = image::RgbImage::from_fn(200, 150, |x, y| {
             image::Rgb([(255 - (x * 255) / 200) as u8, 30, ((y * 255) / 150) as u8])
         });
@@ -1464,7 +1454,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
-        // Horizontal gradient: dark at x=0, bright at the right edge.
         let img =
             image::RgbImage::from_fn(800, 600, |x, _| image::Rgb([((x * 255) / 800) as u8; 3]));
         img.save(root.join("photo.jpg")).unwrap();
@@ -1475,7 +1464,6 @@ mod tests {
         let id: i64 = db
             .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
             .unwrap();
-        // Orientation 6 = rotate 90° CW.
         db.call(move |c| {
             c.execute(
                 "UPDATE files SET orientation = 6 WHERE id = ?1",
@@ -1493,9 +1481,7 @@ mod tests {
         )
         .unwrap();
         let thumb = image::load_from_memory(&bytes).unwrap().to_rgb8();
-        // Rotated: landscape 800x600 -> portrait thumb 288x384.
         assert_eq!((thumb.width(), thumb.height()), (288, 384));
-        // After rotate90 the original bright right edge is at the BOTTOM.
         let top = thumb.get_pixel(thumb.width() / 2, 4).0[0] as i32;
         let bottom = thumb.get_pixel(thumb.width() / 2, thumb.height() - 5).0[0] as i32;
         assert!(
@@ -1509,7 +1495,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
-        // Large enough that the scaled JPEG decode path engages for a 384 thumb.
         let img = image::RgbImage::from_fn(2400, 1600, |x, y| {
             image::Rgb([(x % 251) as u8, (y % 241) as u8, 90])
         });
@@ -1538,7 +1523,6 @@ mod tests {
                 )?)
             })
             .unwrap();
-        // Original dims, not the reduced decode's.
         assert_eq!((w, h), (2400, 1600));
     }
 
@@ -1565,7 +1549,6 @@ mod tests {
             })
             .unwrap();
 
-        // Render with src_dims: None (e.g. a scaled RAW embedded preview).
         let decoded = image::DynamicImage::ImageRgb8(img);
         let meta = SourceMeta {
             file_id: id,

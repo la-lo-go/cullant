@@ -737,7 +737,6 @@ mod tests {
     #[test]
     fn a_pair_sidecar_travels_back_with_its_raw() {
         let f = project(&["IMG_1.cr3"]);
-        // Rate and commit so IMG_1.xmp exists next to the RAW.
         set_rating(&f.db, f.targets("IMG_1.cr3"), 4).unwrap();
         f.commit();
         assert!(f.root().join("IMG_1.xmp").exists());

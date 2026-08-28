@@ -123,7 +123,6 @@ pub fn possible(store: &dyn ProjectStore, rel_path: &str) -> bool {
     if store.decodes_heif() {
         return true;
     }
-    // Every remaining rung needs a real path.
     store.local_path(rel_path).is_some() && (platform_capable() || ffmpeg_capable())
 }
 

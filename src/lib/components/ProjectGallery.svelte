@@ -50,7 +50,6 @@
     return PLACEHOLDER_COLORS[(h + slot * stride) % PLACEHOLDER_COLORS.length];
   }
 
-  // Storage-kind badge icon per classification.
   const kindIcon: Record<StorageKind, typeof HardDrive> = {
     internal: HardDrive,
     removable: Usb,
@@ -70,12 +69,8 @@
     return () => clearInterval(id);
   });
 
-  // Project queued for full data deletion, awaiting confirmation (null = none).
   let deleteTarget = $state<RecentProject | null>(null);
 
-  // Initial load when the gallery mounts (i.e. whenever we're on the homepage —
-  // this component only renders while no project is open, so mounting already
-  // covers "catalog.project became null").
   $effect(() => {
     recent.refresh().catch((e) => console.error("recent refresh failed", e));
   });
@@ -281,7 +276,6 @@
     opacity: 0.55;
   }
 
-  /* A clean fanned stack of the project's photos (no folder, no glare). */
   .preview {
     position: relative;
     width: 132px;

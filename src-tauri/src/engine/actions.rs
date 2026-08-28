@@ -216,8 +216,6 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files WHERE ext='jpg'", [], |r| r.get(0))?))
             .unwrap();
 
-        // Target the JPEG (the displayed half), scope raw-only, mirror on:
-        // the queued delete must land on the CR3.
         let n = enqueue(
             &db,
             Targets {
@@ -265,7 +263,6 @@ mod tests {
         assert!(pending[0].pair_token.is_some());
         assert_eq!(pending[0].pair_token, pending[1].pair_token);
 
-        // Re-enqueue replaces rather than duplicating.
         enqueue(
             &db,
             Targets {
@@ -293,7 +290,6 @@ mod tests {
             .call(|c| Ok(c.query_row("SELECT id FROM files WHERE ext='cr3'", [], |r| r.get(0))?))
             .unwrap();
 
-        // Queue deletes for the A pair (mirror fan-out) and for solo B.
         enqueue(
             &db,
             Targets {
@@ -327,7 +323,6 @@ mod tests {
         .unwrap();
         assert_eq!(list(&db).unwrap().len(), 3);
 
-        // Unqueue by targeting one pair member with groups on: both halves go.
         let n = remove_for_files(
             &db,
             Targets {
@@ -343,7 +338,6 @@ mod tests {
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].rel_path, "B.jpg");
 
-        // With groups off only the targeted file is unqueued.
         enqueue(
             &db,
             Targets {

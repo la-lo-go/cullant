@@ -233,7 +233,6 @@ pub fn scan_with_store(
         let mut new_files = 0usize;
 
         {
-            // Existing state: rel_path -> (id, size, mtime, status)
             let mut existing: HashMap<String, (i64, i64, i64, i64)> = HashMap::new();
             let mut stmt = tx.prepare("SELECT rel_path, id, size, mtime, status FROM files")?;
             let rows = stmt.query_map([], |r| {
@@ -280,7 +279,6 @@ pub fn scan_with_store(
                     }
                     Some((id, size, mtime, status)) => {
                         if size != f.size || mtime != f.mtime {
-                            // Content changed: refresh stats, invalidate metadata.
                             update_file.execute(params![id, f.size, f.mtime])?;
                         } else if status != 0 {
                             revive_file.execute(params![id])?;
@@ -289,7 +287,6 @@ pub fn scan_with_store(
                 }
             }
 
-            // Anything left in `existing` was not found on disk.
             let mut mark_missing = tx.prepare("UPDATE files SET status = 1 WHERE id = ?1")?;
             for (id, _, _, status) in existing.values() {
                 if *status == 0 {
@@ -338,7 +335,7 @@ pub fn scan_with_store(
             rows.collect::<Result<_, _>>()?
         };
 
-        // Already ordered by (dir, basename), so equal keys arrive together.
+        // Equal keys are contiguous because the query orders by directory and basename.
         let mut members: Vec<Candidate> = Vec::new();
         let mut key: Option<(String, String)> = None;
         for (dir, basename, candidate) in candidates {
@@ -864,7 +861,6 @@ mod tests {
         touch(root, "IMG_4.HIF");
         let db = Arc::new(Db::open(root).unwrap());
         scan(&db, root);
-        // The user ran "delete RAW only" and committed it.
         std::fs::remove_file(root.join("IMG_4.CR3")).unwrap();
         db.call(|c| {
             c.execute("UPDATE files SET status = 2 WHERE ext = 'cr3'", [])?;

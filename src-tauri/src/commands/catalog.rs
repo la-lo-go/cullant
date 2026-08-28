@@ -199,8 +199,7 @@ pub fn query_items(
                         AND pf.failed = 1 AND pf.source_mtime = f.mtime) AS preview_failed
              FROM files f
              JOIN groups g ON g.id = f.group_id
-             -- A plain join, not another correlated subquery: this SELECT
-             -- already carries three of those per row (see the backend audit).
+             -- A plain join avoids another correlated subquery in this wide row.
              LEFT JOIN file_analysis fa ON fa.file_id = f.id
              WHERE f.status = 0 AND {kind_filter}
              ORDER BY {order}"

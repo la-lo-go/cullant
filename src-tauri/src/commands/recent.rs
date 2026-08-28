@@ -72,9 +72,8 @@ fn save_recent<R: Runtime>(app: &AppHandle<R>, list: &[RecentEntry]) {
 }
 
 /// Record that a project was just opened, moving it to the front of the
-/// recent list (or inserting it). Called from `open_project` / the
-/// CULLANT_OPEN_PROJECT startup hook — best-effort, errors are swallowed so a
-/// broken app-data dir never blocks opening a project.
+/// recent list (or inserting it). Errors are swallowed so a broken app-data
+/// directory never blocks opening a project.
 pub fn record_opened<R: Runtime>(app: &AppHandle<R>, path: &str) {
     // The project is connected right now, so capture its storage kind + friendly
     // name to fall back on when it's later disconnected.
@@ -124,9 +123,8 @@ pub fn list_recent_projects(app: AppHandle) -> Vec<RecentProject> {
         .collect()
 }
 
-/// Probe the storage backing an arbitrary project identifier — used to watch the
-/// currently-open project's folder/volume while it's in use, so the UI can warn
-/// when it's disconnected or removed.
+/// Probe the storage backing an arbitrary project identifier so the UI can warn
+/// when its folder or volume is disconnected or removed.
 ///
 /// `async` puts it on the sync threadpool instead of running inline on the IPC
 /// handler: on Android the probe makes two blocking JNI calls, and every other
@@ -136,7 +134,7 @@ pub fn probe_storage(app: AppHandle, id: String) -> crate::storage::StorageInfo 
     crate::storage::probe(&app, &id)
 }
 
-/// Fully forget a project: drop it from the recent list AND delete Cullant's
+/// Fully forget a project: drop it from the recent list and delete Cullant's
 /// own data (the SQLite DB + thumbnail cache). The user's photos are NEVER
 /// touched — only Cullant's sidecar is removed.
 ///

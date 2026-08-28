@@ -63,7 +63,6 @@ async function readRange(url: string, start: number, end: number): Promise<Uint8
   return out;
 }
 
-/** A running remux. `src` goes on the video element; `done` settles with it. */
 export type Remux = {
   src: string;
   done: Promise<void>;

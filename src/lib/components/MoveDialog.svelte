@@ -24,8 +24,7 @@
       .join("/"),
   );
 
-  // Selection-aware targets: the whole selection when one exists, else the
-  // focused item (matches how the other actions fan out).
+  // Use the whole selection, or the focused item when there is no selection.
   function moveTargets() {
     const ids =
       session.selectedIds.size > 0

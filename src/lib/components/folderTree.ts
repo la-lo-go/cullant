@@ -9,7 +9,6 @@ export interface TreeNode {
   children: Map<string, TreeNode>;
 }
 
-/** Build a directory tree (with per-folder file counts) from a project's items. */
 export function buildFolderTree(items: ItemLite[]): TreeNode {
   const root: TreeNode = { name: "", path: "", count: 0, children: new Map() };
   for (const item of items) {

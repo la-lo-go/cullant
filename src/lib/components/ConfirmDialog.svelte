@@ -117,8 +117,6 @@
     border-color: var(--accent);
   }
 
-  /* Default action, filled (no colored border). Red: closing is a mild,
-     back-out action. */
   button.confirm {
     border-color: transparent;
     background: #a04040;

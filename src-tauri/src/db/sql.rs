@@ -25,14 +25,12 @@ pub fn image_exts() -> &'static str {
     &SQL
 }
 
-/// [`SECONDARY_RAW_EXTS`] as a SQL value list.
 pub fn secondary_raw_exts() -> &'static str {
     static SQL: std::sync::LazyLock<String> =
         std::sync::LazyLock::new(|| value_list(SECONDARY_RAW_EXTS));
     &SQL
 }
 
-/// [`HEIF_EXTS`] as a SQL value list.
 pub fn heif_exts() -> &'static str {
     static SQL: std::sync::LazyLock<String> =
         std::sync::LazyLock::new(|| value_list(crate::decode::HEIF_EXTS));
@@ -81,7 +79,6 @@ mod tests {
         }
     }
 
-    /// Pregeneration must queue a HEIF exactly when something can decode it.
     #[test]
     fn the_pregeneration_predicate_follows_the_decoder() {
         let with = decodable_photo("f", true);
@@ -90,7 +87,6 @@ mod tests {
             assert!(with.contains(&format!("'{ext}'")), "{ext} missing");
             assert!(!without.contains(&format!("'{ext}'")), "{ext} must not be");
         }
-        // A RAW and a JPEG are queued either way.
         assert!(without.contains("f.kind = 0"));
         assert!(without.contains("'jpg'"));
     }

@@ -10,7 +10,6 @@
 
   let { onclose }: { onclose: () => void } = $props();
 
-  // Order the sections appear in the cheat-sheet.
   const CATEGORY_ORDER: CommandCategory[] = [
     "Navigation",
     "Rating & flags",
@@ -69,7 +68,6 @@
     return PRETTY_KEY[k] ?? (k.length === 1 ? k.toUpperCase() : k);
   }
 
-  /** Split a binding string ("ctrl+=") into display chips (["Ctrl", "="]). */
   function keyChips(binding: string): string[] {
     const chips: string[] = [];
     let rest = binding;

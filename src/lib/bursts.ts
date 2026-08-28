@@ -140,7 +140,6 @@ export interface Bursts {
 
 export const NO_BURSTS: Bursts = { byFile: new Map(), sizes: new Map() };
 
-/** Cluster the project's photos into bursts. */
 export function computeBursts(items: ItemLite[], gapSeconds: number): Bursts {
   const shots = shotsOf(items);
   const out: Bursts = { byFile: new Map(), sizes: new Map() };

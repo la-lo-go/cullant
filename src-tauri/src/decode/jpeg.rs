@@ -17,7 +17,7 @@ use crate::error::{AppError, AppResult};
 pub fn decode_scaled(bytes: &[u8], min_long_edge: u32, name: &str) -> AppResult<DynamicImage> {
     match try_scaled(bytes, min_long_edge) {
         Ok(Some(img)) => return Ok(img),
-        Ok(None) => {} // scaled path not applicable; fall through
+        Ok(None) => {}
         Err(e) => tracing::debug!("scaled JPEG decode failed for {name}, falling back: {e}"),
     }
     image::load_from_memory(bytes).map_err(|e| AppError::Decode(format!("{name}: {e}")))
@@ -108,14 +108,11 @@ mod tests {
         let bytes = test_jpeg(4000, 3000);
 
         let scaled = decode_scaled(&bytes, 384, "test.jpg").unwrap();
-        // The scale path must have engaged: fewer pixels than full size,
-        // but still at least the requested long edge.
         assert!(scaled.width() < 4000, "expected a reduced decode");
         assert!(scaled.width().max(scaled.height()) >= 384);
 
         let full = image::load_from_memory(&bytes).unwrap();
 
-        // Resize both to the same 384px target and compare.
         let a = scaled.resize_exact(384, 288, image::imageops::FilterType::Triangle);
         let b = full.resize_exact(384, 288, image::imageops::FilterType::Triangle);
         assert_eq!(a.dimensions(), b.dimensions());
@@ -133,8 +130,6 @@ mod tests {
 
     #[test]
     fn small_images_take_the_full_path() {
-        // Long edge < 2x target: the scaled path must decline and the result
-        // must be the full-size decode.
         let bytes = test_jpeg(600, 400);
         let img = decode_scaled(&bytes, 384, "small.jpg").unwrap();
         assert_eq!((img.width(), img.height()), (600, 400));

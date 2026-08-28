@@ -24,14 +24,12 @@ static SOURCE_NANOS: AtomicU64 = AtomicU64::new(0);
 /// document-id resolutions. Zero on desktop.
 static BACKEND_CALLS: AtomicUsize = AtomicUsize::new(0);
 
-/// Record one opened decode source.
 pub fn source_opened(bytes: usize, elapsed: Duration) {
     SOURCES.fetch_add(1, Ordering::Relaxed);
     SOURCE_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
     SOURCE_NANOS.fetch_add(elapsed.as_nanos() as u64, Ordering::Relaxed);
 }
 
-/// Record one non-read call into the storage backend.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub fn backend_call() {
     BACKEND_CALLS.fetch_add(1, Ordering::Relaxed);

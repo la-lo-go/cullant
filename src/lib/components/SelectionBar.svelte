@@ -17,14 +17,12 @@
     Purple: "#9a66d6",
   };
 
-  // Tags applicable to the current media type.
   const scopedTags = $derived(
     tags.all.filter(
       (t) => t.scope === 2 || (catalog.media === "photos" ? t.scope === 0 : t.scope === 1),
     ),
   );
 
-  // Hover-preview state for the star row (0 = not hovering).
   let hovered = $state(0);
 
   // These act on session.targets(), which is the current selection when one exists.

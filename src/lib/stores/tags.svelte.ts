@@ -13,7 +13,6 @@ class TagsStore {
     this.all = await api.listTaskTags();
   }
 
-  /** Apply toggle results to the in-memory catalog. */
   applyChanges(changes: TagChange[]) {
     if (changes.length === 0) return;
     const byFile = new Map<number, TagChange[]>();

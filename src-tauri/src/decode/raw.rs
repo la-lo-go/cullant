@@ -160,7 +160,6 @@ impl<'a> RawSession<'a> {
     }
 }
 
-/// One-shot variant of [`RawSession::decode_adequate`].
 pub fn embedded_preview_scaled(
     source: &RawSource,
     min_long_edge: u32,
@@ -206,9 +205,6 @@ fn raf_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
     }
     None
 }
-
-// --- Little TIFF reader (byte-order aware, fully bounds-checked) ---
-
 fn rd_u16(b: &[u8], off: usize, le: bool) -> Option<u16> {
     let s = b.get(off..off + 2)?;
     let a = [s[0], s[1]];
@@ -316,9 +312,8 @@ fn consider_jpeg(b: &[u8], off: usize, len: usize, best: &mut Option<(usize, usi
 /// JPEG previews inside the TIFF IFD tree. Walk IFD0, its chained IFDs and its
 /// SubIFDs (bounded) and return the LARGEST displayable embedded JPEG.
 ///
-/// Only callers with a confirmed-RAW input reach this (decode_for's RAW branch),
-/// so the loose header acceptance below is safe: plain `.tif` never lands here,
-/// and a false match simply finds no SOI and returns `None`.
+/// The loose header acceptance below is safe because plain `.tif` never reaches
+/// this function, and a false match simply finds no SOI and returns `None`.
 fn tiff_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
     let le = match bytes.get(0..2)? {
         b"II" => true,
@@ -391,7 +386,6 @@ fn tiff_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
                         consider_jpeg(bytes, off as usize, cnt as usize, &mut best);
                     }
                 }
-                // SubIFDs: descend into each referenced IFD.
                 0x014A => {
                     for off in tiff_entry_long_list(bytes, e, cnt, le) {
                         stack.push(off as usize);
@@ -401,7 +395,6 @@ fn tiff_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
             }
         }
 
-        // Chained next IFD (IFD1 = thumbnail, etc.).
         if let Some(next) = rd_u32(bytes, entries + count * 12, le) {
             let n = next as usize;
             if n >= 8 && n < bytes.len() {
@@ -515,7 +508,7 @@ fn olympus_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
 ///
 /// Note: CR3's PRVW is a reduced preview (~1620px), smaller than the sensor — so
 /// the loupe preview is slightly softer than a full-res decode, in exchange for
-/// avoiding rawler's multi-second full-res path. Acceptable per the plan.
+/// avoiding rawler's multi-second full-res path.
 fn cr3_embedded_jpeg(bytes: &[u8]) -> Option<&[u8]> {
     // Gate on an ftyp box whose brand set mentions "crx " (Canon CR3/CRM).
     if bytes.get(4..8)? != b"ftyp" {
@@ -626,24 +619,18 @@ mod tests {
 
     #[test]
     fn rejects_non_raf_and_bad_pointers() {
-        // Not a RAF at all.
         assert_eq!(embedded_jpeg(b"not a raw file, just bytes here..."), None);
 
-        // RAF magic but the pointer overruns the buffer.
         let mut raf = vec![0u8; 92];
         raf[..16].copy_from_slice(b"FUJIFILMCCD-RAW ");
         raf[84..88].copy_from_slice(&1000u32.to_be_bytes());
         raf[88..92].copy_from_slice(&50u32.to_be_bytes());
         assert_eq!(embedded_jpeg(&raf), None);
 
-        // RAF magic, in-bounds pointer, but the target isn't a JPEG (no SOI).
         let not_jpeg = [0x00u8, 0x01, 0x02, 0x03];
         let raf = fake_raf(&not_jpeg);
         assert_eq!(embedded_jpeg(&raf), None);
     }
-
-    // --- TIFF walker ---
-
     /// One little-endian IFD: a count, `entries` (tag, type, count, inline value)
     /// each 12 bytes, then the `next` IFD offset.
     fn ifd(entries: &[(u16, u16, u32, u32)], next: u32) -> Vec<u8> {
@@ -728,9 +715,6 @@ mod tests {
         // Not a TIFF/RAF/CR3 container at all.
         assert_eq!(embedded_jpeg(&[0u8; 64]), None);
     }
-
-    // --- Olympus MakerNote ---
-
     /// A little-endian ORF-shaped container: IFD0 -> ExifIFD -> MakerNote, whose
     /// own IFD holds the small 0x0100 thumbnail and a CameraSettings sub-IFD
     /// pointing at the large preview. Every offset inside the MakerNote is
@@ -790,13 +774,9 @@ mod tests {
         orf[mn..mn + 8].copy_from_slice(b"Nikon\0\0\0");
         assert_eq!(embedded_jpeg(&orf), None);
     }
-
-    // --- CR3 (ISO-BMFF) ---
-
     /// Minimal CR3: an `ftyp` box with the `crx ` brand, then a `uuid` box holding
     /// a nested `PRVW` box whose payload contains a JPEG.
     fn fake_cr3(jpeg: &[u8]) -> Vec<u8> {
-        // box = size(u32 BE) + fourcc + payload
         fn boxed(fourcc: &[u8; 4], payload: &[u8]) -> Vec<u8> {
             let size = 8 + payload.len();
             let mut v = (size as u32).to_be_bytes().to_vec();
@@ -804,15 +784,12 @@ mod tests {
             v.extend_from_slice(payload);
             v
         }
-        // PRVW: a small header then the JPEG.
         let mut prvw_payload = vec![0u8; 6];
         prvw_payload.extend_from_slice(jpeg);
         let prvw = boxed(b"PRVW", &prvw_payload);
-        // uuid box: 16-byte UUID + the PRVW box.
         let mut uuid_payload = vec![0u8; 16];
         uuid_payload.extend_from_slice(&prvw);
         let uuid = boxed(b"uuid", &uuid_payload);
-        // ftyp: major brand "crx ", minor, one compatible brand.
         let ftyp = boxed(b"ftyp", b"crx \0\0\0\0crx ");
 
         let mut buf = ftyp;
@@ -829,7 +806,6 @@ mod tests {
 
     #[test]
     fn cr3_without_crx_brand_is_ignored() {
-        // An MP4 that is not a CR3 must not be treated as one.
         let mut buf = Vec::new();
         let ftyp = {
             let payload = b"isom\0\0\0\0isommp42";

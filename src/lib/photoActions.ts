@@ -34,7 +34,6 @@ const LABEL_OF: Record<string, string> = {
   "label.purple": "Purple",
 };
 
-/** Run `id` against `targets` instead of the current focus/selection. */
 export function runPhotoCommand(id: CommandId, item: ItemLite, targets: Targets) {
   if (id in RATINGS) return void session.rate(RATINGS[id], undefined, targets);
   if (id in LABEL_OF) {
@@ -62,7 +61,6 @@ export function runPhotoCommand(id: CommandId, item: ItemLite, targets: Targets)
     case "edit.rotateRight":
       return void session.rotate(1, targets);
     default:
-      // No per-photo reading: let it mean what it always means.
       return runCommand(id);
   }
 }

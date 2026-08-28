@@ -1,4 +1,14 @@
-# Cullant — project guide for Claude Code
+# Cullant — project guide for coding agents
+
+This file is the canonical shared project memory for Codex and Claude Code.
+`docs/agent-memory.md` maps the shared and agent-specific instruction files without copying
+their rules. `CLAUDE.md` contains extended implementation notes; read the relevant sections
+when working on RAW, HEIF, Android, video, or platform decoder behavior.
+
+Agent-specific configuration belongs outside this file. Codex uses `.codex/config.toml`
+for project-scoped MCP servers and `.agents/skills/` for repository skills. Claude Code
+may also use `.claude/`, but reusable instructions must be copied into `.agents/skills/`
+or documented here.
 
 Fast, keyboard-first photo/video culling app for Windows. Open source (GPL-3.0-or-later).
 This file is the working context for anyone (human or Claude Code) picking the project up.
