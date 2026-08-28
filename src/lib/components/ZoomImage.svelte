@@ -1,6 +1,13 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { previewUrl, thumbUrl, cullantUrl, mediaVersion, type ItemLite } from "../api";
+  import {
+    previewUrl,
+    thumbUrl,
+    cullantUrl,
+    mediaVersion,
+    rotatedOrientation,
+    type ItemLite,
+  } from "../api";
   import { view, MAX_SCALE } from "../stores/view.svelte";
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
@@ -10,6 +17,7 @@
   import ContextMenu from "./ContextMenu.svelte";
   import { buildPhotoMenu, runPhotoCommand } from "../photoActions";
   import type { MenuNode } from "../menu";
+  import { zoomSignature, type ZoomSnapshot } from "../zoom";
 
   /** Dwell before requesting an *uncached* preview, so arrowing quickly through
    *  photos never enqueues a decode for ones merely passed over. */
@@ -24,6 +32,8 @@
     item,
     standalone = false,
     onPage,
+    syncZoom = null,
+    onZoomChange,
   }: {
     item: ItemLite;
     standalone?: boolean;
@@ -32,6 +42,12 @@
      *  a fixed photo overrides this to page that pinned photo instead, since
      *  moving the shared focus wouldn't change what a pinned pane shows. */
     onPage?: (dir: number) => void;
+    /** Compare-only external camera. Scale is physical (1 = 1:1 pixels), while
+     *  the centre is image-relative, so unlike-sized panes can stay aligned. */
+    syncZoom?: ZoomSnapshot | null;
+    /** Reports direct changes from this pane. External sync applications are
+     *  suppressed so the two panes cannot echo updates back and forth. */
+    onZoomChange?: (zoom: ZoomSnapshot) => void;
   } = $props();
   const page = $derived(onPage ?? ((dir: number) => session.moveFocus(dir)));
 
@@ -212,6 +228,8 @@
     untrack(() => (progressiveStart ? thumbUrl(item) : previewUrl(item))),
   );
   let displayedAlt = $state(untrack(() => item.name));
+  let displayedItemId = $state(untrack(() => item.id));
+  let displayedOrientation = $state(untrack(() => item.orientation ?? 1));
   /** True while the fit view shows the upscaled grid thumb as a stand-in. */
   let softPreview = $state(progressiveStart);
 
@@ -220,6 +238,9 @@
     const alt = item.name;
     const progressive = settings.progressiveLoupe;
     const thumb = thumbUrl(item);
+    const targetItemId = item.id;
+    const targetOrientation = item.orientation ?? 1;
+    const sameItem = targetItemId === untrack(() => displayedItemId);
     // Whether the sharp preview ALREADY EXISTS on disk. Read untracked so the
     // preview pass reporting progress cannot restart the dwell below.
     const alreadyGenerated = untrack(() => catalog.previewReady.has(item.id));
@@ -230,10 +251,14 @@
     let loader: HTMLImageElement | undefined;
 
     const showSoftThumb = () => {
-      if (!progressive) return;
+      // On an in-place rotation the previous preview is still the right photo.
+      // Keep it and rotate it immediately instead of dropping to a soft thumb.
+      if (!progressive || sameItem) return;
       softPreview = true;
       displayedSrc = thumb;
       displayedAlt = alt;
+      displayedItemId = targetItemId;
+      displayedOrientation = targetOrientation;
     };
 
     const loadPreview = () => {
@@ -244,6 +269,8 @@
         softPreview = false;
         displayedSrc = target;
         displayedAlt = alt;
+        displayedItemId = targetItemId;
+        displayedOrientation = targetOrientation;
       };
       loader.src = target;
       // Progressive fit: if the sharp preview takes longer than a beat, paint
@@ -264,7 +291,7 @@
     // so the branch misfired anyway. That was true when readiness came from a
     // polled refetch; `previews:progress` now carries the ids as they complete,
     // so this is accurate the moment a preview exists.
-    if (alreadyGenerated) {
+    if (alreadyGenerated || sameItem) {
       loadPreview();
     } else {
       showSoftThumb();
@@ -283,6 +310,15 @@
       if (softTimer !== undefined) clearTimeout(softTimer);
       if (dwellTimer !== undefined) clearTimeout(dwellTimer);
     };
+  });
+
+  const previewTurn = $derived.by(() => {
+    if (displayedItemId !== item.id) return 0;
+    const target = item.orientation ?? 1;
+    for (let steps = 0; steps < 4; steps++) {
+      if (rotatedOrientation(displayedOrientation, steps) === target) return steps;
+    }
+    return 0;
   });
 
   // Authoritative full-resolution dimensions of the image AS DISPLAYED. The DB
@@ -343,12 +379,52 @@
     return Math.max(frameSize - dispSize, Math.min(0, v));
   }
 
-  /** Clamp a relative center so panning stops exactly at the image edges. */
   function clampCenter(c: number, frameSize: number, dispSize: number): number {
     if (dispSize <= frameSize) return 0.5;
     const half = frameSize / (2 * dispSize);
     return Math.min(1 - half, Math.max(half, c));
   }
+
+  function zoomSnapshot(): ZoomSnapshot {
+    return { zoomed: z.zoomed, scale: z.scale, cx: z.cx, cy: z.cy };
+  }
+
+  let lastAppliedSync = "";
+
+  $effect(() => {
+    const external = syncZoom;
+    void item.id;
+    void frameW;
+    void frameH;
+    if (!standalone || external === null || !refW || !refH || !frameW || !frameH) return;
+
+    const scale = external.zoomed ? clampToRange(external.scale) : fit;
+    const zoomed = external.zoomed && scale > fit + ZOOM_EPS;
+    const width = refW * scale;
+    const height = refH * scale;
+    const applied: ZoomSnapshot = {
+      zoomed,
+      scale,
+      cx: zoomed ? clampCenter(external.cx, frameW, width) : 0.5,
+      cy: zoomed ? clampCenter(external.cy, frameH, height) : 0.5,
+    };
+    lastAppliedSync = zoomSignature(applied);
+    z.zoomed = applied.zoomed;
+    z.scale = applied.scale;
+    z.cx = applied.cx;
+    z.cy = applied.cy;
+  });
+
+  $effect(() => {
+    if (!standalone || !onZoomChange) return;
+    const snapshot = zoomSnapshot();
+    const signature = zoomSignature(snapshot);
+    if (signature === lastAppliedSync) {
+      lastAppliedSync = "";
+      return;
+    }
+    untrack(() => onZoomChange(snapshot));
+  });
 
   function onFitLoad(e: Event) {
     const img = e.currentTarget as HTMLImageElement;
@@ -469,7 +545,7 @@
     // At fit -> DOUBLE_TAP_MAG × fit, centered. clampToRange caps it at 1:1 for
     // large photos, or at the modest detail zoom for small ones.
     const target = clampToRange(fit * DOUBLE_TAP_MAG);
-    if (target <= fit + ZOOM_EPS) return; // nothing beyond fit to reveal
+    if (target <= fit + ZOOM_EPS) return;
     animateZoomIn(target);
   }
 
@@ -573,7 +649,7 @@
       const factor = e.deltaY < 0 ? WHEEL_ZOOM : 1 / WHEEL_ZOOM;
       const current = z.zoomed ? z.scale : fit;
       const next = clampToRange(current * factor);
-      if (!z.zoomed && next <= fit) return; // already fully zoomed out
+      if (!z.zoomed && next <= fit) return;
       if (z.zoomed && next <= fit + 1e-6) {
         // Wheeling out lands on fit: return to the clean fit view.
         z.zoomed = false;
@@ -881,8 +957,6 @@
     return endPeek;
   });
 
-  // --- press and hold: the radial menu ---
-  //
   // Longer than DOUBLE_TAP_MS so a deliberate double-tap never grows into a
   // ring, and long enough that a margin tap has to be held on purpose.
   const RADIAL_HOLD_MS = 350;
@@ -988,12 +1062,21 @@
   function onPointerCancel(e: PointerEvent) {
     endPeek();
     dropRadial();
+    const wasPinching = pinchStartDist > 0;
     pointers.delete(e.pointerId);
     if (pointers.size < 2) {
       pinchStartDist = 0;
       pinchFrameRect = null;
     }
-    if (pointers.size === 0) dragging = false;
+    if (wasPinching && z.zoomed && z.scale <= fit + ZOOM_EPS) settleToFit();
+    if (pointers.size === 1 && z.zoomed && z.scale > fit + ZOOM_EPS) {
+      const [remaining] = [...pointers.values()];
+      lastX = remaining.x;
+      lastY = remaining.y;
+      dragging = true;
+    } else if (pointers.size === 0 || z.scale <= fit + ZOOM_EPS) {
+      dragging = false;
+    }
   }
 </script>
 
@@ -1023,6 +1106,12 @@
       class="fit"
       class:soft={softPreview}
       class:underlay={z.zoomed}
+      class:turning={previewTurn !== 0}
+      style:width={previewTurn % 2 === 1 ? `${frameH}px` : null}
+      style:height={previewTurn % 2 === 1 ? `${frameW}px` : null}
+      style:transform={previewTurn !== 0
+        ? `translate(-50%, -50%) rotate(${previewTurn * 90}deg)`
+        : null}
       draggable="false"
       onload={onFitLoad}
     />
@@ -1128,6 +1217,13 @@
     height: 100%;
     object-fit: contain;
     user-select: none;
+  }
+
+  img.fit.turning {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform-origin: center;
   }
 
   /* Marked for deletion (reject flag or queued delete). Reads as doomed at a

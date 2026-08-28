@@ -28,10 +28,8 @@ import CircleDot from "@lucide/svelte/icons/circle-dot";
 
 export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project";
 
-/** Rows that open a nested panel rather than holding their own control. */
 export type SubPanelId = "filmstripBadges" | "touchBar" | "radial";
 
-/** Rows the dialog renders with bespoke markup. */
 export type CustomSlot = "previewQuality";
 
 export interface SettingGroup {
@@ -61,7 +59,6 @@ interface SettingBase {
   /** Search terms present in neither the label nor the info, for the cases where
    *  the user's word for a thing is not the one the UI uses. */
   keywords?: string;
-  /** Whether the preference currently differs from the value Cullant ships. */
   modified(): boolean;
   reset(): void;
 }
@@ -190,7 +187,6 @@ function barReordered(): boolean {
 }
 
 export const SETTINGS: Setting[] = [
-  // --- Culling ---
   toggle({
     id: "fastCulling",
     group: "culling",
@@ -221,8 +217,17 @@ export const SETTINGS: Setting[] = [
     set: (v) => settings.setLockCarousel(v),
     def: DEFAULTS.lockCarousel,
   }),
+  toggle({
+    id: "compareZoomSync",
+    group: "culling",
+    label: "Sync zoom in Compare",
+    info: "Keeps both panes on the same relative point at the same physical pixel scale. Either pane can lead while you zoom or pan.",
+    keywords: "compare linked zoom pan focus pixels",
+    get: () => settings.compareZoomSync,
+    set: (v) => settings.setCompareZoomSync(v),
+    def: DEFAULTS.compareZoomSync,
+  }),
 
-  // --- Appearance ---
   toggle({
     id: "dimQueuedDeletes",
     group: "appearance",
@@ -282,7 +287,6 @@ export const SETTINGS: Setting[] = [
     reset: () => settings.resetRadial(),
   },
 
-  // --- Quality & performance ---
   {
     kind: "custom",
     slot: "previewQuality",
@@ -315,7 +319,6 @@ export const SETTINGS: Setting[] = [
     def: DEFAULTS.generateVideoThumbs,
   }),
 
-  // --- Bursts ---
   {
     kind: "choice",
     id: "burstMode",
@@ -344,7 +347,6 @@ export const SETTINGS: Setting[] = [
     options: BURST_GAP_CHOICES.map((s) => ({ value: s, label: `${s} s` })),
   }),
 
-  // --- Project & files ---
   numberChoice({
     id: "autoRescanMinutes",
     group: "project",

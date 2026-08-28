@@ -13,7 +13,6 @@
   let newScope = $state(2);
   let newColor = $state("#7a9bd6");
   let error = $state("");
-  /** Tag id currently listening for a shortcut key. */
   let recording = $state<number | null>(null);
 
   const scopeNames = ["Photos", "Videos", "Both"];
@@ -263,6 +262,10 @@
     font-family: inherit;
     color: #e8e8e8;
     background-color: var(--control);
+  }
+
+  select {
+    padding-right: 28px;
   }
 
   button {

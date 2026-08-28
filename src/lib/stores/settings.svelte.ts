@@ -16,11 +16,8 @@ import {
 const PROGRESSIVE_LOUPE_KEY = "cullant.progressiveLoupe";
 const REMEMBER_SESSION_KEY = "cullant.rememberSession";
 const GENERATE_VIDEO_THUMBS_KEY = "cullant.generateVideoThumbs";
-// Per-element visibility of the filmstrip's culling badges. Unlike the main
-// grid (where these always clamp to the actual photo's visible bounds), the
-// filmstrip's thumbnails are small enough that badges may legitimately sit
-// outside the letterboxed photo — so instead of clamping, each badge type is
-// individually toggleable.
+// Small filmstrip thumbnails can place badges outside the letterboxed image,
+// so each badge type has its own visibility setting instead of using grid clamping.
 const FILMSTRIP_SHOW_TYPE_KEY = "cullant.filmstrip.showType";
 const FILMSTRIP_SHOW_RATING_KEY = "cullant.filmstrip.showRating";
 const FILMSTRIP_SHOW_LABEL_KEY = "cullant.filmstrip.showLabel";
@@ -31,6 +28,7 @@ const DIM_DELETES_IN_PREVIEW_KEY = "cullant.dimDeletesInPreview";
 const AUTO_RESCAN_MINUTES_KEY = "cullant.autoRescanMinutes";
 const FAST_CULLING_KEY = "cullant.fastCulling";
 const LOCK_CAROUSEL_KEY = "cullant.lockCarousel";
+const COMPARE_ZOOM_SYNC_KEY = "cullant.compareZoomSync";
 const SKIP_REJECTED_KEY = "cullant.skipRejected";
 const COLLAPSE_BURSTS_KEY = "cullant.collapseBursts";
 const BURST_MODE_KEY = "cullant.burstMode";
@@ -83,6 +81,7 @@ export const DEFAULTS: {
   autoRescanMinutes: number;
   fastCulling: boolean;
   lockCarousel: boolean;
+  compareZoomSync: boolean;
   skipRejected: boolean;
   collapseBursts: boolean;
   burstMode: BurstMode;
@@ -102,6 +101,7 @@ export const DEFAULTS: {
   autoRescanMinutes: 5,
   fastCulling: false,
   lockCarousel: false,
+  compareZoomSync: false,
   skipRejected: false,
   collapseBursts: true,
   burstMode: "fixed",
@@ -132,7 +132,7 @@ function save(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    // persistence is best-effort
+    // Settings persistence is best-effort.
   }
 }
 
@@ -251,6 +251,12 @@ class SettingsStore {
    *  independently of the selection. Off by default. */
   lockCarousel = $state<boolean>(loadBool(LOCK_CAROUSEL_KEY, DEFAULTS.lockCarousel));
 
+  /** Keep both Compare panes on the same image-relative point and physical
+   *  pixel scale. Each pane still clamps to what its own image can display. */
+  compareZoomSync = $state<boolean>(
+    loadBool(COMPARE_ZOOM_SYNC_KEY, DEFAULTS.compareZoomSync),
+  );
+
   /** Step over photos already marked for deletion when moving to the next or
    *  previous photo in the loupe and compare views. Only the next/previous
    *  commands skip: picking a thumbnail directly still opens it, however it is
@@ -349,6 +355,11 @@ class SettingsStore {
     save(LOCK_CAROUSEL_KEY, on);
   }
 
+  setCompareZoomSync(on: boolean) {
+    this.compareZoomSync = on;
+    save(COMPARE_ZOOM_SYNC_KEY, on);
+  }
+
   setDimDeletesInPreview(on: boolean) {
     this.dimDeletesInPreview = on;
     save(DIM_DELETES_IN_PREVIEW_KEY, on);
@@ -364,10 +375,7 @@ class SettingsStore {
     save(COLLAPSE_BURSTS_KEY, on);
   }
 
-  // --- bottom classification bar layout ---
-  /** Order the bar's groups appear in (ids from BOTTOM_BAR_ITEMS). */
   bottomBarOrder = $state<string[]>(initialBottomBar.order);
-  /** Ids the user has hidden from the bar. */
   bottomBarHidden = $state<string[]>(initialBottomBar.hidden);
 
   /** Ordered bar items with resolved label + hidden flag — the shape the
@@ -406,7 +414,6 @@ class SettingsStore {
     this.saveBottomBar();
   }
 
-  // --- radial menu (press and hold over a photo) ---
   /** What each sector holds, clockwise from the top. The list IS the ring: its
    *  length is the sector count, so adding and removing a sector is adding and
    *  removing an entry. Always contains the `more` slot. */

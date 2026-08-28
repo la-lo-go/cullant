@@ -26,7 +26,7 @@ import {
   shutterBucket,
   type FacetBucket,
 } from "./metadataFacets";
-import { LABELS, dirOf, session } from "./stores/session.svelte";
+import { LABELS, session } from "./stores/session.svelte";
 import { tags } from "./stores/tags.svelte";
 import { view } from "./stores/view.svelte";
 
@@ -271,9 +271,6 @@ function classifyBlock(item: ItemLite): MenuNode[] {
 
 function filterBlock(item: ItemLite): MenuNode[] {
   const photos = catalog.media === "photos";
-  const burstKey = session.bursts.byFile.get(item.id) ?? null;
-  const burstSize = burstKey === null ? 0 : (session.bursts.sizes.get(burstKey) ?? 0);
-  const folder = dirOf(item.relPath);
 
   const filters: MenuNode[] = [
     ...(photos
@@ -301,48 +298,19 @@ function filterBlock(item: ItemLite): MenuNode[] {
           ),
         ]
       : []),
-    ...axisRow("Extension", item.ext.toLowerCase(), session.extFilter, (v) => (session.extFilter = v)),
-    // The project root is offered as no filter at all: scoping to it would keep
-    // every photo and read as a filter that does nothing.
-    ...axisRow("Folder", folder, session.folderFilter, (v) => (session.folderFilter = v)),
-    ...axisRow("Day", dayKey(item), session.dateFilter, (v) => (session.dateFilter = v)),
-    ...axisRow("Label", item.label, session.labelFilter, (v) => (session.labelFilter = v)),
-    ...(burstKey !== null
-      ? [
-          {
-            kind: "item" as const,
-            label:
-              session.burstKeyFilter === burstKey
-                ? "Clear burst filter"
-                : `This burst (${burstSize})`,
-            checked: session.burstKeyFilter === burstKey,
-            run: () => {
-              session.burstKeyFilter = session.burstKeyFilter === burstKey ? null : burstKey;
-              session.clampFocus();
-            },
-          },
-        ]
-      : []),
-    ...(item.rating > 0
-      ? [
-          {
-            kind: "item" as const,
-            label:
-              session.minRating === item.rating
-                ? "Clear rating filter"
-                : `Rating: ${"★".repeat(item.rating)} and up`,
-            checked: session.minRating === item.rating,
-            run: () => {
-              session.minRating = session.minRating === item.rating ? 0 : item.rating;
-              session.clampFocus();
-            },
-          },
-        ]
-      : []),
   ];
 
   return [
-    { kind: "submenu", label: "Filter by…", icon: Filter, children: filters },
+    ...(filters.length > 0
+      ? [
+          {
+            kind: "submenu" as const,
+            label: "Filter by this…",
+            icon: Filter,
+            children: filters,
+          },
+        ]
+      : []),
     {
       kind: "submenu",
       label: "Sort by",

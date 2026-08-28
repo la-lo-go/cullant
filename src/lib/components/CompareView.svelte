@@ -4,7 +4,9 @@
   import { session } from "../stores/session.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import { view } from "../stores/view.svelte";
+  import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
+  import { FIT_ZOOM, sameZoom, type ZoomSnapshot } from "../zoom";
   import ZoomImage from "./ZoomImage.svelte";
   import Filmstrip from "./Filmstrip.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -14,6 +16,8 @@
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
   import Layers from "@lucide/svelte/icons/layers";
+  import Link2 from "@lucide/svelte/icons/link-2";
+  import Unlink2 from "@lucide/svelte/icons/unlink-2";
   import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
@@ -61,8 +65,28 @@
     return i === null ? undefined : session.filtered[i];
   });
 
-  // Which pane tracks the focused photo (gets the accent caption).
   const focusedSide = $derived<Side>(pinnedSide === "left" ? "right" : "left");
+
+  let paneZoom = $state<Record<Side, ZoomSnapshot>>({
+    left: { ...FIT_ZOOM },
+    right: { ...FIT_ZOOM },
+  });
+  let sharedZoom = $state<ZoomSnapshot | null>(null);
+  let syncWasOn = false;
+
+  $effect(() => {
+    const enabled = settings.compareZoomSync;
+    if (enabled && !syncWasOn) sharedZoom = { ...paneZoom[focusedSide] };
+    if (!enabled) sharedZoom = null;
+    syncWasOn = enabled;
+  });
+
+  function recordZoom(side: Side, zoom: ZoomSnapshot) {
+    paneZoom[side] = { ...zoom };
+    if (settings.compareZoomSync && !sameZoom(sharedZoom, zoom)) {
+      sharedZoom = { ...zoom };
+    }
+  }
 
   /** The other pane's photo, as an index into `filtered`, so the filmstrip can
    *  mark both photos on screen. The focused one is marked by the strip itself
@@ -81,7 +105,6 @@
       pinnedSide = null;
       pinnedItem = null;
     } else if (current) {
-      // Pinning one pane unpins the other.
       pinnedSide = side;
       pinnedItem = current;
     }
@@ -128,7 +151,7 @@
   });
 
   // When a pinned pane's photo is deleted from the catalog, drop the pin so
-  // ZoomImage stops requesting a dead id (mirrors the selectedIds pruning). A
+  // ZoomImage stops requesting a dead id. A
   // photo merely filtered out still shows via pinnedLive's snapshot fallback,
   // so this checks the catalog itself, not the visible filter.
   $effect(() => {
@@ -160,9 +183,28 @@
     >
       {#if view.fullscreen}<Minimize size={16} />{:else}<Maximize size={16} />{/if}
     </button>
+    <button
+      class="back sync-btn"
+      class:active={settings.compareZoomSync}
+      title={settings.compareZoomSync ? "Stop syncing zoom" : "Sync zoom and pan"}
+      aria-label={settings.compareZoomSync ? "Stop syncing zoom" : "Sync zoom and pan"}
+      aria-pressed={settings.compareZoomSync}
+      onclick={(e) => {
+        settings.setCompareZoomSync(!settings.compareZoomSync);
+        e.currentTarget.blur();
+      }}
+    >
+      {#if settings.compareZoomSync}<Link2 size={15} />{:else}<Unlink2 size={15} />{/if}
+    </button>
     {#if left}
       <div class="pane" class:pinned={pinnedSide === "left"}>
-        <ZoomImage item={left} standalone onPage={pagerFor("left")} />
+        <ZoomImage
+          item={left}
+          standalone
+          onPage={pagerFor("left")}
+          syncZoom={settings.compareZoomSync ? sharedZoom : null}
+          onZoomChange={(zoom) => recordZoom("left", zoom)}
+        />
         <button
           class="pin-btn"
           class:active={pinnedSide === "left"}
@@ -198,7 +240,13 @@
     {/if}
     {#if right}
       <div class="pane" class:pinned={pinnedSide === "right"}>
-        <ZoomImage item={right} standalone onPage={pagerFor("right")} />
+        <ZoomImage
+          item={right}
+          standalone
+          onPage={pagerFor("right")}
+          syncZoom={settings.compareZoomSync ? sharedZoom : null}
+          onZoomChange={(zoom) => recordZoom("right", zoom)}
+        />
         <button
           class="pin-btn"
           class:active={pinnedSide === "right"}
@@ -246,7 +294,6 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    /* Anchor for the collapsed filmstrip's floating peek tab. */
     position: relative;
   }
 
@@ -258,7 +305,6 @@
     position: relative;
   }
 
-  /* Portrait / narrow: stack the two panes vertically instead of side by side. */
   @media (max-width: 640px), (max-aspect-ratio: 3 / 4) {
     .panes {
       flex-direction: column;
@@ -294,7 +340,12 @@
     top: 46px;
   }
 
-  .fullscreen-btn.active {
+  .sync-btn {
+    top: 82px;
+  }
+
+  .fullscreen-btn.active,
+  .sync-btn.active {
     background: rgba(var(--accent-rgb), 0.5);
     color: #fff;
   }
@@ -384,8 +435,6 @@
     color: #ff6b6b;
   }
 
-  /* The loupe's burst pill, in the caption. Compare hid it entirely before, so
-     there was no way to tell you were judging two frames of the same burst. */
   .burst {
     display: inline-flex;
     align-items: center;

@@ -101,7 +101,6 @@
     }
   }
 
-  // The sections a whole-plan commit will actually run (those with work).
   function activePhasesOf(p: CommitPlan): CommitSection[] {
     return (["deletes", "moves", "copies", "xmp"] as CommitSection[]).filter(
       (s) => sectionCount(p, s) > 0,
@@ -215,7 +214,7 @@
 
   /** Begin a press-and-hold on `key`; `onFire` runs if it reaches the end. */
   function startHold(key: string, durationMs: number, e: PointerEvent, onFire: () => void) {
-    if (e.button !== 0) return; // primary press only
+    if (e.button !== 0) return;
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     holdKey = key;
@@ -250,12 +249,10 @@
     if (!fired && elapsed < HOLD_DELAY_MS) onTap?.();
   }
 
-  /** Fill width for a row, in percent — 0 unless this row is the one held. */
   function fillOf(key: string): number {
     return holdKey === key ? holdFrac * 100 : 0;
   }
 
-  // --- history ---
   // Pending stays the default view, so the commit flow is unchanged; History is
   // here rather than behind its own toolbar button because it is the same
   // subject seen from the other side.
@@ -888,7 +885,6 @@
     cursor: default;
   }
 
-  /* The battery-style fill that grows left→right while a row is held. */
   .hold-fill {
     position: absolute;
     left: 0;
@@ -977,6 +973,10 @@
     cursor: pointer;
   }
 
+  select {
+    padding-right: 28px;
+  }
+
   /* Corner dismiss: borderless icon button, ≥40px hit area for touch. */
   .close-x {
     display: inline-flex;
@@ -1003,7 +1003,6 @@
     cursor: default;
   }
 
-  /* --- committing view --- */
   .committing {
     display: flex;
     flex-direction: column;
@@ -1120,7 +1119,6 @@
     margin: 0;
   }
 
-  /* --- history --- */
 
   .tabs {
     display: flex;

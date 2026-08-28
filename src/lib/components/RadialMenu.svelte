@@ -37,8 +37,8 @@
   import type { CommandId } from "../keyboard/keymap";
   import Star from "@lucide/svelte/icons/star";
   import Circle from "@lucide/svelte/icons/circle";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
 
-  /** One thing the ring can carry out. */
   export interface RadialAction {
     label: string;
     /** Drawn in the sector. A `glyph` wins when both are present. */
@@ -90,6 +90,7 @@
    *  radius made a group fall open and shut again on the way past, since the
    *  same few pixels meant both "nothing armed" and "leave this group". */
   const CLIMB_R = 15;
+  const CLIMB_DWELL_MS = 160;
   const R_INNER = 40;
   const R_OUTER = 108;
   /** The box leaves room for the armed sector to grow past R_OUTER. */
@@ -145,15 +146,24 @@
   );
 
   // Descending happens on the way out, so it is part of the same motion rather
-  // than a second gesture. Climbing back out needs a return to the dead zone,
-  // which is also how the ring is cancelled — one rule, not two.
+  // than a second gesture.
   $effect(() => {
     if (descended === null) {
       const hit = armed >= 0 ? rootActions[armed] : undefined;
       if (hit?.children && dist > DESCEND_R) descended = hit;
-    } else if (dist <= CLIMB_R) {
-      descended = null;
     }
+  });
+
+  // Returning through the hub is common while changing direction inside a
+  // submenu. Require a short, deliberate dwell before climbing out; leaving
+  // the hub cancels the pending climb immediately.
+  $effect(() => {
+    if (descended === null || dist > CLIMB_R) return;
+    const current = descended;
+    const timer = setTimeout(() => {
+      if (descended === current && dist <= CLIMB_R) descended = null;
+    }, CLIMB_DWELL_MS);
+    return () => clearTimeout(timer);
   });
 
   $effect(() => {
@@ -253,12 +263,17 @@
         {@const Icon = action.icon}
         <Icon size={19} strokeWidth={2} />
       {/if}
+      {#if action.children}
+        <span class="submenu-mark" class:armed={on} title="Pull outward to open">
+          <ChevronRight size={10} strokeWidth={3} />
+        </span>
+      {/if}
       {#if on && !action.glyph}
         <!-- Named only while armed, and directly under its own icon so the eye
              never has to travel to find out what it is about to do. A glyph
              sector says it already: "★★★" with "3 stars" under it is the same
              word twice. -->
-        <span class="name">{action.label}</span>
+        <span class="name">{action.label}{action.children ? " · pull out" : ""}</span>
       {/if}
     </span>
   {/each}
@@ -320,6 +335,23 @@
   .ico.armed {
     color: #fff;
     transform: translate(-50%, -50%) scale(1.12);
+  }
+
+  .submenu-mark {
+    position: absolute;
+    left: calc(100% + 1px);
+    top: 2px;
+    display: inline-flex;
+    color: var(--accent);
+    opacity: 0.8;
+    transition:
+      opacity 90ms ease-out,
+      transform 90ms ease-out;
+  }
+
+  .submenu-mark.armed {
+    opacity: 1;
+    transform: translateX(3px);
   }
 
   .glyph {

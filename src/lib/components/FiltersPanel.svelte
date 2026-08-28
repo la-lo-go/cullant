@@ -30,8 +30,8 @@
   import FilterX from "@lucide/svelte/icons/filter-x";
   import ArrowUp from "@lucide/svelte/icons/arrow-up";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
+  import CalendarDays from "@lucide/svelte/icons/calendar-days";
 
-  // The four plain flag states first, then the two combinations.
   const flagOptions: { value: FlagFilter; label: string; icon?: typeof Check }[] = [
     { value: "all", label: "All" },
     { value: "pick", label: "Picks", icon: Check },
@@ -159,6 +159,37 @@
   // most recent end. Keys are ISO dates, so a plain string sort is chronological.
   const presentDays = $derived([...facets.days].sort().reverse());
 
+  const dayFormatter = new Intl.DateTimeFormat("en", {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+  const monthFormatter = new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  });
+
+  function dateFromDayKey(day: string): Date {
+    return new Date(`${day}T00:00:00Z`);
+  }
+
+  const dayGroups = $derived.by(() => {
+    const groups: { key: string; label: string; days: string[] }[] = [];
+    for (const day of presentDays) {
+      const key = day.slice(0, 7);
+      let group = groups[groups.length - 1];
+      if (!group || group.key !== key) {
+        group = { key, label: monthFormatter.format(dateFromDayKey(day)), days: [] };
+        groups.push(group);
+      }
+      group.days.push(day);
+    }
+    return groups;
+  });
+
   // Displayed-aspect orientations that occur.
   const presentOrientations = $derived(facets.orientations);
 
@@ -270,7 +301,6 @@
   }
 </script>
 
-<!-- Backdrop closes the panel on an outside click. -->
 <div class="backdrop" role="presentation" {...dismiss}></div>
 
 <div
@@ -491,30 +521,29 @@
   {#if presentDays.length > 1 || session.dateFilter !== null}
     <section>
       <span class="lbl">Capture day</span>
-      <div class="row wrap">
-        <button
-          class="seg"
-          class:active={session.dateFilter === null}
-          onclick={() => {
-            session.dateFilter = null;
+      <label class="dayselect">
+        <CalendarDays size={14} />
+        <select
+          aria-label="Capture day"
+          value={session.dateFilter ?? ""}
+          onpointerdown={() => (pointerPick = true)}
+          onkeydown={() => (pointerPick = false)}
+          onchange={(e) => {
+            session.dateFilter = e.currentTarget.value || null;
             session.clampFocus();
+            releaseAfterPointerPick(e);
           }}
         >
-          <span>All</span>
-        </button>
-        {#each presentDays as day (day)}
-          <button
-            class="seg"
-            class:active={session.dateFilter === day}
-            onclick={() => {
-              session.dateFilter = session.dateFilter === day ? null : day;
-              session.clampFocus();
-            }}
-          >
-            <span>{day}</span>
-          </button>
-        {/each}
-      </div>
+          <option value="">All capture days</option>
+          {#each dayGroups as group (group.key)}
+            <optgroup label={group.label}>
+              {#each group.days as day (day)}
+                <option value={day}>{dayFormatter.format(dateFromDayKey(day))}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+      </label>
     </section>
   {/if}
 
@@ -845,6 +874,8 @@
     cursor: pointer;
     font-size: 11px;
     font-family: inherit;
+    line-height: 1;
+    min-height: 24px;
   }
 
   .clear:hover:not(:disabled) {
@@ -884,9 +915,23 @@
     flex-wrap: wrap;
   }
 
-  /* Look comes from the app-wide :global(select) rule; only layout here. */
+  /* The global select rule owns the appearance. This class owns layout only. */
   .metaselect {
     width: 100%;
+    font-size: 12px;
+  }
+
+  .dayselect {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    color: #7f8589;
+  }
+
+  .dayselect select {
+    flex: 1;
+    min-width: 0;
     font-size: 12px;
   }
 

@@ -180,7 +180,6 @@ export interface CommitPlan {
   xmpHash: string;
 }
 
-/** A single commit section, targetable by the per-section hold-to-run buttons. */
 export type CommitSection = "deletes" | "moves" | "copies" | "xmp";
 
 export interface CommitOutcome {
@@ -209,7 +208,6 @@ export interface Targets {
   asGroups: boolean;
 }
 
-/** One past commit, as the history list shows it. */
 export interface CommitSummary {
   id: number;
   startedAt: number;
@@ -372,6 +370,20 @@ export function cullantUrl(path: string): string {
  *  path straight from these params, so a mismatch means a permanent miss. */
 export function mediaVersion(item: ItemLite): string {
   return `v=${item.mtime}&o=${item.orientation ?? 1}`;
+}
+
+/** Match the backend's EXIF quarter-turn cycles for immediate UI feedback. */
+export function rotatedOrientation(orientation: number | null, steps: number): number {
+  const cycles = [
+    [1, 6, 3, 8],
+    [2, 7, 4, 5],
+  ];
+  const from = orientation ?? 1;
+  for (const cycle of cycles) {
+    const index = cycle.indexOf(from);
+    if (index >= 0) return cycle[((index + steps) % 4 + 4) % 4];
+  }
+  return cycles[0][((steps % 4) + 4) % 4];
 }
 
 export function thumbUrl(item: ItemLite): string {

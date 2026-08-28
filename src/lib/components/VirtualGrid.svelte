@@ -80,9 +80,9 @@
   }
 
   const OVERSCAN_ROWS = 2;
-  const LONG_PRESS_MS = 400; // touch: hold this long to start a marquee
-  const MARGIN_Y = 14; // breathing room below the last row
-  const MARGIN_TOP = 6; // tighter gap above the first row / first header
+  const LONG_PRESS_MS = 400;
+  const MARGIN_Y = 14;
+  const MARGIN_TOP = 6;
   // Inter-cell gap: the pitch (CELL) still tiles edge-to-edge for all hit-test
   // and marquee math, but each cell's visual box is inset by GAP so adjacent
   // focus/selection outlines never touch. Kept out of the pitch math on purpose.
@@ -177,6 +177,11 @@
   let scrollTop = $state(0);
   let width = $state(0);
   let height = $state(0);
+  // Pull-to-refresh begins at the top and owns that position until its visual
+  // cycle settles. Catalog refreshes rebuild `layout`; without this guard the
+  // focus-following effect can mistake that rebuild for navigation and jump to
+  // an old, off-screen focus.
+  let pullRefreshOwnsTop = false;
 
   // Bounce the grid when arrow keys try to move past the first/last cell.
   // Track the last-seen bump so switching into the grid view doesn't replay a
@@ -462,6 +467,13 @@
     else if (bottom > viewport.scrollTop + height) viewport.scrollTo({ top: bottom - height });
   }
 
+  function keepRefreshAtTop() {
+    if (!viewport) return;
+    viewport.scrollTop = 0;
+    scrollTop = 0;
+    savedScroll = { root: catalog.project?.rootPath ?? "", top: 0 };
+  }
+
   // True once the offset saved by the previous visit has been re-applied. Until
   // then `followFocus` must not run: it would scroll from the top of the grid
   // and win over the restore that is about to happen.
@@ -507,6 +519,10 @@
       void restoreScroll();
       return;
     }
+    if (pullRefreshOwnsTop) {
+      keepRefreshAtTop();
+      return;
+    }
     followFocus();
   });
 
@@ -548,22 +564,56 @@
     layout.headers.filter((h) => h.y + h.h >= scrollTop - HEADER_H0 && h.y <= scrollTop + height),
   );
 
-  // Outermost (depth-0) group whose section currently sits under the top of the
-  // viewport — pinned as an overlay when the sticky option is on. Headers ascend
-  // by y, so the last depth-0 header at or above scrollTop is the current one.
+  // Group path whose section currently sits under the top of the viewport,
+  // pinned as an overlay when the sticky option is on. Headers ascend by y, so
+  // the last header at each depth at or above scrollTop is the current path.
   const stickyHeader = $derived.by(() => {
     if (!session.stickyGroupHeader || session.groupBy.length === 0) return null;
-    let cur: Header | null = null;
+    const path: Header[] = [];
     for (const h of layout.headers) {
       if (h.y > scrollTop) break;
-      if (h.depth === 0) cur = h;
+      // Replacing an ancestor invalidates every descendant from the previous
+      // branch. Headers at the new boundary then refill the path in order.
+      path.length = h.depth;
+      path.push(h);
     }
-    return cur;
+    if (path.length === 0) return null;
+    return {
+      label: path.map((h) => h.label).join(" / "),
+      count: path[path.length - 1].count,
+    };
   });
+
+  const KINETIC_SCROLL_MIN_SPEED = 0.6; // px/ms
+  const KINETIC_SCROLL_GUARD_MS = 180;
+  const TAP_SCROLL_SLOP = 2;
+  let lastScrollSampleAt = 0;
+  let lastScrollSampleTop = 0;
+  let suppressTouchTapUntil = 0;
 
   function onScroll() {
     if (!viewport) return;
-    scrollTop = viewport.scrollTop;
+    const now = performance.now();
+    const nextTop = viewport.scrollTop;
+    const dt = now - lastScrollSampleAt;
+    const distance = Math.abs(nextTop - lastScrollSampleTop);
+    if (
+      !pullRefreshOwnsTop &&
+      lastScrollSampleAt > 0 &&
+      dt > 0 &&
+      distance / dt >= KINETIC_SCROLL_MIN_SPEED
+    ) {
+      suppressTouchTapUntil = now + KINETIC_SCROLL_GUARD_MS;
+    }
+    lastScrollSampleAt = now;
+    lastScrollSampleTop = nextTop;
+    // Momentum can move the viewport without a pointermove for the new contact
+    // used to stop it. That displacement still makes the contact a scroll.
+    if (touchTap && Math.abs(nextTop - touchTap.scrollTop) > TAP_SCROLL_SLOP) {
+      touchTap.moved = true;
+      cancelLongPress();
+    }
+    scrollTop = nextTop;
     // Recorded as it changes rather than on unmount, so the last position is
     // already stored whatever order the teardown runs in.
     if (restored) savedScroll = { root: catalog.project?.rootPath ?? "", top: scrollTop };
@@ -593,8 +643,15 @@
   // `moved` still false is a tap (select + open the loupe); any larger movement
   // is a scroll and leaves focus/selection untouched. Cleared when a marquee begins.
   const TAP_SLOP = 10;
-  let touchTap: { index: number; onCell: boolean; x: number; y: number; moved: boolean } | null =
-    null;
+  let touchTap: {
+    index: number;
+    onCell: boolean;
+    x: number;
+    y: number;
+    scrollTop: number;
+    moved: boolean;
+    suppressForKineticScroll: boolean;
+  } | null = null;
   // Touch: last tap on a cell while a selection was active, for double-tap-to-open.
   const DOUBLE_TAP_MS = 320;
   let lastSelTap: { index: number; time: number } | null = null;
@@ -716,7 +773,15 @@
       // LONG_PRESS_MS without scrolling) starts a marquee instead. Selection is
       // NOT set here, so the initial press of a scroll never jumps the focus.
       cancelLongPress();
-      touchTap = { index, onCell, x: e.clientX, y: e.clientY, moved: false };
+      touchTap = {
+        index,
+        onCell,
+        x: e.clientX,
+        y: e.clientY,
+        scrollTop: viewport.scrollTop,
+        moved: false,
+        suppressForKineticScroll: performance.now() < suppressTouchTapUntil,
+      };
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
         touchTap = null; // became a marquee, not a tap
@@ -850,7 +915,14 @@
       const tap = touchTap;
       touchTap = null;
       cancelLongPress();
-      if (e.type !== "pointercancel" && !tap.moved) {
+      const shiftedWhileDown =
+        viewport !== null && Math.abs(viewport.scrollTop - tap.scrollTop) > TAP_SCROLL_SLOP;
+      if (
+        e.type !== "pointercancel" &&
+        !tap.moved &&
+        !tap.suppressForKineticScroll &&
+        !shiftedWhileDown
+      ) {
         if (!tap.onCell) {
           // A clean tap on empty grid space clears the whole selection, matching
           // the desktop empty-space click (which resolves to an empty marquee).
@@ -990,17 +1062,37 @@
 
   async function doRefresh() {
     refreshing = true;
+    pullRefreshOwnsTop = true;
+    keepRefreshAtTop();
     pullY = PULL_REST;
     const started = Date.now();
-    void api.rescanProject();
     // The rescan is fire-and-forget (its scan:* events drive the catalog); hold
     // the spinner a beat so an instant, no-op rescan still reads as a deliberate
     // refresh rather than a flicker.
     const wait = Math.max(0, MIN_SPIN_MS - (Date.now() - started));
-    await new Promise((r) => setTimeout(r, wait));
+    await Promise.allSettled([
+      api.rescanProject(),
+      new Promise((resolve) => setTimeout(resolve, wait)),
+    ]);
     refreshing = false;
     pullY = 0;
   }
+
+  // A large project can keep scanning after the pull animation has returned.
+  // Release ownership only after both have ended; otherwise scan:done rebuilds
+  // the layout later and focus-following can still jump to the old focus.
+  $effect(() => {
+    if (!pullRefreshOwnsTop || refreshing || catalog.scanning) return;
+    let cancelled = false;
+    void tick().then(() => {
+      if (cancelled || refreshing || catalog.scanning) return;
+      keepRefreshAtTop();
+      pullRefreshOwnsTop = false;
+    });
+    return () => {
+      cancelled = true;
+    };
+  });
 
   // Attach the touch listeners manually: touchmove must be non-passive so its
   // preventDefault (suppressing native overscroll) actually takes effect.
@@ -1113,7 +1205,10 @@
                padding .frame.stacked opens up, so the deck never leaves the
                cell and never touches its neighbours. -->
           {#if stacked}
-            {@const behind = session.filtered.slice(v.first + 1, v.first + 3)}
+            {@const behind = session.filtered.slice(
+              v.first + 1,
+              v.first + Math.min(v.span, 3),
+            )}
             <!-- One card per frame it actually hides, capped at two: a 2-shot
                  burst that showed three cards would misreport its own size. -->
             {#if behind[1]}
@@ -1283,8 +1378,8 @@
   </div>
   </div>
   {#if stickyHeader}
-    <!-- Pinned copy of the current outermost group's header: rides the top of the
-         viewport (cells scroll under it) so the group and its count stay visible. -->
+    <!-- Pinned copy of the current group path: rides the top of the viewport
+         (cells scroll under it) so the full hierarchy and count stay visible. -->
     <div class="sticky-group" style="padding-left:{padX}px">
       <span class="sg-label">{stickyHeader.label}</span>
       <span class="sg-count">{stickyHeader.count}</span>

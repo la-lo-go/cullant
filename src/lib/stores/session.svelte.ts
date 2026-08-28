@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { untrack } from "svelte";
 import {
   api,
+  rotatedOrientation,
   type CullState,
   type ItemLite,
   type MediaTab,
@@ -134,9 +135,7 @@ function isInFolder(relPath: string, folder: string): boolean {
   return dir === folder || dir.startsWith(`${folder}/`);
 }
 
-// Re-exported so the many existing `from "../stores/session.svelte"` imports
-// keep working; the list itself lives in `labels.ts`, reachable from modules
-// this store imports (and therefore cannot import back).
+// Keep the existing import path without creating a cycle through this store.
 export { LABELS, type Label } from "../labels";
 
 /** Grid thumbnail size. `medium` is the historical default. */
@@ -166,7 +165,6 @@ export function describeHalf(h: PairHalf): string {
 }
 
 class SessionStore {
-  // --- filters ---
   flagFilter = $state<FlagFilter>("all");
   minRating = $state(0);
   labelFilter = $state<string | null>(null);
@@ -286,10 +284,8 @@ class SessionStore {
     saveNumPref(FOLDER_TREE_WIDTH_KEY, px);
   }
 
-  // --- mirror mode (M4 flips the display; fan-out is live already) ---
   mirrorMode = $state(true);
 
-  // --- focus / selection (indexes into `filtered`) ---
   /** Index into `filtered`; -1 is the sentinel "no item focused" state (no
    *  grid cell matches, so nothing shows the focus outline). */
   #focusedIndex = $state(-1);
@@ -336,7 +332,6 @@ class SessionStore {
    *  where the range ended rather than from the anchor. */
   private rangeHead = $state<number | null>(null);
 
-  // --- grid view (density + grouping) ---
   /** Grid thumbnail size; persisted per project via the session blob. */
   gridDensity = $state<GridDensity>("medium");
   /** Ordered grouping dimensions (keys from `gridGroups`); [] = no grouping
@@ -753,7 +748,6 @@ class SessionStore {
     return { position: index + 1, total: members.length, members };
   });
 
-  // --- grid cells (collapsed bursts) ---
 
   /** Start index (into `filtered`) of every grid cell, when each burst is drawn
    *  as ONE stacked cell. null means one cell per photo, which is both the
@@ -859,7 +853,6 @@ class SessionStore {
     this.selectionAnchor = this.focusedIndex;
   }
 
-  // --- survey (N-up elimination) ---
 
   /** Candidate file ids while the survey is open. It SHRINKS as photos are
    *  eliminated — that is the whole point of the view, and why this is its own
@@ -986,7 +979,6 @@ class SessionStore {
     return { pick, reject, unflagged, total: catalog.items.length };
   });
 
-  // --- per-project session persistence (migration v4) ---
 
   /** Serialise the current view + filters + focus for persistence. */
   sessionSnapshot(): SavedSession {
@@ -1257,7 +1249,6 @@ class SessionStore {
     }
   }
 
-  // --- multi-selection (Windows-style) ---
 
   /** Plain click: focus only, drop any selection. */
   selectOnly(index: number) {
@@ -1556,7 +1547,21 @@ class SessionStore {
   async rotate(steps: number, override?: Targets) {
     const t = override ?? this.targets();
     if (!t) return;
-    this.applyStates(await api.rotate(t, steps));
+    const previous = t.ids.map((id) => this.localGuess(id, {}));
+    this.applyStates(
+      t.ids.map((id) => {
+        const current = catalog.items.find((item) => item.id === id);
+        return this.localGuess(id, {
+          orientation: rotatedOrientation(current?.orientation ?? null, steps),
+        });
+      }),
+    );
+    try {
+      this.applyStates(await api.rotate(t, steps));
+    } catch (error) {
+      this.applyStates(previous);
+      throw error;
+    }
   }
 
   /** Toggle a task tag on the focused photo (fan-out included). */
@@ -1567,7 +1572,6 @@ class SessionStore {
     tags.applyChanges(await api.toggleTaskTag(t, tagId));
   }
 
-  // --- pending actions ---
   /** File ids with a queued delete (for grid badges). */
   pendingDeleteIds = $state<Set<number>>(new Set());
   pendingCount = $state(0);

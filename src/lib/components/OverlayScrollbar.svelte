@@ -34,7 +34,6 @@
 
   const MIN_THUMB = 24;
   const INSET = 2; // gap between the thumb's ends and the container corners
-  // How long the thumb lingers after the last scroll before fading out.
   const HIDE_DELAY_MS = 900;
 
   const track = $derived(Math.max(0, viewport - INSET * 2));
@@ -123,13 +122,13 @@
 {/if}
 
 <style>
-  /* The track floats over the content edge and never intercepts input; only
-     the thumb itself is interactive. Sits above the panel resize handles
-     (z-index 25) so grabbing the thumb wins where the two overlap. */
+  /* The full 8px edge is the scrollbar's hover target. It deliberately owns
+     that narrow gutter so a hidden thumb can reappear wherever the pointer
+     enters, rather than requiring the user to guess its current position. */
   .track {
     position: absolute;
     z-index: 26;
-    pointer-events: none;
+    pointer-events: auto;
   }
 
   .track.vertical {
@@ -157,6 +156,11 @@
   }
 
   .thumb.shown {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .track:hover .thumb {
     opacity: 1;
     pointer-events: auto;
   }

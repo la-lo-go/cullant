@@ -25,6 +25,7 @@
   import { api } from "../api";
   import { backdropDismiss } from "../backdrop";
   import { IS_TOUCH } from "../platform";
+  import { getVersion } from "@tauri-apps/api/app";
   import DragList from "./DragList.svelte";
   import RadialPreview from "./RadialPreview.svelte";
   import ContextMenu from "./ContextMenu.svelte";
@@ -127,11 +128,8 @@
     onshowsupport,
   }: {
     onclose: () => void;
-    /** Open the keyboard-shortcuts dialog (owned by the page). */
     onshowkeybindings: () => void;
-    /** Open the task-tag editor (owned by the page). */
     onshowtags: () => void;
-    /** Open the support dialog (owned by the page). */
     onshowsupport: () => void;
   } = $props();
 
@@ -159,7 +157,6 @@
 
   const openPanel = $derived(SETTINGS.find((s) => s.id === view.settingsPanel) ?? null);
 
-  /** Settings of a group that survive the current search. */
   function rows(group: GroupId): Setting[] {
     return SETTINGS.filter((s) => s.group === group && matches(s, query));
   }
@@ -217,7 +214,6 @@
     panel?.focus();
   }
 
-  /** Wrap a control handler so a pointer press releases focus afterwards. */
   function releasing<E extends Event>(fn: (e: E) => void): (e: E) => void {
     return (e) => {
       fn(e);
@@ -225,13 +221,18 @@
     };
   }
 
-  // --- preview quality ---
-
   // Preview quality invalidates every generated preview, so the select never
   // applies straight away: it parks the choice here and waits for a confirm.
   let pendingQuality = $state<number | null>(null);
   let previewBusy = $state(false);
   let previewMsg = $state("");
+  let appVersion = $state("");
+
+  $effect(() => {
+    void getVersion()
+      .then((version) => (appVersion = version))
+      .catch(() => (appVersion = "unknown"));
+  });
 
   function changePreviewQuality(e: Event) {
     const select = e.currentTarget as HTMLSelectElement;
@@ -664,6 +665,7 @@
               <span>Reimport this project…</span>
             </button>
           {/if}
+          <p class="version">Cullant {appVersion || "…"}</p>
           {/if}
         {/if}
       </div>
@@ -868,7 +870,11 @@
   .greset {
     margin-left: auto;
     display: inline-flex;
-    padding: 3px;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    padding: 0;
     border: 0;
     border-radius: 4px;
     background: none;
@@ -956,10 +962,10 @@
   select {
     flex: none;
     max-width: 46%;
-    padding: 3px 6px;
+    padding: 3px 28px 3px 8px;
     border: 1px solid var(--border);
     border-radius: 6px;
-    background: var(--surface);
+    background-color: var(--surface);
     color: inherit;
     font-size: 11.5px;
   }
@@ -1101,6 +1107,13 @@
     margin-top: 12px;
   }
 
+  .version {
+    margin: 12px 0 0;
+    color: #74747d;
+    font-size: 10.5px;
+    text-align: center;
+  }
+
   .empty {
     margin: 24px 0;
     text-align: center;
@@ -1122,8 +1135,6 @@
     opacity: 0.8;
     cursor: pointer;
   }
-
-  /* --- sub-panels --- */
 
   .sub {
     display: flex;
