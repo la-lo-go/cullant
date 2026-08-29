@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- PTP/MTP cameras and mass-storage readers, cards and drives. -->
+    <usb-device class="6" />
+    <usb-device class="8" />
+</resources>

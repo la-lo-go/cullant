@@ -260,7 +260,9 @@ export const api = {
   openProject: (path: string) => invoke<ProjectInfo>("open_project", { path }),
   // Android SAF folder picker; returns a content:// tree URI (or null if
   // cancelled) suitable to pass to openProject. No-op returning null on desktop.
-  pickSafTree: () => invoke<string | null>("pick_saf_tree"),
+  pickSafTree: (preferRemovable = false) =>
+    invoke<string | null>("pick_saf_tree", { preferRemovable }),
+  consumeUsbAttach: () => invoke<boolean>("consume_usb_attach"),
   currentProject: () => invoke<ProjectInfo | null>("current_project"),
   // Files still awaiting metadata (Phase A). Used to recover the open gate if a
   // `metadata:done` event was missed on the startup auto-open path.

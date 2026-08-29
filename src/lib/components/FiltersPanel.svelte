@@ -963,11 +963,14 @@
     border: 1px solid transparent;
     background: var(--control);
     color: #bbb;
-    padding: 4px 9px;
+    box-sizing: border-box;
+    min-height: 26px;
+    padding: 0 9px;
     border-radius: 3px;
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
+    line-height: 1;
   }
 
   .seg:hover:not(.active) {
@@ -1032,11 +1035,14 @@
     border: 1px solid transparent;
     background: var(--control);
     color: #bbb;
-    padding: 4px 9px;
+    box-sizing: border-box;
+    min-height: 26px;
+    padding: 0 9px;
     border-radius: 3px;
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
+    line-height: 1;
   }
 
   .tagseg:hover:not(.active) {

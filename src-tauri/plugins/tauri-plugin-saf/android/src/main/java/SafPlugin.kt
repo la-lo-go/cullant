@@ -12,6 +12,7 @@ import android.graphics.Matrix
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.os.storage.StorageManager
 import android.provider.DocumentsContract
@@ -32,6 +33,11 @@ import java.io.ByteArrayOutputStream
 @InvokeArg
 class TreeArgs {
     lateinit var treeUri: String
+}
+
+@InvokeArg
+class OpenTreeArgs {
+    var preferRemovable: Boolean = false
 }
 
 @InvokeArg
@@ -115,13 +121,38 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun openTree(invoke: Invoke) {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        val args = invoke.parseArgs(OpenTreeArgs::class.java)
+        val intent = preferredTreeIntent(args.preferRemovable)
         intent.addFlags(
             Intent.FLAG_GRANT_READ_URI_PERMISSION or
                 Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
                 Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
         )
         startActivityForResult(invoke, intent, "openTreeResult")
+    }
+
+    private fun preferredTreeIntent(preferRemovable: Boolean): Intent {
+        if (preferRemovable && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val sm = activity.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+            val mounted = sm.storageVolumes.filter {
+                it.isRemovable &&
+                    (it.state == Environment.MEDIA_MOUNTED ||
+                        it.state == Environment.MEDIA_MOUNTED_READ_ONLY)
+            }
+            // Android exposes no stable UsbDevice -> StorageVolume mapping. If
+            // there is one removable volume, its picker root is unambiguous.
+            if (mounted.size == 1) return mounted.single().createOpenDocumentTreeIntent()
+        }
+        return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+    }
+
+    @Command
+    fun consumeUsbAttach(invoke: Invoke) {
+        val attached = activity.intent?.action == "android.hardware.usb.action.USB_DEVICE_ATTACHED"
+        if (attached) activity.intent?.action = null
+        val res = JSObject()
+        res.put("value", attached)
+        invoke.resolve(res)
     }
 
     @ActivityCallback

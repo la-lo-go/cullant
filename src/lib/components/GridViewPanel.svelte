@@ -4,7 +4,7 @@
   import { settings } from "../stores/settings.svelte";
   import { backdropDismiss } from "../backdrop";
   import { keepClamped } from "../popover";
-  import { GROUP_DIMS } from "../gridGroups";
+  import { usefulGroupDims } from "../gridGroups";
   import DragList from "./DragList.svelte";
   import InfoTip from "./InfoTip.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -22,13 +22,8 @@
     { value: "large", label: "Large" },
   ];
 
-  // Offering "Burst" in a project that has none would produce one flat "—"
-  // section — an option that visibly does nothing. It stays offered once
-  // chosen, so an active level never vanishes from under the user.
   const offered = $derived(
-    GROUP_DIMS.filter(
-      (d) => d.key !== "burst" || session.hasBursts || session.groupBy.includes("burst"),
-    ),
+    usefulGroupDims(session.filtered, session.groupContext, session.groupBy),
   );
 
   // Dimensions still free to pick at a given level: any not used elsewhere (the

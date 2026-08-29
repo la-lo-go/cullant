@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, thumbUrl, videoUrl, type ItemLite } from "../api";
+  import { api, previewUrl, thumbUrl, videoUrl, type ItemLite } from "../api";
   import { remuxForPlayback, type Remux } from "../video/remux";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
@@ -80,19 +80,30 @@
 
   $effect(() => () => remux?.cancel());
 
-  // Poster shown over the (paused, pre-playback) video so the clip never opens on
-  // a black frame. We paint the grid thumbnail; if it 404s — no poster was ever
-  // generated (no extractor / undecodable) — we fall back to the same film-glyph
-  // placeholder the grid uses. Cleared once playback starts, and reset per clip
-  // in the item-change effect below.
-  //
-  // The THUMBNAIL, not the preview: videos are excluded from the preview
-  // pregeneration pass (only stills get one), so asking for a preview kicks off a
-  // cold full-size frame extraction on the spot and shows the placeholder until it
-  // lands. The thumbnail is the frame the grid just painted — already on disk and
-  // in the memcache, so it appears at once.
+  // Paint the cached grid thumbnail immediately, then replace it with the sharp
+  // preview when its on-demand video-frame extraction finishes.
   let showPoster = $state(true);
   let posterFailed = $state(false);
+  let sharpPoster = $state<{ itemId: number; src: string } | null>(null);
+  const posterSrc = $derived(
+    sharpPoster?.itemId === item.id ? sharpPoster.src : thumbUrl(item),
+  );
+
+  $effect(() => {
+    const itemId = item.id;
+    const sharpSrc = previewUrl(item);
+    const sharp = new Image();
+    sharp.onload = () => {
+      if (item.id !== itemId) return;
+      sharpPoster = { itemId, src: sharpSrc };
+      posterFailed = false;
+    };
+    sharp.src = sharpSrc;
+    return () => {
+      sharp.onload = null;
+      sharp.src = "";
+    };
+  });
 
   // The volume slider is hidden until the speaker button is pressed, then pops up
   // in a small popover above the button (touch-friendly: no permanent slider
@@ -277,7 +288,7 @@
           <span>{item.ext.toUpperCase()}</span>
         </div>
       {:else}
-        <img src={thumbUrl(item)} alt="" onerror={() => (posterFailed = true)} />
+        <img src={posterSrc} alt="" onerror={() => (posterFailed = true)} />
       {/if}
     </div>
   {/if}

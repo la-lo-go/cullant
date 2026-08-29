@@ -285,6 +285,37 @@
     };
   });
 
+  // Android can launch (or re-target) the singleTask activity when the user
+  // chooses Cullant for a newly attached camera, card reader or USB drive. The
+  // native side retains that intent until this effect consumes it, which covers
+  // both a cold launch and onNewIntent while the WebView is already alive.
+  let attachedStoragePickerOpen = false;
+  async function openAttachedStorage() {
+    if (!IS_ANDROID || attachedStoragePickerOpen) return;
+    attachedStoragePickerOpen = true;
+    let handledAttach = false;
+    try {
+      if (!(await api.consumeUsbAttach())) return;
+      handledAttach = true;
+      const uri = await api.pickSafTree(true);
+      if (uri) await openProject(uri);
+    } finally {
+      attachedStoragePickerOpen = false;
+      // A second device can arrive while Android's picker is open. MainActivity
+      // retains that latest intent even though the event handler above was busy;
+      // consume it after this picker settles instead of dropping the attach.
+      if (handledAttach) queueMicrotask(() => void openAttachedStorage());
+    }
+  }
+
+  $effect(() => {
+    if (!IS_ANDROID) return;
+    const onUsbAttached = () => void openAttachedStorage();
+    window.addEventListener("cullant:usb-attached", onUsbAttached);
+    void openAttachedStorage();
+    return () => window.removeEventListener("cullant:usb-attached", onUsbAttached);
+  });
+
   // Custom window chrome is Windows-only: macOS/Linux keep native decorations
   // (restored in the Rust setup hook), and touch/mobile never gets a titlebar.
   const showTitleBar = IS_WINDOWS && !IS_TOUCH;
@@ -1096,7 +1127,10 @@
      button instead of overshooting to ~36px. */
   .media-toggle button,
   .segmented button {
-    min-height: 24px;
+    box-sizing: border-box;
+    height: 24px;
+    min-height: 0;
+    line-height: 1;
   }
 
   .preload {
@@ -1223,7 +1257,7 @@
     /* 3px vertical (not 4px) to match .media-btn's rhythm — with the .segmented
        container's own 2px padding + 1px border, this lands the pill at the same
        total height (38px) as every other toolbar button. */
-    padding: 3px 9px;
+    padding: 0 9px;
     transition: background-color 0.15s ease, color 0.15s ease;
   }
 
@@ -1262,7 +1296,7 @@
     border: 1px solid transparent;
     border-radius: 6px;
     background: transparent;
-    padding: 3px 10px;
+    padding: 0 10px;
     font-weight: 600;
     font-size: 12px;
     transition: background-color 0.15s ease, color 0.15s ease;

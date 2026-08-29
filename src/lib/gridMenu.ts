@@ -13,7 +13,7 @@
  */
 
 import { api, type ItemLite, type SyncFrom } from "./api";
-import { GROUP_DIMS, dayKey } from "./gridGroups";
+import { dayKey, hasGroupValue, usefulGroupDims } from "./gridGroups";
 import { runCommand } from "./keyboard/dispatcher.svelte";
 import type { CommandId } from "./keyboard/keymap";
 import { pruneMenu, type MenuNode } from "./menu";
@@ -324,16 +324,11 @@ function filterBlock(item: ItemLite): MenuNode[] {
     },
     {
       kind: "submenu",
-      label: "Group by",
+      label: "Group by this…",
       icon: Group,
-      children: [
-        {
-          kind: "item",
-          label: "No grouping",
-          checked: session.groupBy.length === 0,
-          run: () => (session.groupBy = []),
-        },
-        ...GROUP_DIMS.filter((d) => d.key !== "burst" || session.hasBursts).map((d) => ({
+      children: usefulGroupDims(session.filtered, session.groupContext, session.groupBy)
+        .filter((d) => hasGroupValue(d, item, session.groupContext))
+        .map((d) => ({
           kind: "item" as const,
           label: d.label,
           checked: session.groupBy.length === 1 && session.groupBy[0] === d.key,
@@ -341,7 +336,6 @@ function filterBlock(item: ItemLite): MenuNode[] {
             (session.groupBy =
               session.groupBy.length === 1 && session.groupBy[0] === d.key ? [] : [d.key]),
         })),
-      ],
     },
   ];
 }

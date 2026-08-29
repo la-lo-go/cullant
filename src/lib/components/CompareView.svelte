@@ -71,20 +71,29 @@
     left: { ...FIT_ZOOM },
     right: { ...FIT_ZOOM },
   });
-  let sharedZoom = $state<ZoomSnapshot | null>(null);
+  let sharedZoom = $state<{
+    leader: Side;
+    zoom: ZoomSnapshot;
+    animate: boolean;
+  } | null>(null);
   let syncWasOn = false;
 
   $effect(() => {
     const enabled = settings.compareZoomSync;
-    if (enabled && !syncWasOn) sharedZoom = { ...paneZoom[focusedSide] };
+    if (enabled && !syncWasOn) {
+      sharedZoom = { leader: focusedSide, zoom: { ...paneZoom[focusedSide] }, animate: false };
+    }
     if (!enabled) sharedZoom = null;
     syncWasOn = enabled;
   });
 
-  function recordZoom(side: Side, zoom: ZoomSnapshot) {
+  function recordZoom(side: Side, zoom: ZoomSnapshot, animate: boolean) {
     paneZoom[side] = { ...zoom };
-    if (settings.compareZoomSync && !sameZoom(sharedZoom, zoom)) {
-      sharedZoom = { ...zoom };
+    if (
+      settings.compareZoomSync &&
+      (sharedZoom?.leader !== side || sharedZoom.animate !== animate || !sameZoom(sharedZoom.zoom, zoom))
+    ) {
+      sharedZoom = { leader: side, zoom: { ...zoom }, animate };
     }
   }
 
@@ -132,6 +141,12 @@
     if (pinnedSide === side) return pageWhilePinned;
     if (focusedSide === side) return undefined;
     return (dir) => session.stepCompanion(dir);
+  }
+
+  /** Wheel paging advances the comparison pair from either pane. Touch swipes
+   *  retain pane-local paging for deliberate companion replacement. */
+  function pagePair(dir: number) {
+    session.moveFocus(dir);
   }
 
   // Warm the cache one photo ahead of the focus, so arrowing quickly through a
@@ -202,8 +217,12 @@
           item={left}
           standalone
           onPage={pagerFor("left")}
-          syncZoom={settings.compareZoomSync ? sharedZoom : null}
-          onZoomChange={(zoom) => recordZoom("left", zoom)}
+          onWheelPage={pagePair}
+          syncZoom={settings.compareZoomSync && sharedZoom && sharedZoom.leader !== "left"
+            ? sharedZoom.zoom
+            : null}
+          syncAnimate={sharedZoom?.animate ?? false}
+          onZoomChange={(zoom, animate) => recordZoom("left", zoom, animate)}
         />
         <button
           class="pin-btn"
@@ -244,8 +263,12 @@
           item={right}
           standalone
           onPage={pagerFor("right")}
-          syncZoom={settings.compareZoomSync ? sharedZoom : null}
-          onZoomChange={(zoom) => recordZoom("right", zoom)}
+          onWheelPage={pagePair}
+          syncZoom={settings.compareZoomSync && sharedZoom && sharedZoom.leader !== "right"
+            ? sharedZoom.zoom
+            : null}
+          syncAnimate={sharedZoom?.animate ?? false}
+          onZoomChange={(zoom, animate) => recordZoom("right", zoom, animate)}
         />
         <button
           class="pin-btn"

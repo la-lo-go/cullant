@@ -220,6 +220,38 @@ export function groupDim(key: string): GroupDim | undefined {
   return DIM_BY_KEY.get(key);
 }
 
+/** Whether an item has a real value for a grouping dimension. */
+export function hasGroupValue(
+  dim: GroupDim,
+  item: ItemLite,
+  ctx: GroupContext = EMPTY_GROUP_CONTEXT,
+): boolean {
+  return dim.of(item, ctx).key !== UNKNOWN.key;
+}
+
+/**
+ * Dimensions that can split the current items into at least two sections.
+ * Active dimensions remain available so a restored or newly filtered view can
+ * still display and remove them even if it temporarily collapses to one value.
+ */
+export function usefulGroupDims(
+  items: readonly ItemLite[],
+  ctx: GroupContext = EMPTY_GROUP_CONTEXT,
+  activeKeys: readonly string[] = [],
+): GroupDim[] {
+  const active = new Set(activeKeys);
+  return GROUP_DIMS.filter((dim) => {
+    if (active.has(dim.key)) return true;
+    let first: string | undefined;
+    for (const item of items) {
+      const key = dim.of(item, ctx).key;
+      if (first === undefined) first = key;
+      else if (key !== first) return true;
+    }
+    return false;
+  });
+}
+
 /** The bucket a photo falls into for a given dimension key (or null for an
  *  unknown dimension). Used by the grid to detect section boundaries + labels. */
 export function bucketOf(

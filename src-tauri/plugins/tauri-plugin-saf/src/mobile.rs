@@ -22,9 +22,18 @@ impl<R: Runtime> Saf<R> {
     /// Launch `ACTION_OPEN_DOCUMENT_TREE`, persist read/write permission on the
     /// picked tree, and return `(tree_uri, root_document_id)`. Blocks until the
     /// user picks a folder or cancels.
-    pub fn open_tree(&self) -> Result<(String, String)> {
-        let res: OpenTreeResponse = self.0.run_mobile_plugin("openTree", ())?;
+    pub fn open_tree(&self, prefer_removable: bool) -> Result<(String, String)> {
+        let res: OpenTreeResponse = self.0.run_mobile_plugin(
+            "openTree",
+            OpenTreePayload { prefer_removable },
+        )?;
         Ok((res.tree_uri, res.root_document_id))
+    }
+
+    /// Consume a USB-attach intent delivered to the main Android activity.
+    pub fn consume_usb_attach(&self) -> Result<bool> {
+        let res: BooleanResponse = self.0.run_mobile_plugin("consumeUsbAttach", ())?;
+        Ok(res.value)
     }
 
     /// Resolve the root document id of a previously-persisted tree URI.

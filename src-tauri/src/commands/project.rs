@@ -172,11 +172,11 @@ pub fn open_project(
 /// cancelled. On desktop this is a no-op returning `None` — the frontend uses
 /// the native directory dialog there instead.
 #[tauri::command]
-pub fn pick_saf_tree(app: AppHandle) -> AppResult<Option<String>> {
+pub fn pick_saf_tree(app: AppHandle, prefer_removable: Option<bool>) -> AppResult<Option<String>> {
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_saf::SafExt;
-        match app.saf().open_tree() {
+        match app.saf().open_tree(prefer_removable.unwrap_or(false)) {
             Ok((tree_uri, _root)) => Ok(Some(tree_uri)),
             Err(e) => {
                 tracing::info!("SAF picker returned no folder: {e}");
@@ -186,8 +186,25 @@ pub fn pick_saf_tree(app: AppHandle) -> AppResult<Option<String>> {
     }
     #[cfg(not(target_os = "android"))]
     {
-        let _ = app;
+        let _ = (app, prefer_removable);
         Ok(None)
+    }
+}
+
+/// Return true once for an Android USB-attach intent delivered to Cullant.
+#[tauri::command]
+pub fn consume_usb_attach(app: AppHandle) -> AppResult<bool> {
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_saf::SafExt;
+        app.saf()
+            .consume_usb_attach()
+            .map_err(|e| AppError::Other(format!("saf: {e}")))
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(false)
     }
 }
 

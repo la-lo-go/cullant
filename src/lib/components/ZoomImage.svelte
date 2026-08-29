@@ -17,7 +17,7 @@
   import ContextMenu from "./ContextMenu.svelte";
   import { buildPhotoMenu, runPhotoCommand } from "../photoActions";
   import type { MenuNode } from "../menu";
-  import { zoomSignature, type ZoomSnapshot } from "../zoom";
+  import { sameZoom, zoomSignature, type ZoomSnapshot } from "../zoom";
 
   /** Dwell before requesting an *uncached* preview, so arrowing quickly through
    *  photos never enqueues a decode for ones merely passed over. */
@@ -32,7 +32,9 @@
     item,
     standalone = false,
     onPage,
+    onWheelPage,
     syncZoom = null,
+    syncAnimate = false,
     onZoomChange,
   }: {
     item: ItemLite;
@@ -42,14 +44,20 @@
      *  a fixed photo overrides this to page that pinned photo instead, since
      *  moving the shared focus wouldn't change what a pinned pane shows. */
     onPage?: (dir: number) => void;
+    /** Optional wheel-specific pager. Compare uses it to advance the pair from
+     *  either pane without changing pane-local touch swipes. */
+    onWheelPage?: (dir: number) => void;
     /** Compare-only external camera. Scale is physical (1 = 1:1 pixels), while
      *  the centre is image-relative, so unlike-sized panes can stay aligned. */
     syncZoom?: ZoomSnapshot | null;
+    /** The leader made a discrete toggle, so the follower should animate. */
+    syncAnimate?: boolean;
     /** Reports direct changes from this pane. External sync applications are
      *  suppressed so the two panes cannot echo updates back and forth. */
-    onZoomChange?: (zoom: ZoomSnapshot) => void;
+    onZoomChange?: (zoom: ZoomSnapshot, animate: boolean) => void;
   } = $props();
   const page = $derived(onPage ?? ((dir: number) => session.moveFocus(dir)));
+  const wheelPage = $derived(onWheelPage ?? page);
 
   let frame = $state<HTMLDivElement | null>(null);
   let frameW = $state(0);
@@ -390,6 +398,8 @@
   }
 
   let lastAppliedSync = "";
+  let lastReceivedSync = "";
+  let applyingAnimatedSync = false;
 
   $effect(() => {
     const external = syncZoom;
@@ -408,23 +418,77 @@
       cx: zoomed ? clampCenter(external.cx, frameW, width) : 0.5,
       cy: zoomed ? clampCenter(external.cy, frameH, height) : 0.5,
     };
-    lastAppliedSync = zoomSignature(applied);
-    z.zoomed = applied.zoomed;
-    z.scale = applied.scale;
-    z.cx = applied.cx;
-    z.cy = applied.cy;
+    const signature = zoomSignature(applied);
+    if (applyingAnimatedSync && signature === lastReceivedSync) return;
+    if (sameZoom(zoomSnapshot(), applied)) {
+      lastReceivedSync = signature;
+      return;
+    }
+    lastReceivedSync = signature;
+    lastAppliedSync = signature;
+
+    if (syncAnimate && (z.zoomed !== applied.zoomed || Math.abs(z.scale - applied.scale) > ZOOM_EPS)) {
+      animateSyncedZoom(applied);
+    } else {
+      applyingAnimatedSync = false;
+      z.zoomed = applied.zoomed;
+      z.scale = applied.scale;
+      z.cx = applied.cx;
+      z.cy = applied.cy;
+    }
   });
 
   $effect(() => {
     if (!standalone || !onZoomChange) return;
     const snapshot = zoomSnapshot();
     const signature = zoomSignature(snapshot);
+    if (applyingAnimatedSync) return;
     if (signature === lastAppliedSync) {
       lastAppliedSync = "";
       return;
     }
-    untrack(() => onZoomChange(snapshot));
+    const animate = settling;
+    untrack(() => onZoomChange(snapshot, animate));
   });
+
+  /** Mirror a discrete toggle from the other pane without feeding its
+   *  intermediate animation frames back into Compare as a new leader. */
+  function animateSyncedZoom(target: ZoomSnapshot) {
+    cancelSettle();
+    applyingAnimatedSync = true;
+    settling = true;
+
+    if (!target.zoomed) {
+      z.scale = fit;
+      z.cx = 0.5;
+      z.cy = 0.5;
+      settleTimer = setTimeout(() => {
+        settleTimer = undefined;
+        z.zoomed = false;
+        settling = false;
+        applyingAnimatedSync = false;
+      }, 180);
+      return;
+    }
+
+    z.zoomed = true;
+    z.scale = fit;
+    z.cx = 0.5;
+    z.cy = 0.5;
+    toggleRaf = requestAnimationFrame(() => {
+      toggleRaf = requestAnimationFrame(() => {
+        toggleRaf = 0;
+        z.scale = target.scale;
+        z.cx = target.cx;
+        z.cy = target.cy;
+        settleTimer = setTimeout(() => {
+          settleTimer = undefined;
+          settling = false;
+          applyingAnimatedSync = false;
+        }, 180);
+      });
+    });
+  }
 
   function onFitLoad(e: Event) {
     const img = e.currentTarget as HTMLImageElement;
@@ -667,7 +731,7 @@
     if (Math.sign(delta) !== Math.sign(wheelAccum)) wheelAccum = 0;
     wheelAccum += delta;
     if (Math.abs(wheelAccum) >= WHEEL_NAV_THRESHOLD) {
-      page(wheelAccum > 0 ? 1 : -1);
+      wheelPage(wheelAccum > 0 ? 1 : -1);
       wheelAccum = 0;
     }
   }
@@ -708,6 +772,7 @@
       toggleRaf = 0;
     }
     settling = false;
+    applyingAnimatedSync = false;
   }
 
   function settleToFit() {

@@ -18,6 +18,12 @@ pub struct SafEntry {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct OpenTreePayload {
+    pub prefer_removable: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct TreePayload {
     pub tree_uri: String,
 }
@@ -39,6 +45,11 @@ pub(crate) struct RootDocumentResponse {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AccessResponse {
     pub ok: bool,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct BooleanResponse {
+    pub value: bool,
 }
 
 /// Status of the tree URI's backing storage volume (Android `StorageManager`).
