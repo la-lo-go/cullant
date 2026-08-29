@@ -5,6 +5,19 @@ target) and an **Android** port (`src-tauri/gen/android/`, checked into git).
 This doc covers how to build each, the size/target tradeoffs, and how release
 signing works for Android.
 
+## Versioning
+
+`package.json` is the canonical application version. Tauri reads it through
+`src-tauri/tauri.conf.json`, and the Settings UI reads the packaged Tauri version at
+runtime. Change every required lockfile and Rust package entry with one command:
+
+```sh
+npm run version:set -- 0.11.0
+```
+
+`npm run check` fails when `package.json`, `package-lock.json`, `Cargo.toml`, or
+`Cargo.lock` disagree.
+
 ## Windows desktop
 
 ```sh
@@ -103,6 +116,18 @@ That is where the ingest reports its per-phase timings and its storage counters
 (`N sources, X GB, Ys in opens, Z backend calls`) — the numbers that say whether
 an import is bound by reading files or by something else.
 
+### Attached cameras and removable storage
+
+The Android manifest registers Cullant for USB imaging devices and mass-storage
+devices. A cold or warm USB attach opens the Storage Access Framework folder picker.
+On Android 10 or later, the picker starts at the removable volume when exactly one
+mounted removable volume is available; otherwise it opens at the normal root list.
+
+Android does not provide a stable mapping from every `UsbDevice` to a
+`StorageVolume`. An internally mounted SD card does not emit the USB attach intent,
+and a PTP camera that is not exposed through a document provider cannot be browsed
+without a separate PTP implementation.
+
 ### Launch (splash) screen
 
 The launch screen is customized: the app theme's `windowBackground` is a
@@ -120,6 +145,29 @@ Files involved (all under `src-tauri/gen/android/app/src/main/res/`):
   `splash_logo`.
 - `values/themes.xml` and `values-night/themes.xml` — set
   `android:windowBackground` to `@drawable/splash_background`.
+
+### App icons
+
+Run `powershell -ExecutionPolicy Bypass -File logo/generate-icons.ps1` from the
+repository root to regenerate every platform icon. Do not run `tauri icon`
+directly into `src-tauri/icons`: its Android foreground fills the whole adaptive
+icon canvas and launchers zoom/crop the Cullant mark.
+
+The generator uses `logo/icon-square.svg` as the canonical complete icon.
+`logo/icon.svg` and `logo/logo.svg` are identical portrait exports of the older
+artwork and are not icon inputs. Android is deliberately split into three layers:
+
+- `logo/logo-w.svg` plus `icon-manifest.json` generates the legacy square/round
+  launchers.
+- `logo/android-background.svg` provides the canonical `#222728` background.
+- `logo/android-foreground.svg` places the current mark at 48dp on Android's
+  108dp adaptive-icon canvas. The inset is baked into the PNG because launchers
+  apply their own mask and zoom after loading it.
+- `logo/android-adaptive-icon.xml` and `android-background-color.xml` restore
+  the adaptive resource wiring that the Tauri command resets.
+
+The script copies those Android assets into `gen/android/app/src/main/res/` and
+removes Tauri's unused generated `src-tauri/icons/android/` subtree.
 
 ### Re-running `tauri android init`
 
