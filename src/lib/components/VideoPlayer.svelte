@@ -49,6 +49,11 @@
   // The element failed. Try to rewrite the clip into something it will accept
   // before giving up — see lib/video/remux.ts for why that so often works.
   async function onVideoError() {
+    const failedItemId = item.id;
+    // A WebView may emit `play` before the decoder rejects the first frame.
+    // Restore the poster so neither that broken frame nor Chromium's broken-file
+    // glyph becomes the backdrop for the remux/fallback UI.
+    showPoster = true;
     mediaErrorCode = video?.error?.code ?? null;
     console.error("video playback failed", mediaErrorCode, video?.error?.message);
     // A second failure is the remuxed source failing too; nothing left to try.
@@ -61,17 +66,25 @@
     remuxProgress = 0;
     try {
       const handle = await remuxForPlayback(item, (f) => (remuxProgress = f));
+      if (item.id !== failedItemId) {
+        handle.cancel();
+        return;
+      }
       remux = handle;
       remuxSrc = handle.src;
       void handle.done.then(
-        () => (remuxing = false),
+        () => {
+          if (item.id === failedItemId) remuxing = false;
+        },
         (e) => {
+          if (item.id !== failedItemId) return;
           console.error("in-app remux failed", e);
           remuxing = false;
           failed = true;
         },
       );
     } catch (e) {
+      if (item.id !== failedItemId) return;
       console.error("in-app remux unavailable", e);
       remuxing = false;
       failed = true;
@@ -84,24 +97,64 @@
   // preview when its on-demand video-frame extraction finishes.
   let showPoster = $state(true);
   let posterFailed = $state(false);
+  let sharpPosterFailed = $state(false);
   let sharpPoster = $state<{ itemId: number; src: string } | null>(null);
   const posterSrc = $derived(
     sharpPoster?.itemId === item.id ? sharpPoster.src : thumbUrl(item),
   );
 
+  function onPosterError(itemId: number, failedSrc: string) {
+    // Requests from the previous clip can finish after navigation. They must not
+    // replace the new clip's pending sharp poster with the placeholder.
+    if (item.id !== itemId || posterSrc !== failedSrc) return;
+    if (sharpPoster?.itemId === itemId && sharpPoster.src === failedSrc) {
+      sharpPosterFailed = true;
+      sharpPoster = null;
+      posterFailed = false;
+      return;
+    }
+    posterFailed = true;
+  }
+
   $effect(() => {
     const itemId = item.id;
     const sharpSrc = previewUrl(item);
-    const sharp = new Image();
-    sharp.onload = () => {
-      if (item.id !== itemId) return;
-      sharpPoster = { itemId, src: sharpSrc };
-      posterFailed = false;
+    let sharp: HTMLImageElement | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    sharpPosterFailed = false;
+
+    const loadSharp = (attempt: number) => {
+      sharp = new Image();
+      sharp.onload = () => {
+        if (cancelled || item.id !== itemId) return;
+        sharpPoster = { itemId, src: sharpSrc };
+        sharpPosterFailed = false;
+        posterFailed = false;
+      };
+      sharp.onerror = () => {
+        if (cancelled || item.id !== itemId) return;
+        // A first interactive poster request can be displaced by rapid grid
+        // navigation. Retry once with a distinct URL before declaring the clip
+        // genuinely undecodable.
+        if (attempt === 0) {
+          retryTimer = setTimeout(() => loadSharp(1), 250);
+        } else {
+          sharpPosterFailed = true;
+        }
+      };
+      sharp.src = attempt === 0 ? sharpSrc : `${sharpSrc}&posterRetry=1`;
     };
-    sharp.src = sharpSrc;
+    loadSharp(0);
+
     return () => {
-      sharp.onload = null;
-      sharp.src = "";
+      cancelled = true;
+      if (retryTimer !== null) clearTimeout(retryTimer);
+      if (sharp) {
+        sharp.onload = null;
+        sharp.onerror = null;
+        sharp.src = "";
+      }
     };
   });
 
@@ -169,6 +222,7 @@
     failed = false;
     showPoster = true;
     posterFailed = false;
+    sharpPosterFailed = false;
     volOpen = false;
     // Drop any remux belonging to the previous clip, along with its object URL.
     remux?.cancel();
@@ -259,21 +313,23 @@
   onpointerdown={revealUi}
 >
   <!-- svelte-ignore a11y_media_has_caption -->
-  <video
-    class="player"
-    bind:this={video}
-    bind:paused
-    bind:currentTime
-    bind:duration
-    bind:muted
-    bind:volume
-    {src}
-    preload="metadata"
-    playsinline
-    onclick={togglePlay}
-    onplay={() => (showPoster = false)}
-    onerror={onVideoError}
-  ></video>
+  {#key item.id}
+    <video
+      class="player"
+      bind:this={video}
+      bind:paused
+      bind:currentTime
+      bind:duration
+      bind:muted
+      bind:volume
+      {src}
+      preload="metadata"
+      playsinline
+      onclick={togglePlay}
+      onplay={() => (showPoster = false)}
+      onerror={onVideoError}
+    ></video>
+  {/key}
 
   {#if showPoster}
     <!-- Pre-playback poster so the clip doesn't open on a black frame. Passes
@@ -282,13 +338,17 @@
          clip's own frame instead of over black — only playback actually starting
          clears it. -->
     <div class="video-poster">
-      {#if posterFailed}
+      {#if posterFailed && sharpPosterFailed}
         <div class="no-poster">
           <Film size={48} />
           <span>{item.ext.toUpperCase()}</span>
         </div>
+      {:else if posterFailed}
+        <div class="poster-waiting" aria-hidden="true"></div>
       {:else}
-        <img src={posterSrc} alt="" onerror={() => (posterFailed = true)} />
+        {#key `${item.id}:${posterSrc}`}
+          <img src={posterSrc} alt="" onerror={() => onPosterError(item.id, posterSrc)} />
+        {/key}
       {/if}
     </div>
   {/if}

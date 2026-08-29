@@ -118,8 +118,12 @@ an import is bound by reading files or by something else.
 
 ### Attached cameras and removable storage
 
-The Android manifest registers Cullant for USB imaging devices and mass-storage
-devices. A cold or warm USB attach opens the Storage Access Framework folder picker.
+The Android manifest registers Cullant for USB attachment without a class filter so
+it appears in the system app chooser for cameras and removable storage. Many MTP
+cameras identify the device or interface as composite/vendor-specific instead of
+class 6 or 8, so a class-only filter silently excludes them. Cullant never claims the
+raw USB interface: after the user chooses it, a cold or warm attach opens the Storage
+Access Framework folder picker.
 On Android 10 or later, the picker starts at the removable volume when exactly one
 mounted removable volume is available; otherwise it opens at the normal root list.
 
