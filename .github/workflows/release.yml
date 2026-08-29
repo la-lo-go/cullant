@@ -32,7 +32,9 @@ jobs:
         run: |
           tag="${{ github.event.release.tag_name }}"
           tag="${tag#v}"
-          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          # tauri.conf.json intentionally delegates its version to package.json.
+          # Resolve that indirection before comparing the release tag.
+          conf=$(node -p "const v=require('./src-tauri/tauri.conf.json').version; v === '../package.json' ? require('./package.json').version : v")
           pkg=$(node -p "require('./package.json').version")
           if [ "$tag" != "$conf" ] || [ "$tag" != "$pkg" ]; then
             echo "::error::tag=$tag tauri.conf.json=$conf package.json=$pkg — all three must agree"
