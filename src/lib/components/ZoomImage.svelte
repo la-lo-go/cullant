@@ -78,6 +78,7 @@
   let pinchStartDist = 0;
   let pinchStartScale = 1;
   let pinchAnchor = { x: 0.5, y: 0.5 };
+  let pinchIds: [number, number] | null = null;
   let pinchedThisGesture = false;
   // Frame rect cached at pinch start: framePoint() is hit on every pointermove
   // of a live pinch, and getBoundingClientRect forces layout each call. Cleared
@@ -191,6 +192,11 @@
     return () => {
       clearPageTimer();
       cancelSettle();
+      pointers.clear();
+      pinchIds = null;
+      pinchStartDist = 0;
+      pinchFrameRect = null;
+      dragging = false;
     };
   });
 
@@ -420,14 +426,22 @@
     };
     const signature = zoomSignature(applied);
     if (applyingAnimatedSync && signature === lastReceivedSync) return;
-    if (sameZoom(zoomSnapshot(), applied)) {
+    // This effect applies a new camera sent by Compare. Its dependencies must
+    // not include our local camera: otherwise a gesture that starts in the
+    // follower pane wakes this effect first and the old leader camera is
+    // immediately written back, making that pane appear impossible to zoom.
+    const current = untrack(() => zoomSnapshot());
+    if (sameZoom(current, applied)) {
       lastReceivedSync = signature;
       return;
     }
     lastReceivedSync = signature;
     lastAppliedSync = signature;
 
-    if (syncAnimate && (z.zoomed !== applied.zoomed || Math.abs(z.scale - applied.scale) > ZOOM_EPS)) {
+    if (
+      syncAnimate &&
+      (current.zoomed !== applied.zoomed || Math.abs(current.scale - applied.scale) > ZOOM_EPS)
+    ) {
       animateSyncedZoom(applied);
     } else {
       applyingAnimatedSync = false;
@@ -787,8 +801,48 @@
     }, 180);
   }
 
+  function beginPinch() {
+    if (pointers.size < 2) return;
+    const ids = [...pointers.keys()].slice(0, 2) as [number, number];
+    const a = pointers.get(ids[0]);
+    const b = pointers.get(ids[1]);
+    if (!a || !b) return;
+
+    pinchIds = ids;
+    pinchFrameRect = frame ? frame.getBoundingClientRect() : null;
+    pinchStartDist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+    pinchStartScale = z.zoomed ? z.scale : fit;
+    const m = framePoint({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 });
+    pinchAnchor = anchorUnder(m.x, m.y);
+    if (!z.zoomed) {
+      z.scale = fit;
+      z.zoomed = true;
+      centerOn(pinchAnchor, m.x, m.y, fit);
+    }
+    dragging = false;
+  }
+
+  function finishTouchPointer(pointerId: number) {
+    const belongedToPinch = pinchIds?.includes(pointerId) ?? false;
+    pointers.delete(pointerId);
+
+    if (pointers.size >= 2 && belongedToPinch) {
+      // Android can add/remove a third finger without cancelling the whole
+      // stream. Rebase on the two survivors so distance and anchor never refer
+      // to a pointer that no longer exists.
+      beginPinch();
+    } else if (pointers.size < 2) {
+      pinchIds = null;
+      pinchStartDist = 0;
+      pinchFrameRect = null;
+    }
+  }
+
   function onPointerDown(e: PointerEvent) {
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    // Capture on the stable frame, not on the image under the finger. The fit
+    // image is intentionally removed when the full source paints; capturing on
+    // it made WebView lose the rest of an in-flight pinch at exactly that time.
+    frame?.setPointerCapture?.(e.pointerId);
     cancelSettle();
     startPeek();
 
@@ -800,20 +854,7 @@
         // Two fingers mean zooming, not holding.
         dropRadial();
         pinchedThisGesture = true;
-        pinchFrameRect = frame ? frame.getBoundingClientRect() : null;
-        const [a, b] = [...pointers.values()];
-        pinchStartDist = Math.hypot(a.x - b.x, a.y - b.y);
-        pinchStartScale = z.zoomed ? z.scale : fit;
-        const m = framePoint({ clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2 });
-        pinchAnchor = anchorUnder(m.x, m.y);
-        if (!z.zoomed) {
-          // Enter zoom seamlessly at the fit scale, so the pinch ramps up
-          // continuously from exactly what was on screen.
-          z.scale = fit;
-          z.zoomed = true;
-          centerOn(pinchAnchor, m.x, m.y, fit);
-        }
-        dragging = false;
+        beginPinch();
       } else if (pointers.size === 1) {
         pinchedThisGesture = false;
         swipeStartX = e.clientX;
@@ -865,8 +906,10 @@
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       if (pointers.size >= 2) {
-        if (pinchStartDist <= 0) return;
-        const [a, b] = [...pointers.values()];
+        if (pinchStartDist <= 0 || !pinchIds) return;
+        const a = pointers.get(pinchIds[0]);
+        const b = pointers.get(pinchIds[1]);
+        if (!a || !b) return;
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         const raw = pinchStartScale * (d / pinchStartDist);
         // Below fit the zoom resists (rubber band) instead of deforming or
@@ -916,11 +959,7 @@
     if (e.pointerType === "touch") {
       const wasSingle = pointers.size === 1;
       const wasPinching = pinchStartDist > 0;
-      pointers.delete(e.pointerId);
-      if (pointers.size < 2) {
-        pinchStartDist = 0;
-        pinchFrameRect = null;
-      }
+      finishTouchPointer(e.pointerId);
 
       // Pinch ended below (or at) fit: spring back and leave zoom mode.
       if (wasPinching && pointers.size < 2 && z.zoomed && z.scale <= fit + 1e-6) {
@@ -1128,11 +1167,7 @@
     endPeek();
     dropRadial();
     const wasPinching = pinchStartDist > 0;
-    pointers.delete(e.pointerId);
-    if (pointers.size < 2) {
-      pinchStartDist = 0;
-      pinchFrameRect = null;
-    }
+    finishTouchPointer(e.pointerId);
     if (wasPinching && z.zoomed && z.scale <= fit + ZOOM_EPS) settleToFit();
     if (pointers.size === 1 && z.zoomed && z.scale > fit + ZOOM_EPS) {
       const [remaining] = [...pointers.values()];
@@ -1164,7 +1199,7 @@
   <!-- The fit image stays mounted while zoomed until the full one has actually
        painted. Unmounting it on the way in used to run the zoom animation over
        a blank frame, at the exact moment the user asked to look closer. -->
-  {#if !z.zoomed || !fullPainted}
+  {#if !z.zoomed}
     <img
       src={displayedSrc}
       alt={displayedAlt}
@@ -1179,6 +1214,19 @@
         : null}
       draggable="false"
       onload={onFitLoad}
+    />
+  {:else if !fullPainted}
+    <!-- Animate the already-painted preview with the exact same camera as the
+         full source. The first zoom therefore follows the gesture immediately
+         instead of animating an invisible image and snapping when full loads. -->
+    <img
+      src={displayedSrc}
+      alt={displayedAlt}
+      style="transform: translate({offset.x}px, {offset.y}px); width: {dispW}px;"
+      class="full zoom-underlay"
+      class:soft={softPreview}
+      class:settling
+      draggable="false"
     />
   {/if}
   {#if waiting && !fitPainted && !z.zoomed}
@@ -1333,5 +1381,9 @@
     transition:
       width 160ms ease-out,
       transform 160ms ease-out;
+  }
+
+  img.zoom-underlay {
+    pointer-events: none;
   }
 </style>

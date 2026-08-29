@@ -36,6 +36,11 @@
 
   let activePath = $state<number[]>([]);
   let rootEl = $state<HTMLDivElement | null>(null);
+  // A touch can open this menu while that same pointer is still held down on
+  // the grid. When a submenu mounts beneath it, Android may retarget the
+  // eventual click to a child row that never received the pointerdown. Only
+  // activate a row when both halves of the gesture belong to that same row.
+  let pressedRow = $state<string | null>(null);
 
   const dismiss = backdropDismiss(() => onclose());
 
@@ -54,6 +59,7 @@
     void items;
     if (!el) return;
     activePath = [];
+    pressedRow = null;
     place(el, x, y);
   });
 
@@ -111,6 +117,22 @@
     // Close first: a `run` that opens a dialog must not land behind this menu.
     onclose();
     node.run();
+  }
+
+  function pathKey(path: number[]): string {
+    return path.join("/");
+  }
+
+  function armRow(path: number[]) {
+    pressedRow = pathKey(path);
+  }
+
+  function clickRow(e: MouseEvent, path: number[]) {
+    // `detail === 0` is an accessibility/programmatic activation, which has no
+    // pointerdown by design. Physical taps/clicks must match their down target.
+    if (e.detail !== 0 && pressedRow !== pathKey(path)) return;
+    pressedRow = null;
+    activate(path);
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -192,7 +214,8 @@
             class:checked={node.kind === "item" && node.checked}
             disabled={node.disabled}
             onpointerenter={() => (activePath = [...path, i])}
-            onclick={() => activate([...path, i])}
+            onpointerdown={() => armRow([...path, i])}
+            onclick={(e) => clickRow(e, [...path, i])}
           >
             <span class="ico">
               {#if node.icon}

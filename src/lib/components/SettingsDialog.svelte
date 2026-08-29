@@ -929,6 +929,7 @@
   .switch {
     flex: none;
     position: relative;
+    box-sizing: border-box;
     width: 32px;
     height: 18px;
     padding: 0;
@@ -945,17 +946,18 @@
 
   .knob {
     position: absolute;
-    top: 2px;
+    top: 50%;
     left: 2px;
     width: 12px;
     height: 12px;
     border-radius: 50%;
     background: #d8d8de;
+    transform: translateY(-50%);
     transition: transform 0.14s ease;
   }
 
   .switch.on .knob {
-    transform: translateX(14px);
+    transform: translate(14px, -50%);
     background: #fff;
   }
 

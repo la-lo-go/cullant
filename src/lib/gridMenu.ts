@@ -313,17 +313,6 @@ function filterBlock(item: ItemLite): MenuNode[] {
       : []),
     {
       kind: "submenu",
-      label: "Sort by",
-      icon: ArrowDownUp,
-      children: (["capture", "name", "size"] as const).map((key) => ({
-        kind: "item" as const,
-        label: { capture: "Capture time", name: "File name", size: "File size" }[key],
-        checked: catalog.sort === key,
-        run: () => void catalog.setSort(key),
-      })),
-    },
-    {
-      kind: "submenu",
       label: "Group by this…",
       icon: Group,
       children: usefulGroupDims(session.filtered, session.groupContext, session.groupBy)
@@ -336,6 +325,17 @@ function filterBlock(item: ItemLite): MenuNode[] {
             (session.groupBy =
               session.groupBy.length === 1 && session.groupBy[0] === d.key ? [] : [d.key]),
         })),
+    },
+    {
+      kind: "submenu",
+      label: "Sort by",
+      icon: ArrowDownUp,
+      children: (["capture", "name", "size"] as const).map((key) => ({
+        kind: "item" as const,
+        label: { capture: "Capture time", name: "File name", size: "File size" }[key],
+        checked: catalog.sort === key,
+        run: () => void catalog.setSort(key),
+      })),
     },
   ];
 }
