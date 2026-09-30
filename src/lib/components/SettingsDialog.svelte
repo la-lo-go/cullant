@@ -41,6 +41,7 @@
     RADIAL_MIN_SECTORS,
     RADIAL_ROTATION_CHOICES,
     slotKey,
+    slotLabel,
     type RadialGroupId,
     type RadialMouse,
     type RadialSlot,
@@ -492,6 +493,12 @@
             />
           </label>
         {/each}
+        {#if openPanel.modified()}
+          <button class="wide" onclick={releasing(() => openPanel?.reset())}>
+            <RotateCcw size={13} />
+            <span>Reset filmstrip badges</span>
+          </button>
+        {/if}
       </div>
     {:else if openPanel?.kind === "panel" && openPanel.panel === "colorLabelNames"}
       <div class="content sub">
@@ -525,6 +532,7 @@
         <DragList
           items={settings.bottomBarList}
           keyOf={(it) => it.id}
+          itemLabel={(it) => it.label}
           onMove={(from, to) => settings.moveBottomBarItem(from, to)}
           ariaLabel="Bottom bar groups"
         >
@@ -542,10 +550,12 @@
             </label>
           {/snippet}
         </DragList>
-        <button class="wide" onclick={releasing(() => settings.resetBottomBar())}>
-          <RotateCcw size={13} />
-          <span>Reset to default</span>
-        </button>
+        {#if openPanel.modified()}
+          <button class="wide" onclick={releasing(() => settings.resetBottomBar())}>
+            <RotateCcw size={13} />
+            <span>Reset to default</span>
+          </button>
+        {/if}
       </div>
     {:else if openPanel?.kind === "panel" && openPanel.panel === "radial"}
       <div class="content sub">
@@ -565,6 +575,7 @@
             <DragList
               items={settings.radialSlots.map((slot, i) => ({ slot, i }))}
               keyOf={(it) => slotKey(it.slot)}
+              itemLabel={(it, i) => `sector ${i + 1}: ${slotLabel(it.slot)}`}
               onMove={(from, to) => settings.moveRadialSlot(from, to)}
               ariaLabel="Radial menu sectors"
             >
@@ -580,8 +591,14 @@
                        one of the things a sector can be, so making it a line of
                        grey text was a special case with nothing behind it. -->
                   <select
+                    aria-label={`Sector ${it.i + 1} action`}
                     value={slotKey(it.slot)}
-                    onchange={releasing((e) => assignSlot(it.i, e.currentTarget.value))}
+                    onchange={releasing((e) => {
+                      const next = e.currentTarget.value;
+                      // A keyed row can move without Svelte updating its select value.
+                      e.currentTarget.value = slotKey(it.slot);
+                      assignSlot(it.i, next);
+                    })}
                   >
                     <option value="more">More… (the full command list)</option>
                     <optgroup label="Groups">
@@ -597,8 +614,8 @@
                   </select>
                   <button
                     class="drop"
-                    title="Remove this sector"
-                    aria-label="Remove this sector"
+                    title={settings.radialSlots.length <= RADIAL_MIN_SECTORS ? "Keep at least two sectors." : `Remove sector ${it.i + 1}: ${slotLabel(it.slot)}`}
+                    aria-label={`Remove sector ${it.i + 1}: ${slotLabel(it.slot)}`}
                     disabled={settings.radialSlots.length <= RADIAL_MIN_SECTORS}
                     onclick={releasing(() => settings.removeRadialSlot(it.i))}
                   >
@@ -607,6 +624,8 @@
                 </div>
               {/snippet}
             </DragList>
+
+            <p class="hint">Keep at least two sectors. More opens the full command list and can be removed.</p>
 
             <!-- Quiet, and left where the list ends: adding a sector is a step
                  you take now and then, not the thing this panel is for. As a
@@ -626,6 +645,7 @@
             <div class="slot ring-opt">
               <span class="slot-label">Opens with</span>
               <select
+                aria-label="Radial menu opens with"
                 value={settings.radialMouse}
                 onchange={releasing((e) =>
                   settings.setRadialMouse(e.currentTarget.value as RadialMouse))}
@@ -639,6 +659,7 @@
             <div class="slot">
               <span class="slot-label">Rotation</span>
               <select
+                aria-label="Radial menu rotation"
                 value={settings.radialRotation}
                 onchange={releasing((e) =>
                   settings.setRadialRotation(Number(e.currentTarget.value)))}
@@ -651,10 +672,12 @@
           </div>
         </div>
 
-        <button class="wide" onclick={releasing(() => settings.resetRadial())}>
-          <RotateCcw size={13} />
-          <span>Reset to default</span>
-        </button>
+        {#if openPanel.modified()}
+          <button class="wide" onclick={releasing(() => settings.resetRadial())}>
+            <RotateCcw size={13} />
+            <span>Reset to default</span>
+          </button>
+        {/if}
       </div>
     {:else}
       <div class="content">
@@ -788,7 +811,7 @@
 {#if confirmResetAll}
   <ConfirmDialog
     title="Reset all settings?"
-    message="Every preference goes back to the value Cullant ships with. Your photos, ratings and pending actions are untouched."
+    message="Reset the settings and submenu settings in this dialog to their defaults. View settings, keyboard shortcuts, task tags, and project file actions stay as they are."
     confirmLabel="Reset all"
     onconfirm={() => {
       confirmResetAll = false;

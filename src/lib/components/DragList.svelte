@@ -3,11 +3,12 @@
   import { onDestroy, tick, type Snippet } from "svelte";
   import { flip } from "svelte/animate";
 
-  let { items, keyOf, onMove, row, ariaLabel = "Reorderable list" }: {
+  let { items, keyOf, onMove, row, itemLabel, ariaLabel = "Reorderable list" }: {
     items: Item[];
     keyOf: (item: Item, index: number) => string | number;
     onMove: (from: number, to: number) => void;
     row: Snippet<[Item, number]>;
+    itemLabel?: (item: Item, index: number) => string;
     ariaLabel?: string;
   } = $props();
 
@@ -106,7 +107,7 @@
     <li class="drow" class:dragging={dragIndex === i}
       style:translate={dragIndex === i ? `0 ${dragOffset}px` : null}
       animate:flip={{ duration: dragIndex === i ? 0 : 140 }}>
-      <button class="handle" type="button" aria-label="Drag to reorder"
+      <button class="handle" type="button" aria-label={itemLabel ? `Reorder ${itemLabel(item, i)}` : "Drag to reorder"}
         title="Drag to reorder. Use Up or Down when the handle has focus."
         onpointerdown={(e) => startDrag(e, i)} onkeydown={(e) => void moveByKeyboard(e, i)}>
         <GripVertical size={15} />

@@ -455,7 +455,7 @@ class SettingsStore {
 
   /** What each sector holds, clockwise from the top. The list IS the ring: its
    *  length is the sector count, so adding and removing a sector is adding and
-   *  removing an entry. Always contains the `more` slot. */
+   *  removing an entry. The More slot is optional. */
   radialSlots = $state<RadialSlot[]>(loadRadialSlots());
   /** Which mouse gesture opens it. Touch always uses press-and-hold. */
   radialMouse = $state<RadialMouse>(loadRadialMouse());

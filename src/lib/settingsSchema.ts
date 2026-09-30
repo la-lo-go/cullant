@@ -296,6 +296,7 @@ export const SETTINGS: Setting[] = [
     keywords: "hold press gesture wheel pie sector sectors touch thumb mouse button left right either click opening rotation rotate angle degrees",
     modified: () =>
       settings.radialMouse !== "left" ||
+      settings.radialRotation !== 0 ||
       settings.radialSlots.map(slotKey).join() !== DEFAULT_RADIAL_SLOTS.map(slotKey).join(),
     reset: () => settings.resetRadial(),
   },
