@@ -89,6 +89,24 @@
   </section>
 
   <section>
+    <span class="lbl">Thumbnail framing</span>
+    <div class="row">
+      <button
+        class="seg"
+        class:active={settings.gridPhotoFit === "fit"}
+        aria-pressed={settings.gridPhotoFit === "fit"}
+        onclick={() => settings.setGridPhotoFit("fit")}
+      >Fit whole photo</button>
+      <button
+        class="seg"
+        class:active={settings.gridPhotoFit === "fill"}
+        aria-pressed={settings.gridPhotoFit === "fill"}
+        onclick={() => settings.setGridPhotoFit("fill")}
+      >Fill cell</button>
+    </div>
+  </section>
+
+  <section>
     <button class="toggle" class:on={session.showNames} onclick={() => session.toggleShowNames()}>
       <span>Show file names</span>
       <span class="pill"></span>

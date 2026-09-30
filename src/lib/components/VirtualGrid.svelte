@@ -15,6 +15,7 @@
   import { catalog } from "../stores/catalog.svelte";
   import { describeHalf, session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
+  import { formatColorLabel } from "../colorLabels";
   import { tags } from "../stores/tags.svelte";
   import { view } from "../stores/view.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
@@ -1178,7 +1179,7 @@
       {@const inset = selected ? SELECTED_INSET : 0}
       {@const dims = displayDims(v.item)}
       {@const stacked = v.span > 1}
-      {@const portrait = !stacked && dims !== null && dims.h > dims.w}
+      {@const wholePhoto = settings.gridPhotoFit === "fit" && dims !== null}
       {@const burstAt = stacked ? null : session.burstPositionAt(v.first)}
       {@const isFocused =
         session.focusedIndex >= v.first &&
@@ -1218,17 +1219,15 @@
               <span class="deck d1"><img src={thumbUrl(behind[0])} alt="" decoding="async" /></span>
             {/if}
           {/if}
-          <!-- Sized to the item's REAL aspect ratio when portrait (instead of
-               filling the square frame and cropping), so every badge/chip/label
-               below — all positioned relative to THIS box, not .frame — stays
-               within the actual visible photo instead of spilling into the
-               empty letterbox gutters. Landscape/unknown-dims items fill the
-               frame exactly (unchanged from before), cropped via object-fit. -->
+          <!-- Fitted dimensions keep the badges inside the visible photo. -->
           <div
             class="photo"
+            class:fit={settings.gridPhotoFit === "fit"}
             class:queued={settings.dimQueuedDeletes &&
               (v.item.flag === -1 || session.pendingDeleteIds.has(v.item.id))}
-            style={portrait && dims ? `width:auto; aspect-ratio:${dims.w}/${dims.h}` : ""}
+            style={wholePhoto && dims
+              ? `${dims.h > dims.w ? "width:auto" : "height:auto"}; aspect-ratio:${dims.w}/${dims.h}`
+              : ""}
           >
             {#if v.item.kind === 2}
               {#if posterFailed.has(v.item.id)}
@@ -1280,7 +1279,7 @@
               </span>
             {/if}
             {#if v.item.label}
-              <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
+              <span class="label-bar" title={formatColorLabel(v.item.label)} style:border-color={labelColors[v.item.label]}></span>
             {/if}
             {#if stacked}
               <span class="burst" title="Burst of {v.span} photos">
@@ -1815,6 +1814,10 @@
     height: 100%;
     object-fit: cover;
     user-select: none;
+  }
+
+  .photo.fit img {
+    object-fit: contain;
   }
 
   /* Subtle shimmer while a cell's thumbnail is still being generated/decoded.

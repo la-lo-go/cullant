@@ -44,9 +44,11 @@ const RADIAL_SLOTS_KEY = "cullant.radial.slots";
 const RADIAL_MOUSE_KEY = "cullant.radial.mouse";
 const RADIAL_ROTATION_KEY = "cullant.radial.rotation";
 const COLOR_LABEL_NAMES_KEY = "cullant.colorLabelNames";
+const GRID_PHOTO_FIT_KEY = "cullant.gridPhotoFit";
 
 export const COLOR_LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
 export type ColorLabel = (typeof COLOR_LABELS)[number];
+export type GridPhotoFit = "fill" | "fit";
 
 /** Allowed burst gaps in seconds — a whitelist for the same reason the
  *  auto-rescan intervals are one. */
@@ -159,6 +161,14 @@ function loadColorLabelNames(): Partial<Record<ColorLabel, string>> {
   }
 }
 
+function loadGridPhotoFit(): GridPhotoFit {
+  try {
+    return JSON.parse(localStorage.getItem(GRID_PHOTO_FIT_KEY) ?? '"fill"') === "fit" ? "fit" : "fill";
+  } catch {
+    return "fill";
+  }
+}
+
 /** The reorderable / hideable groups of the bottom classification bar, in their
  *  default order. Group-level granularity (not individual stars/swatches) mirrors
  *  the bar's own visual grouping. The contextual selection/navigation controls
@@ -223,6 +233,7 @@ function loadRadialSlots(): RadialSlot[] {
 
 class SettingsStore {
   colorLabelNames = $state<Partial<Record<ColorLabel, string>>>(loadColorLabelNames());
+  gridPhotoFit = $state<GridPhotoFit>(loadGridPhotoFit());
 
   setColorLabelName(label: ColorLabel, name: string) {
     const names = { ...this.colorLabelNames };
@@ -236,6 +247,11 @@ class SettingsStore {
   resetColorLabelNames() {
     this.colorLabelNames = {};
     save(COLOR_LABEL_NAMES_KEY, {});
+  }
+
+  setGridPhotoFit(fit: GridPhotoFit) {
+    this.gridPhotoFit = fit;
+    save(GRID_PHOTO_FIT_KEY, fit);
   }
 
   /** Paint the cached thumbnail instantly while the sharp preview loads. */
