@@ -11,6 +11,9 @@
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
+  import { shortcutHint } from "$lib/keyboard/hints";
+  import { formatColorLabel } from "$lib/colorLabels";
+  import { folders } from "$lib/stores/folders.svelte";
   import VirtualGrid from "$lib/components/VirtualGrid.svelte";
   import FolderTree from "$lib/components/FolderTree.svelte";
   import Viewer from "$lib/components/Viewer.svelte";
@@ -39,6 +42,7 @@
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Search from "@lucide/svelte/icons/search";
+  import Eye from "@lucide/svelte/icons/eye";
   import Columns2 from "@lucide/svelte/icons/columns-2";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import ImageIcon from "@lucide/svelte/icons/image";
@@ -80,6 +84,24 @@
   // as --bottom-bar-h so overlays inside the grid — the background-status pill —
   // can sit above it instead of being buried by it in selection mode.
   let bottomBarH = $state(0);
+  const flagNames = { all: "All", pick: "Picked", reject: "Rejected", unflagged: "Unflagged", anyflag: "Flagged", notrejected: "Not rejected" };
+  const activeFilterSummary = $derived([
+    session.nameFilter.trim() && `Filename: ${session.nameFilter}`,
+    session.flagFilter !== "all" && `Flag: ${flagNames[session.flagFilter]}`,
+    session.minRating > 0 && `Rating: ${session.minRating}+ stars`,
+    session.labelFilter && `Label: ${formatColorLabel(session.labelFilter)}`,
+    session.tagFilter !== null && `Tag: ${tags.all.find((tag) => tag.id === session.tagFilter)?.name ?? session.tagFilter}`,
+    catalog.media === "photos" && session.typeFilter !== "all" && `Type: ${session.typeFilter.toUpperCase()}`,
+    session.extFilter && `Extension: ${session.extFilter}`,
+    session.orientationFilter !== "all" && `Orientation: ${session.orientationFilter}`,
+    session.dateFilter && `Date: ${session.dateFilter}`,
+    session.hasBursts && session.burstFilter !== "all" && `Burst: ${session.burstFilter}`,
+    session.burstKeyFilter && "Burst: selected burst",
+    ...Object.entries(folders.scope).map(([path, included]) => `${included ? "Folder" : "Excluded folder"}: ${path || "project root"}`),
+    ...[ ["Camera", session.cameraFilter], ["Lens", session.lensFilter], ["ISO", session.isoFilter], ["Aperture", session.apertureFilter], ["Focal length", session.focalFilter], ["Shutter", session.shutterFilter] ]
+      .filter(([, value]) => catalog.media === "photos" && value !== null)
+      .map(([label, value]) => `${label}: ${value}`),
+  ].filter(Boolean).join("; "));
   let showKeybindings = $state(false);
   let showSupport = $state(false);
   let showSettings = $state(false);
@@ -494,7 +516,7 @@
           >
             <ImageIcon size={14} />
             <span>Photos</span>
-            <span class="count">{catalog.mediaCounts.photos}</span>
+            <span class="count">{catalog.mediaCounts.photos} {catalog.mediaCounts.photos === 1 ? "file" : "files"}</span>
           </button>
           <button
             class="media-btn"
@@ -505,18 +527,21 @@
           >
             <VideoIcon size={14} />
             <span>Videos</span>
-            <span class="count">{catalog.mediaCounts.videos}</span>
+            <span class="count">{catalog.mediaCounts.videos} {catalog.mediaCounts.videos === 1 ? "file" : "files"}</span>
           </button>
         </div>
       </div>
       <div class="toolbar-center">
         <div class="segmented">
-          <button class:active={view.mode === "grid"} title="Grid (G)" onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
-          <button class:active={view.mode === "viewer"} title="Loupe (E)" onclick={blurring(() => { session.ensureFocus(); view.mode = "viewer"; })}><Search size={14} /></button>
-          <button class:active={view.mode === "compare"} title="Compare (C)" onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
+          <button class:active={view.mode === "grid"} aria-label="Grid" title={shortcutHint("Grid", "view.grid")} onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
+          <button class:active={view.mode === "viewer"} aria-label="Loupe" title={shortcutHint("Loupe", "view.viewer")} onclick={blurring(() => { session.ensureFocus(); view.mode = "viewer"; })}><Eye size={14} /></button>
+          <button class:active={view.mode === "compare"} aria-label="Compare" title={shortcutHint("Compare", "view.compare")} onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
         </div>
       </div>
       <div class="toolbar-right">
+        <button aria-label="Search filenames" title={shortcutHint("Search filenames", "ui.search")} class:haswork={session.nameFilter.trim() !== ""} onclick={blurring(() => (session.searchOpen = true))}>
+          <Search size={14} />
+        </button>
         <div class="filters-anchor">
           <button
             class:active={session.filtersPanelOpen}
@@ -576,12 +601,10 @@
         <button
           class="commit"
           class:haswork={session.hasCommitWork}
-          title={session.hasCommitWork
-            ? "Review & commit pending actions — actions are queued (Ctrl+Enter)"
-            : "Review & commit pending actions (Ctrl+Enter)"}
+          title={shortcutHint(session.hasCommitWork ? "Review changes — actions are queued" : "Review changes", "commit.open")}
           onclick={blurring(() => (session.commitDialogOpen = true))}
         >
-          <CheckCheck size={14} /><span>Commit</span>
+          <CheckCheck size={14} /><span>Review changes</span>
         </button>
       </div>
     </header>
@@ -612,7 +635,7 @@
           {:else if hasSubfolders}
             <button
               class="tree-peek"
-              title="Show folder tree (D)"
+              title={shortcutHint("Show folder tree", "ui.toggleFolderTree")}
               aria-label="Show folder tree"
               onclick={blurring(() => (session.folderTreeVisible = true))}
             >
@@ -626,6 +649,7 @@
             <div class="empty-filtered">
               <ListFilter size={28} />
               <p>No items match the current filters</p>
+              <p class="filter-summary">{activeFilterSummary}</p>
               <button
                 onclick={blurring(() => (session.filtersPanelOpen = true))}
               >
@@ -789,7 +813,7 @@
          from — or worse, not notice that Cullant now disagrees with Lightroom. -->
     <AlertDialog
       title="Ratings read from XMP"
-      message={`${catalog.xmpImported} photo(s) took their rating, flag or colour label from an XMP sidecar written by another app.`}
+      message={`${catalog.xmpImported} ${catalog.xmpImported === 1 ? "file" : "files"} received a rating, flag or color label from an XMP sidecar.`}
       onclose={() => (catalog.xmpImported = 0)}
     />
   {/if}

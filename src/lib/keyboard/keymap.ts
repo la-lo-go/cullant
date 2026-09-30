@@ -117,7 +117,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "edit.rotateLeft", title: "Rotate anticlockwise", category: "Actions" },
   { id: "edit.rotateRight", title: "Rotate clockwise", category: "Actions" },
   { id: "action.moveCopy", title: "Queue move/copy to folder…", category: "Actions" },
-  { id: "commit.open", title: "Review & commit pending actions", category: "Actions" },
+  { id: "commit.open", title: "Review changes", category: "Actions" },
   { id: "ui.toggleFilterBar", title: "Toggle filters panel", category: "UI" },
   { id: "ui.search", title: "Search by file name", category: "UI" },
   { id: "ui.toggleMirror", title: "Toggle RAW+JPEG mirror mode", category: "UI" },
