@@ -24,6 +24,7 @@ import { catalog } from "./catalog.svelte";
 import { settings } from "./settings.svelte";
 import { tags } from "./tags.svelte";
 import { view } from "./view.svelte";
+import { folders } from "./folders.svelte";
 
 export type FlagFilter = "all" | "pick" | "reject" | "unflagged" | "anyflag" | "notrejected";
 
@@ -71,6 +72,7 @@ interface SavedSession {
     focalFilter?: string | null;
     shutterFilter?: string | null;
     folderFilter?: string | null;
+    folderScope?: Record<string, boolean>;
     dateFilter?: string | null;
   };
   focusKey?: string | null;
@@ -127,12 +129,6 @@ function initialFolderTreeVisible(): boolean {
 export function dirOf(relPath: string): string {
   const idx = Math.max(relPath.lastIndexOf("/"), relPath.lastIndexOf("\\"));
   return idx === -1 ? "" : relPath.slice(0, idx).replace(/\\/g, "/");
-}
-
-/** Whether a file's directory is `folder` itself or one of its descendants. */
-function isInFolder(relPath: string, folder: string): boolean {
-  const dir = dirOf(relPath);
-  return dir === folder || dir.startsWith(`${folder}/`);
 }
 
 // Keep the existing import path without creating a cycle through this store.
@@ -207,7 +203,7 @@ class SessionStore {
   /** Whether the name-search overlay is open (Ctrl+F). */
   searchOpen = $state(false);
 
-  /** True when any filter narrows the grid (used to badge the Filters button).
+  /** True when a Sort & Filter control narrows the grid.
    *  The type filter only counts while on the photos tab (it is inert on
    *  videos), so switching tabs never leaves a phantom "active" badge. */
   hasActiveFilters = $derived.by(
@@ -255,6 +251,7 @@ class SessionStore {
     this.shutterFilter = null;
     this.dateFilter = null;
     this.burstKeyFilter = null;
+    this.folderFilter = null;
     this.clampFocus();
   }
 
@@ -273,8 +270,13 @@ class SessionStore {
     this.stickyGroupHeader = false;
   }
 
-  /** Relative directory path to scope the grid to (descendants included); null = all folders combined. */
-  folderFilter = $state<string | null>(null);
+  /** Single-folder fallback for project sessions saved by older versions. */
+  get folderFilter(): string | null {
+    return folders.allSelected ? null : Object.keys(folders.scope).find((path) => folders.scope[path]) ?? "";
+  }
+  set folderFilter(path: string | null) {
+    folders.selectOnly(path);
+  }
   folderTreeVisible = $state(initialFolderTreeVisible());
   /** Width of the folder-tree panel in px (persisted, drag-resizable). */
   folderTreeWidth = $state<number>(loadNumPref(FOLDER_TREE_WIDTH_KEY, 210));
@@ -676,8 +678,11 @@ class SessionStore {
         out = out.filter((i) => shutterBucket(i.exposureTime)?.key === this.shutterFilter);
       }
     }
-    if (this.folderFilter !== null) {
-      out = out.filter((i) => isInFolder(i.relPath, this.folderFilter!));
+    if (!folders.allSelected) {
+      out = out.filter((i) => folders.includes(dirOf(i.relPath)));
+    }
+    if (folders.ignored.length > 0) {
+      out = out.filter((i) => !folders.ignoredBy(dirOf(i.relPath)));
     }
     if (this.dateFilter !== null) {
       out = out.filter((i) => dayKey(i) === this.dateFilter);
@@ -1006,6 +1011,7 @@ class SessionStore {
         focalFilter: this.focalFilter,
         shutterFilter: this.shutterFilter,
         folderFilter: this.folderFilter,
+        folderScope: folders.scope,
         dateFilter: this.dateFilter,
       },
       focusKey: this.focused?.relPath ?? null,
@@ -1053,6 +1059,7 @@ class SessionStore {
         this.focalFilter = f.focalFilter ?? null;
         this.shutterFilter = f.shutterFilter ?? null;
         this.folderFilter = f.folderFilter ?? null;
+        folders.restoreScope(f.folderScope);
         this.dateFilter = f.dateFilter ?? null;
       }
       this.pendingFocusKey = s.focusKey ?? null;
@@ -1678,12 +1685,6 @@ $effect.root(() => {
     if (kept.length !== session.selectedIds.size) {
       session.selectedIds = new Set(kept);
     }
-  });
-
-  // A different project's folders have nothing to do with the last one's.
-  $effect(() => {
-    void catalog.project;
-    session.folderFilter = null;
   });
 
   // Any view-mode transition (grid <-> loupe/compare, either direction) drops

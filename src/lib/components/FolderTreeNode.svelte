@@ -1,16 +1,36 @@
 <script lang="ts">
-  import { session } from "../stores/session.svelte";
+  import { folders } from "../stores/folders.svelte";
+  import { folderContextMenu } from "../folderContextMenu";
   import FolderTreeNode from "./FolderTreeNode.svelte";
   import Folder from "@lucide/svelte/icons/folder";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import type { TreeNode } from "./folderTree";
 
-  let { node, depth }: { node: TreeNode; depth: number } = $props();
+  let { node, depth, onmenu, onselect, menuPath = null }: {
+    node: TreeNode;
+    depth: number;
+    onmenu: (path: string, x: number, y: number) => void;
+    onselect: (path: string, event: MouseEvent) => void;
+    menuPath?: string | null;
+  } = $props();
 
-  let expanded = $state(true);
+  const expanded = $derived(!folders.collapsed.has(node.path));
+  const ignored = $derived(folders.ignoredBy(node.path) !== undefined);
+  const included = $derived(!ignored && !folders.allSelected && folders.includes(node.path));
   const hasChildren = $derived(node.children.size > 0);
   const children = $derived([...node.children.values()]);
+
+  function select(e: MouseEvent) {
+    const button = e.currentTarget as HTMLButtonElement;
+    if (ignored) {
+      const bounds = button.getBoundingClientRect();
+      onmenu(node.path, bounds.left, bounds.bottom);
+    } else {
+      onselect(node.path, e);
+    }
+    button.blur();
+  }
 </script>
 
 <!-- The chevron is a real <button> sibling of the node button, overlaid on the
@@ -19,9 +39,16 @@
 <div class="row">
   <button
     class="node"
-    class:active={session.folderFilter === node.path}
+    class:active={included && folders.scope[node.path] === true}
+    class:included={included && folders.scope[node.path] !== true}
+    class:excluded={ignored || (!folders.allSelected && !included)}
+    aria-pressed={!ignored && folders.includes(node.path)}
+    class:ignored
+    class:menu-target={menuPath === node.path}
+    title={ignored ? `${node.path} (ignored)` : node.path}
     style="padding-left: {depth * 16 + 8}px"
-    onclick={() => (session.folderFilter = node.path)}
+    onclick={select}
+    use:folderContextMenu={(x, y) => onmenu(node.path, x, y)}
   >
     <span class="chevron-spacer"></span>
     <Folder size={13} />
@@ -34,7 +61,7 @@
       style="left: {depth * 16 + 8}px"
       aria-label={expanded ? "Collapse" : "Expand"}
       aria-expanded={expanded}
-      onclick={() => (expanded = !expanded)}
+      onclick={(e) => { folders.toggleCollapsed(node.path); e.currentTarget.blur(); }}
     >
       {#if expanded}<ChevronDown size={12} />{:else}<ChevronRight size={12} />{/if}
     </button>
@@ -42,7 +69,7 @@
 </div>
 {#if hasChildren && expanded}
   {#each children as child (child.path)}
-    <FolderTreeNode node={child} depth={depth + 1} />
+    <FolderTreeNode node={child} depth={depth + 1} {onmenu} {onselect} {menuPath} />
   {/each}
 {/if}
 
@@ -76,6 +103,20 @@
   .node.active {
     background: var(--accent-fill);
     color: var(--accent);
+  }
+
+  .node.included {
+    background: color-mix(in srgb, var(--accent-fill) 40%, transparent);
+    color: color-mix(in srgb, var(--accent) 55%, #ddd);
+  }
+
+  .node.excluded { color: #777; }
+  .node.ignored .name { text-decoration: line-through; }
+
+  .node.menu-target {
+    background: var(--hover);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .chevron-spacer {

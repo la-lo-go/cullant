@@ -12,8 +12,10 @@ import {
 } from "../api";
 import { flushSessionSave, session } from "./session.svelte";
 import { view } from "./view.svelte";
+import { folders } from "./folders.svelte";
 
 class CatalogStore {
+  generation = 0;
   project = $state<ProjectInfo | null>(null);
   items = $state<ItemLite[]>([]);
   sort = $state<SortKey>("capture");
@@ -73,6 +75,7 @@ class CatalogStore {
   async adoptCurrent() {
     const info = await api.currentProject();
     if (info) {
+      this.generation++;
       this.project = info;
       this.thumbLoaded.clear();
       this.previewReady.clear();
@@ -99,6 +102,7 @@ class CatalogStore {
     // change is still sitting in the OLD project's persist debounce — flush it
     // to that project's DB before its connection goes away underneath it.
     await flushSessionSave();
+    this.generation++;
     // Set the in-flight flags BEFORE awaiting openProject. The scan finishes in a
     // few milliseconds and its scan:progress/scan:done events can arrive before
     // this promise resolves; setting `scanning` after the await would then clobber
@@ -131,6 +135,7 @@ class CatalogStore {
   async reimport() {
     this.error = "";
     await flushSessionSave();
+    this.generation++;
     this.scanning = true;
     this.scanFound = 0;
     this.preloading = true;
@@ -167,8 +172,10 @@ class CatalogStore {
     // defaults set here can never overwrite the saved blob before it loads.
     session.restoring = true;
     session.resetForNewProject();
+    folders.reset();
     view.mode = "grid";
     this.media = "photos";
+    await folders.restore();
     await this.refresh();
     if (this.mediaCounts.photos === 0 && this.mediaCounts.videos > 0) {
       await this.setMedia("videos");
@@ -196,9 +203,11 @@ class CatalogStore {
 
   async close() {
     await flushSessionSave();
+    this.generation++;
     await api.closeProject();
     this.project = null;
     this.items = [];
+    folders.reset();
     this.scanning = false;
     this.preloading = false;
     this.thumbLoaded.clear();

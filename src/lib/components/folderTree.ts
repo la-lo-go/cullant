@@ -9,11 +9,12 @@ export interface TreeNode {
   children: Map<string, TreeNode>;
 }
 
-export function buildFolderTree(items: ItemLite[]): TreeNode {
+export function buildFolderTree(items: ItemLite[], ignored: (path: string) => boolean = () => false): TreeNode {
   const root: TreeNode = { name: "", path: "", count: 0, children: new Map() };
   for (const item of items) {
-    root.count++;
     const dir = dirOf(item.relPath);
+    const visible = !ignored(dir);
+    if (visible) root.count++;
     if (!dir) continue;
     let node = root;
     let acc = "";
@@ -24,7 +25,7 @@ export function buildFolderTree(items: ItemLite[]): TreeNode {
         child = { name: segment, path: acc, count: 0, children: new Map() };
         node.children.set(segment, child);
       }
-      child.count++;
+      if (visible) child.count++;
       node = child;
     }
   }
@@ -34,5 +35,13 @@ export function buildFolderTree(items: ItemLite[]): TreeNode {
 export function collectFolderPaths(node: TreeNode, out: Set<string> = new Set()): Set<string> {
   out.add(node.path);
   for (const child of node.children.values()) collectFolderPaths(child, out);
+  return out;
+}
+
+export function visibleFolderPaths(node: TreeNode, collapsed: ReadonlySet<string>, out: string[] = []): string[] {
+  for (const child of node.children.values()) {
+    out.push(child.path);
+    if (!collapsed.has(child.path)) visibleFolderPaths(child, collapsed, out);
+  }
   return out;
 }

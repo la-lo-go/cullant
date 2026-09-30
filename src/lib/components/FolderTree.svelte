@@ -1,23 +1,68 @@
 <script lang="ts">
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
+  import { folders, folderContains } from "../stores/folders.svelte";
+  import { folderContextMenu } from "../folderContextMenu";
+  import ContextMenu from "./ContextMenu.svelte";
+  import type { MenuNode } from "../menu";
   import FolderTreeNode from "./FolderTreeNode.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
-  import { buildFolderTree, collectFolderPaths } from "./folderTree";
+  import { buildFolderTree, collectFolderPaths, visibleFolderPaths } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import EyeOff from "@lucide/svelte/icons/eye-off";
+  import Eye from "@lucide/svelte/icons/eye";
 
-  const tree = $derived(buildFolderTree(catalog.items));
+  const tree = $derived(buildFolderTree(catalog.items, (path) => folders.ignoredBy(path) !== undefined));
   const children = $derived([...tree.children.values()]);
+  const visiblePaths = $derived(visibleFolderPaths(tree, folders.collapsed));
+  let menu = $state<{ path: string; x: number; y: number; items: MenuNode[] } | null>(null);
 
-  // If the selected folder disappeared (rescan, mirror-mode change removing
-  // its only file, etc.) fall back to "All" instead of silently showing an
-  // empty grid.
+  function showAll() {
+    session.folderFilter = null;
+    session.clampFocus();
+  }
+
+  function selectFolder(path: string, event: MouseEvent) {
+    folders.select(path, event, visiblePaths);
+    session.clampFocus();
+  }
+
+  async function restoreAll() {
+    if (await folders.showAll()) showAll();
+  }
+
+  function openAllMenu(x: number, y: number) {
+    if (folders.ignored.length === 0) return;
+    menu = { path: "", x, y, items: [
+      { kind: "header", label: "All" },
+      { kind: "item", label: "Show all folders again", icon: Eye, disabled: folders.saving, run: () => void restoreAll() },
+    ] };
+  }
+
+  function openMenu(path: string, x: number, y: number) {
+    const ignoredBy = folders.ignoredBy(path);
+    const inherited = ignoredBy !== undefined && ignoredBy !== path;
+    menu = { path, x, y, items: [
+      { kind: "header", label: path },
+      {
+        kind: "item", label: inherited ? `Ignored by ${ignoredBy}` : ignoredBy ? "Show folder again" : "Ignore folder",
+        icon: ignoredBy ? Eye : EyeOff,
+        disabled: inherited || folders.saving,
+        run: () => void folders.setIgnored(path, !ignoredBy),
+      },
+      { kind: "sep" },
+      { kind: "item", label: "Expand branch", run: () => {
+        for (const folder of folders.collapsed) if (folderContains(path, folder)) folders.collapsed.delete(folder);
+      } },
+      { kind: "item", label: "Collapse branch", run: () => folders.collapsed.add(path) },
+    ] };
+  }
+
+  // Wait for the catalog and saved scope before removing missing folder paths.
   $effect(() => {
-    if (session.folderFilter === null) return;
-    if (!collectFolderPaths(tree).has(session.folderFilter)) {
-      session.folderFilter = null;
-    }
+    if (catalog.preloading || catalog.scanning || session.restoring) return;
+    folders.reconcileScope(collectFolderPaths(tree));
   });
 
   // Drag-to-resize the panel. Dragging the right edge past COLLAPSE_AT hides
@@ -82,14 +127,17 @@
       onscroll={() => scroller && (scrollTop = scroller.scrollTop)}
     >
       <div class="inner" bind:clientHeight={contentH}>
-        <div class="header">Folders</div>
-        <button class="node root" class:active={session.folderFilter === null} onclick={() => (session.folderFilter = null)}>
+        <div class="header">
+          <span>Folders</span>
+        </div>
+        <button class="node root" class:active={folders.allSelected} aria-pressed={folders.allSelected} class:menu-target={menu?.path === ""}
+          use:folderContextMenu={openAllMenu} onclick={(e) => { showAll(); e.currentTarget.blur(); }}>
           <Images size={13} />
           <span class="name">All</span>
           <span class="count">{tree.count}</span>
         </button>
         {#each children as child (child.path)}
-          <FolderTreeNode node={child} depth={0} />
+          <FolderTreeNode node={child} depth={0} onmenu={openMenu} onselect={selectFolder} menuPath={menu?.path ?? null} />
         {/each}
       </div>
     </div>
@@ -127,6 +175,10 @@
       <ChevronLeft size={16} />
     </button>
   </aside>
+{/if}
+
+{#if menu}
+  <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
 {/if}
 
 <style>
@@ -241,12 +293,21 @@
   }
 
   .header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 36px;
+    box-sizing: border-box;
+    background: var(--surface);
+    color: #888;
     padding: 8px 10px;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    opacity: 0.5;
   }
 
   .node.root {
@@ -274,6 +335,12 @@
   .node.root.active {
     background: var(--accent-fill);
     color: var(--accent);
+  }
+
+  .node.root.menu-target {
+    background: var(--hover);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .name {
