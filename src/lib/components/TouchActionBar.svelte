@@ -12,6 +12,7 @@
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import Eraser from "@lucide/svelte/icons/eraser";
+  import FolderInput from "@lucide/svelte/icons/folder-input";
 
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
   // opt-in: the parent flips `forceShow` from a toolbar toggle. `hidden` lets
@@ -137,7 +138,13 @@
   {/if}
 
   {#each visibleBarItems as itemId (itemId)}
-    {#if itemId === "flags"}
+    {#if itemId === "moveCopy"}
+      <div class="group file-actions">
+        <button class="btn task" title="Move or copy to folder" aria-label="Move or copy to folder" onclick={act(() => runCommand("action.moveCopy"))}>
+          <FolderInput size={18} /> Move / Copy
+        </button>
+      </div>
+    {:else if itemId === "flags"}
       <div class="group flags">
         <button
           class="btn reject"
@@ -290,6 +297,14 @@
 
   .btn:active {
     background: var(--hover);
+  }
+
+  .task {
+    gap: 5px;
+    padding: 0 9px;
+    white-space: nowrap;
+    font-family: inherit;
+    font-size: 12px;
   }
 
   .star {

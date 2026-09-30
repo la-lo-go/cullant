@@ -1,6 +1,12 @@
 /** App-wide user preferences, persisted in localStorage. */
 
 import type { BurstMode } from "../bursts";
+import FolderInput from "@lucide/svelte/icons/folder-input";
+import Flag from "@lucide/svelte/icons/flag";
+import Star from "@lucide/svelte/icons/star";
+import Palette from "@lucide/svelte/icons/palette";
+import Tag from "@lucide/svelte/icons/tag";
+import Eraser from "@lucide/svelte/icons/eraser";
 import {
   DEFAULT_RADIAL_SLOTS,
   RADIAL_MAX_SECTORS,
@@ -141,11 +147,12 @@ function save(key: string, value: unknown) {
  *  the bar's own visual grouping. The contextual selection/navigation controls
  *  are not listed here — they appear on their own when relevant. */
 export const BOTTOM_BAR_ITEMS = [
-  { id: "flags", label: "Pick / Reject" },
-  { id: "rating", label: "Star rating" },
-  { id: "labels", label: "Color labels" },
-  { id: "tags", label: "Tags" },
-  { id: "clear", label: "Clear all" },
+  { id: "moveCopy", label: "Move / Copy", icon: FolderInput },
+  { id: "flags", label: "Pick / Reject", icon: Flag },
+  { id: "rating", label: "Star rating", icon: Star },
+  { id: "labels", label: "Color labels", icon: Palette },
+  { id: "tags", label: "Tags", icon: Tag },
+  { id: "clear", label: "Clear all", icon: Eraser },
 ] as const;
 
 const BOTTOM_BAR_KEY = "cullant.bottomBar";
@@ -381,11 +388,10 @@ class SettingsStore {
   /** Ordered bar items with resolved label + hidden flag — the shape the
    *  settings drag list renders. */
   bottomBarList = $derived(
-    this.bottomBarOrder.map((id) => ({
-      id,
-      label: BOTTOM_BAR_ITEMS.find((m) => m.id === id)?.label ?? id,
-      hidden: this.bottomBarHidden.includes(id),
-    })),
+    this.bottomBarOrder.map((id) => {
+      const item = BOTTOM_BAR_ITEMS.find((m) => m.id === id);
+      return { id, label: item?.label ?? id, icon: item?.icon, hidden: this.bottomBarHidden.includes(id) };
+    }),
   );
 
   private saveBottomBar() {

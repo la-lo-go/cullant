@@ -457,7 +457,10 @@
         >
           {#snippet row(it)}
             <label class="check">
-              <span class:off={it.hidden}>{it.label}</span>
+              <span class="bar-label" class:off={it.hidden}>
+                {#if it.icon}<it.icon size={16} />{/if}
+                <span>{it.label}</span>
+              </span>
               <input
                 type="checkbox"
                 checked={!it.hidden}
@@ -1179,6 +1182,12 @@
     text-decoration: line-through;
   }
 
+  .bar-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
   .sub .wide {
     margin-top: 8px;
   }
@@ -1293,6 +1302,7 @@
   }
 
   .slot {
+    box-sizing: border-box;
     display: flex;
     align-items: center;
     gap: 6px;

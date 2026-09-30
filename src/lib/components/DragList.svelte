@@ -1,20 +1,9 @@
 <script lang="ts" generics="Item">
-  /**
-   * Generic drag-to-reorder list with a grip handle per row. Pointer-based, so
-   * it works with mouse and touch alike. The parent owns the array and applies
-   * the move (via `onMove(from, to)`); this component only renders each row's
-   * content through the `row` snippet and drives the reordering while dragging.
-   */
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
-  import type { Snippet } from "svelte";
+  import { onDestroy, tick, type Snippet } from "svelte";
+  import { flip } from "svelte/animate";
 
-  let {
-    items,
-    keyOf,
-    onMove,
-    row,
-    ariaLabel = "Reorderable list",
-  }: {
+  let { items, keyOf, onMove, row, ariaLabel = "Reorderable list" }: {
     items: Item[];
     keyOf: (item: Item, index: number) => string | number;
     onMove: (from: number, to: number) => void;
@@ -22,71 +11,114 @@
     ariaLabel?: string;
   } = $props();
 
-  let rowEls = $state<(HTMLElement | null)[]>([]);
-  let dragIndex = $state(-1);
+  let list = $state<HTMLUListElement | null>(null);
+  let dragKey = $state<string | number | null>(null);
+  let dragOffset = $state(0);
+  const dragIndex = $derived(items.findIndex((item, index) => keyOf(item, index) === dragKey));
   let activePointer = -1;
+  let pointerY = 0;
+  let grabOffset = 0;
+  let frame = 0;
+  let scroller: HTMLElement | null = null;
 
   function startDrag(e: PointerEvent, i: number) {
     if (e.button !== 0 && e.pointerType === "mouse") return;
-    dragIndex = i;
+    if (!list || activePointer !== -1) return;
+    dragKey = keyOf(items[i], i);
     activePointer = e.pointerId;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    pointerY = e.clientY;
+    grabOffset = e.clientY - list.children[i].getBoundingClientRect().top;
+    scroller = list.parentElement;
+    while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement;
+    // The list keeps capture when a keyed row moves to another position.
+    list.setPointerCapture(e.pointerId);
     e.preventDefault();
+    frame = requestAnimationFrame(dragFrame);
   }
 
   function onMovePointer(e: PointerEvent) {
     if (dragIndex < 0 || e.pointerId !== activePointer) return;
-    const y = e.clientY;
-    // Walk the rows and settle on the slot whose midpoint the pointer has passed,
-    // in the direction of travel — that becomes the new index for the dragged row.
+    pointerY = e.clientY;
+  }
+
+  function targetIndex(): number {
+    if (!list) return dragIndex;
     let target = dragIndex;
+    const top = list.getBoundingClientRect().top;
     for (let j = 0; j < items.length; j++) {
-      const el = rowEls[j];
+      const el = list.children[j] as HTMLElement | undefined;
       if (!el) continue;
-      const r = el.getBoundingClientRect();
-      const mid = r.top + r.height / 2;
-      if (j > dragIndex && y > mid) target = j;
-      else if (j < dragIndex && y < mid) {
-        target = j;
-        break;
-      }
+      // Layout coordinates do not change while FLIP animates another row.
+      const mid = top + el.offsetTop + el.offsetHeight / 2;
+      if (j > dragIndex && pointerY > mid) target = j;
+      else if (j < dragIndex && pointerY < mid) { target = j; break; }
     }
-    if (target !== dragIndex) {
-      onMove(dragIndex, target);
-      dragIndex = target;
+    return target;
+  }
+
+  async function dragFrame() {
+    if (!list || dragIndex < 0) return;
+    if (scroller) {
+      const bounds = scroller.getBoundingClientRect();
+      if (pointerY < bounds.top + 36) scroller.scrollTop -= 8;
+      else if (pointerY > bounds.bottom - 36) scroller.scrollTop += 8;
     }
+    const target = targetIndex();
+    if (target !== dragIndex) { onMove(dragIndex, target); await tick(); }
+    if (!list || dragIndex < 0) return;
+    const el = list.children[dragIndex] as HTMLElement;
+    dragOffset = pointerY - grabOffset - list.getBoundingClientRect().top - el.offsetTop;
+    frame = requestAnimationFrame(dragFrame);
+  }
+
+  function stopDrag() {
+    cancelAnimationFrame(frame);
+    if (list?.hasPointerCapture(activePointer)) list.releasePointerCapture(activePointer);
+    dragKey = null;
+    dragOffset = 0;
+    activePointer = -1;
+    scroller = null;
   }
 
   function endDrag(e: PointerEvent) {
-    if (e.pointerId !== activePointer) return;
-    dragIndex = -1;
-    activePointer = -1;
+    if (e.pointerId === activePointer) stopDrag();
   }
+
+  async function moveByKeyboard(e: KeyboardEvent, from: number) {
+    const delta = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+    if (delta === 0 || activePointer !== -1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const to = from + delta;
+    if (to < 0 || to >= items.length) return;
+    const control = e.currentTarget as HTMLButtonElement;
+    onMove(from, to);
+    await tick();
+    control.focus();
+  }
+
+  onDestroy(stopDrag);
 </script>
 
-<ul class="draglist" aria-label={ariaLabel}>
+<ul class="draglist" class:reordering={dragIndex >= 0} aria-label={ariaLabel} bind:this={list}
+  onpointermove={onMovePointer} onpointerup={endDrag} onpointercancel={endDrag} onlostpointercapture={endDrag}>
   {#each items as item, i (keyOf(item, i))}
-    <li class="drow" class:dragging={dragIndex === i} bind:this={rowEls[i]}>
-      <button
-        class="handle"
-        type="button"
-        aria-label="Drag to reorder"
-        onpointerdown={(e) => startDrag(e, i)}
-        onpointermove={onMovePointer}
-        onpointerup={endDrag}
-        onpointercancel={endDrag}
-      >
+    <li class="drow" class:dragging={dragIndex === i}
+      style:translate={dragIndex === i ? `0 ${dragOffset}px` : null}
+      animate:flip={{ duration: dragIndex === i ? 0 : 140 }}>
+      <button class="handle" type="button" aria-label="Drag to reorder"
+        title="Drag to reorder. Use Up or Down when the handle has focus."
+        onpointerdown={(e) => startDrag(e, i)} onkeydown={(e) => void moveByKeyboard(e, i)}>
         <GripVertical size={15} />
       </button>
-      <div class="content">
-        {@render row(item, i)}
-      </div>
+      <div class="content">{@render row(item, i)}</div>
     </li>
   {/each}
 </ul>
 
 <style>
   .draglist {
+    position: relative;
     list-style: none;
     margin: 0;
     padding: 0;
@@ -94,48 +126,38 @@
     flex-direction: column;
     gap: 4px;
   }
-
   .drow {
     display: flex;
     align-items: center;
     gap: 4px;
     border-radius: 6px;
   }
-
   .drow.dragging {
-    background: var(--hover);
+    position: relative;
+    z-index: 1;
+    background: var(--surface);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
   }
-
   .handle {
     flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 28px;
+    width: 36px;
+    height: 40px;
     padding: 0;
     background: none;
     border: none;
     border-radius: 4px;
     color: #6a6a72;
     cursor: grab;
-    /* The handle owns the drag gesture; stop the browser from scrolling/panning
-       when a finger presses it. */
     touch-action: none;
   }
-
-  .handle:hover {
-    color: #bbb;
-  }
-
-  .drow.dragging .handle {
-    cursor: grabbing;
-    color: #ddd;
-  }
-
-  .content {
-    flex: 1;
-    min-width: 0;
+  .handle:hover, .handle:focus-visible { color: var(--accent); }
+  .reordering { user-select: none; }
+  .drow.dragging .handle { cursor: grabbing; color: #ddd; }
+  .content { flex: 1; min-width: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .drow { animation-duration: 0s !important; }
   }
 </style>
