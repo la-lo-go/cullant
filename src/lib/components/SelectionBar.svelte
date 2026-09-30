@@ -6,6 +6,7 @@
   import X from "@lucide/svelte/icons/x";
   import Eraser from "@lucide/svelte/icons/eraser";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import { formatColorLabel } from "../colorLabels";
 
   const n = $derived(session.selectedIds.size);
 
@@ -125,7 +126,8 @@
         class="dot"
         class:active={summary.label === l}
         style="--c: {labelColors[l]}"
-        aria-label={`Label ${l}`}
+        aria-label={`Label ${formatColorLabel(l)}`}
+        title={formatColorLabel(l)}
         onclick={act(() => label(l))}
       ></button>
     {/each}

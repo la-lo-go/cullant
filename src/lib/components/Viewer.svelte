@@ -16,6 +16,7 @@
   import { edgeBounce } from "../anim";
   import { previewUrl } from "../api";
   import { tags } from "../stores/tags.svelte";
+  import { formatColorLabel } from "../colorLabels";
 
   const item = $derived(session.focused);
 
@@ -110,7 +111,7 @@
       {/if}
       {#if !view.fullscreen}
         <div class="info">
-          <span class="filename" style:color={item.label ? labelColors[item.label] : null}>{item.relPath}</span>
+          <span class="filename" style:color={item.label ? labelColors[item.label] : null} title={item.label ? formatColorLabel(item.label) : undefined}>{item.relPath}</span>
           {#if session.mirrorMode && item.groupSize > 1}
             <span class="chip" class:split={item.decoupled}>
               {#if item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}

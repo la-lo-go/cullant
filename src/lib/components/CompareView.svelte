@@ -5,6 +5,7 @@
   import { catalog } from "../stores/catalog.svelte";
   import { view } from "../stores/view.svelte";
   import { settings } from "../stores/settings.svelte";
+  import { formatColorLabel } from "../colorLabels";
   import { tags } from "../stores/tags.svelte";
   import { FIT_ZOOM, sameZoom, type ZoomSnapshot } from "../zoom";
   import ZoomImage from "./ZoomImage.svelte";
@@ -257,7 +258,7 @@
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(left.id)}
           <span class="caption" class:focused-caption={focusedSide === "left"}>
-            <span style:color={left.label ? labelColors[left.label] : null}>{left.name}.{left.ext}</span>
+            <span style:color={left.label ? labelColors[left.label] : null} title={left.label ? formatColorLabel(left.label) : undefined}>{left.name}.{left.ext}</span>
             {#if left.flag === 1}<span class="pick" title="Picked"><Check size={13} /></span>{/if}
             {#if left.flag === -1}<span class="reject" title="Rejected"><X size={13} /></span>{/if}
             {#if b}
@@ -318,7 +319,7 @@
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(right.id)}
           <span class="caption" class:focused-caption={focusedSide === "right"}>
-            <span style:color={right.label ? labelColors[right.label] : null}>{right.name}.{right.ext}</span>
+            <span style:color={right.label ? labelColors[right.label] : null} title={right.label ? formatColorLabel(right.label) : undefined}>{right.name}.{right.ext}</span>
             {#if right.flag === 1}<span class="pick" title="Picked"><Check size={13} /></span>{/if}
             {#if right.flag === -1}<span class="reject" title="Rejected"><X size={13} /></span>{/if}
             {#if b}

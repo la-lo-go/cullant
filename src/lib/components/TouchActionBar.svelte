@@ -5,6 +5,7 @@
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
   import { runCommand } from "$lib/keyboard/dispatcher.svelte";
+  import { formatColorLabel } from "$lib/colorLabels";
   import type { CommandId } from "$lib/keyboard/keymap";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -185,8 +186,8 @@
           <button
             class="btn swatchbtn"
             class:active={labelActive(name)}
-            title={`${name} label`}
-            aria-label={`${name} label`}
+            title={`${formatColorLabel(name)} label`}
+            aria-label={`${formatColorLabel(name)} label`}
             style="--c: {color}"
             onclick={act(() => session.setLabel(labelActive(name) ? null : name))}
           >

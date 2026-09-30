@@ -12,6 +12,7 @@
     type OrientationFilter,
   } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
+  import { formatColorLabel } from "../colorLabels";
   import { folders } from "../stores/folders.svelte";
   import {
     APERTURE_BUCKETS,
@@ -444,7 +445,8 @@
             class="dot"
             class:active={session.labelFilter === label}
             style="--c: {labelColors[label]}"
-            aria-label={label}
+            aria-label={formatColorLabel(label)}
+            title={formatColorLabel(label)}
             onclick={() => {
               session.labelFilter = session.labelFilter === label ? null : label;
               session.clampFocus();
