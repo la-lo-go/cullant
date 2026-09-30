@@ -3,6 +3,8 @@ import { tags } from "../stores/tags.svelte";
 import { view } from "../stores/view.svelte";
 import {
   effectiveBindings,
+  COMMANDS,
+  DEFAULT_BINDINGS,
   loadOverrides,
   normalizeKey,
   saveOverrides,
@@ -16,12 +18,27 @@ class KeymapStore {
   rebinding = $state<CommandId | null>(null);
 
   rebind(command: CommandId, key: string) {
-    this.overrides = { ...this.overrides, [command]: [key] };
+    const overrides = { ...this.overrides, [command]: [key] };
+    for (const { id } of COMMANDS) {
+      if (id === command) continue;
+      const keys = overrides[id] ?? DEFAULT_BINDINGS[id];
+      if (keys.includes(key)) overrides[id] = keys.filter((binding) => binding !== key);
+    }
+    this.overrides = overrides;
     saveOverrides(this.overrides);
   }
 
   reset() {
     this.overrides = {};
+    this.rebinding = null;
+    saveOverrides(this.overrides);
+  }
+
+  resetCommand(command: CommandId) {
+    const overrides = { ...this.overrides };
+    delete overrides[command];
+    this.overrides = overrides;
+    this.rebinding = null;
     saveOverrides(this.overrides);
   }
 }

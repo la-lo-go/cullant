@@ -189,25 +189,67 @@ const STORAGE_KEY = "cullant.keymap.v1";
 
 export function loadOverrides(): Partial<Record<CommandId, string[]>> {
   try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}");
+    return validOverrides(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}"));
   } catch {
     return {};
   }
 }
 
 export function saveOverrides(overrides: Partial<Record<CommandId, string[]>>) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  } catch {
+    // Keep the current bindings when storage is unavailable.
+  }
+}
+
+function validOverrides(value: unknown): Partial<Record<CommandId, string[]>> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const source = value as Record<string, unknown>;
+  const valid: Partial<Record<CommandId, string[]>> = {};
+  for (const { id } of COMMANDS) {
+    const keys = source[id];
+    if (!Array.isArray(keys) || !keys.every((key) => typeof key === "string" && key.trim() !== "")) continue;
+    valid[id] = [...new Set(keys.map((key: string) => key.trim().toLowerCase()))];
+  }
+  return valid;
 }
 
 export function effectiveBindings(
   overrides: Partial<Record<CommandId, string[]>>
 ): Map<string, CommandId> {
   const map = new Map<string, CommandId>();
+  const valid = validOverrides(overrides);
   for (const cmd of COMMANDS) {
-    const keys = overrides[cmd.id] ?? DEFAULT_BINDINGS[cmd.id];
-    for (const key of keys) map.set(key, cmd.id);
+    if (valid[cmd.id] !== undefined) continue;
+    for (const key of DEFAULT_BINDINGS[cmd.id]) if (!map.has(key)) map.set(key, cmd.id);
+  }
+  const assigned = new Set<string>();
+  for (const cmd of COMMANDS) {
+    for (const key of valid[cmd.id] ?? []) {
+      if (assigned.has(key)) continue;
+      assigned.add(key);
+      map.set(key, cmd.id);
+    }
   }
   return map;
+}
+
+export function isModifierKey(e: KeyboardEvent): boolean {
+  return ["Control", "Shift", "Alt", "Meta", "AltGraph"].includes(e.key);
+}
+
+const KEY_NAMES: Record<string, string> = {
+  ctrl: "Ctrl", alt: "Alt", shift: "Shift", meta: "Meta",
+  arrowleft: "Left Arrow", arrowright: "Right Arrow",
+  arrowup: "Up Arrow", arrowdown: "Down Arrow",
+  space: "Space", escape: "Esc", enter: "Enter", delete: "Delete",
+  home: "Home", end: "End", tab: "Tab", backspace: "Backspace",
+  pageup: "Page Up", pagedown: "Page Down", capslock: "Caps Lock",
+};
+
+export function formatKey(binding: string): string {
+  return binding.split("+").map((key) => KEY_NAMES[key] ?? key.toUpperCase()).join("+");
 }
 
 /**
