@@ -16,6 +16,7 @@
   import { edgeBounce } from "../anim";
   import { previewUrl } from "../api";
   import { tags } from "../stores/tags.svelte";
+  import { shortcutHint } from "../keyboard/hints";
   import { formatColorLabel } from "../colorLabels";
 
   const item = $derived(session.focused);
@@ -77,7 +78,7 @@
       {/if}
       <button
         class="back"
-        title="Back to grid (Esc)"
+        title={shortcutHint("Back to grid", "view.back")}
         onclick={(e) => {
           view.mode = "grid";
           (e.currentTarget as HTMLElement).blur();
@@ -86,7 +87,7 @@
       <button
         class="back info-btn"
         class:active={view.infoOpen}
-        title="Camera metadata (I)"
+        title={shortcutHint("Camera metadata", "info.toggle")}
         data-metadata-toggle
         onclick={(e) => {
           view.infoOpen = !view.infoOpen;

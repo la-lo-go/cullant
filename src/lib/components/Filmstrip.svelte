@@ -289,7 +289,7 @@
          peek arrow. -->
     <button
       class="strip-hide"
-      title="Hide filmstrip (F)"
+      title="Hide filmstrip"
       aria-label="Hide filmstrip"
       onclick={() => session.setShowFilmstrip(false)}
     >
@@ -421,7 +421,7 @@
 {:else}
   <button
     class="strip-peek"
-    title="Show filmstrip (F)"
+    title="Show filmstrip"
     aria-label="Show filmstrip"
     onclick={() => session.setShowFilmstrip(true)}
   >
