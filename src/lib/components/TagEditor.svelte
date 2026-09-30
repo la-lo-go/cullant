@@ -5,6 +5,8 @@
   import Pencil from "@lucide/svelte/icons/pencil";
   import X from "@lucide/svelte/icons/x";
   import { backdropDismiss } from "../backdrop";
+  import { COMMANDS, formatKey, normalizeKey } from "../keyboard/keymap";
+  import { keymap } from "../keyboard/dispatcher.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -86,7 +88,18 @@
   }
 
   function recordShortcut(tag: TaskTag) {
+    error = "";
     recording = tag.id;
+  }
+
+  function shortcutConflict(tag: TaskTag, shortcut: string, fallback: string): string {
+    const command = keymap.bindings.get(shortcut) ?? keymap.bindings.get(fallback);
+    if (command) {
+      const title = COMMANDS.find((item) => item.id === command)?.title ?? command;
+      return `${formatKey(shortcut)} is used by ${title}. Choose another key.`;
+    }
+    const owner = tags.all.find((item) => item.id !== tag.id && item.shortcut === shortcut);
+    return owner ? `${formatKey(shortcut)} is used by task tag "${owner.name}". Choose another key.` : "";
   }
 
   async function onKeydown(e: KeyboardEvent) {
@@ -99,13 +112,10 @@
     const tag = tags.all.find((t) => t.id === recording);
     recording = null;
     if (!tag || e.key === "Escape") return;
-    const parts: string[] = [];
-    if (e.ctrlKey) parts.push("ctrl");
-    if (e.altKey) parts.push("alt");
-    if (e.shiftKey) parts.push("shift");
-    parts.push(e.key.toLowerCase());
-    const shortcut = parts.join("+");
-    await api.updateTaskTag({ ...tag, shortcut: e.key === "Backspace" ? null : shortcut });
+    const shortcut = e.key === "Backspace" ? null : normalizeKey(e);
+    error = shortcut === null ? "" : shortcutConflict(tag, shortcut, normalizeKey(e, false));
+    if (error) return;
+    await api.updateTaskTag({ ...tag, shortcut });
     await tags.refresh();
   }
 
@@ -137,6 +147,9 @@
     class="dialog"
     bind:this={dialogEl}
     onclick={(e) => e.stopPropagation()}
+    onfocusin={(e) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) recording = null;
+    }}
     onkeydown={onDialogKeydown}
     role="dialog"
     aria-label="Task tags"
@@ -158,13 +171,13 @@
       {#each tags.all as tag, i}
         <span class="dot" style="background: {tag.color ?? '#888'}"></span>
         <span class="name">{i + 1}. {tag.name}</span>
-        <select value={String(tag.scope)} disabled={saving} onchange={(e) => setScope(tag, e)}>
+        <select aria-label={`Scope for ${tag.name}`} value={String(tag.scope)} disabled={saving} onchange={(e) => setScope(tag, e)}>
           {#each scopeNames as s, v}
             <option value={String(v)}>{s}</option>
           {/each}
         </select>
-        <button class="key" class:waiting={recording === tag.id} disabled={saving} onclick={() => recordShortcut(tag)}>
-          {recording === tag.id ? "press key…" : (tag.shortcut ?? "—")}
+        <button class="key" aria-label={`Change ${tag.name} shortcut`} title={`Change shortcut for ${tag.name}`} class:waiting={recording === tag.id} disabled={saving} onclick={() => recordShortcut(tag)}>
+          {recording === tag.id ? "press key…" : (tag.shortcut ? formatKey(tag.shortcut) : "—")}
         </button>
         <button class="edit" title="Edit tag" aria-label={`Edit ${tag.name}`} disabled={saving} onclick={() => edit(tag)}><Pencil size={14} /></button>
         <button class="del" title="Delete tag" aria-label={`Delete ${tag.name}`} disabled={saving} onclick={() => remove(tag)}><Trash2 size={14} /></button>
@@ -180,16 +193,16 @@
     </div>
 
     <div class="create">
-      <input placeholder="New tag name…" bind:value={newName} onkeydown={(e) => e.key === "Enter" && create()} />
-      <select bind:value={newScope}>
+      <input aria-label="New tag name" placeholder="New tag name…" bind:value={newName} onkeydown={(e) => e.key === "Enter" && create()} />
+      <select aria-label="New tag scope" bind:value={newScope}>
         {#each scopeNames as s, v}
           <option value={v}>{s}</option>
         {/each}
       </select>
-      <input type="color" bind:value={newColor} title="Tag color" />
+      <input type="color" aria-label="New tag color" bind:value={newColor} title="Tag color" />
       <button onclick={create}>Add</button>
     </div>
-    {#if error}<p class="error">{error}</p>{/if}
+    {#if error}<p class="error" role="alert">{error}</p>{/if}
   </div>
 </div>
 
