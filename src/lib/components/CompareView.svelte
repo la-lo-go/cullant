@@ -66,6 +66,10 @@
   });
 
   const focusedSide = $derived<Side>(pinnedSide === "left" ? "right" : "left");
+  let activeZoomSide = $state<Side | null>(null);
+  const zoomSide = $derived<Side>(
+    activeZoomSide === "right" && !right ? "left" : activeZoomSide ?? focusedSide,
+  );
 
   let paneZoom = $state<Record<Side, ZoomSnapshot>>({
     left: { ...FIT_ZOOM },
@@ -81,7 +85,7 @@
   $effect(() => {
     const enabled = settings.compareZoomSync;
     if (enabled && !syncWasOn) {
-      sharedZoom = { leader: focusedSide, zoom: { ...paneZoom[focusedSide] }, animate: false };
+      sharedZoom = { leader: zoomSide, zoom: { ...paneZoom[zoomSide] }, animate: false };
     }
     if (!enabled) sharedZoom = null;
     syncWasOn = enabled;
@@ -212,10 +216,20 @@
       {#if settings.compareZoomSync}<Link2 size={15} />{:else}<Unlink2 size={15} />{/if}
     </button>
     {#if left}
-      <div class="pane" class:pinned={pinnedSide === "left"}>
+      <div
+        class="pane"
+        class:zoom-active={zoomSide === "left"}
+        class:pinned={pinnedSide === "left"}
+        role="group"
+        aria-label={zoomSide === "left" ? "Left comparison: keyboard zoom active" : "Left comparison"}
+        onpointerdown={() => { activeZoomSide = "left"; }}
+        onfocusin={() => { activeZoomSide = "left"; }}
+        onwheel={() => { activeZoomSide = "left"; }}
+      >
         <ZoomImage
           item={left}
           standalone
+          keyboardActive={zoomSide === "left"}
           onPage={pagerFor("left")}
           onWheelPage={pagePair}
           syncZoom={settings.compareZoomSync && sharedZoom && sharedZoom.leader !== "left"
@@ -258,10 +272,20 @@
       </div>
     {/if}
     {#if right}
-      <div class="pane" class:pinned={pinnedSide === "right"}>
+      <div
+        class="pane"
+        class:zoom-active={zoomSide === "right"}
+        class:pinned={pinnedSide === "right"}
+        role="group"
+        aria-label={zoomSide === "right" ? "Right comparison: keyboard zoom active" : "Right comparison"}
+        onpointerdown={() => { activeZoomSide = "right"; }}
+        onfocusin={() => { activeZoomSide = "right"; }}
+        onwheel={() => { activeZoomSide = "right"; }}
+      >
         <ZoomImage
           item={right}
           standalone
+          keyboardActive={zoomSide === "right"}
           onPage={pagerFor("right")}
           onWheelPage={pagePair}
           syncZoom={settings.compareZoomSync && sharedZoom && sharedZoom.leader !== "right"
@@ -384,6 +408,11 @@
     display: flex;
     flex-direction: column;
     position: relative;
+  }
+
+  .pane.zoom-active {
+    outline: 1px solid rgba(var(--accent-rgb), 0.35);
+    outline-offset: -1px;
   }
 
   .pane.pinned {

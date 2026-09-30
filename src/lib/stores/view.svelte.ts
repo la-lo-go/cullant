@@ -1,10 +1,9 @@
 export type ViewMode = "grid" | "viewer" | "compare" | "survey";
 
 /**
- * Hard zoom ceiling: 6x of 1:1 pixel scale (deep pixel-peeping past actual
- * size). The effective MINIMUM is the per-photo "fit" scale (whole image
- * visible), which depends on the viewport and is therefore computed inside
- * ZoomImage, not here.
+ * Base zoom ceiling: 6x of 1:1 pixel scale. ZoomImage raises this limit to
+ * at least twice the fit scale, so small images can grow from their visible
+ * size. ZoomImage also computes the minimum scale from the viewport.
  */
 export const MAX_SCALE = 6;
 

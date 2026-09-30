@@ -31,6 +31,7 @@
   let {
     item,
     standalone = false,
+    keyboardActive = false,
     onPage,
     onWheelPage,
     syncZoom = null,
@@ -39,6 +40,8 @@
   }: {
     item: ItemLite;
     standalone?: boolean;
+    /** A standalone pane applies keyboard zoom only while it is active. */
+    keyboardActive?: boolean;
     /** Step to the prev/next photo (swipe / margin-tap paging). Defaults to
      *  the shared session focus; a standalone (compare) pane that's pinned to
      *  a fixed photo overrides this to page that pinned photo instead, since
@@ -200,24 +203,25 @@
     };
   });
 
-  // Keyboard zoom toggle (Z / Space) routes through the view store, which can't
-  // know the per-photo `fit`; it bumps a nonce and we run the same centered
-  // toggle the double-tap uses. Loupe only — compare panes keep local zoom.
-  let lastKbNonce = 0;
+  // Consume each request in every pane so activation cannot replay an old key.
+  // Only the active standalone pane applies it; sync follows its camera update.
+  let lastKbNonce = untrack(() => view.zoomToggleNonce);
   $effect(() => {
     const n = view.zoomToggleNonce;
-    if (standalone || n === lastKbNonce) return;
+    if (n === lastKbNonce) return;
     lastKbNonce = n;
+    if (standalone && !keyboardActive) return;
     untrack(() => toggleZoom());
   });
 
   // Ctrl+= / Ctrl+- zoom step. Same store-nonce channel as the toggle: the loupe
   // component owns the per-photo fit scale, so the keymap only signals direction.
-  let lastStepNonce = 0;
+  let lastStepNonce = untrack(() => view.zoomStepNonce);
   $effect(() => {
     const n = view.zoomStepNonce;
-    if (standalone || n === lastStepNonce) return;
+    if (n === lastStepNonce) return;
     lastStepNonce = n;
+    if (standalone && !keyboardActive) return;
     untrack(() => stepZoom(view.zoomStepDir));
   });
 
@@ -360,10 +364,10 @@
 
   // The zoom model: ONE uniform scale factor in [fit, MAX_SCALE], where 1.0 is
   // one source pixel per CSS pixel and `fit` is the contain-scale at which the
-  // whole photo is visible (capped at 1 — fit never upscales small photos).
+  // whole photo is visible. Match object-fit: contain, including upscaled images.
   const fit = $derived.by(() => {
     if (!refW || !refH || !frameW || !frameH) return 1;
-    return Math.min(1, frameW / refW, frameH / refH);
+    return Math.min(frameW / refW, frameH / refH);
   });
 
   // Fit-anchored zoom: magnification is measured RELATIVE to fit (1× = the whole
@@ -545,8 +549,14 @@
 
   function onFullLoad(e: Event) {
     const img = e.currentTarget as HTMLImageElement;
+    const previousWidth = refW;
+    const previousScale = z.scale;
     fullNaturalW = img.naturalWidth;
     fullNaturalH = img.naturalHeight;
+    // Embedded previews can have fewer pixels than the catalog dimensions.
+    if (z.zoomed && previousWidth && img.naturalWidth) {
+      z.scale = clampToRange(previousScale * previousWidth / img.naturalWidth);
+    }
     fullPainted = true;
   }
 
@@ -593,7 +603,7 @@
    * what's on screen:
    *   - zoomed in at all (scale > fit)  -> animate back to the whole-image fit;
    *   - at fit                          -> DOUBLE_TAP_MAG × fit, centered
-   *                                        (Twitter-style), capped at 1:1 pixels.
+   *                                        (Twitter-style), capped at maxScale.
    * Both directions animate briefly. A photo whose target is still not above
    * fit stays put (the least-surprising no-op).
    */
@@ -620,8 +630,7 @@
       settleToFit();
       return;
     }
-    // At fit -> DOUBLE_TAP_MAG × fit, centered. clampToRange caps it at 1:1 for
-    // large photos, or at the modest detail zoom for small ones.
+    // Start from the visible fit size and stay within the zoom limit.
     const target = clampToRange(fit * DOUBLE_TAP_MAG);
     if (target <= fit + ZOOM_EPS) return;
     animateZoomIn(target);
@@ -633,6 +642,7 @@
   // fit -> target instead of snapping. cx = cy = 0.5 keeps equal image on the
   // left and right, regardless of where the tap/click landed.
   function animateZoomIn(target: number) {
+    const targetWidth = refW * target;
     z.zoomed = true;
     z.scale = fit;
     z.cx = 0.5;
@@ -642,7 +652,7 @@
     toggleRaf = requestAnimationFrame(() => {
       toggleRaf = requestAnimationFrame(() => {
         toggleRaf = 0;
-        z.scale = target;
+        z.scale = clampToRange(targetWidth / refW);
         z.cx = 0.5;
         z.cy = 0.5;
         settleTimer = setTimeout(() => {
@@ -702,6 +712,7 @@
   // zoomed on the clicked spot.
   function animateZoomInAt(px: number, py: number, target: number) {
     const u = anchorUnder(px, py);
+    const targetWidth = refW * target;
     z.zoomed = true;
     z.scale = fit;
     centerOn(u, px, py, fit);
@@ -710,8 +721,8 @@
     toggleRaf = requestAnimationFrame(() => {
       toggleRaf = requestAnimationFrame(() => {
         toggleRaf = 0;
-        z.scale = target;
-        centerOn(u, px, py, target);
+        z.scale = clampToRange(targetWidth / refW);
+        centerOn(u, px, py, z.scale);
         settleTimer = setTimeout(() => {
           settleTimer = undefined;
           settling = false;
