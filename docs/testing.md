@@ -171,6 +171,31 @@ Use it for UX and discoverability passes. It does not replace `cargo test`, and
 `cargo test` does not replace it. One pass over the running app found twelve real
 UX defects. The suite showed none of them.
 
+## Folder and action controls
+
+Create the disposable project. Then start the debug app with this project.
+
+```powershell
+node scripts/e2e-folder-ux.mjs --prepare
+$env:CULLANT_OPEN_PROJECT = (Resolve-Path .playwright-mcp/folder-ux-project).Path
+npm run tauri:debug
+```
+
+Run the checks in a second terminal at the repository root.
+
+```powershell
+node scripts/e2e-folder-ux.mjs .playwright-mcp/folder-ux-green
+```
+
+The script uses the real Windows app through port 9222. It checks mouse, keyboard, and touch controls.
+It also checks folder exclusions, project isolation, collapsed branches, and a missing preview after a rescan.
+It checks the All context menu, folder menu feedback, Compare zoom focus, and touch bar icons.
+It checks Ctrl and Shift folder selection and saved folder scope.
+The first zoom checks use wheel, double tap, and keyboard input. They also check a change in source dimensions.
+It saves `results.json` and screenshots in the output folder. It restores the bar layouts and app preferences.
+Touch checks use pointer emulation. Run Android device checks separately.
+Set `CULLANT_CDP_PORT` if the debug app uses a port other than 9222.
+
 ## What the tests do not cover
 
 This list is explicit, because the gaps matter more than the coverage.
