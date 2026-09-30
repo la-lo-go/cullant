@@ -6,9 +6,14 @@
   import X from "@lucide/svelte/icons/x";
   import Eraser from "@lucide/svelte/icons/eraser";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import { keymap } from "../keyboard/dispatcher.svelte";
+  import { formatKey } from "../keyboard/keymap";
   import { formatColorLabel } from "../colorLabels";
 
   const n = $derived(session.selectedIds.size);
+  const surveyKeys = $derived([...keymap.bindings]
+    .filter(([, command]) => command === "view.survey")
+    .map(([binding]) => formatKey(binding)).join(" / "));
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -93,8 +98,8 @@
     <!-- The survey acts on a selection, so this bar is its natural home — the
          top toolbar has no room and this one only exists when there is
          something to survey. -->
-    <button class="btn survey" title="Survey these side by side (N)" onclick={act(() => session.openSurvey())}>
-      <LayoutGrid size={14} /><span>Survey</span>
+    <button class="btn survey" title={`Survey: review these side by side${surveyKeys ? ` (${surveyKeys})` : ""}`} onclick={act(() => session.openSurvey())}>
+      <LayoutGrid size={14} /><span>Review selection</span>
     </button>
   {/if}
 

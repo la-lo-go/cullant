@@ -5,6 +5,7 @@
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
   import { runCommand } from "$lib/keyboard/dispatcher.svelte";
+  import { shortcutHint } from "$lib/keyboard/hints";
   import { formatColorLabel } from "$lib/colorLabels";
   import type { CommandId } from "$lib/keyboard/keymap";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -13,6 +14,7 @@
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import Eraser from "@lucide/svelte/icons/eraser";
+  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import FolderInput from "@lucide/svelte/icons/folder-input";
 
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
@@ -125,6 +127,11 @@
       <button class="btn" title="Clear selection" aria-label="Clear selection" onclick={act(() => session.clearSelection())}>
         <X size={20} />
       </button>
+      {#if session.canSurvey && view.mode !== "survey"}
+        <button class="btn task" title={shortcutHint("Review selection (Survey)", "view.survey")} aria-label="Review selection" onclick={act(() => session.openSurvey())}>
+          <LayoutGrid size={18} /> Review selection
+        </button>
+      {/if}
     </div>
   {/if}
   {#if view.mode !== "grid"}
