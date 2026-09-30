@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { slide } from "svelte/transition";
   import {
     settings,
     COLOR_LABELS,
@@ -160,6 +161,24 @@
   let colorNameDrafts = $state<Partial<Record<ColorLabel, string>>>({ ...settings.colorLabelNames });
 
   const openPanel = $derived(SETTINGS.find((s) => s.id === view.settingsPanel) ?? null);
+  let reorderHeld = $state(false);
+  let heldResetVisible = $state(false);
+  const showPanelReset = $derived(reorderHeld ? heldResetVisible : (openPanel?.modified() ?? false));
+
+  function setReorderHeld(active: boolean) {
+    if (active) heldResetVisible = openPanel?.modified() ?? false;
+    reorderHeld = active;
+  }
+
+  function resetSlide(node: HTMLElement) {
+    return slide(node, { duration: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 200 });
+  }
+
+  function retireReset(e: Event) {
+    const slot = e.currentTarget as HTMLElement;
+    if (slot.contains(document.activeElement)) panel?.focus({ preventScroll: true });
+    slot.inert = true;
+  }
 
   $effect(() => {
     if (view.settingsPanel === "colorLabelNames") {
@@ -346,6 +365,22 @@
   );
 </script>
 
+{#snippet panelReset(label: string, reset: () => void)}
+  {#if showPanelReset}
+    <div
+      class="reset-slot"
+      transition:resetSlide
+      onintrostart={(e) => (e.currentTarget.inert = false)}
+      onoutrostart={retireReset}
+    >
+      <button class="wide" onclick={releasing(reset)}>
+        <RotateCcw size={13} />
+        <span>{label}</span>
+      </button>
+    </div>
+  {/if}
+{/snippet}
+
 {#snippet settingRow(s: Setting)}
   {#if s.kind === "panel"}
     <!-- A door, drawn like the doors at the foot of the dialog rather than like
@@ -493,12 +528,7 @@
             />
           </label>
         {/each}
-        {#if openPanel.modified()}
-          <button class="wide" onclick={releasing(() => openPanel?.reset())}>
-            <RotateCcw size={13} />
-            <span>Reset filmstrip badges</span>
-          </button>
-        {/if}
+        {@render panelReset("Reset filmstrip badges", () => openPanel?.reset())}
       </div>
     {:else if openPanel?.kind === "panel" && openPanel.panel === "colorLabelNames"}
       <div class="content sub">
@@ -516,15 +546,10 @@
             />
           </label>
         {/each}
-        {#if openPanel.modified()}
-          <button class="wide" onclick={releasing(() => {
-            colorNameDrafts = {};
-            settings.resetColorLabelNames();
-          })}>
-            <RotateCcw size={13} />
-            <span>Reset color label names</span>
-          </button>
-        {/if}
+        {@render panelReset("Reset color label names", () => {
+          colorNameDrafts = {};
+          settings.resetColorLabelNames();
+        })}
       </div>
     {:else if openPanel?.kind === "panel" && openPanel.panel === "touchBar"}
       <div class="content sub">
@@ -534,6 +559,7 @@
           keyOf={(it) => it.id}
           itemLabel={(it) => it.label}
           onMove={(from, to) => settings.moveBottomBarItem(from, to)}
+          onInteractionChange={setReorderHeld}
           ariaLabel="Bottom bar groups"
         >
           {#snippet row(it)}
@@ -550,12 +576,7 @@
             </label>
           {/snippet}
         </DragList>
-        {#if openPanel.modified()}
-          <button class="wide" onclick={releasing(() => settings.resetBottomBar())}>
-            <RotateCcw size={13} />
-            <span>Reset to default</span>
-          </button>
-        {/if}
+        {@render panelReset("Reset to default", () => settings.resetBottomBar())}
       </div>
     {:else if openPanel?.kind === "panel" && openPanel.panel === "radial"}
       <div class="content sub">
@@ -577,6 +598,7 @@
               keyOf={(it) => slotKey(it.slot)}
               itemLabel={(it, i) => `sector ${i + 1}: ${slotLabel(it.slot)}`}
               onMove={(from, to) => settings.moveRadialSlot(from, to)}
+              onInteractionChange={setReorderHeld}
               ariaLabel="Radial menu sectors"
             >
               {#snippet row(it)}
@@ -672,12 +694,7 @@
           </div>
         </div>
 
-        {#if openPanel.modified()}
-          <button class="wide" onclick={releasing(() => settings.resetRadial())}>
-            <RotateCcw size={13} />
-            <span>Reset to default</span>
-          </button>
-        {/if}
+        {@render panelReset("Reset to default", () => settings.resetRadial())}
       </div>
     {:else}
       <div class="content">
@@ -1308,8 +1325,9 @@
     gap: 8px;
   }
 
-  .sub .wide {
-    margin-top: 8px;
+  .reset-slot {
+    flex-shrink: 0;
+    padding-top: 8px;
   }
 
   /* Hover belongs to pointers that can hover. On touch it sticks after a tap and
