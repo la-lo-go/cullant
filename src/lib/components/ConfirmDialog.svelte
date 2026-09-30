@@ -1,5 +1,6 @@
 <script lang="ts">
   import { backdropDismiss } from "../backdrop";
+  import { modalFocus } from "../modal";
 
   let {
     title,
@@ -16,13 +17,6 @@
   } = $props();
 
   const dismiss = backdropDismiss(() => oncancel());
-
-  let panel = $state<HTMLDivElement | null>(null);
-
-  // Focus the panel so Escape lands here (and stops) instead of the global keymap.
-  $effect(() => {
-    panel?.focus();
-  });
 
   function onKeydown(e: KeyboardEvent) {
     e.stopPropagation();
@@ -41,7 +35,7 @@
 >
   <div
     class="dialog"
-    bind:this={panel}
+    use:modalFocus
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
