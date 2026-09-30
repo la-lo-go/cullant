@@ -207,6 +207,14 @@ export function runCommand(id: CommandId) {
 }
 
 export function handleKeydown(e: KeyboardEvent) {
+  // Contain keys even when a pointer choice or the toolbar moves DOM focus out.
+  if (session.filtersPanelOpen) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      session.filtersPanelOpen = false;
+    }
+    return;
+  }
   const target = e.target as HTMLElement | null;
   if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
 

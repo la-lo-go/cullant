@@ -232,7 +232,7 @@ class SessionStore {
         catalog.media === "photos"),
   );
 
-  /** Reset every filter to its neutral value. */
+  /** Clear the filter controls and keep the selected folders. */
   clearFilters() {
     this.flagFilter = "all";
     this.minRating = 0;
@@ -251,7 +251,6 @@ class SessionStore {
     this.shutterFilter = null;
     this.dateFilter = null;
     this.burstKeyFilter = null;
-    this.folderFilter = null;
     this.clampFocus();
   }
 
@@ -264,6 +263,7 @@ class SessionStore {
    *  `restoreSessionState()` on every project open; a saved blob then overrides
    *  these defaults with the new project's own remembered choices. */
   resetForNewProject() {
+    this.folderFilter = null;
     this.clearFilters();
     this.groupBy = [];
     this.gridDensity = "medium";
@@ -551,7 +551,7 @@ class SessionStore {
   /** What the grouping dimensions need beyond the item itself. */
   groupContext = $derived<GroupContext>({ bursts: this.bursts });
 
-  filtered = $derived.by(() => {
+  folderScopedItems = $derived.by(() => {
     let out: ItemLite[];
     if (this.mirrorMode) {
       // One entry per logical photo; J may swap which member is displayed.
@@ -566,6 +566,11 @@ class SessionStore {
     } else {
       out = catalog.items;
     }
+    return out.filter((item) => folders.includes(dirOf(item.relPath)) && !folders.ignoredBy(dirOf(item.relPath)));
+  });
+
+  filtered = $derived.by(() => {
+    let out = this.folderScopedItems;
     if (this.flagFilter !== "all") {
       const keep = FLAG_FILTER_TESTS[this.flagFilter];
       out = out.filter((i) => keep(i.flag));
@@ -677,12 +682,6 @@ class SessionStore {
       if (this.shutterFilter !== null) {
         out = out.filter((i) => shutterBucket(i.exposureTime)?.key === this.shutterFilter);
       }
-    }
-    if (!folders.allSelected) {
-      out = out.filter((i) => folders.includes(dirOf(i.relPath)));
-    }
-    if (folders.ignored.length > 0) {
-      out = out.filter((i) => !folders.ignoredBy(dirOf(i.relPath)));
     }
     if (this.dateFilter !== null) {
       out = out.filter((i) => dayKey(i) === this.dateFilter);
@@ -976,12 +975,12 @@ class SessionStore {
     let pick = 0;
     let reject = 0;
     let unflagged = 0;
-    for (const i of catalog.items) {
+    for (const i of this.folderScopedItems) {
       if (i.flag === 1) pick++;
       else if (i.flag === -1) reject++;
       else unflagged++;
     }
-    return { pick, reject, unflagged, total: catalog.items.length };
+    return { pick, reject, unflagged, total: this.folderScopedItems.length };
   });
 
 

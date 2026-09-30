@@ -12,6 +12,7 @@
     type OrientationFilter,
   } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
+  import { folders } from "../stores/folders.svelte";
   import {
     APERTURE_BUCKETS,
     FOCAL_BUCKETS,
@@ -263,23 +264,20 @@
     }
   }
 
-  // A control that keeps DOM focus after a click swallows the arrow keys: the
-  // panel's keydown handler stops them before the grid sees them, and a focused
-  // <select> even consumes them itself. So release focus after a pointer pick,
-  // but not after a keyboard one — a user who tabs into the panel keeps place.
+  // Pointer choices return focus to the panel, which contains classification keys.
   let pointerPick = false;
 
-  function releaseAfterPointerPick(e: Event) {
+  function releaseAfterPointerPick() {
     if (!pointerPick) return;
     pointerPick = false;
-    (e.currentTarget as HTMLElement).blur();
+    panelEl?.focus();
   }
 
   // Same rule for the chips, delegated once instead of per button. A real click
   // reports detail > 0; keyboard activation reports 0.
   function releaseChipFocus(e: MouseEvent) {
     if (e.detail === 0) return;
-    (e.target as HTMLElement | null)?.closest("button")?.blur();
+    if (session.filtersPanelOpen && (e.target as HTMLElement | null)?.closest("button")) panelEl?.focus();
   }
 
   let panelEl = $state<HTMLDivElement | null>(null);
@@ -297,7 +295,10 @@
 
   function onPanelKeydown(e: KeyboardEvent) {
     e.stopPropagation();
-    if (e.key === "Escape") session.filtersPanelOpen = false;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      session.filtersPanelOpen = false;
+    }
   }
 </script>
 
@@ -332,6 +333,13 @@
       </button>
     </div>
   </header>
+
+  {#if !folders.allSelected}
+    <section>
+      <span class="lbl">Folder scope</span>
+      <button class="seg" onclick={() => { folders.selectOnly(null); session.clampFocus(); }}>Show all folders</button>
+    </section>
+  {/if}
 
   <section>
     <span class="lbl">Sort</span>
@@ -387,7 +395,7 @@
   </section>
 
   <section>
-    <span class="lbl">Flag</span>
+    <span class="lbl">Flag · {folders.allSelected ? "All folders" : "Selected folders"}</span>
     <!-- Six chips never fit one line, so this row wraps like the tag rows. -->
     <div class="row wrap">
       {#each flagOptions as opt (opt.value)}
@@ -531,7 +539,7 @@
           onchange={(e) => {
             session.dateFilter = e.currentTarget.value || null;
             session.clampFocus();
-            releaseAfterPointerPick(e);
+            releaseAfterPointerPick();
           }}
         >
           <option value="">All capture days</option>
@@ -620,7 +628,7 @@
         onchange={(e) => {
           session.cameraFilter = e.currentTarget.value || null;
           session.clampFocus();
-          releaseAfterPointerPick(e);
+          releaseAfterPointerPick();
         }}
       >
         <option value="">Any</option>
@@ -642,7 +650,7 @@
         onchange={(e) => {
           session.lensFilter = e.currentTarget.value || null;
           session.clampFocus();
-          releaseAfterPointerPick(e);
+          releaseAfterPointerPick();
         }}
       >
         <option value="">Any</option>
