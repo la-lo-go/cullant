@@ -25,10 +25,11 @@ import FolderOpen from "@lucide/svelte/icons/folder-open";
 import Film from "@lucide/svelte/icons/film";
 import PanelBottom from "@lucide/svelte/icons/panel-bottom";
 import CircleDot from "@lucide/svelte/icons/circle-dot";
+import Palette from "@lucide/svelte/icons/palette";
 
 export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project";
 
-export type SubPanelId = "filmstripBadges" | "touchBar" | "radial";
+export type SubPanelId = "filmstripBadges" | "touchBar" | "radial" | "colorLabelNames";
 
 export type CustomSlot = "previewQuality";
 
@@ -271,6 +272,18 @@ export const SETTINGS: Setting[] = [
     keywords: "bottom bar reorder hide mobile rating labels tags move copy",
     modified: () => settings.bottomBarHidden.length > 0 || barReordered(),
     reset: () => settings.resetBottomBar(),
+  },
+  {
+    kind: "panel",
+    panel: "colorLabelNames",
+    icon: Palette,
+    id: "colorLabelNames",
+    group: "appearance",
+    label: "Color label names",
+    info: "Give each color a name, such as To print. Leave a name empty to use the color name. XMP export keeps the standard color values.",
+    keywords: "red yellow green blue purple meaning alias customize personal labels",
+    modified: () => Object.keys(settings.colorLabelNames).length > 0,
+    reset: () => settings.resetColorLabelNames(),
   },
   {
     kind: "panel",

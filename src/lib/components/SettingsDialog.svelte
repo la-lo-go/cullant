@@ -1,6 +1,9 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import {
     settings,
+    COLOR_LABELS,
+    type ColorLabel,
     PREVIEW_QUALITY_CHOICES,
     PREVIEW_QUALITY_LABELS,
   } from "../stores/settings.svelte";
@@ -153,8 +156,15 @@
     return () => view.resetSettingsNav();
   });
 
+  let colorNameDrafts = $state<Partial<Record<ColorLabel, string>>>({ ...settings.colorLabelNames });
 
   const openPanel = $derived(SETTINGS.find((s) => s.id === view.settingsPanel) ?? null);
+
+  $effect(() => {
+    if (view.settingsPanel === "colorLabelNames") {
+      colorNameDrafts = untrack(() => ({ ...settings.colorLabelNames }));
+    }
+  });
 
   function rows(group: GroupId): Setting[] {
     return SETTINGS.filter((s) => s.kind !== "panel" && s.group === group && matches(s, query));
@@ -483,6 +493,32 @@
           </label>
         {/each}
       </div>
+    {:else if openPanel?.kind === "panel" && openPanel.panel === "colorLabelNames"}
+      <div class="content sub">
+        <p class="sub-intro">{openPanel.info}</p>
+        {#each COLOR_LABELS as label (label)}
+          <label class="label-name">
+            <span>{label}</span>
+            <input
+              type="text"
+              aria-label={`${label} label name`}
+              placeholder={label}
+              maxlength="40"
+              bind:value={colorNameDrafts[label]}
+              oninput={(e) => settings.setColorLabelName(label, e.currentTarget.value)}
+            />
+          </label>
+        {/each}
+        {#if openPanel.modified()}
+          <button class="wide" onclick={releasing(() => {
+            colorNameDrafts = {};
+            settings.resetColorLabelNames();
+          })}>
+            <RotateCcw size={13} />
+            <span>Reset color label names</span>
+          </button>
+        {/if}
+      </div>
     {:else if openPanel?.kind === "panel" && openPanel.panel === "touchBar"}
       <div class="content sub">
         <p class="sub-intro">{openPanel.info}</p>
@@ -763,6 +799,29 @@
 {/if}
 
 <style>
+  .label-name {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 8px 0;
+  }
+
+  .label-name span {
+    width: 60px;
+    flex: none;
+  }
+
+  .label-name input {
+    min-width: 0;
+    flex: 1;
+    padding: 7px 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--control);
+    color: inherit;
+    font: inherit;
+  }
+
   .backdrop {
     position: fixed;
     inset: 0;

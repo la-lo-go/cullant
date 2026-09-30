@@ -43,6 +43,10 @@ const PREVIEW_QUALITY_KEY = "cullant.previewQuality";
 const RADIAL_SLOTS_KEY = "cullant.radial.slots";
 const RADIAL_MOUSE_KEY = "cullant.radial.mouse";
 const RADIAL_ROTATION_KEY = "cullant.radial.rotation";
+const COLOR_LABEL_NAMES_KEY = "cullant.colorLabelNames";
+
+export const COLOR_LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
+export type ColorLabel = (typeof COLOR_LABELS)[number];
 
 /** Allowed burst gaps in seconds — a whitelist for the same reason the
  *  auto-rescan intervals are one. */
@@ -142,6 +146,19 @@ function save(key: string, value: unknown) {
   }
 }
 
+function loadColorLabelNames(): Partial<Record<ColorLabel, string>> {
+  try {
+    const value = JSON.parse(localStorage.getItem(COLOR_LABEL_NAMES_KEY) ?? "{}");
+    if (!value || typeof value !== "object") return {};
+    return Object.fromEntries(COLOR_LABELS.flatMap((label) =>
+      typeof value[label] === "string" && value[label].trim()
+        ? [[label, value[label].trim().slice(0, 40)]] : [],
+    ));
+  } catch {
+    return {};
+  }
+}
+
 /** The reorderable / hideable groups of the bottom classification bar, in their
  *  default order. Group-level granularity (not individual stars/swatches) mirrors
  *  the bar's own visual grouping. The contextual selection/navigation controls
@@ -205,6 +222,22 @@ function loadRadialSlots(): RadialSlot[] {
 }
 
 class SettingsStore {
+  colorLabelNames = $state<Partial<Record<ColorLabel, string>>>(loadColorLabelNames());
+
+  setColorLabelName(label: ColorLabel, name: string) {
+    const names = { ...this.colorLabelNames };
+    const trimmed = name.trim().slice(0, 40);
+    if (trimmed) names[label] = trimmed;
+    else delete names[label];
+    this.colorLabelNames = names;
+    save(COLOR_LABEL_NAMES_KEY, names);
+  }
+
+  resetColorLabelNames() {
+    this.colorLabelNames = {};
+    save(COLOR_LABEL_NAMES_KEY, {});
+  }
+
   /** Paint the cached thumbnail instantly while the sharp preview loads. */
   progressiveLoupe = $state<boolean>(loadBool(PROGRESSIVE_LOUPE_KEY, DEFAULTS.progressiveLoupe));
 
