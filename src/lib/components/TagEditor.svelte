@@ -2,6 +2,7 @@
   import { api, type TaskTag } from "../api";
   import { tags } from "../stores/tags.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import X from "@lucide/svelte/icons/x";
   import { backdropDismiss } from "../backdrop";
 
@@ -14,6 +15,10 @@
   let newColor = $state("#7a9bd6");
   let error = $state("");
   let recording = $state<number | null>(null);
+  let editing = $state<number | null>(null);
+  let editName = $state("");
+  let editColor = $state("#888888");
+  let saving = $state(false);
 
   const scopeNames = ["Photos", "Videos", "Both"];
 
@@ -37,6 +42,36 @@
       await tags.refresh();
     } catch (e) {
       error = String(e);
+    }
+  }
+
+  function edit(tag: TaskTag) {
+    recording = null;
+    editing = tag.id;
+    editName = tag.name;
+    editColor = tag.color ?? "#888888";
+    error = "";
+  }
+
+  function focusName(input: HTMLInputElement) {
+    input.focus();
+    input.select();
+  }
+
+  async function saveEdit() {
+    const tag = tags.byId.get(editing ?? -1);
+    const name = editName.trim();
+    if (!tag || !name || saving) return;
+    saving = true;
+    error = "";
+    try {
+      await api.updateTaskTag({ ...tag, name, color: editColor });
+      await tags.refresh();
+      editing = null;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      saving = false;
     }
   }
 
@@ -104,6 +139,7 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onDialogKeydown}
     role="dialog"
+    aria-label="Task tags"
     tabindex="-1"
   >
     <header>
@@ -122,15 +158,24 @@
       {#each tags.all as tag, i}
         <span class="dot" style="background: {tag.color ?? '#888'}"></span>
         <span class="name">{i + 1}. {tag.name}</span>
-        <select value={String(tag.scope)} onchange={(e) => setScope(tag, e)}>
+        <select value={String(tag.scope)} disabled={saving} onchange={(e) => setScope(tag, e)}>
           {#each scopeNames as s, v}
             <option value={String(v)}>{s}</option>
           {/each}
         </select>
-        <button class="key" class:waiting={recording === tag.id} onclick={() => recordShortcut(tag)}>
+        <button class="key" class:waiting={recording === tag.id} disabled={saving} onclick={() => recordShortcut(tag)}>
           {recording === tag.id ? "press key…" : (tag.shortcut ?? "—")}
         </button>
-        <button class="del" title="Delete tag" onclick={() => remove(tag)}><Trash2 size={14} /></button>
+        <button class="edit" title="Edit tag" aria-label={`Edit ${tag.name}`} disabled={saving} onclick={() => edit(tag)}><Pencil size={14} /></button>
+        <button class="del" title="Delete tag" aria-label={`Delete ${tag.name}`} disabled={saving} onclick={() => remove(tag)}><Trash2 size={14} /></button>
+        {#if editing === tag.id}
+          <form class="edit-row" onsubmit={(e) => { e.preventDefault(); void saveEdit(); }}>
+            <input aria-label="Tag name" use:focusName bind:value={editName} disabled={saving} />
+            <input type="color" aria-label="Tag color" bind:value={editColor} disabled={saving} />
+            <button type="submit" disabled={!editName.trim() || saving}>{saving ? "Saving…" : "Save"}</button>
+            <button type="button" disabled={saving} onclick={() => { editing = null; error = ""; }}>Cancel</button>
+          </form>
+        {/if}
       {/each}
     </div>
 
@@ -204,7 +249,7 @@
 
   .list {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
     gap: 6px 10px;
     align-items: center;
     overflow-y: auto;
@@ -243,6 +288,19 @@
     align-items: center;
     border-top: 1px solid var(--border);
     padding-top: 10px;
+  }
+
+  .edit-row {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-bottom: 6px;
+  }
+
+  .edit-row input:not([type="color"]) {
+    flex: 1;
+    min-width: 0;
   }
 
   .create input:not([type="color"]) {
@@ -298,7 +356,8 @@
     opacity: 1;
   }
 
-  .del {
+  .del,
+  .edit {
     display: inline-flex;
     align-items: center;
     opacity: 0.6;
