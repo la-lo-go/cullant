@@ -219,9 +219,10 @@
       <div
         class="pane"
         class:zoom-active={zoomSide === "left"}
+        class:classification-target={focusedSide === "left"}
         class:pinned={pinnedSide === "left"}
         role="group"
-        aria-label={zoomSide === "left" ? "Left comparison: keyboard zoom active" : "Left comparison"}
+        aria-label={`Left comparison${focusedSide === "left" ? `: Selected ${left.name}.${left.ext}` : ""}${zoomSide === "left" ? ": keyboard zoom active" : ""}`}
         onpointerdown={() => { activeZoomSide = "left"; }}
         onfocusin={() => { activeZoomSide = "left"; }}
         onwheel={() => { activeZoomSide = "left"; }}
@@ -249,6 +250,10 @@
         >
           {#if pinnedSide === "left"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
+        <div class="target-status">
+          {#if focusedSide === "left"}<span class="selected-target">Selected: {left.name}.{left.ext}</span>{/if}
+          {#if zoomSide === "left"}<span class="zoom-target">Keyboard zoom</span>{/if}
+        </div>
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(left.id)}
           <span class="caption" class:focused-caption={focusedSide === "left"}>
@@ -275,9 +280,10 @@
       <div
         class="pane"
         class:zoom-active={zoomSide === "right"}
+        class:classification-target={focusedSide === "right"}
         class:pinned={pinnedSide === "right"}
         role="group"
-        aria-label={zoomSide === "right" ? "Right comparison: keyboard zoom active" : "Right comparison"}
+        aria-label={`Right comparison${focusedSide === "right" ? `: Selected ${right.name}.${right.ext}` : ""}${zoomSide === "right" ? ": keyboard zoom active" : ""}`}
         onpointerdown={() => { activeZoomSide = "right"; }}
         onfocusin={() => { activeZoomSide = "right"; }}
         onwheel={() => { activeZoomSide = "right"; }}
@@ -305,6 +311,10 @@
         >
           {#if pinnedSide === "right"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
+        <div class="target-status">
+          {#if focusedSide === "right"}<span class="selected-target">Selected: {right.name}.{right.ext}</span>{/if}
+          {#if zoomSide === "right"}<span class="zoom-target">Keyboard zoom</span>{/if}
+        </div>
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(right.id)}
           <span class="caption" class:focused-caption={focusedSide === "right"}>
@@ -411,13 +421,43 @@
   }
 
   .pane.zoom-active {
-    outline: 1px solid rgba(var(--accent-rgb), 0.35);
+    outline: 1px dashed rgba(255, 255, 255, 0.35);
     outline-offset: -1px;
   }
 
   .pane.pinned {
     outline: 1px solid rgba(var(--accent-rgb), 0.55);
     outline-offset: -1px;
+  }
+
+  .pane.classification-target {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .target-status {
+    position: absolute;
+    bottom: 36px;
+    left: calc(10px + var(--safe-left));
+    max-width: calc(100% - 20px - var(--safe-left));
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    font-size: 11px;
+    pointer-events: none;
+    z-index: 4;
+  }
+
+  .target-status span {
+    background: rgba(0, 0, 0, 0.7);
+    border-radius: 4px;
+    padding: 3px 6px;
+    overflow-wrap: anywhere;
+  }
+
+  .selected-target {
+    color: var(--accent);
+    font-weight: 600;
   }
 
   .pin-btn {
