@@ -10,6 +10,7 @@
   import Scissors from "@lucide/svelte/icons/scissors";
   import Layers from "@lucide/svelte/icons/layers";
   import Info from "@lucide/svelte/icons/info";
+  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
   import { edgeBounce } from "../anim";
@@ -136,11 +137,16 @@
         </div>
       {/if}
     </div>
-    {#if !view.fullscreen}
-      <Filmstrip items={session.filtered} />
-    {/if}
   {:else}
-    <div class="empty">No photo selected</div>
+    <div class="empty" role="status">
+      <p>No photo selected. The previous photo may no longer be available.</p>
+      <button onclick={(e) => { view.mode = "grid"; e.currentTarget.blur(); }}>
+        <LayoutGrid size={16} /> Back to grid
+      </button>
+    </div>
+  {/if}
+  {#if !view.fullscreen}
+    <Filmstrip items={session.filtered} />
   {/if}
 </div>
 
@@ -289,6 +295,23 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    opacity: 0.5;
+    flex-direction: column;
+    gap: 12px;
+    padding: 20px;
+    text-align: center;
+    color: #888;
+  }
+
+  .empty button {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
   }
 </style>

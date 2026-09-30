@@ -83,7 +83,7 @@
   // Rendered height: the persisted preference clamped to what the current
   // items can actually fill (a tall preference saved from a portrait-heavy
   // catalog must not leave dead space in a landscape-only one).
-  const stripH = $derived(Math.min(session.filmstripHeight, contentMaxH));
+  const stripH = $derived(Math.max(MIN_H, Math.min(session.filmstripHeight, contentMaxH)));
   // Reactive: the strip is user-resizable (drag its top edge), and unlike the
   // (square, fixed-height) grid cell, a filmstrip cell's height is the OTHER
   // free axis besides width — object-fit: contain can bind on either one
