@@ -52,31 +52,30 @@
     </header>
 
     <div class="content">
-      <p class="intro">
-        Cullant is free and open source. No ads, no account, no subscription, and it
-        never sends your photos or anything about them anywhere.
-      </p>
-      <p class="intro">If it saves you time, here is how you can help it keep going.</p>
+      <p class="intro">Help fund Cullant's development.</p>
+
+      <section class="block money">
+        <header>
+          <span class="h-title">Support development</span>
+        </header>
+        {#each MONEY_WAYS as c (c.id)}
+          {@render way(c)}
+        {/each}
+      </section>
 
       <section class="block">
         <header>
-          <span class="h-title">Costs nothing</span>
-          <span class="h-note">Worth more than it sounds</span>
+          <span class="h-title">Other ways to help</span>
         </header>
         {#each FREE_WAYS as c (c.id)}
           {@render way(c)}
         {/each}
       </section>
 
-      <section class="block money">
-        <header>
-          <span class="h-title">With money</span>
-          <span class="h-note">None of these are open yet</span>
-        </header>
-        {#each MONEY_WAYS as c (c.id)}
-          {@render way(c)}
-        {/each}
-      </section>
+      <p class="intro">
+        Cullant is free and open source. No ads, no account, no subscription, and it
+        never sends your photos or anything about them anywhere.
+      </p>
     </div>
   </div>
 </div>
@@ -187,11 +186,6 @@
     letter-spacing: 0.07em;
     text-transform: uppercase;
     color: var(--accent);
-  }
-
-  .h-note {
-    font-size: 11px;
-    opacity: 0.55;
   }
 
   .way {

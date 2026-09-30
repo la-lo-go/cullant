@@ -629,7 +629,7 @@
             <span class="s-text">
               <span class="s-title">Support Cullant</span>
               <span class="s-note">
-                Free, no ads, no account. Help with your time or with money.
+                Support development with a donation or help with feedback.
               </span>
             </span>
             <ChevronRight size={16} />

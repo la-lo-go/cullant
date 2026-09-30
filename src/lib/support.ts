@@ -31,8 +31,7 @@ export interface SupportChannel {
   icon: typeof Star;
 }
 
-/** Help that costs nothing. Listed first, and deliberately so: asking only for
- *  money reads worse than asking for help and mentioning money. */
+/** Help through feedback, test files, and sharing. */
 export const FREE_WAYS: SupportChannel[] = [
   {
     id: "star",
