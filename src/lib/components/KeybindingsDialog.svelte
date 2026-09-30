@@ -1,24 +1,41 @@
 <script lang="ts">
   import { keymap } from "../keyboard/dispatcher.svelte";
-  import { COMMANDS, DEFAULT_BINDINGS, normalizeKey } from "../keyboard/keymap";
+  import { COMMANDS, DEFAULT_BINDINGS, formatKey, isModifierKey, normalizeKey, type CommandId } from "../keyboard/keymap";
+  import { formatColorLabel } from "../colorLabels";
+  import Search from "@lucide/svelte/icons/search";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import X from "@lucide/svelte/icons/x";
   import { backdropDismiss } from "../backdrop";
+  import { modalFocus } from "../modal";
 
   let { onclose }: { onclose: () => void } = $props();
 
-  function currentKeys(id: (typeof COMMANDS)[number]["id"]): string {
-    return (keymap.overrides[id] ?? DEFAULT_BINDINGS[id]).join(", ");
+  function currentKeys(id: CommandId): string {
+    return [...keymap.bindings].filter(([, command]) => command === id)
+      .map(([key]) => formatKey(key)).join(", ") || "Unassigned";
   }
 
+  function bindingsChanged(id: CommandId): boolean {
+    const keys = [...keymap.bindings].filter(([, command]) => command === id).map(([key]) => key);
+    const defaults = DEFAULT_BINDINGS[id];
+    return keys.length !== defaults.length || keys.some((key) => !defaults.includes(key));
+  }
+
+  const modifiedCommands = $derived(new Set(COMMANDS.filter((cmd) => bindingsChanged(cmd.id)).map((cmd) => cmd.id)));
+
+  function commandTitle(cmd: (typeof COMMANDS)[number]): string {
+    if (!cmd.id.startsWith("label.")) return cmd.title;
+    const color = cmd.title.replace(" label", "");
+    return `${formatColorLabel(color)} label`;
+  }
+
+  let query = $state("");
+  const visibleCommands = $derived(COMMANDS.filter((cmd) => {
+    const text = `${commandTitle(cmd)} ${cmd.category} ${currentKeys(cmd.id)}`.toLowerCase();
+    return query.trim().toLowerCase().split(/\s+/).every((word) => text.includes(word));
+  }));
+
   const dismiss = backdropDismiss(() => onclose());
-
-  let panel = $state<HTMLDivElement | null>(null);
-
-  // Focus the panel so keydowns land here first (and stop) instead of the
-  // global keymap.
-  $effect(() => {
-    panel?.focus();
-  });
 
   // A shortcut waiting for its new key must not outlive the dialog. `rebinding`
   // is global state the window dispatcher also honours, so a dialog closed
@@ -36,6 +53,7 @@
     if (keymap.rebinding) {
       e.preventDefault();
       e.stopPropagation();
+      if (isModifierKey(e)) return;
       const key = normalizeKey(e);
       if (key !== "escape") keymap.rebind(keymap.rebinding, key);
       keymap.rebinding = null;
@@ -54,33 +72,53 @@
 >
   <div
     class="dialog"
-    bind:this={panel}
+    use:modalFocus={{ isRecording: () => keymap.rebinding !== null }}
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
+    aria-label="Keyboard shortcuts"
     tabindex="-1"
   >
     <header>
       <h2>Keyboard shortcuts</h2>
-      <button onclick={() => keymap.reset()}>Reset all</button>
+      {#if modifiedCommands.size > 0}
+        <button onclick={() => keymap.reset()}>Reset all</button>
+      {/if}
       <button class="close-x" onclick={onclose} aria-label="Close" title="Close">
         <X size={18} />
       </button>
     </header>
     <p class="hint">
-      Click a shortcut, then press the new key. Esc cancels. Hold Shift while rating to
-      advance one photo (or to stay put when Caps Lock auto-advance is on).
+      Click a shortcut, then press the new key. Esc cancels. Hold Shift to reverse
+      auto-advance for one classification. This also applies to Fast culling and Caps Lock.
     </p>
+    <label class="find">
+      <Search size={14} />
+      <input type="search" aria-label="Search shortcuts" placeholder="Search commands or keys" bind:value={query} onfocus={() => (keymap.rebinding = null)} />
+    </label>
     <div class="list">
-      {#each COMMANDS as cmd}
-        <span class="title">{cmd.title}</span>
+      {#each visibleCommands as cmd (cmd.id)}
+        <span class="title">{commandTitle(cmd)}</span>
         <button
           class="key"
+          aria-label={`Change ${cmd.title} shortcut`}
           class:waiting={keymap.rebinding === cmd.id}
           onclick={() => (keymap.rebinding = cmd.id)}
         >
           {keymap.rebinding === cmd.id ? "press a key…" : currentKeys(cmd.id)}
         </button>
+        {#if modifiedCommands.has(cmd.id) && keymap.overrides[cmd.id] !== undefined}
+          <button
+            class="reset"
+            aria-label={`Reset ${cmd.title} shortcut`}
+            title={`Reset ${cmd.title} shortcut`}
+            onclick={() => keymap.resetCommand(cmd.id)}
+          ><RotateCcw size={13} /></button>
+        {:else}
+          <span aria-hidden="true"></span>
+        {/if}
+      {:else}
+        <p class="empty">No shortcuts match “{query}”.</p>
       {/each}
     </div>
   </div>
@@ -101,6 +139,7 @@
   }
 
   .dialog {
+    box-sizing: border-box;
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
     border-radius: 10px;
@@ -132,14 +171,16 @@
 
   .list {
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 16px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 4px 8px;
     overflow-y: auto;
     align-items: center;
   }
 
   .title {
     font-size: 13px;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .key {
@@ -158,6 +199,38 @@
   .key.waiting {
     border-color: var(--accent);
     color: var(--accent);
+  }
+
+  .find {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 6px 8px;
+    background: var(--control);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+  }
+
+  .find input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    outline: none;
+  }
+
+  .reset {
+    display: inline-flex;
+    justify-content: center;
+    padding: 5px;
+  }
+
+  .empty {
+    grid-column: 1 / -1;
+    font-size: 12px;
   }
 
   button {
