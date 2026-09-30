@@ -1,8 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
 import { api, type TagChange, type TaskTag } from "../api";
 import { catalog } from "./catalog.svelte";
+import { session } from "./session.svelte";
 
 class TagsStore {
+  private refreshRequest = 0;
   all = $state<TaskTag[]>([]);
   editorOpen = $state(false);
 
@@ -10,7 +12,25 @@ class TagsStore {
 
   async refresh() {
     if (!catalog.project) return;
-    this.all = await api.listTaskTags();
+    const generation = catalog.generation;
+    const request = ++this.refreshRequest;
+    const all = await api.listTaskTags();
+    if (generation !== catalog.generation || request !== this.refreshRequest) return;
+    this.all = all;
+    const validIds = new Set(all.map((tag) => tag.id));
+    let changed = false;
+    for (const item of catalog.items) {
+      const tagIds = item.tagIds.filter((id) => validIds.has(id));
+      if (tagIds.length !== item.tagIds.length) {
+        item.tagIds = tagIds;
+        changed = true;
+      }
+    }
+    if (session.tagFilter !== null && !validIds.has(session.tagFilter)) {
+      session.tagFilter = null;
+      changed = true;
+    }
+    if (changed) session.clampFocus();
   }
 
   applyChanges(changes: TagChange[]) {
