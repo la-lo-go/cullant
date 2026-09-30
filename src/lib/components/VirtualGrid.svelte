@@ -1667,6 +1667,7 @@
     gap: 4px;
     border-radius: 8px;
     user-select: none; /* marquee drags must not select label text */
+    outline: none;
   }
 
   /* Animates the selection shrink (width/height/position all move together by
@@ -1682,7 +1683,8 @@
       height 100ms ease-out;
   }
 
-  .cell.focused {
+  .cell.focused,
+  .cell:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
     background: rgba(var(--accent-rgb), 0.08);
