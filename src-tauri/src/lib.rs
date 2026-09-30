@@ -329,6 +329,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::project::open_project,
+            commands::project::folder_project_path,
             commands::project::pick_saf_tree,
             commands::project::consume_usb_attach,
             commands::project::current_project,

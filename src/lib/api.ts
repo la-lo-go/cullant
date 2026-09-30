@@ -341,6 +341,7 @@ export const api = {
   commitExecuteSection: (section: CommitSection, sectionHash: string) =>
     invoke<CommitOutcome>("commit_execute_section", { section, sectionHash }),
   getProjectSetting: (key: string) => invoke<string | null>("get_project_setting", { key }),
+  folderProjectPath: (path: string) => invoke<string>("folder_project_path", { path }),
   setProjectSetting: (key: string, value: string) =>
     invoke("set_project_setting", { key, value }),
   // Per-project UI session state (opaque JSON blob; shape owned by the frontend).

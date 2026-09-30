@@ -2,6 +2,7 @@
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { folders, folderContains } from "../stores/folders.svelte";
+  import { api } from "../api";
   import { folderContextMenu } from "../folderContextMenu";
   import ContextMenu from "./ContextMenu.svelte";
   import type { MenuNode } from "../menu";
@@ -10,6 +11,7 @@
   import { buildFolderTree, collectFolderPaths, visibleFolderPaths } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import Eye from "@lucide/svelte/icons/eye";
 
@@ -40,6 +42,17 @@
     ] };
   }
 
+  async function createProject(path: string) {
+    const generation = catalog.generation;
+    try {
+      const projectPath = await api.folderProjectPath(path);
+      if (generation !== catalog.generation) return;
+      await catalog.open(projectPath);
+    } catch (error) {
+      if (generation === catalog.generation) catalog.error = `Could not create the folder project: ${error}`;
+    }
+  }
+
   function openMenu(path: string, x: number, y: number) {
     const ignoredBy = folders.ignoredBy(path);
     const inherited = ignoredBy !== undefined && ignoredBy !== path;
@@ -51,6 +64,8 @@
         disabled: inherited || folders.saving,
         run: () => void folders.setIgnored(path, !ignoredBy),
       },
+      { kind: "sep" },
+      { kind: "item", label: "Create a project for this folder", icon: FolderPlus, run: () => void createProject(path) },
       { kind: "sep" },
       { kind: "item", label: "Expand branch", run: () => {
         for (const folder of folders.collapsed) if (folderContains(path, folder)) folders.collapsed.delete(folder);

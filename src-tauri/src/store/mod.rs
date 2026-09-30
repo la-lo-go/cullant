@@ -9,7 +9,7 @@
 //! Paths are always project-root-relative, `/`-separated strings — matching the
 //! `files.rel_path` column the DB already stores.
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 pub mod stats;
 
@@ -99,6 +99,13 @@ pub trait ProjectStore: Send + Sync {
         None
     }
 
+    /// Return an identifier that opens this folder as a separate project.
+    fn folder_project_path(&self, _rel: &str) -> AppResult<String> {
+        Err(AppError::Other(
+            "folder projects are not supported by this store".into(),
+        ))
+    }
+
     /// Whether this backend extracts video poster frames itself, through a
     /// platform media API. True only for Android SAF, which has neither an
     /// ffmpeg binary to shell out to nor a real path to hand it (see
@@ -164,4 +171,18 @@ pub(crate) fn split_parent(rel: &str) -> (&str, &str) {
         Some(i) => (&rel[..i], &rel[i + 1..]),
         None => ("", rel),
     }
+}
+
+pub(crate) fn validate_relative(rel: &str) -> AppResult<()> {
+    if !rel.is_empty()
+        && (rel.contains(['\\', ':', '\0'])
+            || rel
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == ".."))
+    {
+        return Err(AppError::Other(format!(
+            "invalid project-relative path: {rel}"
+        )));
+    }
+    Ok(())
 }

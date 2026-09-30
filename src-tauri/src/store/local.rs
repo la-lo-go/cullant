@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
 use super::{split_parent, ProjectStore, StoreEntry, WALK_PROGRESS_EVERY};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 pub struct LocalFsStore {
     root: PathBuf,
@@ -32,6 +32,19 @@ fn unix_secs(t: SystemTime) -> i64 {
 }
 
 impl ProjectStore for LocalFsStore {
+    fn folder_project_path(&self, rel: &str) -> AppResult<String> {
+        super::validate_relative(rel)?;
+        let path = self.root.join(rel);
+        if !path.is_dir() {
+            return Err(AppError::Other(format!("folder not found: {rel}")));
+        }
+        let path = path.canonicalize()?;
+        if !path.starts_with(self.root.canonicalize()?) {
+            return Err(AppError::Other(format!("path leaves the project: {rel}")));
+        }
+        Ok(path.to_string_lossy().into_owned())
+    }
+
     fn list_recursive(
         &self,
         skip_dirs: &[&str],

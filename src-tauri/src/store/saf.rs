@@ -158,6 +158,23 @@ impl SafStore {
 }
 
 impl ProjectStore for SafStore {
+    fn folder_project_path(&self, rel: &str) -> AppResult<String> {
+        super::validate_relative(rel)?;
+        let document = self.resolve(rel)?;
+        let tree = self
+            .tree_uri
+            .split("/document/")
+            .next()
+            .unwrap_or(&self.tree_uri);
+        let mut uri = tauri::Url::parse(tree)
+            .map_err(|error| AppError::Other(format!("invalid tree URI: {error}")))?;
+        uri.path_segments_mut()
+            .map_err(|()| AppError::Other("tree URI has no path".into()))?
+            .push("document")
+            .push(&document);
+        Ok(uri.into())
+    }
+
     fn list_recursive(
         &self,
         skip_dirs: &[&str],

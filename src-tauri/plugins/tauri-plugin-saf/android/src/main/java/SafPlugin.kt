@@ -184,7 +184,12 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     fun rootDocumentId(invoke: Invoke) {
         val args = invoke.parseArgs(TreeArgs::class.java)
         try {
-            val rootId = DocumentsContract.getTreeDocumentId(Uri.parse(args.treeUri))
+            val uri = Uri.parse(args.treeUri)
+            val rootId = if (DocumentsContract.isDocumentUri(activity, uri)) {
+                DocumentsContract.getDocumentId(uri)
+            } else {
+                DocumentsContract.getTreeDocumentId(uri)
+            }
             val res = JSObject()
             res.put("rootDocumentId", rootId)
             invoke.resolve(res)
@@ -193,13 +198,20 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    private fun hasTreePermission(uri: Uri): Boolean {
+        val treeUri = DocumentsContract.buildTreeDocumentUri(
+            uri.authority, DocumentsContract.getTreeDocumentId(uri)
+        )
+        return resolver.persistedUriPermissions.any {
+            it.uri == treeUri && it.isReadPermission && it.isWritePermission
+        }
+    }
+
     @Command
     fun checkTreeAccess(invoke: Invoke) {
         val args = invoke.parseArgs(TreeArgs::class.java)
         val uri = Uri.parse(args.treeUri)
-        val ok = resolver.persistedUriPermissions.any {
-            it.uri == uri && it.isReadPermission
-        }
+        val ok = hasTreePermission(uri)
         val res = JSObject()
         res.put("ok", ok)
         invoke.resolve(res)

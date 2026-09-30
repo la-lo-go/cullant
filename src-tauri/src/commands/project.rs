@@ -167,6 +167,15 @@ pub fn open_project(
     do_open_project(&path, &app, &state)
 }
 
+#[tauri::command(async)]
+pub fn folder_project_path(path: String, state: State<'_, AppState>) -> AppResult<String> {
+    let store = {
+        let guard = state.project.lock().unwrap();
+        guard.as_ref().ok_or(AppError::NoProject)?.store.clone()
+    };
+    store.folder_project_path(&path)
+}
+
 /// Launch the Android SAF folder picker and return the picked `content://` tree
 /// URI (which `open_project` accepts as its `path`). `None` if the user
 /// cancelled. On desktop this is a no-op returning `None` — the frontend uses
