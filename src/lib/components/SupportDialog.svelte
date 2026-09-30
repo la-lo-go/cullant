@@ -1,6 +1,7 @@
 <script lang="ts">
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { backdropDismiss } from "../backdrop";
+  import { modalFocus } from "../modal";
   import { FREE_WAYS, MONEY_WAYS, type SupportChannel } from "../support";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import Heart from "@lucide/svelte/icons/heart";
@@ -9,12 +10,6 @@
   let { onclose }: { onclose: () => void } = $props();
 
   const dismiss = backdropDismiss(() => onclose());
-
-  let panel = $state<HTMLDivElement | null>(null);
-
-  $effect(() => {
-    panel?.focus();
-  });
 
   function onKeydown(e: KeyboardEvent) {
     e.stopPropagation();
@@ -36,7 +31,7 @@
 <div class="backdrop" {...dismiss} role="presentation">
   <div
     class="dialog"
-    bind:this={panel}
+    use:modalFocus
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"

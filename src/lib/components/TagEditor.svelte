@@ -5,7 +5,8 @@
   import Pencil from "@lucide/svelte/icons/pencil";
   import X from "@lucide/svelte/icons/x";
   import { backdropDismiss } from "../backdrop";
-  import { COMMANDS, formatKey, normalizeKey } from "../keyboard/keymap";
+  import { modalFocus } from "../modal";
+  import { COMMANDS, formatKey, isModifierKey, normalizeKey } from "../keyboard/keymap";
   import { keymap } from "../keyboard/dispatcher.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
@@ -108,34 +109,27 @@
     e.stopPropagation();
     // A lone modifier press is not a shortcut on its own — keep listening for
     // the next real key so we never store "ctrl+control".
-    if (e.key === "Control" || e.key === "Alt" || e.key === "Shift" || e.key === "Meta") return;
+    if (isModifierKey(e)) return;
     const tag = tags.all.find((t) => t.id === recording);
     recording = null;
     if (!tag || e.key === "Escape") return;
     const shortcut = e.key === "Backspace" ? null : normalizeKey(e);
     error = shortcut === null ? "" : shortcutConflict(tag, shortcut, normalizeKey(e, false));
     if (error) return;
-    await api.updateTaskTag({ ...tag, shortcut });
-    await tags.refresh();
+    try {
+      await api.updateTaskTag({ ...tag, shortcut });
+      await tags.refresh();
+    } catch (e) {
+      error = String(e);
+    }
   }
 
-  // Escape closes the dialog (unless a shortcut is being recorded, where the
-  // window capture handler above consumes it to cancel the recording instead).
+  // The capture handler cancels a recording before Escape can close the dialog.
   function onDialogKeydown(e: KeyboardEvent) {
     e.stopPropagation();
-    if (e.key === "Escape" && recording === null) onclose();
+    if (e.key === "Escape") onclose();
   }
-
-  let dialogEl = $state<HTMLDivElement | null>(null);
-
-  // Focus the panel on open so a key pressed before any click lands here and
-  // stops, instead of reaching the global keymap and acting on the grid.
-  $effect(() => {
-    dialogEl?.focus();
-  });
 </script>
-
-<svelte:window onkeydowncapture={onKeydown} />
 
 <div
   class="backdrop"
@@ -145,11 +139,12 @@
 >
   <div
     class="dialog"
-    bind:this={dialogEl}
+    use:modalFocus={{ isRecording: () => recording !== null }}
     onclick={(e) => e.stopPropagation()}
     onfocusin={(e) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) recording = null;
     }}
+    onkeydowncapture={(e) => recording !== null && void onKeydown(e)}
     onkeydown={onDialogKeydown}
     role="dialog"
     aria-label="Task tags"

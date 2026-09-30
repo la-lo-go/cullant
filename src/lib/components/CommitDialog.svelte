@@ -24,6 +24,7 @@
   import Undo2 from "@lucide/svelte/icons/undo-2";
   import X from "@lucide/svelte/icons/x";
   import { backdropDismiss } from "../backdrop";
+  import { modalFocus } from "../modal";
 
   let plan = $state<CommitPlan | null>(null);
   let running = $state(false);
@@ -458,14 +459,6 @@
 
   const dismiss = backdropDismiss(close);
 
-  let panel = $state<HTMLDivElement | null>(null);
-
-  // Focus the panel so keys (e.g. X) land here and stop, instead of flagging the
-  // background photo via the global keymap.
-  $effect(() => {
-    panel?.focus();
-  });
-
   function onKeydown(e: KeyboardEvent) {
     e.stopPropagation();
     if (e.key === "Escape") close();
@@ -513,14 +506,15 @@
 >
   <div
     class="dialog"
-    bind:this={panel}
+    use:modalFocus
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
+    aria-labelledby="review-changes-heading"
     tabindex="-1"
   >
     <header>
-      <h2>{tab === "pending" ? "Commit pending actions" : "Commit history"}</h2>
+      <h2 id="review-changes-heading">{tab === "pending" ? "Review changes" : "Change history"}</h2>
       <button class="close-x" onclick={close} aria-label="Close" title="Close" disabled={running}>
         <X size={18} />
       </button>
