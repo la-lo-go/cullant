@@ -83,6 +83,7 @@
   let showKeybindings = $state(false);
   let showSupport = $state(false);
   let showSettings = $state(false);
+  let settingsQuery = $state("");
   /** Settings opens three dialogs of its own, and closes itself to do it.
    *  Backing out of one of those should land back in Settings rather than in the
    *  grid, so it remembers where the user came from. */
@@ -178,6 +179,7 @@
     }
     if (showSettings) {
       showSettings = false;
+      settingsQuery = "";
       return;
     }
     if (session.recoupleDialogFor !== null) {
@@ -451,7 +453,7 @@
   function blurring(fn: () => void): (e: Event) => void {
     return (e) => {
       fn();
-      (e.currentTarget as HTMLElement).blur();
+      if (!showSettings && !session.commitDialogOpen) (e.currentTarget as HTMLElement).blur();
     };
   }
 
@@ -749,7 +751,8 @@
 
   {#if showSettings}
     <SettingsDialog
-      onclose={() => (showSettings = false)}
+      bind:query={settingsQuery}
+      onclose={() => { showSettings = false; settingsQuery = ""; }}
       onshowkeybindings={() => fromSettings(() => (showKeybindings = true))}
       onshowtags={() => fromSettings(() => (tags.editorOpen = true))}
       onshowsupport={() => fromSettings(() => (showSupport = true))}

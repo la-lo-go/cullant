@@ -24,6 +24,7 @@
   import { view } from "../stores/view.svelte";
   import { api } from "../api";
   import { backdropDismiss } from "../backdrop";
+  import { modalFocus } from "../modal";
   import { IS_TOUCH } from "../platform";
   import { getVersion } from "@tauri-apps/api/app";
   import DragList from "./DragList.svelte";
@@ -42,6 +43,8 @@
     type RadialSlot,
   } from "../radial";
   import type { CommandId } from "../keyboard/keymap";
+  import { shortcutHint } from "../keyboard/hints";
+  import { FREE_WAYS, MONEY_WAYS } from "../support";
 
   /** Which sector the panel is pointing at, so hovering a row lights up the
    *  matching wedge in the preview and the other way round. */
@@ -126,11 +129,13 @@
     onshowkeybindings,
     onshowtags,
     onshowsupport,
+    query = $bindable(""),
   }: {
     onclose: () => void;
     onshowkeybindings: () => void;
     onshowtags: () => void;
     onshowsupport: () => void;
+    query?: string;
   } = $props();
 
   // A touch platform reaches the manual rescan via pull-to-refresh; desktop uses
@@ -141,11 +146,6 @@
 
   let panel = $state<HTMLDivElement | null>(null);
 
-  // Focus the panel so Escape lands here (and stops) instead of the global keymap.
-  $effect(() => {
-    panel?.focus();
-  });
-
   // A sub-panel or an explanation left open would greet the next visit out of
   // context, so the dialog always opens at its top level.
   $effect(() => {
@@ -153,12 +153,11 @@
     return () => view.resetSettingsNav();
   });
 
-  let query = $state("");
 
   const openPanel = $derived(SETTINGS.find((s) => s.id === view.settingsPanel) ?? null);
 
   function rows(group: GroupId): Setting[] {
-    return SETTINGS.filter((s) => s.group === group && matches(s, query));
+    return SETTINGS.filter((s) => s.kind !== "panel" && s.group === group && matches(s, query));
   }
 
   const visibleGroups = $derived(GROUPS.filter((g) => rows(g.id).length > 0));
@@ -273,13 +272,49 @@
   let confirmResetAll = $state(false);
   let confirmReimport = $state(false);
 
-  /** Both destinations need a project, so the whole section waits for one. */
+  const supportDestination = {
+    label: "Support Cullant",
+    info: [...FREE_WAYS, ...MONEY_WAYS].map(({ label, note }) => `${label} ${note}`).join(" "),
+    keywords: "support help contribution donate donation free",
+  };
+  const resetDestination = {
+    label: "Reset all settings",
+    info: "Restore the settings in this dialog to their defaults.",
+    keywords: "reset defaults preferences restore",
+  };
+  const reimportDestination = {
+    label: "Reimport this project",
+    info: "Clear the project catalog and read its folder again.",
+    keywords: "reimport rebuild reset project database repair recover",
+  };
+  const showSupport = $derived(matches(supportDestination, query));
+  const showReset = $derived(matches(resetDestination, query) && anyModified());
+  const showReimport = $derived(catalog.project !== null && matches(reimportDestination, query));
+
+  const destinations = $derived([
+    {
+      label: "Keyboard shortcuts",
+      info: "Search and change command keys. Reset one shortcut or all shortcuts.",
+      keywords: "keyboard keymap bindings remap hotkeys",
+      icon: Keyboard,
+      go: onshowkeybindings,
+    },
+    {
+      label: "Task tags",
+      info: "Create or edit task tag names, colors, scope and shortcuts.",
+      keywords: "tags labels keywords",
+      icon: Tag,
+      go: onshowtags,
+    },
+  ].filter((item) => matches(item, query)));
+
   const elsewhere = $derived(
-    catalog.project
+    (catalog.project
       ? [
           {
-            what: "Thumbnail size, grouping, RAW+JPEG pairing, burst collapsing",
-            where: "View panel",
+            label: "View panel",
+            info: "Thumbnail size, framing, file names, grouping, RAW+JPEG pairing, burst collapsing",
+            keywords: "filename filenames photos grid fit fill",
             go: () => {
               onclose();
               view.mode = "grid";
@@ -287,15 +322,16 @@
             },
           },
           {
-            what: "Where deleted files go",
-            where: "Commit dialog",
+            label: "Review changes",
+            info: "Pending actions, commit history, and where deleted files go",
+            keywords: "delete trash queue move copy undo destination",
             go: () => {
               onclose();
               session.commitDialogOpen = true;
             },
           },
         ]
-      : [],
+      : []).filter((item) => matches(item, query)),
   );
 </script>
 
@@ -385,7 +421,7 @@
         </button>
       {/if}
     </header>
-    {#each rows(g.id).filter((s) => s.kind !== "panel") as s (s.id)}
+    {#each rows(g.id) as s (s.id)}
       {@render settingRow(s)}
     {/each}
     {#if g.id === "quality" && previewMsg}
@@ -398,6 +434,7 @@
   <div
     class="dialog"
     bind:this={panel}
+    use:modalFocus
     onclick={(e) => e.stopPropagation()}
     onpointerdown={() => (pointerPress = true)}
     onkeydown={onKeydown}
@@ -585,9 +622,9 @@
       </div>
     {:else}
       <div class="content">
-        {#if visibleGroups.length === 0}
+        {#if visibleGroups.length === 0 && panelRows.length === 0 && destinations.length === 0 && elsewhere.length === 0 && !showSupport && !showReset && !showReimport}
           <p class="empty">Nothing matches “{query}”.</p>
-        {:else}
+        {:else if visibleGroups.length > 0}
           <div class="cols">
             <div class="col">
               {#each columns[0] as g (g.id)}
@@ -602,26 +639,22 @@
           </div>
         {/if}
 
-        {#if panelRows.length > 0 || !query}
+        {#if panelRows.length > 0 || destinations.length > 0}
           <div class="jump">
             {#each panelRows as s (s.id)}
               {@render settingRow(s)}
             {/each}
-            {#if !query}
-              <button class="wide" onclick={releasing(onshowkeybindings)}>
-                <Keyboard size={14} />
-                <span>Keyboard shortcuts</span>
+            {#each destinations as item (item.label)}
+              <button class="wide" onclick={releasing(item.go)}>
+                <item.icon size={14} />
+                <span>{item.label}</span>
                 <ChevronRight size={14} />
               </button>
-              <button class="wide" onclick={releasing(onshowtags)}>
-                <Tag size={14} />
-                <span>Task tags</span>
-                <ChevronRight size={14} />
-              </button>
-            {/if}
+            {/each}
           </div>
+        {/if}
 
-          {#if !query}
+        {#if showSupport}
           <!-- Deliberately not a third grey row like the two above. Nothing funds
                this app, so the one ask it makes gets to be seen. -->
           <button class="support" onclick={releasing(onshowsupport)}>
@@ -634,32 +667,38 @@
             </span>
             <ChevronRight size={16} />
           </button>
+        {/if}
 
-          {#if elsewhere.length > 0}
+        {#if elsewhere.length > 0}
             <section class="group elsewhere">
               <header><span class="gname">Elsewhere</span></header>
-              {#each elsewhere as item (item.where)}
+              {#each elsewhere as item (item.label)}
                 <button class="out" onclick={releasing(item.go)}>
-                  <span class="what">{item.what}</span>
-                  <span class="where">{item.where}<ArrowUpRight size={12} /></span>
+                  <span class="what">{item.info}</span>
+                  <span class="where">{item.label}<ArrowUpRight size={12} /></span>
                 </button>
               {/each}
             </section>
-          {/if}
+        {/if}
 
+        {#if !query}
           <p class="hint tail">
             {isTouch
               ? "Pull down on the grid to rescan the project now."
-              : "Press ? anytime to see the shortcuts you have configured."}
+              : shortcutHint("Show configured shortcuts", "ui.toggleShortcuts")}
           </p>
+        {/if}
 
-          {#if anyModified()}
-            <button class="reset-all" onclick={releasing(() => (confirmResetAll = true))}>
+          {#if showReset}
+            <button
+              class="reset-all"
+              onclick={releasing(() => (confirmResetAll = true))}
+            >
               <RotateCcw size={13} />
               <span>Reset all settings</span>
             </button>
           {/if}
-          {#if catalog.project}
+          {#if showReimport}
             <!-- The escape hatch for a project that has gone strange. Down here
                  with the other reset, because it is one: it throws away what
                  Cullant stored, not a preference. -->
@@ -668,10 +707,18 @@
               <span>Reimport this project…</span>
             </button>
           {/if}
+        {#if !query}
           <p class="version">Cullant {appVersion || "…"}</p>
-          {/if}
         {/if}
       </div>
+    {/if}
+    {#if addMenu}
+      <ContextMenu
+        x={addMenu.x}
+        y={addMenu.y}
+        items={addMenu.items}
+        onclose={() => (addMenu = null)}
+      />
     {/if}
   </div>
 </div>
@@ -685,15 +732,6 @@
     confirmLabel="Change and rebuild"
     onconfirm={() => void applyPreviewQuality()}
     oncancel={() => (pendingQuality = null)}
-  />
-{/if}
-
-{#if addMenu}
-  <ContextMenu
-    x={addMenu.x}
-    y={addMenu.y}
-    items={addMenu.items}
-    onclose={() => (addMenu = null)}
   />
 {/if}
 

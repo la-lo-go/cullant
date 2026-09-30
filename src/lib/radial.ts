@@ -145,7 +145,7 @@ const SHORT_LABELS: Partial<Record<CommandId, string>> = {
   "edit.rotateLeft": "Rotate ↺",
   "edit.rotateRight": "Rotate ↻",
   "action.moveCopy": "Move/copy",
-  "commit.open": "Commit",
+  "commit.open": "Review changes",
 };
 
 const SHORT_GROUPS: Record<RadialGroupId, string> = {

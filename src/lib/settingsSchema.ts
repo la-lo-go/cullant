@@ -266,7 +266,7 @@ export const SETTINGS: Setting[] = [
     icon: PanelBottom,
     id: "touchBar",
     group: "appearance",
-    label: "Touch action bar",
+    label: "Action bar",
     info: "Drag the handles to change the order of the action groups. Use the checkboxes to show or hide each group.",
     keywords: "bottom bar reorder hide mobile rating labels tags move copy",
     modified: () => settings.bottomBarHidden.length > 0 || barReordered(),
@@ -280,7 +280,7 @@ export const SETTINGS: Setting[] = [
     group: "culling",
     label: "Radial menu",
     info: "Press and hold a photo in the loupe or compare to open the ring.",
-    keywords: "hold press gesture wheel pie sectors touch thumb mouse right click",
+    keywords: "hold press gesture wheel pie sector sectors touch thumb mouse button left right either click opening rotation rotate angle degrees",
     modified: () =>
       settings.radialMouse !== "left" ||
       settings.radialSlots.map(slotKey).join() !== DEFAULT_RADIAL_SLOTS.map(slotKey).join(),
@@ -375,10 +375,11 @@ export const SETTINGS: Setting[] = [
 
 /** Case-insensitive match over label, info and keywords, so searching a concept
  *  ("delete") finds the settings that never say it in their label. */
-export function matches(s: Setting, query: string): boolean {
+export function matches(s: Pick<Setting, "label" | "info" | "keywords"> & { group?: GroupId }, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  const haystack = `${s.label} ${s.info} ${s.keywords ?? ""}`.toLowerCase();
+  const group = GROUPS.find((g) => g.id === s.group)?.label ?? "";
+  const haystack = `${s.label} ${s.info} ${s.keywords ?? ""} ${group}`.toLowerCase();
   return q.split(/\s+/).every((word) => haystack.includes(word));
 }
 
