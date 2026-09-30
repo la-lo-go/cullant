@@ -105,6 +105,10 @@
     menuOpen = false;
     fn();
   }
+  function parentPath(path: string): string {
+    return path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "") || path;
+  }
+
 </script>
 
 <div class="titlebar" data-tauri-drag-region>
@@ -144,7 +148,10 @@
                 onclick={() => choose(() => onOpenRecent(p.path))}
               >
                 <RecentIcon size={15} />
-                <span class="recent-name">{p.displayName}</span>
+                <span class="recent-details">
+                  <span class="recent-name">{p.displayName}</span>
+                  <span class="recent-path">{parentPath(p.path)}</span>
+                </span>
               </button>
             {/each}
           {/if}
@@ -352,7 +359,15 @@
     color: #ff9b9b;
   }
 
-  .recent-name {
+  .recent-details {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .recent-name,
+  .recent-path {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -365,6 +380,13 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     opacity: 0.45;
+  }
+
+  .recent-path {
+    font-size: 10.5px;
+    opacity: 0.6;
+    direction: rtl;
+    text-align: left;
   }
 
   .sep {

@@ -118,6 +118,10 @@
     if (project.storage.state === "ok") onopen(project.path);
   }
 
+  function parentPath(path: string): string {
+    return path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "") || path;
+  }
+
   function askDeleteCard(e: Event, project: RecentProject) {
     e.stopPropagation();
     deleteTarget = project;
@@ -192,6 +196,7 @@
               {/if}
             </div>
             <span class="name">{project.displayName}</span>
+            <span class="project-path">{parentPath(project.path)}</span>
             <span class="meta">
               {#if st.state === "ok"}
                 Opened {relativeTime(project.lastOpened)}
@@ -350,6 +355,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .project-path {
+    font-size: 11px;
+    opacity: 0.6;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    direction: rtl;
+    text-align: left;
   }
 
   .meta {
