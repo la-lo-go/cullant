@@ -1,11 +1,12 @@
 <script lang="ts">
   import homeLogoUrl from "../../logo/logo-w.svg?url";
+  import { untrack } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
   import { addPluginListener, type PluginListener } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { IS_ANDROID, IS_TOUCH, IS_WINDOWS } from "$lib/platform";
+  import { IS_ANDROID, IS_MOBILE, IS_TOUCH, IS_WINDOWS } from "$lib/platform";
   import { catalog } from "$lib/stores/catalog.svelte";
-  import { session } from "$lib/stores/session.svelte";
+  import { session, flushSessionSave } from "$lib/stores/session.svelte";
   import { settings } from "$lib/stores/settings.svelte";
   import { recent } from "$lib/stores/recent.svelte";
   import { tags } from "$lib/stores/tags.svelte";
@@ -355,6 +356,25 @@
 
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
 
+  $effect(() => {
+    if (IS_MOBILE) return;
+    const appWindow = getCurrentWindow();
+    let closing = false;
+    const unlisten = appWindow.onCloseRequested(async (event) => {
+      event.preventDefault();
+      if (closing) return;
+      closing = true;
+      try {
+        await flushSessionSave();
+        await appWindow.destroy();
+      } catch (error) {
+        closing = false;
+        catalog.error = String(error);
+      }
+    });
+    return () => { void unlisten.then((off) => off()); };
+  });
+
   const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
 
   // The grid view differs from its defaults — colours the View toolbar button,
@@ -388,18 +408,22 @@
     const check = async () => {
       // Nothing can move the folder mid-import, and probing while the storage
       // backend is already saturated is exactly when the answer is worthless.
-      if (catalog.ingesting) return;
+      if (untrack(() => catalog.ingesting) || probing) return;
+      probing = true;
       try {
         const info = await api.probeStorage(proj.rootPath);
         storageOk = info.state === "ok";
         if (info.state === "ok") {
           failures = 0;
+    let disposed = false;
+    let probing = false;
           wasOk = true;
           folderLostMsg = ""; // reconnected → let the user carry on
         } else if (++failures >= 2 && wasOk) {
           wasOk = false;
           folderLostMsg =
             info.state === "disconnected"
+        if (disposed || catalog.project?.rootPath !== proj.rootPath) return;
               ? "The drive or volume holding this project is no longer connected. Reconnect it to keep working, or close the project."
               : "This project's folder can no longer be found. It may have been moved or deleted. Restore it, or close the project.";
         }
@@ -414,6 +438,8 @@
 
   // Periodically rescan the open project's folder for added/removed/changed
   // files, at the interval chosen in Settings (0 = off). Only fires while the
+      } finally {
+        probing = false;
   // storage is reachable and no part of an import is still running, so a
   // disconnected drive or a live ingest is never piled onto. Fire-and-forget:
   // its scan:* events reconcile the catalog just like the manual triggers.
@@ -429,7 +455,7 @@
       },
       minutes * 60 * 1000,
     );
-    return () => clearInterval(id);
+    return () => { disposed = true; clearInterval(id); };
   });
 
   async function pickProject() {
@@ -733,7 +759,7 @@
   {/if}
 
   {#if catalog.error}
-    <AlertDialog title="Couldn't open project" message={catalog.error} onclose={() => (catalog.error = "")} />
+    <AlertDialog title="Action failed" message={catalog.error} onclose={() => (catalog.error = "")} />
   {/if}
 
   {#if folderLostMsg}

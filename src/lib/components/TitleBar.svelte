@@ -1,7 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { catalog } from "../stores/catalog.svelte";
-  import { flushSessionSave } from "../stores/session.svelte";
   import { recent } from "../stores/recent.svelte";
   import Minus from "@lucide/svelte/icons/minus";
   import Square from "@lucide/svelte/icons/square";
@@ -59,20 +58,6 @@
     };
   });
 
-  // Flush a still-debounced view/filter save before the window actually closes
-  // (this button, Alt+F4, or the taskbar) — otherwise a change made in the last
-  // 400ms before quitting never reaches the project's DB.
-  $effect(() => {
-    const unlisten = appWindow.onCloseRequested(async (event) => {
-      event.preventDefault();
-      await flushSessionSave();
-      await appWindow.destroy();
-    });
-    return () => {
-      void unlisten.then((f) => f());
-    };
-  });
-
   let menuOpen = $state(false);
 
   // Up to five most-recently-opened projects other than the current one, for
@@ -82,33 +67,62 @@
   );
 
   let menuEl = $state<HTMLDivElement | null>(null);
+  let menuTrigger = $state<HTMLButtonElement | null>(null);
+
+  function closeMenu() {
+    menuOpen = false;
+    menuTrigger?.focus({ preventScroll: true });
+  }
 
   function toggleMenu() {
     menuOpen = !menuOpen;
     if (menuOpen) void recent.refresh();
   }
 
-  // Focus the menu on open so Escape reaches onMenuKeydown; the trigger button
-  // keeps focus after the click otherwise, and it is a sibling of .menu.
   $effect(() => {
-    if (menuOpen) menuEl?.focus();
+    if (!menuOpen || !menuEl) return;
+    const menu = menuEl;
+    menu.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
+    const containKeys = (e: KeyboardEvent) => {
+      if (e.target instanceof Node && menu.contains(e.target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      onMenuKeydown(e);
+    };
+    window.addEventListener("keydown", containKeys, true);
+    return () => window.removeEventListener("keydown", containKeys, true);
   });
 
   function onMenuKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
-      menuOpen = false;
-      e.stopPropagation();
+    e.stopPropagation();
+    if (e.key === "Escape" || e.key === "Tab") {
+      e.preventDefault();
+      closeMenu();
+      return;
+    }
+    const items = [...(menuEl?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])];
+    if (items.length === 0) return;
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = {
+      ArrowDown: (index + 1) % items.length,
+      ArrowUp: (index - 1 + items.length) % items.length,
+      Home: 0,
+      End: items.length - 1,
+    }[e.key];
+    if (next !== undefined) {
+      e.preventDefault();
+      items[next].focus();
     }
   }
 
   function choose(fn: () => void) {
-    menuOpen = false;
+    closeMenu();
     fn();
   }
+
   function parentPath(path: string): string {
     return path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "") || path;
   }
-
 </script>
 
 <div class="titlebar" data-tauri-drag-region>
@@ -116,7 +130,10 @@
     {#if catalog.project}
       <button
         class="project-btn"
+        bind:this={menuTrigger}
         class:open={menuOpen}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
         onclick={toggleMenu}
         title={catalog.project.rootPath}
       >
@@ -126,7 +143,7 @@
       </button>
       {#if menuOpen}
         <!-- Full-window backdrop: an outside click closes the menu. -->
-        <button class="menu-backdrop" aria-label="Close menu" onclick={() => (menuOpen = false)}></button>
+        <button class="menu-backdrop" tabindex="-1" aria-label="Close menu" onclick={closeMenu}></button>
         <div class="menu" role="menu" tabindex="-1" bind:this={menuEl} onkeydown={onMenuKeydown}>
           <button class="item" role="menuitem" onclick={() => choose(onOpenNew)}>
             <FolderOpen size={15} />
