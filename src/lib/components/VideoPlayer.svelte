@@ -1,6 +1,8 @@
 <script lang="ts">
   import { api, previewUrl, thumbUrl, videoUrl, type ItemLite } from "../api";
-  import { remuxForPlayback, type Remux } from "../video/remux";
+  import { untrack } from "svelte";
+  import { needsPlaybackFallback, remuxForPlayback, UnplayableError, type Remux } from "../video/remux";
+  import { unplayableVideos, playbackFailureKey } from "../video/failures";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
   import Volume2 from "@lucide/svelte/icons/volume-2";
@@ -8,7 +10,6 @@
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
   import ExternalLink from "@lucide/svelte/icons/external-link";
-  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Film from "@lucide/svelte/icons/film";
 
   let { item }: { item: ItemLite } = $props();
@@ -28,50 +29,110 @@
   // Set once a clip has run out of ways to play: the WebView refused it AND the
   // in-app remux could not rescue it. Only then is the "open externally" escape
   // hatch the last word. Reset per clip in the item-change effect below.
-  let failed = $state(false);
+  const failureKey = $derived(playbackFailureKey(item));
+  const rememberedFailure = $derived(unplayableVideos.has(failureKey));
+  let currentFailure = $state(false);
+  const failed = $derived(currentFailure || rememberedFailure);
 
   // The source on the element: the file itself, unless the WebView turned that
   // down and the in-app remuxer produced a MediaSource it will accept.
   const nativeSrc = $derived(videoUrl(item));
   let remuxSrc = $state<string | null>(null);
-  const src = $derived(remuxSrc ?? nativeSrc);
+  const src = $derived(failed ? undefined : remuxSrc ?? nativeSrc);
   // True while the remuxer is still feeding the MediaSource. Playback usually
   // starts long before this finishes — fragmented MP4 is playable as it arrives
   // — so this drives an unobtrusive indicator, not a blocking spinner.
   let remuxing = $state(false);
   let remuxProgress = $state(0);
-  // The MediaError code the element reported, surfaced in the failure panel so
-  // a field report names the problem instead of describing it.
-  let mediaErrorCode = $state<number | null>(null);
   let remux: Remux | null = null;
   let triedRemux = false;
   let remuxGeneration = 0;
   let playRequested = false;
+  let recovering = false;
+  let surfacePressed = false;
+  let posterFrame: number | null = null;
+
+  function cancelPosterFrame() {
+    if (posterFrame === null) return;
+    video?.cancelVideoFrameCallback(posterFrame);
+    posterFrame = null;
+  }
+
+  function onPlaying() {
+    // Android can emit `playing` without presenting a frame.
+    const element = video;
+    if (!element || failed || element.paused || element.ended) return;
+    if (!element.requestVideoFrameCallback) {
+      showPoster = false;
+      return;
+    }
+    cancelPosterFrame();
+    const generation = remuxGeneration;
+    posterFrame = element.requestVideoFrameCallback(() => {
+      posterFrame = null;
+      if (element === video && generation === remuxGeneration && !failed && !element.paused) {
+        showPoster = false;
+      }
+    });
+  }
+
+  function onSurfaceClick(e: MouseEvent) {
+    // A grid pointerup mounts this video before Android sends its click.
+    const pressed = surfacePressed;
+    surfacePressed = false;
+    if (pressed || e.detail === 0) togglePlay();
+  }
+
+  function isCurrent(generation: number, itemId: number) {
+    return generation === remuxGeneration && item.id === itemId;
+  }
+
+  function failPlayback(error?: unknown) {
+    cancelPosterFrame();
+    currentFailure = true;
+    if (!(error instanceof UnplayableError && error.retryable) && video?.error?.code !== 1) {
+      unplayableVideos.add(failureKey);
+    }
+    showPoster = true;
+    remuxing = false;
+    playRequested = false;
+    recovering = false;
+    volOpen = false;
+    video?.pause();
+    remux?.cancel();
+    remux = null;
+  }
 
   // The element failed. Try to rewrite the clip into something it will accept
   // before giving up — see lib/video/remux.ts for why that so often works.
   async function onVideoError() {
+    if (failed) return;
+    cancelPosterFrame();
     const failedItemId = item.id;
     const generation = remuxGeneration;
-    // A WebView may emit `play` before the decoder rejects the first frame.
+    // A WebView may emit playback events before it rejects the first frame.
     // Restore the poster so neither that broken frame nor Chromium's broken-file
     // glyph becomes the backdrop for the remux/fallback UI.
     showPoster = true;
-    mediaErrorCode = video?.error?.code ?? null;
-    console.error("video playback failed", mediaErrorCode, video?.error?.message);
+    const error = video?.error;
+    console.error("video playback failed", error?.code, error?.message);
     // A second failure is the remuxed source failing too; nothing left to try.
     if (triedRemux) {
-      failed = true;
+      // The native source can still fail while a proactive remux is pending.
+      if (remuxSrc) failPlayback();
       return;
     }
     triedRemux = true;
-    remuxing = true;
+    recovering = true;
     remuxProgress = 0;
     try {
       const handle = await remuxForPlayback(item, (f) => {
-        if (generation === remuxGeneration) remuxProgress = f;
+        if (generation === remuxGeneration && !failed) {
+          remuxing = true;
+          remuxProgress = f;
+        }
       });
-      if (generation !== remuxGeneration || item.id !== failedItemId) {
+      if (failed || !isCurrent(generation, failedItemId)) {
         handle.cancel();
         return;
       }
@@ -79,24 +140,36 @@
       remuxSrc = handle.src;
       void handle.done.then(
         () => {
-          if (generation === remuxGeneration) remuxing = false;
+          if (generation === remuxGeneration) {
+            remuxing = false;
+            recovering = false;
+          }
         },
         (e) => {
-          if (generation !== remuxGeneration || item.id !== failedItemId) return;
+          if (!isCurrent(generation, failedItemId)) return;
           console.error("in-app remux failed", e);
-          remuxing = false;
-          failed = true;
+          failPlayback(e);
         },
       );
     } catch (e) {
-      if (generation !== remuxGeneration || item.id !== failedItemId) return;
+      if (!isCurrent(generation, failedItemId)) return;
       console.error("in-app remux unavailable", e);
-      remuxing = false;
-      failed = true;
+      failPlayback(e);
     }
   }
 
+  function checkCompatibility(element: HTMLVideoElement, currentItem: ItemLite, generation: number) {
+    // Some Android decoders defer their error until Play. Inspect the actual
+    // codec on entry so a known rejection does not require another tap.
+    void needsPlaybackFallback(currentItem, (mime) => !!element.canPlayType(mime)).then((unsupported) => {
+      if (unsupported && element === video && isCurrent(generation, currentItem.id) && !triedRemux && !failed) {
+        void onVideoError();
+      }
+    }).catch((e) => console.error("video compatibility check unavailable", e));
+  }
+
   $effect(() => () => {
+    cancelPosterFrame();
     remuxGeneration += 1;
     remux?.cancel();
   });
@@ -133,10 +206,11 @@
     sharpPosterFailed = false;
 
     const loadSharp = (attempt: number) => {
+      const loadedSrc = attempt === 0 ? sharpSrc : `${sharpSrc}&posterRetry=1`;
       sharp = new Image();
       sharp.onload = () => {
         if (cancelled || item.id !== itemId) return;
-        sharpPoster = { itemId, src: sharpSrc };
+        sharpPoster = { itemId, src: loadedSrc };
         sharpPosterFailed = false;
         posterFailed = false;
       };
@@ -151,7 +225,7 @@
           sharpPosterFailed = true;
         }
       };
-      sharp.src = attempt === 0 ? sharpSrc : `${sharpSrc}&posterRetry=1`;
+      sharp.src = loadedSrc;
     };
     loadSharp(0);
 
@@ -221,15 +295,17 @@
   // Reset transport state whenever we navigate to a different clip. The element
   // is reused (same <video> node, new src), so nothing resets on its own.
   $effect(() => {
-    void item.id; // re-run when the clip changes
+    void failureKey;
+    cancelPosterFrame();
     remuxGeneration += 1;
     playRequested = false;
+    surfacePressed = false;
     currentTime = 0;
     duration = 0;
     paused = true;
     uiVisible = true;
     hovering = false;
-    failed = false;
+    currentFailure = false;
     showPoster = true;
     posterFailed = false;
     sharpPosterFailed = false;
@@ -239,8 +315,9 @@
     remux = null;
     remuxSrc = null;
     remuxing = false;
-    mediaErrorCode = null;
+    recovering = false;
     triedRemux = false;
+    if (video && !untrack(() => rememberedFailure)) checkCompatibility(video, item, remuxGeneration);
     // Grab focus so Space toggles playback immediately, without a prior click.
     wrap?.focus();
   });
@@ -258,8 +335,8 @@
   }
 
   function togglePlay() {
-    if (!video) return;
-    playRequested = remuxing ? !playRequested : video.paused;
+    if (!video || failed) return;
+    playRequested = recovering ? !playRequested : video.paused;
     if (playRequested) void video.play().catch(() => {});
     else video.pause();
   }
@@ -327,7 +404,7 @@
   onpointerdown={revealUi}
 >
   <!-- svelte-ignore a11y_media_has_caption -->
-  {#key item.id}
+  {#key nativeSrc}
     <video
       class="player"
       bind:this={video}
@@ -339,8 +416,10 @@
       {src}
       preload="metadata"
       playsinline
-      onclick={togglePlay}
-      onplay={() => (showPoster = false)}
+      onpointerdown={() => { surfacePressed = true; }}
+      onpointercancel={() => { surfacePressed = false; }}
+      onclick={onSurfaceClick}
+      onplaying={onPlaying}
       onloadedmetadata={resumeRequestedPlayback}
       onended={() => { playRequested = false; }}
       onerror={onVideoError}
@@ -383,21 +462,13 @@
          a corner rather than over the frame. -->
     <div class="remuxing">
       <Film size={13} />
-      <span>Decoding in app… {Math.round(remuxProgress * 100)}%</span>
+      <span>Preparing video… {Math.round(remuxProgress * 100)}%</span>
     </div>
   {/if}
 
   {#if failed}
-    <!-- Shown once the WebView refused the clip AND the in-app remux couldn't
-         rescue it. Not part of the transport chrome, so it stays put while the
-         (now useless) controls auto-hide. -->
-    <div class="fallback">
-      <TriangleAlert size={30} />
-      <p>
-        This video can't be played here.{#if mediaErrorCode}
-          <br /><span class="code">Media error {mediaErrorCode}</span>
-        {/if}
-      </p>
+    <div class="fallback" role="status">
+      <p>This video can't be played here.</p>
       <button class="open-ext" onclick={openExternally}>
         <ExternalLink size={16} />
         <span>Open in external player</span>
@@ -414,7 +485,7 @@
     onfocusin={() => { controlsFocused = true; revealUi(); }}
     onfocusout={(e) => { controlsFocused = e.currentTarget.contains(e.relatedTarget as Node | null); }}
   >
-    <button class="ctl" title={paused ? "Play (Space)" : "Pause (Space)"} onclick={(e) => { togglePlay(); refocus(e); }}>
+    <button class="ctl" disabled={failed} title={failed ? "Playback unavailable" : paused ? "Play (Space)" : "Pause (Space)"} onclick={(e) => { togglePlay(); refocus(e); }}>
       {#if paused}<Play size={16} />{:else}<Pause size={16} />{/if}
     </button>
 
@@ -422,6 +493,7 @@
 
     <input
       class="seek"
+      disabled={failed}
       type="range"
       min="0"
       max={duration || 0}
@@ -440,6 +512,7 @@
         <div class="vol-popover" onpointerenter={() => { hovering = true; }} onpointerleave={() => { hovering = false; }}>
           <input
             class="vol"
+            disabled={failed}
             type="range"
             min="0"
             max="1"
@@ -451,16 +524,16 @@
           />
         </div>
       {/if}
-      <button class="ctl" title="Volume" aria-label="Volume" onclick={(e) => { volOpen = !volOpen; refocus(e); }}>
+      <button class="ctl" disabled={failed} title="Volume" aria-label="Volume" onclick={(e) => { volOpen = !volOpen; refocus(e); }}>
         {#if muted || volume === 0}<VolumeX size={16} />{:else}<Volume2 size={16} />{/if}
       </button>
     </div>
 
-    <button class="ctl" title="Open in external player" onclick={(e) => { openExternally(); refocus(e); }}>
+    <button class="ctl" disabled={failed} title="Open in external player" onclick={(e) => { openExternally(); refocus(e); }}>
       <ExternalLink size={16} />
     </button>
 
-    <button class="ctl" title={fullscreen ? "Exit fullscreen" : "Fullscreen"} onclick={(e) => { void toggleFullscreen(); refocus(e); }}>
+    <button class="ctl" disabled={failed} title={fullscreen ? "Exit fullscreen" : "Fullscreen"} onclick={(e) => { void toggleFullscreen(); refocus(e); }}>
       {#if fullscreen}<Minimize size={16} />{:else}<Maximize size={16} />{/if}
     </button>
   </div>
@@ -486,37 +559,28 @@
     cursor: pointer;
   }
 
-  /* Centered "can't decode — open externally" panel. Sits above the video
-     (which is showing nothing useful) but below the transport bar's z-index so
-     the controls stay reachable. Same pill/backdrop language as the chrome. */
+  /* Keep the playback warning below the poster's main subject. */
   .fallback {
     position: absolute;
-    inset: 0;
+    left: calc(10px + var(--safe-left));
+    right: calc(10px + var(--safe-right));
+    bottom: calc(82px + var(--safe-bottom));
     z-index: 3;
     display: flex;
-    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
     gap: 12px;
-    padding: 24px;
-    text-align: center;
+    padding: 10px 12px;
+    border-radius: 10px;
     color: rgba(255, 255, 255, 0.85);
-    background: rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(2px);
+    background: rgba(0, 0, 0, 0.8);
   }
 
   .fallback p {
     margin: 0;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.7);
-  }
-
-  /* The raw MediaError code, kept quiet: useful in a bug report, noise to
-     everyone else. */
-  .fallback .code {
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    color: rgba(255, 255, 255, 0.45);
   }
 
   /* Progress of the in-app remux. Tucked into the top corner, under the safe-area
@@ -616,9 +680,15 @@
     cursor: pointer;
   }
 
-  .ctl:hover {
+  .ctl:enabled:hover {
     background: rgba(var(--accent-rgb), 0.5);
     color: #fff;
+  }
+
+  .ctl:disabled,
+  .seek:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   .time {

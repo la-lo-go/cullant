@@ -259,6 +259,76 @@ Video rows test control visibility. They do not test video playback.
 It saves `results.json` and screenshots. It restores preferences and reloads the app.
 Touch checks use WebView emulation. Run Android device checks separately.
 
+## First video and playback failure
+
+Use Node 24 and ffmpeg. Create the disposable project. Then start the debug app.
+
+```powershell
+node scripts/e2e-video-first-open.mjs --prepare
+$env:CULLANT_OPEN_PROJECT = (Resolve-Path .playwright-mcp/video-first-open-project).Path
+npm run tauri:debug
+```
+
+Run the checks in a second terminal at the repository root.
+
+```powershell
+node scripts/e2e-video-first-open.mjs .playwright-mcp/video-first-open
+```
+
+The script checks MJPEG clips that need an external player and an H.264 clip that plays in the app.
+It clears the fixture's preview cache before the first clip opens.
+It checks sharp posters, early failure messages, narrow screens, remux playback, and navigation.
+It checks that one grid tap keeps playback paused and that a false playback event keeps the poster.
+It injects load errors to check poster retries and late decoder failures.
+It checks the external action's file ID without starting another application.
+It checks that preparation notices wait for compatibility and a valid conversion plan.
+It checks that every transport control is disabled after failure.
+It checks that confirmed playback failures reopen without new video reads.
+It checks file changes and projects with the same file IDs.
+It checks that temporary read failures can retry without an app restart.
+It checks that the warning has no help action.
+It delays the native response to check that an unsupported codec warns without another tap.
+It saves `results.json` and screenshots. It restores app preferences.
+These synthetic clips do not test real camera videos. Run Android device checks separately.
+
+For the Android check, open a project and its Videos grid on the connected phone.
+Use a camera clip that shows the external player warning after a playback attempt.
+Leave Cullant in the foreground while the test runs.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/e2e-android-video.ps1 -Device '100.89.241.106:45353' -VideoName 'DSCF5044.MOV' -Output '.playwright-mcp/android-video'
+```
+
+The script opens the clip with one tap. A second tap can hide the original defect.
+It compares the initial and settled posters with the poster after the playback attempt.
+It checks that the external warning appears before that attempt.
+It saves screenshots, UI XML, and `results.json`. It stops if another app takes focus.
+
+With a diagnostic WebView connected to CDP port 9223, test the real camera clip.
+The script saves request logs, results, and ADB screenshots.
+
+```powershell
+$env:CULLANT_EXPECT_PLAYABLE = '1'
+node scripts/e2e-android-video-memory.mjs .playwright-mcp/android-camera-playback DSCF5044.MOV
+Remove-Item Env:CULLANT_EXPECT_PLAYABLE
+$env:CULLANT_FORCE_UNSUPPORTED = '1'
+node scripts/e2e-android-video-memory.mjs .playwright-mcp/android-failure-memory DSCF5044.MOV
+Remove-Item Env:CULLANT_FORCE_UNSUPPORTED
+```
+
+The first run checks preparation, frames, and seeking with the real codec.
+The second run injects an unsupported codec result. It checks the warning and failure memory.
+Run the second check in a fresh app session. Restart the app after fault injection.
+With the same clip open and paused before Play, compare query range reads with its local copy.
+If playback has hidden the poster, set `CULLANT_VIDEO_URL` to the `/video/` URL from the request log.
+
+```powershell
+node scripts/e2e-video-range.mjs .playwright-mcp/android-video-ranges .playwright-mcp/android-video-camera/DSCF5044.MOV
+```
+
+Each result includes byte counts, Content-Range, and SHA-256 hashes.
+Remove WebView debugging before the final APK is built and installed.
+
 ## What the tests do not cover
 
 This list is explicit, because the gaps matter more than the coverage.

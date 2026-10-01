@@ -12,8 +12,8 @@
  * the platform still hardware-decodes and audio, seeking and battery life all
  * survive. What changes is only the wrapper the element was objecting to.
  *
- * Mediabunny is imported dynamically: it is dead weight for every clip that
- * plays normally, and this module is only reached once one has not.
+ * Mediabunny is imported dynamically when a video opens, so its metadata check
+ * does not add to the app's startup bundle.
  */
 
 // Type-only, so it is erased at build time and pulls nothing into this module's
@@ -21,9 +21,14 @@
 import type { StreamTargetChunk } from "mediabunny";
 
 import { videoUrl, type ItemLite } from "../api";
+import { IS_ANDROID } from "../platform";
 
 /** Raised when the fallback cannot help, so the caller offers an external app. */
-export class UnplayableError extends Error {}
+export class UnplayableError extends Error {
+  constructor(message: string, readonly retryable = false) {
+    super(message);
+  }
+}
 
 /**
  * The protocol answers every video request with at most an 8 MB window, so a
@@ -34,8 +39,15 @@ const WINDOW = 8 * 1024 * 1024;
 const MAX_METADATA_RANGE = 64 * 1024 * 1024;
 
 async function range(url: string, start: number, endInclusive: number): Promise<Response> {
-  const res = await fetch(url, { headers: { Range: `bytes=${start}-${endInclusive}` } });
-  if (!res.ok) throw new UnplayableError(`video range request failed: ${res.status}`);
+  const requested = `bytes=${start}-${endInclusive}`;
+  // WebView seeks twice when Range accompanies an intercepted partial body.
+  const request = IS_ANDROID
+    ? fetch(`${url}&range=${encodeURIComponent(requested)}`)
+    : fetch(url, { headers: { Range: requested } });
+  const res = await request.catch(() => {
+    throw new UnplayableError("video storage could not be read", true);
+  });
+  if (!res.ok) throw new UnplayableError(`video range request failed: ${res.status}`, true);
   return res;
 }
 
@@ -44,7 +56,7 @@ async function totalSize(url: string): Promise<number> {
   const res = await range(url, 0, 0);
   const total = Number(res.headers.get("Content-Range")?.split("/")[1]);
   if (!Number.isFinite(total) || total <= 0) {
-    throw new UnplayableError("video response carried no usable Content-Range");
+    throw new UnplayableError("video response carried no usable Content-Range", true);
   }
   return total;
 }
@@ -59,8 +71,10 @@ async function readRange(url: string, start: number, end: number): Promise<Uint8
   while (at < end) {
     const stop = Math.min(at + WINDOW, end);
     const res = await range(url, at, stop - 1);
-    const chunk = new Uint8Array(await res.arrayBuffer());
-    if (chunk.byteLength === 0) throw new UnplayableError("video range returned no bytes");
+    const chunk = new Uint8Array(await res.arrayBuffer().catch(() => {
+      throw new UnplayableError("video read was interrupted", true);
+    }));
+    if (chunk.byteLength === 0) throw new UnplayableError("video range returned no bytes", true);
     if (chunk.byteLength > stop - at) throw new UnplayableError("video range returned too many bytes");
     out.set(chunk, at - start);
     at += chunk.byteLength;
@@ -73,6 +87,34 @@ export type Remux = {
   done: Promise<void>;
   cancel: () => void;
 };
+
+async function openInput(item: ItemLite) {
+  const { Input, ALL_FORMATS, CustomSource } = await import("mediabunny");
+  const url = videoUrl(item);
+  return new Input({
+    formats: ALL_FORMATS,
+    source: new CustomSource({
+      getSize: () => totalSize(url),
+      read: (start, end) => readRange(url, start, end),
+      prefetchProfile: "network",
+    }),
+  });
+}
+
+/** Inspect the codec without playing or preparing the video. */
+export async function needsPlaybackFallback(item: ItemLite, canPlay: (mime: string) => boolean): Promise<boolean> {
+  // Large native clips need nonzero Range reads, which Android's intercepted
+  // stream cannot serve correctly. Remux uses the explicit query above.
+  if (IS_ANDROID && await totalSize(videoUrl(item)) > WINDOW) return true;
+  const input = await openInput(item);
+  try {
+    const track = await input.getPrimaryVideoTrack();
+    const codec = await track?.getCodecParameterString();
+    return !!codec && !canPlay(`video/mp4; codecs="${codec}"`);
+  } finally {
+    input.dispose();
+  }
+}
 
 /**
  * Rewrite `item` into fragmented MP4 behind a `MediaSource` and hand back a URL
@@ -88,20 +130,12 @@ export async function remuxForPlayback(
   item: ItemLite,
   onProgress?: (fraction: number) => void,
 ): Promise<Remux> {
-  const { Input, ALL_FORMATS, CustomSource, Output, Mp4OutputFormat, StreamTarget, Conversion } =
+  if (typeof MediaSource === "undefined") {
+    throw new UnplayableError("MediaSource is unavailable");
+  }
+  const { Output, Mp4OutputFormat, StreamTarget, Conversion } =
     await import("mediabunny");
-
-  const url = videoUrl(item);
-  const input = new Input({
-    formats: ALL_FORMATS,
-    source: new CustomSource({
-      getSize: () => totalSize(url),
-      read: (start, end) => readRange(url, start, end),
-      // Every read is an IPC round trip to the Rust protocol handler, which is
-      // the high-latency profile this is for.
-      prefetchProfile: "network",
-    }),
-  });
+  const input = await openInput(item);
 
   // Everything up to the point of no return, so a rejected clip disposes the
   // input rather than leaking it and its open requests.
@@ -115,6 +149,7 @@ export async function remuxForPlayback(
 
     const audio = await input.getPrimaryAudioTrack();
     const audioCodec = (await audio?.getCodecParameterString()) ?? null;
+    dropAudio = !!audio && !audioCodec;
 
     // Prefer keeping the audio, but never let it sink the clip: a container can
     // carry audio that MP4 cannot, and a silent video still lets the user judge
@@ -196,7 +231,10 @@ export async function remuxForPlayback(
                 conversion.discardedTracks.map((t) => t.reason).join(", ") || "nothing to convert",
               );
             }
-            if (onProgress) conversion.onProgress = (fraction) => onProgress(fraction);
+            if (onProgress) {
+              conversion.onProgress = onProgress;
+              onProgress(0);
+            }
 
             await conversion.execute();
             if (!canceled && mediaSource.readyState === "open") mediaSource.endOfStream();

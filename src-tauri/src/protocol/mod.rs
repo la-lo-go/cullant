@@ -313,10 +313,15 @@ fn respond_video<R: Runtime>(
         let len = file.metadata()?.len();
 
         // Parse "Range: bytes=start-end" (end optional).
-        let range = request
-            .headers()
-            .get(header::RANGE)
-            .map(|value| value.to_str().unwrap_or(""));
+        // Android WebView applies Range again to intercepted partial bodies.
+        // Script reads use the query to leave its own stream seek at zero.
+        let explicit_range = query_param(request.uri().query(), "range");
+        let range = explicit_range.as_deref().or_else(|| {
+            request
+                .headers()
+                .get(header::RANGE)
+                .map(|value| value.to_str().unwrap_or(""))
+        });
         let Some((start, end)) = video_range(range, len, WINDOW) else {
             return Ok(cors(Response::builder())
                 .status(StatusCode::RANGE_NOT_SATISFIABLE)
