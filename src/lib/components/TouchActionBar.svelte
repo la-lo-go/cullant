@@ -330,6 +330,15 @@
      thumbnail badges and the desktop selection bar; "active" adds the tinted
      highlight. */
   .pick {
+  @media (hover: hover) {
+    .btn:hover:not(:disabled) {
+      background: var(--hover);
+    }
+  }
+
+  .btn:disabled { opacity: 0.4; }
+  .btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-fill); }
+
     color: #6be675;
   }
 

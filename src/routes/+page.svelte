@@ -347,15 +347,6 @@
   // (restored in the Rust setup hook), and touch/mobile never gets a titlebar.
   const showTitleBar = IS_WINDOWS && !IS_TOUCH;
 
-  // The project name lives in the window title (OS taskbar/Alt-Tab, and the
-  // custom TitleBar below) rather than the toolbar — kept out of the way
-  // there, still one glance/hover away from anyone who needs the full path.
-  $effect(() => {
-    document.title = catalog.project ? `${catalog.project.displayName} · Cullant` : "Cullant";
-  });
-
-  const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
-
   $effect(() => {
     if (IS_MOBILE) return;
     const appWindow = getCurrentWindow();
@@ -384,6 +375,15 @@
   // Thumbnail size is deliberately not part of this. It is a comfort setting,
   // not a view that hides or regroups anything, so marking the button for it
   // would flag a state the user has nothing to undo.
+  // The project name lives in the window title (OS taskbar/Alt-Tab, and the
+  // custom TitleBar below) rather than the toolbar — kept out of the way
+  // there, still one glance/hover away from anyone who needs the full path.
+  $effect(() => {
+    document.title = catalog.project ? `${catalog.project.displayName} · Cullant` : "Cullant";
+  });
+
+  const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
+
   const hasCustomView = $derived(
     session.groupBy.length > 0 || (!session.mirrorMode && hasRaws),
   );
@@ -926,11 +926,12 @@
     cursor: pointer;
   }
 
-  :global(select:hover) {
-    border-color: var(--accent);
+  @media (hover: hover) {
+    :global(select:hover:not(:disabled)) {
+      background-color: var(--hover);
+    }
   }
 
-  :global(select:focus),
   :global(select:focus-visible) {
     outline: none;
     border-color: var(--accent);
@@ -1146,8 +1147,11 @@
     cursor: pointer;
   }
 
-  button:hover {
-    border-color: var(--accent);
+  @media (hover: hover) {
+    button:hover:not(:disabled),
+    .toolbar button:hover:not(:disabled) {
+      background-color: var(--hover);
+    }
   }
 
   .toolbar button {
@@ -1304,10 +1308,6 @@
     transition: background-color 0.15s ease, color 0.15s ease;
   }
 
-  .segmented button:hover:not(:disabled) {
-    border-color: var(--accent);
-  }
-
   .segmented button.active {
     background: var(--accent-fill);
     border-color: transparent;
@@ -1343,10 +1343,6 @@
     font-weight: 600;
     font-size: 12px;
     transition: background-color 0.15s ease, color 0.15s ease;
-  }
-
-  .media-btn:hover:not(:disabled) {
-    border-color: var(--accent);
   }
 
   .media-btn.active {

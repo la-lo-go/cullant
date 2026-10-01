@@ -290,9 +290,10 @@
     padding: 0;
   }
 
-  .close:hover {
-    color: #fff;
-    border-color: var(--border-strong);
+  @media (hover: hover) {
+    .panel button:hover:not(:disabled) {
+      background: var(--hover);
+    }
   }
 
   section {
@@ -334,10 +335,6 @@
     font-family: inherit;
   }
 
-  .clear:hover {
-    color: #fff;
-  }
-
   .hint {
     margin: 0;
     color: #6a6a72;
@@ -362,10 +359,6 @@
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
-  }
-
-  .seg:hover:not(.active) {
-    border-color: var(--accent);
   }
 
   .seg.active {
@@ -453,8 +446,4 @@
     cursor: pointer;
   }
 
-  .icon:hover {
-    border-color: var(--accent);
-    color: #fff;
-  }
 </style>
