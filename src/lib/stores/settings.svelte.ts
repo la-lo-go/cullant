@@ -163,9 +163,9 @@ function loadColorLabelNames(): Partial<Record<ColorLabel, string>> {
 
 function loadGridPhotoFit(): GridPhotoFit {
   try {
-    return JSON.parse(localStorage.getItem(GRID_PHOTO_FIT_KEY) ?? '"fill"') === "fit" ? "fit" : "fill";
+    return JSON.parse(localStorage.getItem(GRID_PHOTO_FIT_KEY) ?? "null") === "fill" ? "fill" : "fit";
   } catch {
-    return "fill";
+    return "fit";
   }
 }
 
