@@ -30,6 +30,12 @@
   let running = $state(false);
   let error = $state("");
   let expanded = $state<CommitSection | null>(null);
+  let refreshRequest = 0;
+  let alive = true;
+
+  function isDialogCurrent(generation: number): boolean {
+    return alive && session.commitDialogOpen && generation === catalog.generation;
+  }
 
   // Per-phase commit progress. `runningPhases` are the sections a single
   // execution touches (all four for Execute, one for a hold-to-run button);
@@ -55,11 +61,14 @@
   };
 
   async function refresh() {
+    const generation = catalog.generation;
+    const request = ++refreshRequest;
     error = "";
     try {
-      plan = await api.commitPreview();
+      const next = await api.commitPreview();
+      if (isDialogCurrent(generation) && request === refreshRequest) plan = next;
     } catch (e) {
-      error = String(e);
+      if (isDialogCurrent(generation) && request === refreshRequest) error = String(e);
     }
   }
 
@@ -135,6 +144,8 @@
   // hold-to-run buttons: run, then hand the result to a popup and close this
   // dialog just before it shows. On failure the dialog stays open with the error.
   async function runCommit(phases: CommitSection[], run: () => Promise<CommitOutcome>) {
+    const generation = catalog.generation;
+    if (phases.some((phase) => phase !== "xmp")) session.invalidateRejectionUndo();
     startRun(phases);
     // The commit command is synchronous on the backend, so it stalls the app for
     // its whole duration. Get the busy panel committed to the DOM and drawn on
@@ -145,10 +156,17 @@
     // frame, so that frame never reaches the screen.
     await tick();
     await afterPaint();
+    if (generation !== catalog.generation || !session.commitDialogOpen) {
+      running = false;
+      return;
+    }
     try {
       const oc = await run();
+      if (generation !== catalog.generation) return;
       await catalog.refresh();
+      if (generation !== catalog.generation) return;
       await session.refreshPending();
+      if (generation !== catalog.generation) return;
       const samples = oc.errorSamples.map((s) => `· ${s}`).join("\n");
       session.commitDone = {
         title: oc.errors > 0 ? "Commit finished with errors" : "Commit complete",
@@ -158,8 +176,9 @@
       };
       close();
     } catch (e) {
-      error = String(e);
+      if (generation !== catalog.generation) return;
       await refresh();
+      error = String(e);
     } finally {
       running = false;
       activePhase = null;
@@ -173,7 +192,7 @@
   }
 
   async function executeSection(section: CommitSection) {
-    if (!plan) return;
+    if (!plan || running || !session.commitDialogOpen) return;
     const hash = sectionHash(plan, section);
     await runCommit([section], () => api.commitExecuteSection(section, hash));
   }
@@ -214,16 +233,17 @@
   }
 
   /** Begin a press-and-hold on `key`; `onFire` runs if it reaches the end. */
-  function startHold(key: string, durationMs: number, e: PointerEvent, onFire: () => void) {
-    if (e.button !== 0) return;
+  function startHold(key: string, durationMs: number, e: PointerEvent | KeyboardEvent, onFire: () => void) {
+    if ("button" in e && e.button !== 0) return;
+    resetHold();
     e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    if ("pointerId" in e) (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     holdKey = key;
     holdFrac = 0;
     holdFired = false;
     holdStart = performance.now();
     const step = () => {
-      if (holdKey !== key) return;
+      if (holdKey !== key || !session.commitDialogOpen) return;
       // The fill only advances AFTER the grace period, so the first HOLD_DELAY_MS
       // of a press show nothing (that window belongs to the tap-to-expand gesture).
       const held = performance.now() - holdStart - HOLD_DELAY_MS;
@@ -254,6 +274,21 @@
     return holdKey === key ? holdFrac * 100 : 0;
   }
 
+  function onRowKeydown(section: CommitSection, e: KeyboardEvent) {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.repeat) return;
+    if (e.key === "Enter") expanded = expanded === section ? null : section;
+    else startHold(`section:${section}`, holdDuration(section), e, () => void executeSection(section));
+  }
+
+  function onRowKeyup(section: CommitSection, e: KeyboardEvent) {
+    if (e.key !== " ") return;
+    e.preventDefault();
+    endHold(`section:${section}`);
+  }
+
   // Pending stays the default view, so the commit flow is unchanged; History is
   // here rather than behind its own toolbar button because it is the same
   // subject seen from the other side.
@@ -263,6 +298,23 @@
   let openCommit = $state<number | null>(null);
   let entries = $state<CommitEntry[]>([]);
   let undoing = $state(false);
+  let historyRequest = 0;
+  let detailRequest = 0;
+  interface UndoCounts {
+    filesUndone: number;
+    filesRetained: number;
+    sidecarsRetained: number;
+  }
+  let undoCounts = $state<Record<number, UndoCounts>>({});
+
+  function countUndo(entries: CommitEntry[]): UndoCounts {
+    const successful = entries.filter((entry) => entry.result === 0);
+    return {
+      filesUndone: successful.filter((entry) => entry.action !== 3 && entry.undoneAt !== null).length,
+      filesRetained: successful.filter((entry) => entry.action !== 3 && entry.undoneAt === null).length,
+      sidecarsRetained: successful.filter((entry) => entry.action === 3 && entry.undoneAt === null).length,
+    };
+  }
 
   const ACTION_NAMES: Record<number, string> = {
     0: "Deleted",
@@ -271,42 +323,71 @@
     3: "Wrote sidecar",
   };
 
+  async function refreshHistory() {
+    const generation = catalog.generation;
+    const request = ++historyRequest;
+    try {
+      const next = await api.listCommits();
+      const details = await Promise.all(next.filter((commit) => commit.undoneAt !== null ||
+        commit.undoable < commit.deletes + commit.moves + commit.copies)
+        .map(async (commit) => [commit.id, countUndo(await api.commitDetail(commit.id))] as const));
+      if (isDialogCurrent(generation) && request === historyRequest) {
+        undoCounts = Object.fromEntries(details.filter(([, counts]) => counts.filesUndone > 0));
+        commits = next;
+      }
+    } catch (e) {
+      if (isDialogCurrent(generation) && request === historyRequest) error = String(e);
+    }
+  }
+
   async function showHistory() {
     tab = "history";
     error = "";
+    await refreshHistory();
+  }
+
+  async function refreshCommitEntries(id: number) {
+    const generation = catalog.generation;
+    const request = ++detailRequest;
+    const isCurrent = () => isDialogCurrent(generation) && request === detailRequest && openCommit === id;
+    entries = [];
     try {
-      commits = await api.listCommits();
+      const next = await api.commitDetail(id);
+      if (isCurrent()) entries = next;
     } catch (e) {
-      error = String(e);
+      if (isCurrent()) error = String(e);
     }
   }
 
   async function toggleCommit(id: number) {
     if (openCommit === id) {
+      ++detailRequest;
       openCommit = null;
+      entries = [];
       return;
     }
     openCommit = id;
-    entries = [];
-    try {
-      entries = await api.commitDetail(id);
-    } catch (e) {
-      error = String(e);
-    }
+    await refreshCommitEntries(id);
   }
 
   /** Shared tail for both undo paths: report, then resync grid and queue. */
   async function runUndo(run: () => Promise<void>) {
+    const generation = catalog.generation;
+    session.invalidateRejectionUndo();
     undoing = true;
     error = "";
     try {
       await run();
+      if (!isDialogCurrent(generation)) return;
       await catalog.refresh();
+      if (!isDialogCurrent(generation)) return;
       await session.refreshPending();
-      commits = await api.listCommits();
-      if (openCommit !== null) entries = await api.commitDetail(openCommit);
+      if (!isDialogCurrent(generation)) return;
+      await refreshHistory();
+      if (!isDialogCurrent(generation)) return;
+      if (openCommit !== null) await refreshCommitEntries(openCommit);
     } catch (e) {
-      error = String(e);
+      if (isDialogCurrent(generation)) error = String(e);
     } finally {
       undoing = false;
     }
@@ -338,8 +419,17 @@
     return new Date(secs * 1000).toLocaleString();
   }
 
+  function undoSummary(counts: UndoCounts): string {
+    const parts = [`${counts.filesUndone} file operation${counts.filesUndone === 1 ? "" : "s"} undone`];
+    if (counts.filesRetained) parts.push(`${counts.filesRetained} file operation${counts.filesRetained === 1 ? "" : "s"} retained`);
+    if (counts.sidecarsRetained) parts.push(`${counts.sidecarsRetained} sidecar${counts.sidecarsRetained === 1 ? "" : "s"} retained`);
+    return parts.join(" · ");
+  }
+
   /** "3 deleted · 2 moved" — only the parts that happened. */
   function summaryOf(c: CommitSummary): string {
+    const undone = undoCounts[c.id];
+    if (undone) return undoSummary(undone);
     const parts: string[] = [];
     if (c.deletes) parts.push(`${c.deletes} deleted`);
     if (c.moves) parts.push(`${c.moves} moved`);
@@ -361,6 +451,7 @@
   }
 
   async function unqueue(row: PlanRow, isDelete: boolean) {
+    if (isDelete) session.invalidateRejectionUndo();
     try {
       await api.removePending(row.ids);
       // Deletes mirror the reject flag: unqueueing a delete also un-rejects the
@@ -408,6 +499,19 @@
     return dot >= 0 ? relPath.slice(0, dot) : relPath;
   }
 
+  function pairedPlanRow(members: PendingAction[]): PlanRow | null {
+    if (members.length !== 2) return null;
+    const jpeg = members.find((m) => isJpegExt(extOf(m.relPath)));
+    const raw = members.find((m) => !isJpegExt(extOf(m.relPath)));
+    if (!jpeg || !raw) return null;
+    return {
+      label: `${raw.relPath}+${extOf(jpeg.relPath)}`,
+      ids: [raw.id, jpeg.id],
+      fileIds: [raw.fileId, jpeg.fileId],
+      dest: raw.dest,
+    };
+  }
+
   // Collapse a RAW+JPEG pair queued for the SAME action into one line
   // ("AJDJ8378.CR3+jpg"). A shared pairToken is necessary but not sufficient:
   // the backend also stamps one token across a whole multi-file enqueue batch,
@@ -416,44 +520,37 @@
   // only in extension). A null token, or a batch of more than two, stays split.
   // Each pair is emitted at the position of its first member, preserving order.
   function planRows(items: PendingAction[]): PlanRow[] {
-    const rows: PlanRow[] = [];
-    const seen = new Set<string>();
+    const groups = new Map<string, PendingAction[]>();
     for (const p of items) {
-      if (p.pairToken == null) {
-        rows.push({ label: p.relPath, ids: [p.id], fileIds: [p.fileId], dest: p.dest });
-        continue;
-      }
-      // Group on token AND stem, not the token alone: one enqueue batch stamps a
-      // single token across every fanned-out file, so a multi-pair reject shares
-      // one token. The stem (relPath minus extension) isolates each real pair
-      // within that batch.
+      if (p.pairToken == null) continue;
       const key = `${p.pairToken} ${stemOf(p.relPath)}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const members = items.filter(
-        (q) => q.pairToken === p.pairToken && stemOf(q.relPath) === stemOf(p.relPath),
-      );
-      if (members.length === 2) {
-        const jpeg = members.find((m) => isJpegExt(extOf(m.relPath)));
-        const raw = members.find((m) => !isJpegExt(extOf(m.relPath)));
-        if (jpeg && raw) {
-          rows.push({
-            label: `${raw.relPath}+${extOf(jpeg.relPath)}`,
-            ids: [raw.id, jpeg.id],
-            fileIds: [raw.fileId, jpeg.fileId],
-            dest: raw.dest,
-          });
+      const members = groups.get(key) ?? [];
+      members.push(p);
+      groups.set(key, members);
+    }
+    const rows: PlanRow[] = [];
+    const collapsed = new Set<string>();
+    for (const p of items) {
+      if (p.pairToken != null) {
+        const key = `${p.pairToken} ${stemOf(p.relPath)}`;
+        if (collapsed.has(key)) continue;
+        const pair = pairedPlanRow(groups.get(key) ?? []);
+        if (pair) {
+          rows.push(pair);
+          collapsed.add(key);
           continue;
         }
       }
-      // Not a clean 2-member RAW+JPEG pair: emit each member on its own line.
-      for (const m of members)
-        rows.push({ label: m.relPath, ids: [m.id], fileIds: [m.fileId], dest: m.dest });
+      rows.push({ label: p.relPath, ids: [p.id], fileIds: [p.fileId], dest: p.dest });
     }
     return rows;
   }
 
   function close() {
+    resetHold();
+    ++refreshRequest;
+    ++historyRequest;
+    ++detailRequest;
     session.commitDialogOpen = false;
   }
 
@@ -470,7 +567,8 @@
     // The dialog can unmount before listen() resolves; track that so the
     // subscription is torn down immediately once it does, instead of leaking.
     let cancelled = false;
-    listen<{ phase: CommitSection; done: number; total: number }>("commit:progress", (e) => {
+    listen<{ projectRoot: string; phase: CommitSection; done: number; total: number }>("commit:progress", (e) => {
+      if (!catalog.acceptEvent(e.payload)) return;
       const { phase, done, total } = e.payload;
       // A phase change means the previous one finished — bank it for the checklist.
       if (activePhase && activePhase !== phase && !completedPhases.has(activePhase)) {
@@ -485,6 +583,8 @@
     });
     return () => {
       cancelled = true;
+      alive = false;
+      resetHold();
       unlisten?.();
     };
   });
@@ -549,24 +649,32 @@
                     : undefined}
                 onpointerup={() => endHold(`commit:${c.id}`, () => void toggleCommit(c.id))}
                 onpointercancel={resetHold}
-                onclick={() => (c.undoable > 0 ? undefined : void toggleCommit(c.id))}
+                onblur={resetHold}
+                onclick={(e) => (e.detail === 0 || c.undoable === 0 ? void toggleCommit(c.id) : undefined)}
+                aria-expanded={openCommit === c.id}
+                aria-controls={`commit-entries-${c.id}`}
                 title={c.undoable > 0 ? "Tap to expand · hold to undo" : "Tap to expand"}
               >
                 <span class="hold-fill" style="width: {fillOf(`commit:${c.id}`)}%"></span>
                 <span class="hwhen">{whenOf(c.startedAt)}</span>
-                <span class="hwhat">{summaryOf(c)}</span>
+                <span class="hwhat" title={summaryOf(c)}>{summaryOf(c)}</span>
                 {#if c.errors > 0}
                   <span class="hbadge err"><TriangleAlert size={11} /> {c.errors}</span>
                 {/if}
-                {#if c.undoneAt !== null}
-                  <span class="hbadge done">Undone</span>
+                {#if c.undoneAt !== null || undoCounts[c.id]}
+                  <span class="hbadge done">{undoCounts[c.id]?.filesRetained || undoCounts[c.id]?.sidecarsRetained ? "Partial undo" : "Undone"}</span>
                 {:else if c.undoable > 0}
                   <span class="hbadge"><Undo2 size={11} /> {c.undoable}</span>
                 {/if}
               </button>
+              {#if c.undoable > 0}
+                <button class="hundo" disabled={undoing} onclick={() => void undoWholeCommit(c.id)}>
+                  <Undo2 size={13} /> Undo reversible actions
+                </button>
+              {/if}
 
               {#if openCommit === c.id}
-                <ul class="hentries">
+                <ul class="hentries" id={`commit-entries-${c.id}`}>
                   {#each entries as e (e.id)}
                     <li class:gone={e.undoneAt !== null}>
                       <span class="eaction">{ACTION_NAMES[e.action] ?? "?"}</span>
@@ -579,6 +687,7 @@
                           class="eundo"
                           disabled={undoing}
                           title="Undo just this one"
+                          aria-label={`Undo ${e.beforePath ?? "entry"}`}
                           onclick={() => void undoOneEntry(e.id)}
                         >
                           <Undo2 size={12} />
@@ -594,7 +703,7 @@
             </div>
           {/each}
         </div>
-        <p class="hint">Tap a commit to see what it did · hold it to undo everything reversible.</p>
+        <p class="hint">Activate a commit to see its actions. Use Undo reversible actions to restore its files.</p>
       {/if}
       {#if error}
         <p class="error">{error}</p>
@@ -634,7 +743,7 @@
         {#if plan.conflicts.length > 0}
           <div class="conflicts">
             <TriangleAlert size={14} style="vertical-align: -2px" />
-            {plan.conflicts.length} conflict(s):
+            {plan.conflicts.length} {plan.conflicts.length === 1 ? "conflict" : "conflicts"}:
             <ul>
               {#each plan.conflicts.slice(0, 5) as c}<li>{c}</li>{/each}
             </ul>
@@ -644,6 +753,7 @@
         <p class="hint">
           <span class="fine">Click a row to expand · hold it to run that section on its own.</span>
           <span class="coarse">Tap a row to expand · hold it to run that section on its own.</span>
+          Enter expands the focused row. Hold Space to run that section.
         </p>
 
         <div class="rows">
@@ -653,6 +763,9 @@
             onpointerdown={(e) => onRowPointerDown("deletes", e)}
             onpointerup={() => onRowPointerUp("deletes")}
             onpointercancel={resetHold}
+            onkeydown={(e) => onRowKeydown("deletes", e)}
+            onkeyup={(e) => onRowKeyup("deletes", e)}
+            onblur={resetHold}
             title="Tap to expand · hold to delete"
           >
             <span
@@ -661,7 +774,7 @@
               style="width: {fillOf('section:deletes')}%"
             ></span>
             <span class="icon"><Trash2 size={16} /></span>
-            <span class="what">Delete {plan.deletes.length} file(s)</span>
+            <span class="what">Delete {plan.deletes.length} {plan.deletes.length === 1 ? "file" : "files"}</span>
             <span class="how">{deletionModeNames[plan.deletionMode]}</span>
           </button>
           {#if expanded === "deletes"}
@@ -681,11 +794,14 @@
             onpointerdown={(e) => onRowPointerDown("moves", e)}
             onpointerup={() => onRowPointerUp("moves")}
             onpointercancel={resetHold}
+            onkeydown={(e) => onRowKeydown("moves", e)}
+            onkeyup={(e) => onRowKeyup("moves", e)}
+            onblur={resetHold}
             title="Tap to expand · hold to move"
           >
             <span class="hold-fill" style="width: {fillOf('section:moves')}%"></span>
             <span class="icon"><FolderInput size={16} /></span>
-            <span class="what">Move {plan.moves.length} file(s)</span>
+            <span class="what">Move {plan.moves.length} {plan.moves.length === 1 ? "file" : "files"}</span>
           </button>
           {#if expanded === "moves"}
             <ul class="detail">
@@ -704,11 +820,14 @@
             onpointerdown={(e) => onRowPointerDown("copies", e)}
             onpointerup={() => onRowPointerUp("copies")}
             onpointercancel={resetHold}
+            onkeydown={(e) => onRowKeydown("copies", e)}
+            onkeyup={(e) => onRowKeyup("copies", e)}
+            onblur={resetHold}
             title="Tap to expand · hold to copy"
           >
             <span class="hold-fill" style="width: {fillOf('section:copies')}%"></span>
             <span class="icon"><Copy size={16} /></span>
-            <span class="what">Copy {plan.copies.length} file(s)</span>
+            <span class="what">Copy {plan.copies.length} {plan.copies.length === 1 ? "file" : "files"}</span>
           </button>
           {#if expanded === "copies"}
             <ul class="detail">
@@ -727,11 +846,14 @@
             onpointerdown={(e) => onRowPointerDown("xmp", e)}
             onpointerup={() => onRowPointerUp("xmp")}
             onpointercancel={resetHold}
+            onkeydown={(e) => onRowKeydown("xmp", e)}
+            onkeyup={(e) => onRowKeyup("xmp", e)}
+            onblur={resetHold}
             title="Hold to write sidecars"
           >
             <span class="hold-fill" style="width: {fillOf('section:xmp')}%"></span>
             <span class="icon"><Tag size={16} /></span>
-            <span class="what">Write {plan.xmpCount} XMP sidecar(s)</span>
+            <span class="what">Write {plan.xmpCount} XMP {plan.xmpCount === 1 ? "sidecar" : "sidecars"}</span>
             <span class="how">rating · flag · color label</span>
           </button>
         </div>
@@ -749,11 +871,11 @@
         {/if}
 
         <footer>
-          <span class="summary">{total} operation(s)</span>
+          <span class="summary">{total} {total === 1 ? "operation" : "operations"}</span>
           <button class="primary" disabled={total === 0} onclick={executeAll}>
             {#if plan.deletionMode === "permanent" && plan.deletes.length > 0}
               <TriangleAlert size={14} style="vertical-align: -2px" />
-              Execute (deletes {plan.deletes.length} files permanently)
+              Execute (deletes {plan.deletes.length} {plan.deletes.length === 1 ? "file" : "files"} permanently)
             {:else}
               Execute
             {/if}
@@ -1182,6 +1304,13 @@
     border-color: var(--accent);
   }
 
+  .hundo {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 4px 0 8px;
+  }
+
   .hcommit.undone .hrow {
     opacity: 0.55;
   }
@@ -1202,9 +1331,8 @@
   .hwhat {
     flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .hbadge {

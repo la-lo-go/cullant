@@ -139,10 +139,10 @@ fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
         // is the one pushed onto a per-file name. Ordering by id alone would
         // hand that role to whichever member the scan happened to insert first.
         let mut stmt = conn.prepare(
-            "SELECT f.id, f.rel_path, f.rating, f.flag, f.label, f.orientation
+            "SELECT f.id, f.rel_path, f.rating, f.flag, f.label, f.orientation, f.xmp_dirty
              FROM files f JOIN groups g ON g.id = f.group_id
-             WHERE f.status = 0 AND f.kind IN (0, 1) AND f.xmp_dirty = 1
-             ORDER BY CASE WHEN f.id = g.primary_file_id THEN 0 ELSE 1 END, f.id",
+             WHERE f.status = 0 AND f.kind IN (0, 1)
+             ORDER BY CASE WHEN f.id = g.primary_file_id THEN 0 ELSE 1 END, f.kind, f.id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
@@ -154,16 +154,21 @@ fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
                     label: r.get::<_, Option<String>>(4)?,
                     orientation: r.get::<_, Option<i64>>(5)?.unwrap_or(1),
                 },
+                r.get::<_, bool>(6)?,
             ))
         })?;
         let mut out: Vec<DirtySidecar> = Vec::new();
+        let mut shared_paths = std::collections::HashMap::new();
         for row in rows {
-            let (id, rel_path, state) = row?;
+            let (id, rel_path, state, dirty) = row?;
             let shared = xmp::sidecar_rel(&rel_path);
-            match out.iter_mut().find(|d| d.sc_rel == shared) {
+            let index = shared_paths.get(&shared).copied();
+            match index.map(|index: usize| &mut out[index]) {
                 // Same state: one sidecar speaks for both, exactly as before.
                 Some(d) if d.state == state => {
-                    d.file_ids.push(id);
+                    if dirty {
+                        d.file_ids.push(id);
+                    }
                     d.member_paths.push(rel_path);
                 }
                 // Diverged: this half needs a sidecar of its own rather than
@@ -171,23 +176,26 @@ fn xmp_dirty_photos(db: &Arc<Db>) -> AppResult<Vec<DirtySidecar>> {
                 Some(_) => {
                     let sc_rel = xmp::sidecar_rel_per_file(&rel_path);
                     out.push(DirtySidecar {
-                        file_ids: vec![id],
+                        file_ids: if dirty { vec![id] } else { Vec::new() },
                         member_paths: vec![rel_path.clone()],
                         rel_path,
                         sc_rel,
                         state,
                     });
                 }
-                None => out.push(DirtySidecar {
-                    file_ids: vec![id],
-                    member_paths: vec![rel_path.clone()],
-                    rel_path,
-                    sc_rel: shared,
-                    state,
-                }),
+                None => {
+                    shared_paths.insert(shared.clone(), out.len());
+                    out.push(DirtySidecar {
+                        file_ids: if dirty { vec![id] } else { Vec::new() },
+                        member_paths: vec![rel_path.clone()],
+                        rel_path,
+                        sc_rel: shared,
+                        state,
+                    });
+                }
             }
         }
-        Ok(out)
+        Ok(out.into_iter().filter(|d| !d.file_ids.is_empty()).collect())
     })
 }
 
@@ -227,37 +235,37 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
     // changes what the commit does), so switching mode re-previews and refreshes
     // the hold-to-run hash the dialog holds.
     let deletes_hash = {
-        let mut h = Xxh3::new();
-        for p in &deletes {
-            h.update(format!("{}:{}", p.id, p.file_id).as_bytes());
-        }
+        let mut h = project_hasher(db);
+        h.update(hash_pending(db, store, &deletes).as_bytes());
         h.update(format!("{deletion_mode:?}").as_bytes());
         format!("{:016x}", h.digest())
     };
-    let moves_hash = hash_pending(&moves);
-    let copies_hash = hash_pending(&copies);
+    let moves_hash = hash_pending(db, store, &moves);
+    let copies_hash = hash_pending(db, store, &copies);
     let xmp_hash = {
-        let mut h = Xxh3::new();
+        let mut h = project_hasher(db);
         for d in &xmp {
-            for id in &d.file_ids {
-                h.update(format!("x{id}").as_bytes());
-            }
+            h.update(
+                serde_json::json!([
+                    d.file_ids,
+                    d.sc_rel,
+                    d.member_paths,
+                    d.state.rating,
+                    d.state.flag,
+                    d.state.label,
+                    d.state.orientation
+                ])
+                .to_string()
+                .as_bytes(),
+            );
         }
         format!("{:016x}", h.digest())
     };
 
-    let mut hasher = Xxh3::new();
-    for list in [&deletes, &moves, &copies] {
-        for p in list {
-            hasher.update(format!("{}:{}:{:?}", p.id, p.file_id, p.dest).as_bytes());
-        }
+    let mut hasher = project_hasher(db);
+    for digest in [&deletes_hash, &moves_hash, &copies_hash, &xmp_hash] {
+        hasher.update(digest.as_bytes());
     }
-    for d in &xmp {
-        for id in &d.file_ids {
-            hasher.update(format!("x{id}").as_bytes());
-        }
-    }
-    hasher.update(format!("{deletion_mode:?}").as_bytes());
     let plan_hash = format!("{:016x}", hasher.digest());
 
     Ok(CommitPlan {
@@ -275,10 +283,28 @@ pub fn preview(db: &Arc<Db>, store: &dyn ProjectStore) -> AppResult<CommitPlan> 
     })
 }
 
-fn hash_pending(items: &[PendingAction]) -> String {
-    let mut h = Xxh3::new();
+fn project_hasher(db: &Arc<Db>) -> Xxh3 {
+    let mut hash = Xxh3::new();
+    hash.update(
+        serde_json::json!([db.project_root(), db.path(), db.generation()])
+            .to_string()
+            .as_bytes(),
+    );
+    hash
+}
+
+fn hash_pending(db: &Arc<Db>, store: &dyn ProjectStore, items: &[PendingAction]) -> String {
+    let mut h = project_hasher(db);
     for p in items {
-        h.update(format!("{}:{}:{:?}", p.id, p.file_id, p.dest).as_bytes());
+        let version = store
+            .open_read(&p.rel_path)
+            .and_then(|file| Ok(metadata_version(&file.metadata()?)))
+            .unwrap_or_else(|error| format!("unavailable: {error}"));
+        h.update(
+            serde_json::json!([p.id, p.file_id, p.rel_path, p.action, p.dest, version])
+                .to_string()
+                .as_bytes(),
+        );
     }
     format!("{:016x}", h.digest())
 }
@@ -289,15 +315,31 @@ fn hash_pending(items: &[PendingAction]) -> String {
 /// being deleted is still status = 0 here, so `id != ?1` excludes it.
 fn sidecar_shared_with_survivor(db: &Arc<Db>, file_id: i64) -> AppResult<bool> {
     db.call(move |conn| {
-        let n: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM files
-             WHERE status = 0 AND id != ?1
-               AND group_id = (SELECT group_id FROM files WHERE id = ?1)",
+        let path: String = conn.query_row(
+            "SELECT rel_path FROM files WHERE id = ?1",
             params![file_id],
             |r| r.get(0),
         )?;
-        Ok(n > 0)
+        let shared = xmp::sidecar_rel(&path);
+        let mut stmt = conn.prepare(
+            "SELECT rel_path FROM files WHERE status = 0 AND id != ?1 AND kind IN (0, 1)
+             AND dir = (SELECT dir FROM files WHERE id = ?1)",
+        )?;
+        let rows = stmt.query_map(params![file_id], |r| r.get::<_, String>(0))?;
+        for row in rows {
+            if xmp::sidecar_rel(&row?) == shared {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     })
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SidecarChange {
+    pub before_path: String,
+    pub after_path: Option<String>,
 }
 
 /// What a commit entry needs in order to be reversed. Serialized into
@@ -308,17 +350,20 @@ fn sidecar_shared_with_survivor(db: &Arc<Db>, file_id: i64) -> AppResult<bool> {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct UndoInfo {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sidecars: Vec<SidecarChange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy_fingerprint: Option<String>,
     /// Deletes: "trash" (the file still exists) or "permanent" (it does not).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     /// Deletes in trash mode: where the file now lives, project-relative.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trash_path: Option<String>,
-    /// Deletes: where the photo's XMP sidecar was put, when it went too.
+    /// Legacy deletes recorded one sidecar here. New entries use `sidecars`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidecar_trash_path: Option<String>,
-    /// Moves: the sidecar travelled with the file. Both of its endpoints derive
-    /// from the entry's own before/after paths, so no path is stored.
+    /// Legacy moves recorded this flag. New entries store each sidecar endpoint.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sidecar_moved: bool,
     /// Deletes: the file was its group's primary, and deleting it promoted a
@@ -378,17 +423,12 @@ fn store_trash(store: &dyn ProjectStore, rel: &str) -> AppResult<String> {
     let mut unique = name.to_string();
     let mut n = 1;
     while store.exists(&format!("{trash_parent}/{unique}"))? {
-        unique = format!("{name}.{n}");
+        unique = crate::store::collision_name(name, n);
         n += 1;
     }
-    // move_to keeps the source name, so rename the source first when a suffix
-    // is needed, then move it into the trash folder.
-    let src_rel = if unique != name {
-        store.rename_in_place(rel, &unique)?
-    } else {
-        rel.to_string()
-    };
-    store.move_to(&src_rel, &trash_parent)
+    let destination = format!("{trash_parent}/{unique}");
+    store.move_file(rel, &destination)?;
+    Ok(destination)
 }
 
 /// Mutable bookkeeping shared by the commit phases (deletes, moves, copies,
@@ -468,96 +508,94 @@ fn run_deletes(
     mode: DeletionMode,
 ) -> AppResult<()> {
     if deletes.is_empty() {
-        return Ok(()); // no phase event for an empty section (avoids UI flicker)
+        return Ok(());
     }
     run.begin_phase("deletes", deletes.len());
     for p in deletes {
-        let mut result: Result<UndoInfo, String> = match run.store.exists(&p.rel_path) {
-            Ok(true) => delete_via_store(run.store, &p.rel_path, mode).map_err(|e| e.to_string()),
-            Ok(false) => Err("file missing on disk".into()),
-            // A real access error (e.g. a disconnected network project folder)
-            // must not masquerade as "file missing on disk".
-            Err(e) => Err(format!("cannot access file: {e}")),
-        };
-        // A photo's sidecar travels with it — but a RAW+JPEG pair shares one
-        // sidecar (IMG.CR3 and IMG.JPG both map to IMG.xmp). Deleting only one
-        // member (delete-RAW-only, or a per-member reject) must NOT remove the
-        // sidecar while the partner survives, or that survivor loses its
-        // exported rating/flag/label. Remove it only when no live file maps to it.
-        if let Ok(undo) = &mut result {
-            // A per-file sidecar (written when the pair disagreed) names exactly
-            // one file, so it always goes with it — no survivor can be reading it.
-            let own = xmp::sidecar_rel_per_file(&p.rel_path);
-            if run.store.exists(&own).unwrap_or(false) {
-                match delete_via_store(run.store, &own, mode) {
-                    Ok(sc) => undo.sidecar_trash_path = sc.trash_path,
-                    Err(e) => tracing::warn!("per-file sidecar delete failed: {e}"),
+        let mut undo = UndoInfo::default();
+        let result = apply_delete(run, p, mode, &mut undo).map_err(|error| {
+            let mut message = error.to_string();
+            if let Some(trash) = &undo.trash_path {
+                for sidecar in undo.sidecars.iter().rev() {
+                    if let Some(after) = &sidecar.after_path {
+                        if let Err(e) = run.store.move_file(after, &sidecar.before_path) {
+                            message.push_str(&format!("; sidecar rollback failed: {e}"));
+                        }
+                    }
                 }
-            }
-            let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
-            if sidecar_rel != p.rel_path
-                && run.store.exists(&sidecar_rel).unwrap_or(false)
-                && !sidecar_shared_with_survivor(run.db, p.file_id)?
-            {
-                match delete_via_store(run.store, &sidecar_rel, mode) {
-                    // Recorded on the photo's own entry rather than as a row of
-                    // its own, so undoing the photo brings its sidecar back in
-                    // the same step.
-                    Ok(sc) => undo.sidecar_trash_path = sc.trash_path,
-                    Err(e) => tracing::warn!("sidecar delete failed: {e}"),
+                if let Err(e) = run.store.move_file(trash, &p.rel_path) {
+                    message.push_str(&format!("; media rollback failed: {e}"));
                 }
+            } else if undo.mode.as_deref() == Some("permanent") {
+                message.push_str("; media was deleted permanently before this error");
             }
+            message
+        });
+        match &result {
+            Ok(()) => run.note_ok(),
+            Err(error) => run.note_err(&p.rel_path, error),
         }
-        match &mut result {
-            Ok(undo) => {
-                run.note_ok();
-                let file_id = p.file_id;
-                // Promoting a survivor overwrites `primary_file_id`, and the old
-                // value is exactly this file — but only when the UPDATE actually
-                // matched. Report that back so undo can hand the role over again.
-                let was_primary = run.db.call(move |conn| {
-                    let tx = conn.transaction()?;
-                    tx.execute(
-                        "UPDATE files SET status = 2 WHERE id = ?1",
-                        params![file_id],
-                    )?;
-                    tx.execute(
-                        "DELETE FROM pending_actions WHERE file_id = ?1",
-                        params![file_id],
-                    )?;
-                    let promoted = tx.execute(
-                        "UPDATE groups SET primary_file_id =
-                           (SELECT id FROM files WHERE group_id = groups.id AND status = 0 LIMIT 1)
-                         WHERE primary_file_id = ?1",
-                        params![file_id],
-                    )?;
-                    tx.commit()?;
-                    Ok(promoted > 0)
-                })?;
-                undo.was_primary = was_primary;
-                run.record(
-                    Some(p.file_id),
-                    0,
-                    Some(p.rel_path.clone()),
-                    None,
-                    Some(undo.to_json()),
-                    Ok(()),
-                )?;
-            }
-            Err(e) => {
-                run.note_err(&p.rel_path, e);
-                run.record(
-                    Some(p.file_id),
-                    0,
-                    Some(p.rel_path.clone()),
-                    None,
-                    None,
-                    Err(e.clone()),
-                )?;
-            }
-        }
+        run.record(
+            Some(p.file_id),
+            0,
+            Some(p.rel_path.clone()),
+            None,
+            Some(undo.to_json()),
+            result,
+        )?;
         run.tick();
     }
+    Ok(())
+}
+
+fn apply_delete(
+    run: &CommitRun,
+    p: &PendingAction,
+    mode: DeletionMode,
+    undo: &mut UndoInfo,
+) -> AppResult<()> {
+    if !run.store.exists(&p.rel_path)? {
+        return Err(AppError::Other("file missing on disk".into()));
+    }
+    let mut candidates = vec![xmp::sidecar_rel_per_file(&p.rel_path)];
+    if !sidecar_shared_with_survivor(run.db, p.file_id)? {
+        candidates.push(xmp::sidecar_rel(&p.rel_path));
+    }
+    let mut sidecars = Vec::new();
+    for path in candidates {
+        if run.store.exists(&path)? {
+            sidecars.push(path);
+        }
+    }
+    *undo = delete_via_store(run.store, &p.rel_path, mode)?;
+    for before_path in sidecars {
+        let sidecar = delete_via_store(run.store, &before_path, mode)?;
+        undo.sidecar_trash_path = sidecar.trash_path.clone();
+        undo.sidecars.push(SidecarChange {
+            before_path,
+            after_path: sidecar.trash_path,
+        });
+    }
+    let file_id = p.file_id;
+    undo.was_primary = run.db.call(move |conn| {
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE files SET status = 2 WHERE id = ?1",
+            params![file_id],
+        )?;
+        tx.execute(
+            "DELETE FROM pending_actions WHERE file_id = ?1",
+            params![file_id],
+        )?;
+        let promoted = tx.execute(
+            "UPDATE groups SET primary_file_id =
+               (SELECT id FROM files WHERE group_id = groups.id AND status = 0 LIMIT 1)
+             WHERE primary_file_id = ?1",
+            params![file_id],
+        )?;
+        tx.commit()?;
+        Ok(promoted > 0)
+    })?;
     Ok(())
 }
 
@@ -586,106 +624,208 @@ fn run_copies(run: &mut CommitRun, copies: &[PendingAction]) -> AppResult<()> {
 /// One move (`action_i == 1`) or copy (`action_i == 2`), including its sidecar,
 /// DB row update and audit record. Ticks the current phase once.
 fn process_move_copy(run: &mut CommitRun, p: &PendingAction, action_i: i64) -> AppResult<()> {
-    let dest = p.dest.clone().unwrap_or_default();
-    let file_name = p
-        .rel_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(&p.rel_path)
-        .to_string();
-    let dest_dir = dest.trim_matches('/').to_string();
-    let dest_rel = if dest_dir.is_empty() {
-        file_name.clone()
-    } else {
-        format!("{dest_dir}/{file_name}")
-    };
-
+    let file_id = p.file_id;
+    let source: String = run.db.call(move |conn| {
+        Ok(conn.query_row(
+            "SELECT rel_path FROM files WHERE id = ?1",
+            params![file_id],
+            |r| r.get(0),
+        )?)
+    })?;
+    let dest_dir = p.dest.as_deref().unwrap_or_default();
+    let (_, file_name) = split_parent(&source);
+    let dest_rel = crate::store::join_relative(dest_dir, file_name);
     let mut undo = UndoInfo::default();
     let result: Result<(), String> = (|| {
-        if !run.store.exists(&p.rel_path).map_err(|e| e.to_string())? {
+        crate::store::validate_relative(dest_dir).map_err(|e| e.to_string())?;
+        if !run.store.exists(&source).map_err(|e| e.to_string())? {
             return Err("file missing on disk".into());
         }
-        if run.store.exists(&dest_rel).map_err(|e| e.to_string())? {
-            return Err(format!("target exists: {dest_rel}"));
-        }
+        check_move_copy_destination(run, file_id, &dest_rel).map_err(|e| e.to_string())?;
         run.store
-            .create_dir_all(&dest_dir)
+            .create_dir_all(dest_dir)
             .map_err(|e| e.to_string())?;
         if action_i == 1 {
-            run.store
-                .move_to(&p.rel_path, &dest_dir)
-                .map_err(|e| e.to_string())?;
+            apply_move(run, p, &source, &dest_rel, &mut undo)?;
         } else {
-            run.store
-                .copy(&p.rel_path, &dest_rel)
-                .map_err(|e| e.to_string())?;
+            apply_copy(run, p, &source, &dest_rel, &mut undo)?;
         }
         Ok(())
     })();
-
     match &result {
-        Ok(()) => {
-            run.note_ok();
-            // A move carries the file's sidecar along (a copy leaves it
-            // behind). Same collision policy as the file itself: the
-            // target must not exist, and a sidecar failure only warns.
-            if action_i == 1 {
-                let sidecar_rel = xmp::sidecar_rel(&p.rel_path);
-                if sidecar_rel != p.rel_path && run.store.exists(&sidecar_rel).unwrap_or(false) {
-                    match run.store.move_to(&sidecar_rel, &dest_dir) {
-                        // Both endpoints derive from the entry's own paths, so
-                        // undo only needs to know that it happened.
-                        Ok(_) => undo.sidecar_moved = true,
-                        Err(e) => tracing::warn!("sidecar move failed: {e}"),
-                    }
-                }
-            }
-            let file_id = p.file_id;
-            let pending_id = p.id;
-            if action_i == 1 {
-                let new_rel = dest_rel.clone();
-                // One transaction so a crash cannot leave the new rel_path
-                // recorded while the stale pending move row survives (which
-                // would resurface as a bogus pending action next preview).
-                run.db.call(move |conn| {
-                    let tx = conn.transaction()?;
-                    let dir = new_rel.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                    tx.execute(
-                        "UPDATE files SET rel_path = ?2, dir = ?3 WHERE id = ?1",
-                        params![file_id, new_rel, dir],
-                    )?;
-                    tx.execute(
-                        "DELETE FROM pending_actions WHERE id = ?1",
-                        params![pending_id],
-                    )?;
-                    tx.commit()?;
-                    Ok(())
-                })?;
-            } else {
-                run.db.call(move |conn| {
-                    conn.execute(
-                        "DELETE FROM pending_actions WHERE id = ?1",
-                        params![pending_id],
-                    )?;
-                    Ok(())
-                })?;
-            }
-        }
-        Err(e) => {
-            run.note_err(&p.rel_path, e);
-        }
+        Ok(()) => run.note_ok(),
+        Err(e) => run.note_err(&source, e),
     }
-    let undo_json = result.is_ok().then(|| undo.to_json());
     run.record(
         Some(p.file_id),
         action_i,
-        Some(p.rel_path.clone()),
+        Some(source),
         Some(dest_rel),
-        undo_json,
+        Some(undo.to_json()),
         result,
     )?;
     run.tick();
     Ok(())
+}
+
+fn check_move_copy_destination(run: &CommitRun, file_id: i64, dest: &str) -> AppResult<()> {
+    if run.store.exists(dest)? {
+        return Err(AppError::Other(format!("target exists: {dest}")));
+    }
+    let dest = dest.to_string();
+    let reserved = run.db.call(move |conn| {
+        Ok(conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM files WHERE rel_path = ?1 AND id != ?2)",
+            params![dest, file_id],
+            |r| r.get::<_, bool>(0),
+        )?)
+    })?;
+    if reserved {
+        return Err(AppError::Other(
+            "target path is reserved in the catalog".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn apply_move(
+    run: &CommitRun,
+    p: &PendingAction,
+    source: &str,
+    dest: &str,
+    undo: &mut UndoInfo,
+) -> Result<(), String> {
+    let mut sidecars = vec![(
+        xmp::sidecar_rel_per_file(source),
+        xmp::sidecar_rel_per_file(dest),
+    )];
+    if !sidecar_shared_with_survivor(run.db, p.file_id).map_err(|e| e.to_string())? {
+        sidecars.push((xmp::sidecar_rel(source), xmp::sidecar_rel(dest)));
+    }
+    let mut existing = Vec::new();
+    for (from, to) in sidecars {
+        if run.store.exists(&from).map_err(|e| e.to_string())? {
+            if run.store.exists(&to).map_err(|e| e.to_string())? {
+                return Err(format!("sidecar target exists: {to}"));
+            }
+            existing.push((from, to));
+        }
+    }
+    run.store
+        .move_file(source, dest)
+        .map_err(|e| e.to_string())?;
+    let applied: AppResult<()> = (|| {
+        for (from, to) in existing {
+            run.store.move_file(&from, &to)?;
+            undo.sidecars.push(SidecarChange {
+                before_path: from,
+                after_path: Some(to),
+            });
+        }
+        let (file_id, pending_id, dest) = (p.file_id, p.id, dest.to_string());
+        run.db.call(move |conn| {
+            let tx = conn.transaction()?;
+            let (dir, _) = split_parent(&dest);
+            tx.execute(
+                "UPDATE files SET rel_path = ?2, dir = ?3 WHERE id = ?1",
+                params![file_id, dest, dir],
+            )?;
+            tx.execute(
+                "DELETE FROM pending_actions WHERE id = ?1",
+                params![pending_id],
+            )?;
+            tx.commit()?;
+            Ok(())
+        })
+    })();
+    if let Err(error) = applied {
+        let mut message = error.to_string();
+        for sc in undo.sidecars.iter().rev() {
+            if let Some(after) = &sc.after_path {
+                if let Err(e) = run.store.move_file(after, &sc.before_path) {
+                    message.push_str(&format!("; restore {} failed: {e}", sc.before_path));
+                }
+            }
+        }
+        if let Err(e) = run.store.move_file(dest, source) {
+            message.push_str(&format!("; restore {source} failed: {e}"));
+        }
+        return Err(message);
+    }
+    undo.sidecar_moved = !undo.sidecars.is_empty();
+    Ok(())
+}
+
+fn apply_copy(
+    run: &CommitRun,
+    p: &PendingAction,
+    source: &str,
+    dest: &str,
+    undo: &mut UndoInfo,
+) -> Result<(), String> {
+    let staged = crate::store::temporary_sibling(run.store, dest).map_err(|e| e.to_string())?;
+    let mut moved = false;
+    let applied: AppResult<()> = (|| {
+        run.store.copy(source, &staged)?;
+        undo.copy_fingerprint = Some(file_fingerprint(run.store, &staged)?);
+        run.store.move_file(&staged, dest)?;
+        moved = true;
+        let pending_id = p.id;
+        run.db.call(move |conn| {
+            conn.execute(
+                "DELETE FROM pending_actions WHERE id = ?1",
+                params![pending_id],
+            )?;
+            Ok(())
+        })
+    })();
+    if let Err(error) = applied {
+        let cleanup = if moved { dest } else { &staged };
+        if run.store.exists(cleanup).map_err(|e| e.to_string())? {
+            if moved
+                && Some(file_fingerprint(run.store, dest).map_err(|e| e.to_string())?)
+                    != undo.copy_fingerprint
+            {
+                return Err(format!("{error}; destination was replaced: {dest}"));
+            }
+            run.store
+                .remove_file(cleanup)
+                .map_err(|e| format!("{error}; partial copy remains at {cleanup}: {e}"))?;
+        }
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn file_fingerprint(store: &dyn ProjectStore, rel: &str) -> AppResult<String> {
+    use std::io::Read;
+    let mut file = store.open_read(rel)?;
+    let version = metadata_version(&file.metadata()?);
+    let mut hash = Xxh3::new();
+    hash.update(version.as_bytes());
+    let mut buffer = [0; 65536];
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    if metadata_version(&file.metadata()?) != version {
+        return Err(AppError::Other(format!(
+            "file changed while reading: {rel}"
+        )));
+    }
+    Ok(format!("{:016x}", hash.digest()))
+}
+
+fn metadata_version(metadata: &std::fs::Metadata) -> String {
+    format!(
+        "{}:{:?}:{:?}",
+        metadata.len(),
+        metadata.modified().ok(),
+        metadata.created().ok()
+    )
 }
 
 /// Write pending XMP sidecars. Resolved only now, AFTER deletes and moves/copies:
@@ -801,17 +941,29 @@ fn run_commit(
         progress: &mut progress,
     };
 
-    if phases.deletes {
-        run_deletes(&mut run, &plan.deletes, plan.deletion_mode)?;
-    }
-    if phases.moves {
-        run_moves(&mut run, &plan.moves)?;
-    }
-    if phases.copies {
-        run_copies(&mut run, &plan.copies)?;
-    }
-    if phases.xmp {
-        run_xmp(&mut run)?;
+    let phase_result: AppResult<()> = (|| {
+        if phases.deletes {
+            run_deletes(&mut run, &plan.deletes, plan.deletion_mode)?;
+        }
+        if phases.moves {
+            run_moves(&mut run, &plan.moves)?;
+        }
+        if phases.copies {
+            run_copies(&mut run, &plan.copies)?;
+        }
+        if phases.xmp {
+            run_xmp(&mut run)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = phase_result {
+        let phase = run.phase;
+        run.note_err(phase, &error.to_string());
+        if let Err(audit_error) =
+            run.record(None, -1, None, None, None, Err(format!("{phase}: {error}")))
+        {
+            run.note_err("audit", &audit_error.to_string());
+        }
     }
 
     let CommitRun {
@@ -1307,6 +1459,333 @@ mod tests {
     }
 
     #[test]
+    fn data_regression_trash_collision_preserves_source_names_and_media_extension() {
+        let (dir, db, store) = paired_project();
+        let root = dir.path();
+        fs::create_dir(root.join("_trash")).unwrap();
+        fs::write(root.join("_trash/IMG_1.jpg"), b"old trash").unwrap();
+        fs::write(root.join("IMG_1.jpg.1"), b"foreign").unwrap();
+        enqueue(
+            &db,
+            Targets {
+                ids: vec![ids(&db, "jpg")],
+                as_groups: false,
+            },
+            ActionKind::Delete,
+            None,
+            PairScope::Both,
+        )
+        .unwrap();
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "deletes", &plan.deletes_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0);
+        assert_eq!(fs::read(root.join("IMG_1.jpg.1")).unwrap(), b"foreign");
+        assert_eq!(fs::read(root.join("_trash/IMG_1.1.jpg")).unwrap(), b"jpg");
+    }
+
+    #[test]
+    fn data_regression_enqueue_rejects_destination_traversal() {
+        let (_dir, db, _store) = paired_project();
+        for dest in ["../escape", "..\\escape", "/absolute", "C:/absolute"] {
+            let result = enqueue(
+                &db,
+                Targets {
+                    ids: vec![ids(&db, "jpg")],
+                    as_groups: false,
+                },
+                ActionKind::Move,
+                Some(dest.into()),
+                PairScope::Both,
+            );
+            assert!(result.is_err(), "accepted {dest}");
+        }
+        assert!(super::super::actions::list(&db).unwrap().is_empty());
+    }
+
+    fn queue_file(db: &Arc<Db>, rel: &str, action: ActionKind, dest: Option<&str>) {
+        enqueue(
+            db,
+            Targets {
+                ids: vec![id_of(db, rel)],
+                as_groups: false,
+            },
+            action,
+            dest.map(str::to_string),
+            PairScope::Both,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn data_regression_move_reserved_db_path_keeps_source_and_finishes_history() {
+        let (dir, db, store) = paired_project();
+        fs::create_dir(dir.path().join("dest")).unwrap();
+        fs::write(dir.path().join("dest/IMG_1.jpg"), b"reserved").unwrap();
+        crate::scan::scan_project_inner(&db, dir.path(), &mut |_| {}).unwrap();
+        fs::remove_file(dir.path().join("dest/IMG_1.jpg")).unwrap();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Move, Some("dest"));
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "moves", &plan.moves_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 1);
+        assert!(dir.path().join("IMG_1.jpg").exists());
+        assert!(!dir.path().join("dest/IMG_1.jpg").exists());
+        let history = super::super::undo::list_commits(&db).unwrap();
+        assert_eq!(history[0].status, 2);
+        assert!(history[0].finished_at.is_some());
+        assert_eq!(
+            super::super::undo::commit_detail(&db, outcome.commit_id)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn data_regression_move_db_failure_rolls_back_and_finishes_history() {
+        let (dir, db, store) = paired_project();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Move, Some("dest"));
+        db.call(|c| { c.execute_batch("CREATE TRIGGER fail_move BEFORE UPDATE OF rel_path ON files BEGIN SELECT RAISE(ABORT, 'injected move failure'); END;")?; Ok(()) }).unwrap();
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "moves", &plan.moves_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 1);
+        assert!(dir.path().join("IMG_1.jpg").exists());
+        assert!(!dir.path().join("dest/IMG_1.jpg").exists());
+        let history = super::super::undo::list_commits(&db).unwrap();
+        assert_eq!(history[0].status, 2);
+        assert!(history[0].finished_at.is_some());
+    }
+
+    #[test]
+    fn data_regression_move_and_copy_use_the_current_source_path() {
+        let (dir, db, store) = paired_project();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Move, Some("moved"));
+        queue_file(&db, "IMG_1.jpg", ActionKind::Copy, Some("copied"));
+        let plan = preview(&db, &store).unwrap();
+        let outcome = execute(&db, &store, &plan.plan_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0, "{:?}", outcome.error_samples);
+        assert_eq!(
+            fs::read(dir.path().join("moved/IMG_1.jpg")).unwrap(),
+            b"jpg"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("copied/IMG_1.jpg")).unwrap(),
+            b"jpg"
+        );
+        assert!(super::super::actions::list(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn data_regression_sidecar_destination_collision_blocks_move() {
+        let (dir, db, store) = paired_project();
+        fs::create_dir(dir.path().join("dest")).unwrap();
+        fs::write(dir.path().join("IMG_1.jpg.xmp"), b"own sidecar").unwrap();
+        fs::write(dir.path().join("dest/IMG_1.jpg.xmp"), b"foreign sidecar").unwrap();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Move, Some("dest"));
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "moves", &plan.moves_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 1);
+        assert!(dir.path().join("IMG_1.jpg").exists());
+        assert_eq!(
+            fs::read(dir.path().join("dest/IMG_1.jpg.xmp")).unwrap(),
+            b"foreign sidecar"
+        );
+    }
+
+    #[test]
+    fn data_regression_divergent_jpeg_move_keeps_raw_shared_sidecar() {
+        let (dir, db, store) = paired_project();
+        fs::write(dir.path().join("IMG_1.xmp"), b"raw state").unwrap();
+        fs::write(dir.path().join("IMG_1.jpg.xmp"), b"jpeg state").unwrap();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Move, Some("dest"));
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "moves", &plan.moves_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 0);
+        assert_eq!(
+            fs::read(dir.path().join("IMG_1.xmp")).unwrap(),
+            b"raw state"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("dest/IMG_1.jpg.xmp")).unwrap(),
+            b"jpeg state"
+        );
+        let undo = super::super::undo::undo_commit(&db, &store, outcome.commit_id).unwrap();
+        assert_eq!((undo.restored, undo.errors), (1, 0));
+        assert_eq!(
+            fs::read(dir.path().join("IMG_1.jpg.xmp")).unwrap(),
+            b"jpeg state"
+        );
+    }
+
+    struct FaultStore(crate::store::LocalFsStore, u8);
+
+    impl ProjectStore for FaultStore {
+        fn list_recursive(
+            &self,
+            skip: &[&str],
+            progress: &mut dyn FnMut(usize),
+        ) -> AppResult<Vec<crate::store::StoreEntry>> {
+            self.0.list_recursive(skip, progress)
+        }
+        fn open_read(&self, rel: &str) -> AppResult<std::fs::File> {
+            self.0.open_read(rel)
+        }
+        fn open_write(&self, rel: &str, mime: &str) -> AppResult<std::fs::File> {
+            self.0.open_write(rel, mime)
+        }
+        fn create_dir_all(&self, rel: &str) -> AppResult<()> {
+            self.0.create_dir_all(rel)
+        }
+        fn rename_in_place(&self, rel: &str, name: &str) -> AppResult<String> {
+            self.0.rename_in_place(rel, name)
+        }
+        fn move_to(&self, rel: &str, parent: &str) -> AppResult<String> {
+            if self.1 == 0 && rel.ends_with(".xmp") {
+                return Err(AppError::Other("injected sidecar move error".into()));
+            }
+            self.0.move_to(rel, parent)
+        }
+        fn copy(&self, from: &str, to: &str) -> AppResult<()> {
+            if self.1 == 2 {
+                fs::write(
+                    self.0.local_path("dest/IMG_1.jpg").unwrap(),
+                    b"concurrent foreign file",
+                )?;
+                return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists).into());
+            }
+            self.0.copy(from, to)?;
+            Err(AppError::Other("injected partial copy error".into()))
+        }
+        fn remove_file(&self, rel: &str) -> AppResult<()> {
+            self.0.remove_file(rel)
+        }
+        fn exists(&self, rel: &str) -> AppResult<bool> {
+            self.0.exists(rel)
+        }
+    }
+
+    #[test]
+    fn data_regression_copy_error_removes_partial_destination() {
+        let (dir, db, local) = paired_project();
+        let store = FaultStore(local, 1);
+        queue_file(&db, "IMG_1.jpg", ActionKind::Copy, Some("dest"));
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "copies", &plan.copies_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 1);
+        assert!(!dir.path().join("dest/IMG_1.jpg").exists());
+        assert_eq!(super::super::actions::list(&db).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn data_regression_sidecar_move_error_keeps_media_and_queue() {
+        let (dir, db, local) = paired_project();
+        let store = FaultStore(local, 0);
+        fs::write(dir.path().join("IMG_1.jpg.xmp"), b"sidecar").unwrap();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Move, Some("dest"));
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "moves", &plan.moves_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 1);
+        assert!(dir.path().join("IMG_1.jpg").exists());
+        assert!(dir.path().join("IMG_1.jpg.xmp").exists());
+        assert_eq!(super::super::actions::list(&db).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn data_regression_reviewed_delete_binds_source_version() {
+        let (dir, db, store) = paired_project();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Delete, None);
+        let plan = preview(&db, &store).unwrap();
+        fs::write(dir.path().join("IMG_1.jpg"), b"new unrelated photo").unwrap();
+        assert!(execute_section(&db, &store, "deletes", &plan.deletes_hash, |_, _, _| {}).is_err());
+        assert_eq!(
+            fs::read(dir.path().join("IMG_1.jpg")).unwrap(),
+            b"new unrelated photo"
+        );
+        assert!(super::super::undo::list_commits(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn data_regression_review_hash_binds_project_and_open_generation() {
+        let (dir, db, store) = paired_project();
+        let (other_dir, other_db, other_store) = paired_project();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Delete, None);
+        queue_file(&other_db, "IMG_1.jpg", ActionKind::Delete, None);
+        let plan = preview(&db, &store).unwrap();
+        assert!(execute_section(
+            &other_db,
+            &other_store,
+            "deletes",
+            &plan.deletes_hash,
+            |_, _, _| {}
+        )
+        .is_err());
+        assert!(other_dir.path().join("IMG_1.jpg").exists());
+        let reopened = Arc::new(Db::open(dir.path()).unwrap());
+        assert!(execute_section(
+            &reopened,
+            &store,
+            "deletes",
+            &plan.deletes_hash,
+            |_, _, _| {}
+        )
+        .is_err());
+        assert!(dir.path().join("IMG_1.jpg").exists());
+    }
+
+    #[test]
+    fn data_regression_reviewed_xmp_binds_the_exported_state() {
+        let (_dir, db, store) = paired_project();
+        rate(&db, &["jpg"], 2);
+        let plan = preview(&db, &store).unwrap();
+        rate(&db, &["jpg"], 5);
+        assert!(execute_section(&db, &store, "xmp", &plan.xmp_hash, |_, _, _| {}).is_err());
+    }
+
+    #[test]
+    fn data_regression_copy_error_preserves_a_concurrent_destination() {
+        let (dir, db, local) = paired_project();
+        let store = FaultStore(local, 2);
+        queue_file(&db, "IMG_1.jpg", ActionKind::Copy, Some("dest"));
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "copies", &plan.copies_hash, |_, _, _| {}).unwrap();
+        assert_eq!(outcome.errors, 1);
+        assert_eq!(
+            fs::read(dir.path().join("dest/IMG_1.jpg")).unwrap(),
+            b"concurrent foreign file"
+        );
+    }
+
+    #[test]
+    fn data_regression_delete_db_failure_restores_media_and_all_sidecars() {
+        let (dir, db, store) = paired_project();
+        queue_file(&db, "IMG_1.cr3", ActionKind::Delete, None);
+        queue_file(&db, "IMG_1.jpg", ActionKind::Delete, None);
+        fs::write(dir.path().join("IMG_1.jpg.xmp"), b"own").unwrap();
+        fs::write(dir.path().join("IMG_1.xmp"), b"shared").unwrap();
+        db.call(|c| { c.execute_batch("CREATE TRIGGER fail_delete BEFORE UPDATE OF status ON files BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END;")?; Ok(()) }).unwrap();
+        let plan = preview(&db, &store).unwrap();
+        let outcome =
+            execute_section(&db, &store, "deletes", &plan.deletes_hash, |_, _, _| {}).unwrap();
+        assert_eq!((outcome.ok, outcome.errors), (0, 2));
+        assert!(dir.path().join("IMG_1.cr3").exists());
+        assert!(dir.path().join("IMG_1.jpg").exists());
+        assert_eq!(fs::read(dir.path().join("IMG_1.jpg.xmp")).unwrap(), b"own");
+        assert_eq!(fs::read(dir.path().join("IMG_1.xmp")).unwrap(), b"shared");
+        let detail = super::super::undo::commit_detail(&db, outcome.commit_id).unwrap();
+        assert_eq!(detail.len(), 2);
+        assert!(detail
+            .iter()
+            .all(|e| e.action == 0 && e.file_id.is_some() && e.result == 2));
+    }
+
+    #[test]
     fn a_diverged_pair_writes_a_sidecar_each_instead_of_picking_a_winner() {
         let (dir, db, store) = paired_project();
         let root = dir.path();
@@ -1324,6 +1803,21 @@ mod tests {
         assert!(shared.contains("xmp:Rating=\"5\""), "{shared}");
         let own = fs::read_to_string(root.join("IMG_1.jpg.xmp")).unwrap();
         assert!(own.contains("xmp:Rating=\"2\""), "{own}");
+    }
+
+    #[test]
+    fn data_regression_dirty_jpeg_does_not_replace_clean_raw_shared_state() {
+        let (dir, db, store) = paired_project();
+        rate(&db, &["cr3", "jpg"], 5);
+        let plan = preview(&db, &store).unwrap();
+        execute_section(&db, &store, "xmp", &plan.xmp_hash, |_, _, _| {}).unwrap();
+        let original = fs::read(dir.path().join("IMG_1.xmp")).unwrap();
+        rate(&db, &["jpg"], 2);
+        let plan = preview(&db, &store).unwrap();
+        execute_section(&db, &store, "xmp", &plan.xmp_hash, |_, _, _| {}).unwrap();
+        assert_eq!(fs::read(dir.path().join("IMG_1.xmp")).unwrap(), original);
+        let jpeg = fs::read_to_string(dir.path().join("IMG_1.jpg.xmp")).unwrap();
+        assert_eq!(xmp::read_sidecar(&jpeg).unwrap().rating, 2);
     }
 
     #[test]

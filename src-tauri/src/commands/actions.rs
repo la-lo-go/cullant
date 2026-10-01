@@ -11,6 +11,14 @@ use crate::error::{AppError, AppResult};
 use crate::store::ProjectStore;
 use crate::AppState;
 
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct CommitDone<'a> {
+    project_root: String,
+    #[serde(flatten)]
+    outcome: &'a CommitOutcome,
+}
+
 fn project(state: &AppState) -> AppResult<(Arc<Db>, Arc<dyn ProjectStore>)> {
     let guard = state.project.lock().unwrap();
     let p = guard.as_ref().ok_or(AppError::NoProject)?;
@@ -39,7 +47,10 @@ pub fn undo_commit(
 ) -> AppResult<UndoOutcome> {
     let (db, store) = project(&state)?;
     let outcome = undo::undo_commit(&db, store.as_ref(), commit_id)?;
-    let _ = app.emit("pending:changed", ());
+    let _ = app.emit(
+        "pending:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(outcome)
 }
 
@@ -51,7 +62,10 @@ pub fn undo_commit_entry(
 ) -> AppResult<UndoOutcome> {
     let (db, store) = project(&state)?;
     let outcome = undo::undo_entry(&db, store.as_ref(), entry_id)?;
-    let _ = app.emit("pending:changed", ());
+    let _ = app.emit(
+        "pending:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(outcome)
 }
 
@@ -66,7 +80,10 @@ pub fn enqueue_action(
 ) -> AppResult<usize> {
     let (db, _) = project(&state)?;
     let n = actions::enqueue(&db, targets, action, dest, pair_scope.unwrap_or_default())?;
-    let _ = app.emit("pending:changed", ());
+    let _ = app.emit(
+        "pending:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(n)
 }
 
@@ -79,7 +96,10 @@ pub fn remove_pending_for_files(
 ) -> AppResult<usize> {
     let (db, _) = project(&state)?;
     let n = actions::remove_for_files(&db, targets, action)?;
-    let _ = app.emit("pending:changed", ());
+    let _ = app.emit(
+        "pending:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(n)
 }
 
@@ -91,7 +111,10 @@ pub fn remove_pending(
 ) -> AppResult<()> {
     let (db, _) = project(&state)?;
     actions::remove(&db, pending_ids)?;
-    let _ = app.emit("pending:changed", ());
+    let _ = app.emit(
+        "pending:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(())
 }
 
@@ -99,7 +122,10 @@ pub fn remove_pending(
 pub fn clear_pending(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     let (db, _) = project(&state)?;
     actions::clear_all(&db)?;
-    let _ = app.emit("pending:changed", ());
+    let _ = app.emit(
+        "pending:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(())
 }
 
@@ -136,6 +162,7 @@ pub fn commit_execute(
 ) -> AppResult<CommitOutcome> {
     let (db, store) = project(&state)?;
     let progress_app = app.clone();
+    let project_root = db.project_root();
     let outcome = committer::execute(
         &db,
         store.as_ref(),
@@ -143,12 +170,21 @@ pub fn commit_execute(
         move |phase, done, total| {
             let _ = progress_app.emit(
                 "commit:progress",
-                serde_json::json!({ "phase": phase, "done": done, "total": total }),
+                serde_json::json!({ "projectRoot": project_root, "phase": phase, "done": done, "total": total }),
             );
         },
     )?;
-    let _ = app.emit("pending:changed", ());
-    let _ = app.emit("commit:done", &outcome);
+    let _ = app.emit(
+        "pending:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
+    let _ = app.emit(
+        "commit:done",
+        CommitDone {
+            project_root: db.project_root(),
+            outcome: &outcome,
+        },
+    );
     Ok(outcome)
 }
 
@@ -165,6 +201,7 @@ pub fn commit_execute_section(
 ) -> AppResult<CommitOutcome> {
     let (db, store) = project(&state)?;
     let progress_app = app.clone();
+    let project_root = db.project_root();
     let outcome = committer::execute_section(
         &db,
         store.as_ref(),
@@ -173,12 +210,21 @@ pub fn commit_execute_section(
         move |phase, done, total| {
             let _ = progress_app.emit(
                 "commit:progress",
-                serde_json::json!({ "phase": phase, "done": done, "total": total }),
+                serde_json::json!({ "projectRoot": project_root, "phase": phase, "done": done, "total": total }),
             );
         },
     )?;
-    let _ = app.emit("pending:changed", ());
-    let _ = app.emit("commit:done", &outcome);
+    let _ = app.emit(
+        "pending:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
+    let _ = app.emit(
+        "commit:done",
+        CommitDone {
+            project_root: db.project_root(),
+            outcome: &outcome,
+        },
+    );
     Ok(outcome)
 }
 

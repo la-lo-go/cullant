@@ -70,6 +70,9 @@ pub fn enqueue(
     if matches!(action, ActionKind::Move | ActionKind::Copy) && dest.is_none() {
         return Err(AppError::Other("move/copy needs a destination".into()));
     }
+    if let Some(dest) = &dest {
+        crate::store::validate_relative(dest)?;
+    }
     db.call(move |conn| {
         let tx = conn.transaction()?;
         let mut ids = super::culling::expand_targets(&tx, &targets)?;
