@@ -69,42 +69,21 @@ pub fn write_sidecar(
     sc_rel: &str,
     state: &XmpState,
 ) -> AppResult<String> {
-    use std::io::Write;
-
     let sc_rel = sc_rel.to_string();
-    // A missing sidecar is expected (write fresh). Any other case that ends in a
-    // fresh overwrite must warn first, so foreign content (e.g. Lightroom develop
-    // settings) is never lost silently — including a stat error, an unreadable
-    // file, or non-UTF-8 bytes.
-    let existing = match store.exists(&sc_rel) {
-        Ok(true) => match read_all(store, &sc_rel) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) => Some(text),
-                Err(e) => {
-                    tracing::warn!("sidecar {sc_rel} is not valid UTF-8 ({e}); rewriting fresh");
-                    None
-                }
-            },
-            Err(e) => {
-                tracing::warn!("sidecar {sc_rel} unreadable ({e}); rewriting fresh");
-                None
-            }
-        },
-        Ok(false) => None,
-        Err(e) => {
-            tracing::warn!("cannot stat sidecar {sc_rel} ({e}); a fresh write may overwrite it");
+    // Keep foreign data when reading or merging fails.
+    let existing =
+        if store.exists(&sc_rel)? {
+            Some(String::from_utf8(read_all(store, &sc_rel)?).map_err(|e| {
+                AppError::Other(format!("sidecar {sc_rel} is not valid UTF-8: {e}"))
+            })?)
+        } else {
             None
-        }
-    };
+        };
     let output = match existing {
-        Some(existing) => merge_into_existing(&existing, state).unwrap_or_else(|e| {
-            tracing::warn!("sidecar merge failed for {sc_rel} ({e}); rewriting fresh");
-            fresh_sidecar(state)
-        }),
+        Some(existing) => merge_into_existing(&existing, state)?,
         None => fresh_sidecar(state),
     };
-    let mut f = store.open_write(&sc_rel, "application/xml")?;
-    f.write_all(output.as_bytes())?;
+    store.write_sidecar(&sc_rel, output.as_bytes())?;
     Ok(sc_rel)
 }
 
@@ -158,35 +137,67 @@ fn merge_into_existing(existing: &str, state: &XmpState) -> AppResult<String> {
     let mut reader = Reader::from_str(existing);
     let mut writer = Writer::new(Vec::new());
     let mut patched = false;
-
+    let mut depth = 0usize;
+    let mut description_depth = None;
     loop {
-        match reader
+        let event = reader
             .read_event()
-            .map_err(|e| AppError::Other(format!("xmp parse: {e}")))?
-        {
+            .map_err(|e| AppError::Other(format!("xmp parse: {e}")))?;
+        match event {
             Event::Eof => break,
             Event::Start(el) if !patched && is_description(&el) => {
-                writer
-                    .write_event(Event::Start(patch_description(&el, state)))
-                    .map_err(|e| AppError::Other(format!("xmp write: {e}")))?;
+                depth += 1;
+                description_depth = Some(depth);
+                writer.write_event(Event::Start(patch_description(&el, state)?))?;
                 patched = true;
             }
             Event::Empty(el) if !patched && is_description(&el) => {
-                writer
-                    .write_event(Event::Empty(patch_description(&el, state)))
-                    .map_err(|e| AppError::Other(format!("xmp write: {e}")))?;
+                writer.write_event(Event::Empty(patch_description(&el, state)?))?;
                 patched = true;
             }
-            ev => writer
-                .write_event(ev)
-                .map_err(|e| AppError::Other(format!("xmp write: {e}")))?,
+            Event::Start(el)
+                if description_depth == Some(depth) && is_our_property(el.name().as_ref()) =>
+            {
+                reader
+                    .read_to_end(el.name())
+                    .map_err(|e| AppError::Other(format!("xmp parse: {e}")))?;
+            }
+            Event::Empty(el)
+                if description_depth == Some(depth) && is_our_property(el.name().as_ref()) => {}
+            Event::Start(el) => {
+                depth += 1;
+                validate_attributes(&el)?;
+                writer.write_event(Event::Start(el))?;
+            }
+            Event::Empty(el) => {
+                validate_attributes(&el)?;
+                writer.write_event(Event::Empty(el))?;
+            }
+            Event::End(el) => {
+                if description_depth == Some(depth) {
+                    description_depth = None;
+                }
+                depth = depth.saturating_sub(1);
+                writer.write_event(Event::End(el))?;
+            }
+            event => writer.write_event(event)?,
         }
     }
-
-    if !patched {
-        return Err(AppError::Other("no rdf:Description element found".into()));
+    if !patched || depth != 0 {
+        return Err(AppError::Other(
+            "sidecar has no complete rdf:Description".into(),
+        ));
     }
     String::from_utf8(writer.into_inner()).map_err(|e| AppError::Other(format!("xmp utf8: {e}")))
+}
+
+fn validate_attributes(el: &BytesStart) -> AppResult<()> {
+    for attr in el.attributes() {
+        let attr = attr.map_err(|e| AppError::Other(format!("xmp attribute: {e}")))?;
+        attr.normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .map_err(|e| AppError::Other(format!("xmp attribute value: {e}")))?;
+    }
+    Ok(())
 }
 
 /// Read the culling state out of a sidecar — the inverse of what the writer
@@ -197,73 +208,151 @@ fn merge_into_existing(existing: &str, state: &XmpState) -> AppResult<String> {
 /// Absent properties come back at their neutral value, matching the writer:
 /// it omits a rating of 0 and a missing label, so their absence means exactly
 /// that.
+#[cfg(test)]
 pub fn read_sidecar(xml: &str) -> Option<XmpState> {
+    read_sidecar_import(xml).map(|import| import.state)
+}
+
+#[derive(Clone, Debug)]
+pub struct XmpImport {
+    pub state: XmpState,
+    pub has_orientation: bool,
+}
+
+pub fn read_sidecar_import(xml: &str) -> Option<XmpImport> {
     let mut reader = Reader::from_str(xml);
+    let mut state = XmpState {
+        rating: 0,
+        flag: 0,
+        label: None,
+        orientation: 1,
+    };
+    let mut saw_description = false;
+    let mut depth = 0usize;
+    let mut description_depth = None;
+    let mut saw_pick = false;
+    let mut saw_good = false;
+    let mut has_orientation = false;
     loop {
-        let el = match reader.read_event().ok()? {
-            Event::Eof => return None,
-            Event::Start(el) | Event::Empty(el) if is_description(&el) => el,
-            _ => continue,
-        };
-
-        let mut state = XmpState {
-            rating: 0,
-            flag: 0,
-            label: None,
-            orientation: 1,
-        };
-        // xmpDM:pick is authoritative when present; xmpDM:good is the fallback
-        // for writers that only emit the boolean.
-        let mut saw_pick = false;
-
-        for attr in el.attributes().flatten() {
-            let value = attr
-                .normalized_value(quick_xml::XmlVersion::Implicit1_0)
-                .ok()?
-                .into_owned();
-            match attr.key.as_ref() {
-                b"xmp:Rating" => {
-                    // Bridge and FastRawViewer write -1 for "rejected". Cullant
-                    // keeps that in the flag, so clamp it out of the rating.
-                    state.rating = value.trim().parse::<i64>().unwrap_or(0).clamp(0, 5);
-                }
-                b"xmp:Label" => {
-                    let label = value.trim();
-                    if !label.is_empty() {
-                        state.label = Some(label.to_string());
-                    }
-                }
-                b"xmpDM:pick" => {
-                    if let Ok(pick) = value.trim().parse::<i64>() {
-                        state.flag = pick.clamp(-1, 1);
-                        saw_pick = true;
-                    }
-                }
-                b"xmpDM:good" if !saw_pick => {
-                    state.flag = match value.trim() {
-                        "True" | "true" => 1,
-                        "False" | "false" => -1,
-                        _ => 0,
-                    };
-                }
-                b"tiff:Orientation" => {
-                    let o = value.trim().parse::<i64>().unwrap_or(1);
-                    state.orientation = if (1..=8).contains(&o) { o } else { 1 };
-                }
-                _ => {}
-            }
+        let event = reader.read_event().ok()?;
+        let opens_description = matches!(&event, Event::Start(_));
+        if opens_description {
+            depth += 1;
         }
-        return Some(state);
+        match event {
+            Event::Eof => {
+                return (saw_description && depth == 0).then_some(XmpImport {
+                    state,
+                    has_orientation,
+                })
+            }
+            Event::Start(el) | Event::Empty(el) if !saw_description && is_description(&el) => {
+                saw_description = true;
+                description_depth = opens_description.then_some(depth);
+                for attr in el.attributes() {
+                    let attr = attr.ok()?;
+                    let value = attr
+                        .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                        .ok()?;
+                    has_orientation |= apply_property(
+                        &mut state,
+                        &mut saw_pick,
+                        &mut saw_good,
+                        attr.key.as_ref(),
+                        &value,
+                    );
+                }
+            }
+            Event::Start(el)
+                if description_depth == depth.checked_sub(1)
+                    && is_our_property(el.name().as_ref()) =>
+            {
+                let text = reader.read_text(el.name()).ok()?;
+                let decoded = text.xml_content(quick_xml::XmlVersion::Implicit1_0).ok()?;
+                let value = quick_xml::escape::unescape(&decoded).ok()?;
+                depth = depth.saturating_sub(1);
+                has_orientation |= apply_property(
+                    &mut state,
+                    &mut saw_pick,
+                    &mut saw_good,
+                    el.name().as_ref(),
+                    &value,
+                );
+            }
+            Event::End(_) => {
+                if description_depth == Some(depth) {
+                    description_depth = None;
+                }
+                depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
     }
 }
 
-fn is_description(el: &BytesStart) -> bool {
-    let name = el.name();
-    let local = name.as_ref();
-    local == b"rdf:Description" || local.ends_with(b":Description") || local == b"Description"
+fn apply_property(
+    state: &mut XmpState,
+    saw_pick: &mut bool,
+    saw_good: &mut bool,
+    key: &[u8],
+    value: &str,
+) -> bool {
+    let value = value.trim();
+    match key {
+        b"xmp:Rating" => {
+            let rating = value.parse::<i64>().unwrap_or(0);
+            state.rating = rating.clamp(0, 5);
+            if !*saw_pick && !*saw_good {
+                state.flag = if rating < 0 { -1 } else { 0 };
+            }
+        }
+        b"xmp:Label" => state.label = (!value.is_empty()).then(|| value.to_string()),
+        b"xmpDM:pick" => {
+            if let Ok(pick) = value.parse::<i64>() {
+                state.flag = pick.clamp(-1, 1);
+                *saw_pick = true;
+            }
+        }
+        b"xmpDM:good" if !*saw_pick => {
+            *saw_good = true;
+            state.flag = match value {
+                "True" | "true" => 1,
+                "False" | "false" => -1,
+                _ => 0,
+            };
+        }
+        b"tiff:Orientation" => {
+            let orientation = value.parse::<i64>().unwrap_or(1);
+            state.orientation = if (1..=8).contains(&orientation) {
+                orientation
+            } else {
+                1
+            };
+            return value
+                .parse::<i64>()
+                .is_ok_and(|orientation| (1..=8).contains(&orientation));
+        }
+        _ => {}
+    }
+    false
 }
 
-fn patch_description(el: &BytesStart, state: &XmpState) -> BytesStart<'static> {
+fn is_our_property(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b"xmp:Rating" | b"xmp:Label" | b"xmpDM:pick" | b"xmpDM:good" | b"tiff:Orientation"
+    )
+}
+
+fn is_description(el: &BytesStart) -> bool {
+    is_description_name(el.name().as_ref())
+}
+
+fn is_description_name(name: &[u8]) -> bool {
+    name == b"rdf:Description" || name.ends_with(b":Description") || name == b"Description"
+}
+
+fn patch_description(el: &BytesStart, state: &XmpState) -> AppResult<BytesStart<'static>> {
     let mut out = BytesStart::new(String::from_utf8_lossy(el.name().as_ref()).into_owned());
     let ours = [
         "xmp:Rating".as_bytes(),
@@ -276,7 +365,8 @@ fn patch_description(el: &BytesStart, state: &XmpState) -> BytesStart<'static> {
     let mut has_dm_ns = false;
     let mut has_tiff_ns = false;
 
-    for attr in el.attributes().flatten() {
+    for attr in el.attributes() {
+        let attr = attr.map_err(|e| AppError::Other(format!("xmp attribute: {e}")))?;
         let key = attr.key.as_ref();
         if key == b"xmlns:xmp" {
             has_xmp_ns = true;
@@ -319,12 +409,131 @@ fn patch_description(el: &BytesStart, state: &XmpState) -> BytesStart<'static> {
         "tiff:Orientation",
         orientation_attr(state.orientation).as_str(),
     ));
-    out.into_owned()
+    Ok(out.into_owned())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_regression_bad_foreign_sidecar_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let state = XmpState {
+            rating: 4,
+            flag: 1,
+            label: None,
+            orientation: 6,
+        };
+        for content in [
+            b"<not-an-xmp>foreign settings</not-an-xmp>".as_slice(),
+            b"<rdf:Description broken",
+            &[0xff, 0xfe, 0x81],
+        ] {
+            std::fs::write(dir.path().join("a.xmp"), content).unwrap();
+            assert!(write_sidecar(&store, "a.xmp", &state).is_err());
+            assert_eq!(std::fs::read(dir.path().join("a.xmp")).unwrap(), content);
+        }
+    }
+
+    #[test]
+    fn data_regression_element_properties_are_read_and_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let foreign = r#"<rdf:Description xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmlns:xmpDM="http://ns.adobe.com/xmp/1.0/DynamicMedia/" xmlns:tiff="http://ns.adobe.com/tiff/1.0/"><xmp:Rating>4</xmp:Rating><xmp:Label>Red &amp; Blue</xmp:Label><xmpDM:good>True</xmpDM:good><xmpDM:pick>-1</xmpDM:pick><tiff:Orientation>6</tiff:Orientation><foreign>keep</foreign></rdf:Description>"#;
+        std::fs::write(dir.path().join("a.xmp"), foreign).unwrap();
+        assert_eq!(
+            read_sidecar(foreign).unwrap(),
+            XmpState {
+                rating: 4,
+                flag: -1,
+                label: Some("Red & Blue".into()),
+                orientation: 6
+            }
+        );
+        let state = XmpState {
+            rating: 2,
+            flag: 1,
+            label: None,
+            orientation: 1,
+        };
+        write_sidecar(&store, "a.xmp", &state).unwrap();
+        let written = std::fs::read_to_string(dir.path().join("a.xmp")).unwrap();
+        assert_eq!(read_sidecar(&written).unwrap(), state);
+        assert!(!written.contains("<xmp:Rating>4"));
+        assert!(written.contains("<foreign>keep</foreign>"));
+    }
+
+    #[test]
+    fn data_regression_invalid_foreign_attribute_is_not_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let foreign = "<rdf:Description broken/>";
+        std::fs::write(dir.path().join("a.xmp"), foreign).unwrap();
+        let state = XmpState {
+            rating: 3,
+            flag: 0,
+            label: None,
+            orientation: 1,
+        };
+        assert!(write_sidecar(&store, "a.xmp", &state).is_err());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("a.xmp")).unwrap(),
+            foreign
+        );
+    }
+
+    #[test]
+    fn data_regression_import_reports_orientation_presence() {
+        let absent = read_sidecar_import("<rdf:Description xmp:Rating=\"3\"/>").unwrap();
+        assert!(!absent.has_orientation);
+        let attribute = read_sidecar_import("<rdf:Description tiff:Orientation=\"6\"/>").unwrap();
+        assert!(attribute.has_orientation);
+        assert_eq!(attribute.state.orientation, 6);
+        let element = read_sidecar_import(
+            "<rdf:Description><tiff:Orientation>8</tiff:Orientation></rdf:Description>",
+        )
+        .unwrap();
+        assert!(element.has_orientation);
+        assert_eq!(element.state.orientation, 8);
+    }
+
+    #[test]
+    fn data_regression_negative_rating_is_a_reject_with_flag_precedence() {
+        let rejected = read_sidecar("<rdf:Description xmp:Rating=\"-1\"/>").unwrap();
+        assert_eq!((rejected.rating, rejected.flag), (0, -1));
+        let picked =
+            read_sidecar("<rdf:Description xmpDM:good=\"True\" xmp:Rating=\"-1\"/>").unwrap();
+        assert_eq!(picked.flag, 1);
+        let neutral = read_sidecar("<rdf:Description><xmp:Rating>-1</xmp:Rating><xmpDM:pick>0</xmpDM:pick></rdf:Description>").unwrap();
+        assert_eq!(neutral.flag, 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn data_regression_failed_sidecar_replace_keeps_existing_bytes() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.xmp");
+        let state = XmpState {
+            rating: 4,
+            flag: 1,
+            label: None,
+            orientation: 6,
+        };
+        let original = fresh_sidecar(&state);
+        std::fs::write(&path, &original).unwrap();
+        let _locked = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        let store = crate::store::LocalFsStore::new(dir.path());
+        assert!(write_sidecar(&store, "a.xmp", &state).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 
     #[test]
     fn fresh_sidecar_is_written_and_parses() {
