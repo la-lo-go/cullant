@@ -4,12 +4,9 @@ use rawler::rawsource::RawSource;
 
 use crate::error::{AppError, AppResult};
 
-/// A decoded embedded image plus whether it was the container's full-size one
-/// (only then do its dimensions approximate the original file's dimensions,
-/// making them safe to record as `files.width/height`).
+/// An embedded preview. Its dimensions can differ from the sensor dimensions.
 pub struct DecodedRaw {
     pub image: DynamicImage,
-    pub is_full: bool,
 }
 
 /// One parsed RAW container serving both metadata and pixel extraction, so an
@@ -32,30 +29,7 @@ impl<'a> RawSession<'a> {
             .raw_metadata(self.source, &RawDecodeParams::default())
             .map_err(|e| AppError::Decode(format!("{e}")))?;
 
-        let camera = super::camera_name(&md.make, &md.model);
-        let iso = md
-            .exif
-            .iso_speed
-            .or(md.exif.iso_speed_ratings.map(u32::from));
-
-        Ok(RawMeta {
-            capture_time: md
-                .exif
-                .date_time_original
-                .as_deref()
-                .or(md.exif.create_date.as_deref())
-                .and_then(super::exif::parse_exif_datetime),
-            orientation: md.exif.orientation,
-            camera,
-            lens: md.exif.lens_model.clone(),
-            iso,
-            focal_length: md.exif.focal_length.map(|r| r.as_f32()),
-            f_number: md.exif.fnumber.map(|r| r.as_f32()),
-            exposure_time: md
-                .exif
-                .exposure_time
-                .map(|r| r.n as f32 / r.d.max(1) as f32),
-        })
+        Ok(metadata_from_exif(&md))
     }
 
     /// Decode the smallest embedded image whose long edge is >= `min_long_edge`,
@@ -79,84 +53,49 @@ impl<'a> RawSession<'a> {
         // only run when no smaller embedded thumbnail/preview is adequate. (The
         // previous eager array literal evaluated all three every time, forcing a
         // full-res decode of every RAW unconditionally.)
-        macro_rules! probe {
-            ($label:expr, $call:expr, $is_full:expr) => {{
-                let t0 = Instant::now();
-                let attempt = $call;
-                let ms = t0.elapsed().as_millis();
-                match attempt {
-                    Ok(Some(img)) => {
-                        let long = img.width().max(img.height());
-                        let ok = long >= min_long_edge;
-                        tracing::debug!(
-                            "raw decode {name}: tier={} dims={}x{} ({ms}ms){}",
-                            $label,
-                            img.width(),
-                            img.height(),
-                            if ok {
-                                " -> ACCEPTED"
-                            } else {
-                                " (too small, keep probing)"
-                            }
-                        );
-                        if ok {
-                            return Ok(DecodedRaw {
-                                image: img,
-                                is_full: $is_full,
-                            });
-                        }
-                        // Keep the largest-so-far in case nothing is adequate.
-                        let keep = match &best {
-                            Some((_, b)) => long > b.image.width().max(b.image.height()),
-                            None => true,
-                        };
-                        if keep {
-                            best = Some((
-                                $label,
-                                DecodedRaw {
-                                    image: img,
-                                    is_full: $is_full,
-                                },
-                            ));
-                        }
-                    }
-                    Ok(None) => {
-                        tracing::debug!("raw decode {name}: tier={} unavailable ({ms}ms)", $label)
-                    }
-                    Err(e) => {
-                        tracing::debug!("raw decode {name}: tier={} FAILED ({ms}ms): {e}", $label)
-                    }
+        for stage in 0..3 {
+            let started = Instant::now();
+            let (label, attempt) = match stage {
+                0 => (
+                    "thumbnail",
+                    self.decoder.thumbnail_image(self.source, &params),
+                ),
+                1 => ("preview", self.decoder.preview_image(self.source, &params)),
+                _ => (
+                    "full(full-res)",
+                    self.decoder.full_image(self.source, &params),
+                ),
+            };
+            let elapsed = started.elapsed().as_millis();
+            let image = match attempt {
+                Ok(Some(image)) => image,
+                Ok(None) => continue,
+                Err(error) => {
+                    tracing::debug!(
+                        "raw decode {name}: tier={label} failed ({elapsed}ms): {error}"
+                    );
+                    continue;
                 }
-            }};
-        }
-
-        probe!(
-            "thumbnail",
-            self.decoder.thumbnail_image(self.source, &params),
-            false
-        );
-        probe!(
-            "preview",
-            self.decoder.preview_image(self.source, &params),
-            false
-        );
-        probe!(
-            "full(full-res)",
-            self.decoder.full_image(self.source, &params),
-            true
-        );
-
-        match best {
-            Some((label, raw)) => {
-                tracing::debug!(
-                    "raw decode {name}: nothing met min_edge={min_long_edge}; using largest tier={label} ({}x{})",
-                    raw.image.width(),
-                    raw.image.height()
-                );
-                Ok(raw)
+            };
+            let long = image.width().max(image.height());
+            tracing::debug!(
+                "raw decode {name}: tier={label} dims={}x{} ({elapsed}ms)",
+                image.width(),
+                image.height()
+            );
+            if long >= min_long_edge {
+                return Ok(DecodedRaw { image });
             }
-            None => Err(AppError::Decode(format!("no embedded preview in {name}"))),
+            if best
+                .as_ref()
+                .is_none_or(|(_, best)| long > best.image.width().max(best.image.height()))
+            {
+                best = Some((label, DecodedRaw { image }));
+            }
         }
+
+        best.map(|(_, raw)| raw)
+            .ok_or_else(|| AppError::Decode(format!("no embedded preview in {name}")))
     }
 }
 
@@ -594,9 +533,61 @@ pub struct RawMeta {
     pub exposure_time: Option<f32>,
 }
 
+fn metadata_from_exif(metadata: &rawler::decoders::RawMetadata) -> RawMeta {
+    let exif = &metadata.exif;
+    RawMeta {
+        capture_time: [
+            exif.date_time_original.as_deref(),
+            exif.create_date.as_deref(),
+            exif.modify_date.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(super::exif::parse_exif_datetime),
+        orientation: exif.orientation,
+        camera: super::camera_name(&metadata.make, &metadata.model),
+        lens: exif.lens_model.clone(),
+        iso: exif.iso_speed.or(exif.iso_speed_ratings.map(u32::from)),
+        focal_length: exif.focal_length.map(|value| value.as_f32()),
+        f_number: exif
+            .fnumber
+            .map(|value| value.as_f32())
+            .or_else(|| {
+                exif.aperture_value
+                    .map(|value| 2.0f32.powf(value.as_f32() / 2.0))
+            })
+            .filter(|value| value.is_finite() && *value > 0.0),
+        exposure_time: exif
+            .exposure_time
+            .map(|value| value.as_f32())
+            .or_else(|| {
+                exif.shutter_speed_value.and_then(|value| {
+                    (value.d != 0).then(|| 2.0f32.powf(-(value.n as f32 / value.d as f32)))
+                })
+            })
+            .filter(|value| value.is_finite() && *value > 0.0),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_regression_raw_metadata_valid_dates_and_apex() {
+        let mut source = rawler::decoders::RawMetadata::default();
+        source.exif.date_time_original = Some("invalid".into());
+        source.exif.create_date = Some("2024:06:15 14:30:05".into());
+        source.exif.modify_date = Some("2024:06:16 14:30:05".into());
+        source.exif.aperture_value = Some(rawler::formats::tiff::Rational { n: 4, d: 1 });
+        source.exif.shutter_speed_value = Some(rawler::formats::tiff::SRational { n: -1, d: 1 });
+        let metadata = metadata_from_exif(&source);
+        assert_eq!(metadata.capture_time, Some(1718461805));
+        assert_eq!(metadata.f_number, Some(4.0));
+        assert_eq!(metadata.exposure_time, Some(2.0));
+        source.exif.create_date = Some("invalid".into());
+        assert_eq!(metadata_from_exif(&source).capture_time, Some(1718548205));
+    }
 
     /// Build a minimal RAF byte blob whose header points at `jpeg` placed at
     /// offset 128 (past the fixed header region).

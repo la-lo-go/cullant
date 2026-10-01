@@ -71,6 +71,7 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
         exif.get_field(tag, exif::In::PRIMARY)
             .and_then(|f| match &f.value {
                 exif::Value::Rational(v) => v.first().map(|r| r.to_f64() as f32),
+                exif::Value::SRational(v) => v.first().map(|r| r.to_f64() as f32),
                 _ => None,
             })
     };
@@ -100,14 +101,22 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
         }
     }
 
-    meta.capture_time = field_ascii(exif::Tag::DateTimeOriginal)
-        .or_else(|| field_ascii(exif::Tag::DateTime))
-        .and_then(|s| parse_exif_datetime(s.trim_end_matches('\0')));
+    meta.capture_time = [
+        exif::Tag::DateTimeOriginal,
+        exif::Tag::DateTimeDigitized,
+        exif::Tag::DateTime,
+    ]
+    .into_iter()
+    .find_map(|tag| field_ascii(tag).and_then(|s| parse_exif_datetime(s.trim_end_matches('\0'))));
     meta.orientation = field_uint(exif::Tag::Orientation).map(|v| v as u16);
     meta.iso = field_uint(exif::Tag::PhotographicSensitivity);
     meta.focal_length = field_rational(exif::Tag::FocalLength);
-    meta.f_number = field_rational(exif::Tag::FNumber);
-    meta.exposure_time = field_rational(exif::Tag::ExposureTime);
+    meta.f_number = field_rational(exif::Tag::FNumber)
+        .or_else(|| field_rational(exif::Tag::ApertureValue).map(|value| 2.0f32.powf(value / 2.0)))
+        .filter(|value| value.is_finite() && *value > 0.0);
+    meta.exposure_time = field_rational(exif::Tag::ExposureTime)
+        .or_else(|| field_rational(exif::Tag::ShutterSpeedValue).map(|value| 2.0f32.powf(-value)))
+        .filter(|value| value.is_finite() && *value > 0.0);
 
     let clean = |s: String| {
         let s = s.trim().trim_matches('"').trim().to_string();
@@ -136,6 +145,43 @@ pub fn read_metadata(bytes: &[u8]) -> AppResult<ImageMeta> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_regression_exif_create_date_and_signed_apex() {
+        use exif::{Field, In, Tag, Value};
+        let fields = [
+            Field {
+                tag: Tag::DateTimeOriginal,
+                ifd_num: In::PRIMARY,
+                value: Value::Ascii(vec![b"invalid".to_vec()]),
+            },
+            Field {
+                tag: Tag::DateTimeDigitized,
+                ifd_num: In::PRIMARY,
+                value: Value::Ascii(vec![b"2024:06:15 14:30:05".to_vec()]),
+            },
+            Field {
+                tag: Tag::ApertureValue,
+                ifd_num: In::PRIMARY,
+                value: Value::Rational(vec![exif::Rational { num: 4, denom: 1 }]),
+            },
+            Field {
+                tag: Tag::ShutterSpeedValue,
+                ifd_num: In::PRIMARY,
+                value: Value::SRational(vec![exif::SRational { num: -1, denom: 1 }]),
+            },
+        ];
+        let mut writer = exif::experimental::Writer::new();
+        for field in &fields {
+            writer.push_field(field);
+        }
+        let mut bytes = Cursor::new(Vec::new());
+        writer.write(&mut bytes, false).unwrap();
+        let meta = read_metadata(&bytes.into_inner()).unwrap();
+        assert_eq!(meta.capture_time, Some(1718461805));
+        assert_eq!(meta.f_number, Some(4.0));
+        assert_eq!(meta.exposure_time, Some(2.0));
+    }
 
     #[test]
     fn parses_exif_datetime() {

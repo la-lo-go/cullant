@@ -24,7 +24,8 @@
 mod wic;
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use image::DynamicImage;
 
@@ -35,18 +36,6 @@ use crate::store::ProjectStore;
 /// decode HEVC video perfectly well and still cannot open a `.HEIC`, so presence
 /// on `PATH` is not capability.
 const FFMPEG_HEIF_MAJOR: u32 = 7;
-
-/// A backstop for a version string that lies: some builds report a release new
-/// enough and still cannot open a still.
-///
-/// The rung is written off only after [`FFMPEG_GIVE_UP`] failures with no
-/// success in between. Both halves of that rule matter. Writing it off on the
-/// first failure would let one corrupt file at the head of a library disable a
-/// perfectly good ffmpeg for the whole session; never writing it off would pay a
-/// process per photo forever to learn the same thing.
-static FFMPEG_OK: AtomicBool = AtomicBool::new(false);
-static FFMPEG_FAILS: AtomicU32 = AtomicU32::new(0);
-const FFMPEG_GIVE_UP: u32 = 3;
 
 /// Pretend the whole ladder is missing, so a test can exercise the "no decoder"
 /// path on a machine that has one. Serialise callers: it is process-wide.
@@ -77,10 +66,6 @@ fn disabled() -> bool {
 /// Whether `ffmpeg` on this machine can be expected to open a HEIF still.
 fn ffmpeg_capable() -> bool {
     if disabled() {
-        return false;
-    }
-    if !FFMPEG_OK.load(Ordering::Relaxed) && FFMPEG_FAILS.load(Ordering::Relaxed) >= FFMPEG_GIVE_UP
-    {
         return false;
     }
     let info = super::video::ffmpeg_info();
@@ -186,17 +171,19 @@ pub fn decode(
 /// asking it to shrink first would only move the resize off `fast_image_resize`
 /// and onto a slower one.
 fn ffmpeg_still(path: &Path, rel_path: &str) -> AppResult<(DynamicImage, (u32, u32), bool)> {
-    let output = super::video::ffmpeg()
-        .args(["-nostdin", "-hide_banner", "-loglevel", "error"])
+    let mut cmd = super::video::ffmpeg();
+    cmd.args(["-nostdin", "-hide_banner", "-loglevel", "error"])
         .arg("-i")
         .arg(path)
         .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|e| AppError::Decode(format!("ffmpeg spawn failed: {e}")))?;
+        .stdin(std::process::Stdio::null());
+    let output = super::video::run_bounded(
+        &mut cmd,
+        128 * 1024 * 1024,
+        std::time::Duration::from_secs(12),
+    )?;
 
     if !output.status.success() || output.stdout.is_empty() {
-        FFMPEG_FAILS.fetch_add(1, Ordering::Relaxed);
         return Err(AppError::Decode(format!(
             "{rel_path}: ffmpeg read no frame"
         )));
@@ -204,9 +191,6 @@ fn ffmpeg_still(path: &Path, rel_path: &str) -> AppResult<(DynamicImage, (u32, u
 
     let img = image::load_from_memory(&output.stdout)
         .map_err(|e| AppError::Decode(format!("{rel_path}: ffmpeg frame decode: {e}")))?;
-    // One success proves the binary can do stills; from here only a real decode
-    // error is ever reported, never "this ffmpeg is no good".
-    FFMPEG_OK.store(true, Ordering::Relaxed);
     let dims = (img.width(), img.height());
     // ffmpeg applies the container's rotation on the way out, the same as it
     // does for a video frame.
@@ -216,6 +200,23 @@ fn ffmpeg_still(path: &Path, rel_path: &str) -> AppResult<(DynamicImage, (u32, u
 #[cfg(test)]
 mod tests {
     use crate::decode::video::ffmpeg_major;
+
+    #[test]
+    fn media_regression_corrupt_heifs_do_not_disable_ffmpeg() {
+        if !super::ffmpeg_capable() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("corrupt.heic");
+        std::fs::write(&path, b"corrupt HEIF bytes").unwrap();
+        for _ in 0..3 {
+            assert!(super::ffmpeg_still(&path, "corrupt.heic").is_err());
+        }
+        assert!(
+            super::ffmpeg_capable(),
+            "File failures do not remove a decoder capability"
+        );
+    }
 
     /// The version parser decides whether a machine's ffmpeg is even tried, so
     /// it has to survive the shapes real builds actually print.

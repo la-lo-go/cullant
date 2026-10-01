@@ -21,8 +21,11 @@
 //! dependency).
 
 use std::path::Path;
-use std::process::Command;
-use std::sync::OnceLock;
+use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::{mpsc, OnceLock};
+use std::time::{Duration, Instant};
 
 use image::DynamicImage;
 
@@ -33,6 +36,22 @@ use crate::store::ProjectStore;
 /// avoids the black/leader frames many clips open on; a 0s fallback still
 /// yields a poster for clips shorter than the first offset.
 const SEEK_SECONDS: &[&str] = &["1", "0"];
+
+thread_local! {
+    static CANCELLED: std::cell::RefCell<Option<Arc<AtomicBool>>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) fn set_cancellation(cancelled: Arc<AtomicBool>) {
+    CANCELLED.with(|flag| *flag.borrow_mut() = Some(cancelled));
+}
+
+pub(crate) fn cancelled() -> bool {
+    CANCELLED.with(|flag| {
+        flag.borrow()
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+    })
+}
 
 /// Configure a spawned ffmpeg process. On Windows this suppresses the console
 /// window that would otherwise flash for every extracted frame.
@@ -50,6 +69,81 @@ pub(crate) fn ffmpeg() -> Command {
     let mut cmd = Command::new("ffmpeg");
     configure(&mut cmd);
     cmd
+}
+
+pub(crate) fn run_bounded(
+    cmd: &mut Command,
+    max_stdout: usize,
+    timeout: Duration,
+) -> AppResult<Output> {
+    use std::io::Read;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| AppError::Decode(format!("decoder spawn failed: {error}")))?;
+    let (sender, receiver) = mpsc::channel();
+    let stdout = child.stdout.take().expect("piped stdout");
+    let stderr = child.stderr.take().expect("piped stderr");
+    fn reader(
+        stream: impl Read + Send + 'static,
+        limit: usize,
+        stdout: bool,
+        sender: mpsc::Sender<(bool, std::io::Result<Vec<u8>>)>,
+    ) {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            let result = stream
+                .take(limit as u64 + 1)
+                .read_to_end(&mut bytes)
+                .and_then(|_| {
+                    if bytes.len() > limit {
+                        Err(std::io::Error::other("decoder output exceeds limit"))
+                    } else {
+                        Ok(bytes)
+                    }
+                });
+            let _ = sender.send((stdout, result));
+        });
+    }
+    reader(stdout, max_stdout, true, sender.clone());
+    reader(stderr, 1024 * 1024, false, sender);
+    let deadline = Instant::now() + timeout;
+    let mut stdout = None;
+    let mut stderr = None;
+    let result = (|| loop {
+        while let Ok((is_stdout, bytes)) = receiver.try_recv() {
+            let bytes =
+                bytes.map_err(|error| AppError::Decode(format!("decoder output: {error}")))?;
+            if is_stdout {
+                stdout = Some(bytes);
+            } else {
+                stderr = Some(bytes);
+            }
+        }
+        if let Some(status) = child.try_wait()? {
+            if stdout.is_some() && stderr.is_some() {
+                return Ok(Output {
+                    status,
+                    stdout: stdout.take().unwrap(),
+                    stderr: stderr.take().unwrap(),
+                });
+            }
+        }
+        if cancelled() {
+            return Err(AppError::Decode("decoder cancelled".into()));
+        }
+        if Instant::now() >= deadline {
+            return Err(AppError::Decode("decoder deadline exceeded".into()));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    })();
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
 }
 
 /// What the one `ffmpeg -version` probe learned.
@@ -89,7 +183,7 @@ pub(crate) fn ffmpeg_info() -> &'static FfmpegInfo {
         let mut cmd = ffmpeg();
         cmd.args(["-hide_banner", "-version"]);
         cmd.stdin(std::process::Stdio::null());
-        let Ok(out) = cmd.output() else {
+        let Ok(out) = run_bounded(&mut cmd, 64 * 1024, Duration::from_secs(5)) else {
             return FfmpegInfo {
                 present: false,
                 major: None,
@@ -113,24 +207,74 @@ fn is_available() -> bool {
     ffmpeg_info().present
 }
 
+/// Read a container date without decoding frames or loading the video in memory.
+/// SAF has no date bridge; missing ffprobe or invalid metadata uses the mtime fallback.
+pub fn capture_time(store: &dyn ProjectStore, rel_path: &str) -> Option<i64> {
+    let path = store.local_path(rel_path)?;
+    let mut cmd = Command::new("ffprobe");
+    configure(&mut cmd);
+    cmd.args([
+        "-v",
+        "error",
+        "-protocol_whitelist",
+        "file,pipe",
+        "-show_entries",
+        "format_tags=creation_time:stream_tags=creation_time",
+        "-of",
+        "json",
+    ])
+    .arg(path);
+    let output = run_bounded(&mut cmd, 64 * 1024, Duration::from_secs(5)).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let containers = std::iter::once(metadata.get("format")).flatten().chain(
+        metadata
+            .get("streams")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten(),
+    );
+    containers
+        .filter_map(|container| {
+            let date = container.get("tags")?.get("creation_time")?.as_str()?;
+            time::OffsetDateTime::parse(date, &time::format_description::well_known::Rfc3339)
+                .ok()
+                .map(|date| date.unix_timestamp())
+        })
+        .next()
+}
+
 /// Run ffmpeg to grab one frame at `seek` seconds, decoded from the PNG it
 /// writes to stdout. Returns `Ok(None)` when ffmpeg produced no frame (e.g. the
 /// seek landed past the end of a short clip) so the caller can try an earlier
 /// offset; `Err` only for a genuine spawn/IO failure.
-fn frame_at(path: &Path, seek: &str) -> AppResult<Option<DynamicImage>> {
+fn frame_at(
+    path: &Path,
+    seek: &str,
+    max_long_edge: u32,
+) -> AppResult<Option<(DynamicImage, (u32, u32))>> {
     // `-ss` before `-i` = fast keyframe seek; `-autorotate` (ffmpeg default)
     // already bakes in display rotation, so posters need no extra orient pass.
-    let output = ffmpeg()
+    let mut cmd = ffmpeg();
+    cmd
         .args([
             "-nostdin",
             "-hide_banner",
             "-loglevel",
-            "error",
+            "info",
             "-ss",
             seek,
         ])
         .arg("-i")
         .arg(path)
+        .arg("-vf")
+        .arg(if max_long_edge == u32::MAX {
+            "showinfo".to_string()
+        } else {
+            format!("showinfo,scale='min(iw,{max_long_edge})':'min(ih,{max_long_edge})':force_original_aspect_ratio=decrease")
+        })
         .args([
             "-frames:v",
             "1",
@@ -141,22 +285,35 @@ fn frame_at(path: &Path, seek: &str) -> AppResult<Option<DynamicImage>> {
             "png",
             "-",
         ])
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|e| AppError::Decode(format!("ffmpeg spawn failed: {e}")))?;
+        .stdin(std::process::Stdio::null());
+    let output = run_bounded(&mut cmd, 128 * 1024 * 1024, Duration::from_secs(12))?;
 
     if !output.status.success() || output.stdout.is_empty() {
         return Ok(None);
     }
     match image::load_from_memory(&output.stdout) {
-        Ok(img) => Ok(Some(img)),
+        Ok(img) => {
+            let log = String::from_utf8_lossy(&output.stderr);
+            let dims = log
+                .lines()
+                .filter(|line| line.contains("Parsed_showinfo"))
+                .find_map(|line| {
+                    let size = line
+                        .split_whitespace()
+                        .find_map(|token| token.strip_prefix("s:"))?;
+                    let (width, height) = size.split_once('x')?;
+                    Some((width.parse::<u32>().ok()?, height.parse::<u32>().ok()?))
+                })
+                .ok_or_else(|| AppError::Decode("ffmpeg omitted source dimensions".into()))?;
+            Ok(Some((img, dims)))
+        }
         Err(e) => Err(AppError::Decode(format!("ffmpeg frame decode: {e}"))),
     }
 }
 
-fn extract_poster_ffmpeg(path: &Path) -> AppResult<DynamicImage> {
+fn extract_poster_ffmpeg(path: &Path, max_long_edge: u32) -> AppResult<(DynamicImage, (u32, u32))> {
     for seek in SEEK_SECONDS {
-        if let Some(img) = frame_at(path, seek)? {
+        if let Some(img) = frame_at(path, seek, max_long_edge)? {
             return Ok(img);
         }
     }
@@ -206,7 +363,72 @@ pub fn extract_poster(
     };
     // ffmpeg hands back the frame at the video's own resolution, so the image
     // itself is the authority on the clip's dimensions.
-    let img = extract_poster_ffmpeg(&path)?;
-    let dims = (img.width(), img.height());
-    Ok((img, dims))
+    extract_poster_ffmpeg(&path, max_long_edge)
+}
+
+#[cfg(test)]
+mod media_regressions {
+    use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn media_regression_child_has_a_deadline_and_output_limit() {
+        let start = std::time::Instant::now();
+        let mut sleep = Command::new("powershell.exe");
+        configure(&mut sleep);
+        sleep.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Start-Sleep -Seconds 10",
+        ]);
+        assert!(run_bounded(&mut sleep, 1024, std::time::Duration::from_millis(100)).is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(3));
+        let mut output = Command::new("powershell.exe");
+        configure(&mut output);
+        output.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::Write(('x' * 4096))",
+        ]);
+        assert!(run_bounded(&mut output, 1024, std::time::Duration::from_secs(5)).is_err());
+    }
+
+    #[test]
+    fn media_regression_video_poster_obeys_size_cap() {
+        if !ffmpeg_info().present {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("clip.mp4");
+        let status = ffmpeg()
+            .args([
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=1280x720:d=2",
+                "-c:v",
+                "mpeg4",
+            ])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let (image, dims) = extract_poster(&store, "clip.mp4", 384).unwrap();
+        assert!(
+            image.width().max(image.height()) <= 384,
+            "ffmpeg must not send a full-resolution PNG to the process"
+        );
+        assert_eq!(
+            dims,
+            (1280, 720),
+            "The cap must not replace source dimensions"
+        );
+    }
 }
