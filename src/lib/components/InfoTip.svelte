@@ -32,9 +32,7 @@
   function toggle(e: MouseEvent) {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     view.infoTip = open ? null : { title, text, x: r.left, y: r.bottom + 6 };
-    // A pressed control must not keep the focus ring, and must not swallow the
-    // next key press.
-    (e.currentTarget as HTMLElement).blur();
+    if (e.detail > 0) (e.currentTarget as HTMLElement).blur();
   }
 </script>
 
@@ -57,9 +55,15 @@
     cursor: pointer;
   }
 
-  .tip:hover,
   .tip.open {
     opacity: 1;
     color: var(--accent);
+  }
+
+  @media (hover: hover) {
+    .tip:hover {
+      opacity: 1;
+      color: var(--accent);
+    }
   }
 </style>

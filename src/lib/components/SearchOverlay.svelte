@@ -1,6 +1,7 @@
 <script lang="ts">
   import { session } from "../stores/session.svelte";
   import { backdropDismiss } from "../backdrop";
+  import { modalFocus } from "../modal";
   import { keymap } from "../keyboard/dispatcher.svelte";
   import { normalizeKey } from "../keyboard/keymap";
   import SearchIcon from "@lucide/svelte/icons/search";
@@ -8,10 +9,8 @@
 
   let inputEl = $state<HTMLInputElement | null>(null);
 
-  // Focus the field on open, and select what is already there so a second
-  // Ctrl+F retypes over the previous query instead of appending to it.
+  // Select the current query when the field mounts.
   $effect(() => {
-    inputEl?.focus();
     inputEl?.select();
   });
 
@@ -38,7 +37,8 @@
     if (e.key === "Escape") {
       close();
     } else if (e.key === "Enter") {
-      if (session.filtered.length > 0) session.focusedIndex = 0;
+      if (e.target !== inputEl) return;
+      if (session.filtered.length > 0) session.focusEdge(false);
       close();
     } else if (keymap.bindings.get(normalizeKey(e)) === "ui.search") {
       // Pressing the open shortcut again closes, as a find bar should. Resolved
@@ -49,10 +49,11 @@
   }
 </script>
 
-<div class="backdrop" role="presentation" {...dismiss}></div>
+<div class="backdrop" role="presentation" {...dismiss}>
 
 <div
   class="panel"
+  use:modalFocus={{ initialFocus: "input" }}
   role="dialog"
   aria-label="Search by file name"
   tabindex="-1"
@@ -84,6 +85,7 @@
       <Eraser size={14} />
     </button>
   {/if}
+</div>
 </div>
 
 <style>

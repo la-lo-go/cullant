@@ -34,6 +34,7 @@
     type RadialSlot,
   } from "../radial";
   import { LABELS, LABEL_COLORS } from "../labels";
+  import { formatColorLabel } from "../colorLabels";
   import type { CommandId } from "../keyboard/keymap";
   import Star from "@lucide/svelte/icons/star";
   import Circle from "@lucide/svelte/icons/circle";
@@ -194,7 +195,7 @@
       return [
         { label: "None", icon: Circle, run: () => handlers.label(null) },
         ...LABELS.map((l) => ({
-          label: l,
+          label: formatColorLabel(l),
           swatch: LABEL_COLORS[l],
           run: () => handlers.label(l),
         })),

@@ -3,13 +3,14 @@
   import { onDestroy, tick, type Snippet } from "svelte";
   import { flip } from "svelte/animate";
 
-  let { items, keyOf, onMove, row, itemLabel, onInteractionChange, ariaLabel = "Reorderable list" }: {
+  let { items, keyOf, onMove, row, itemLabel, onInteractionChange, onPointerRelease, ariaLabel = "Reorderable list" }: {
     items: Item[];
     keyOf: (item: Item, index: number) => string | number;
     onMove: (from: number, to: number) => void;
     row: Snippet<[Item, number]>;
     itemLabel?: (item: Item, index: number) => string;
     onInteractionChange?: (active: boolean) => void;
+    onPointerRelease?: () => void;
     ariaLabel?: string;
   } = $props();
 
@@ -95,7 +96,11 @@
   }
 
   function endDrag(e: PointerEvent) {
-    if (e.pointerId === activePointer) stopDrag();
+    if (e.pointerId !== activePointer) return;
+    const handle = list?.children[dragIndex]?.querySelector<HTMLButtonElement>(".handle");
+    stopDrag();
+    handle?.blur();
+    onPointerRelease?.();
   }
 
   async function moveByKeyboard(e: KeyboardEvent, from: number) {
@@ -191,7 +196,10 @@
     cursor: grab;
     touch-action: none;
   }
-  .handle:hover, .handle:focus-visible { color: var(--accent); }
+  .handle:focus-visible { color: var(--accent); }
+  @media (hover: hover) {
+    .handle:hover { color: var(--accent); }
+  }
   .reordering { user-select: none; }
   .drow.dragging .handle { cursor: grabbing; color: #ddd; }
   .content { flex: 1; min-width: 0; }

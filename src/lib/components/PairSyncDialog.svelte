@@ -1,17 +1,11 @@
 <script lang="ts">
   import { session } from "../stores/session.svelte";
   import { backdropDismiss } from "../backdrop";
+  import { modalFocus } from "../modal";
 
   let { groupId }: { groupId: number } = $props();
 
   const dismiss = backdropDismiss(() => (session.recoupleDialogFor = null));
-
-  let panel = $state<HTMLDivElement | null>(null);
-
-  // Focus the panel so Escape lands here (and stops) instead of the global keymap.
-  $effect(() => {
-    panel?.focus();
-  });
 
   function onKeydown(e: KeyboardEvent) {
     e.stopPropagation();
@@ -27,7 +21,7 @@
 >
   <div
     class="dialog"
-    bind:this={panel}
+    use:modalFocus
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"

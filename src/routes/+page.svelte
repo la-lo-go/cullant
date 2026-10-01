@@ -87,9 +87,9 @@
   // can sit above it instead of being buried by it in selection mode.
   let bottomBarH = $state(0);
   const flagNames = { all: "All", pick: "Picked", reject: "Rejected", unflagged: "Unflagged", anyflag: "Flagged", notrejected: "Not rejected" };
+  const dateNames: Record<string, string> = { today: "Today", last7days: "Last 7 days" };
   const activeFilterSummary = $derived([
     session.nameFilter.trim() && `Filename: ${session.nameFilter}`,
-  const dateNames: Record<string, string> = { today: "Today", last7days: "Last 7 days" };
     session.flagFilter !== "all" && `Flag: ${flagNames[session.flagFilter]}`,
     session.minRating > 0 && `Rating: ${session.minRating}+ stars`,
     session.labelFilter && `Label: ${formatColorLabel(session.labelFilter)}`,
@@ -239,6 +239,14 @@
       session.viewPanelOpen = false;
       return;
     }
+    if (session.surveyReview !== null) {
+      session.surveyReview = null;
+      return;
+    }
+    if (view.mode === "survey") {
+      if (!session.leaveSurveyDetail()) session.closeSurvey();
+      return;
+    }
     if (view.mode !== "grid") {
       view.mode = "grid";
       return;
@@ -376,14 +384,6 @@
 
   const hasSubfolders = $derived(buildFolderTree(catalog.items).children.size > 0);
 
-  const hasCustomView = $derived(
-    session.groupBy.length > 0 || (!session.mirrorMode && hasRaws),
-  );
-
-  // Watch the open project's storage while working: if its folder/volume goes
-  // away (drive unplugged, folder moved/deleted) warn once, and clear the
-  // warning if it comes back. Desktop is reliable; on Android this depends on
-  // the id form (SAF tree URI vs a restored app-dir path).
   const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
 
   // The grid view differs from its defaults — colours the View toolbar button,
@@ -393,6 +393,14 @@
   // Thumbnail size is deliberately not part of this. It is a comfort setting,
   // not a view that hides or regroups anything, so marking the button for it
   // would flag a state the user has nothing to undo.
+  const hasCustomView = $derived(
+    session.groupBy.length > 0 || (!session.mirrorMode && hasRaws),
+  );
+
+  // Watch the open project's storage while working: if its folder/volume goes
+  // away (drive unplugged, folder moved/deleted) warn once, and clear the
+  // warning if it comes back. Desktop is reliable; on Android this depends on
+  // the id form (SAF tree URI vs a restored app-dir path).
   $effect(() => {
     const proj = catalog.project;
     if (!proj) {
@@ -406,6 +414,8 @@
     // perfectly fine — and the panel sits above every dialog and swallows all
     // keys until the next tick clears it.
     let failures = 0;
+    let disposed = false;
+    let probing = false;
     const check = async () => {
       // Nothing can move the folder mid-import, and probing while the storage
       // backend is already saturated is exactly when the answer is worthless.
@@ -413,34 +423,32 @@
       probing = true;
       try {
         const info = await api.probeStorage(proj.rootPath);
+        if (disposed || catalog.project?.rootPath !== proj.rootPath) return;
         storageOk = info.state === "ok";
         if (info.state === "ok") {
           failures = 0;
-    let disposed = false;
-    let probing = false;
           wasOk = true;
           folderLostMsg = ""; // reconnected → let the user carry on
         } else if (++failures >= 2 && wasOk) {
           wasOk = false;
           folderLostMsg =
             info.state === "disconnected"
-        if (disposed || catalog.project?.rootPath !== proj.rootPath) return;
               ? "The drive or volume holding this project is no longer connected. Reconnect it to keep working, or close the project."
               : "This project's folder can no longer be found. It may have been moved or deleted. Restore it, or close the project.";
         }
       } catch {
         // Ignore transient IPC errors; the next tick retries.
+      } finally {
+        probing = false;
       }
     };
     void check();
     const id = setInterval(() => void check(), 4000);
-    return () => clearInterval(id);
+    return () => { disposed = true; clearInterval(id); };
   });
 
   // Periodically rescan the open project's folder for added/removed/changed
   // files, at the interval chosen in Settings (0 = off). Only fires while the
-      } finally {
-        probing = false;
   // storage is reachable and no part of an import is still running, so a
   // disconnected drive or a live ingest is never piled onto. Fire-and-forget:
   // its scan:* events reconcile the catalog just like the manual triggers.
@@ -456,7 +464,7 @@
       },
       minutes * 60 * 1000,
     );
-    return () => { disposed = true; clearInterval(id); };
+    return () => clearInterval(id);
   });
 
   async function pickProject() {
@@ -513,7 +521,10 @@
      can't keep culling a project whose files are gone. -->
 <svelte:window
   onkeydown={(e) => folderLostMsg || handleKeydown(e)}
-  oncontextmenu={(e) => e.preventDefault()}
+  oncontextmenu={(e) => {
+    const target = e.target;
+    if (!(target instanceof Element) || !target.closest('input, textarea, select, [contenteditable="true"]')) e.preventDefault();
+  }}
 />
 
 <main
@@ -539,6 +550,7 @@
             class="media-btn"
             class:active={catalog.media === "photos"}
             disabled={catalog.mediaCounts.photos === 0}
+            aria-label="Photos"
             title={catalog.mediaCounts.photos === 0 ? "No photos in this project" : "Show photos"}
             onclick={blurring(() => void catalog.setMedia("photos").then(() => session.clampFocus()))}
           >
@@ -550,7 +562,7 @@
             class="media-btn"
             class:active={catalog.media === "videos"}
             disabled={catalog.mediaCounts.videos === 0}
-            aria-label="Photos"
+            aria-label="Videos"
             title={catalog.mediaCounts.videos === 0 ? "No videos in this project" : "Show videos"}
             onclick={blurring(() => void catalog.setMedia("videos").then(() => session.clampFocus()))}
           >
@@ -562,7 +574,6 @@
       </div>
       <div class="toolbar-center">
         <div class="segmented">
-            aria-label="Videos"
           <button class:active={view.mode === "grid"} aria-label="Grid" title={shortcutHint("Grid", "view.grid")} onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
           <button class:active={view.mode === "viewer"} aria-label="Loupe" title={shortcutHint("Loupe", "view.viewer")} onclick={blurring(() => { session.ensureFocus(); view.mode = "viewer"; })}><Eye size={14} /></button>
           <button class:active={view.mode === "compare"} aria-label="Compare" title={shortcutHint("Compare", "view.compare")} onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
@@ -573,6 +584,7 @@
           <button
             class:active={session.filtersPanelOpen}
             class:haswork={session.hasActiveFilters}
+            aria-label="Sort & Filter"
             title={session.hasActiveFilters
               ? "Sort & filter — filters are active"
               : "Sort & filter"}
@@ -584,7 +596,6 @@
             <span class="sort-hint">
               <span
                 >{catalog.sort === "capture"
-            aria-label="Sort & Filter"
                   ? "Date"
                   : catalog.sort === "name"
                     ? "Name"
@@ -601,6 +612,7 @@
           <button
             class:active={session.viewPanelOpen}
             class:haswork={hasCustomView}
+            aria-label="View"
             title={hasCustomView
               ? "View — settings changed. Thumbnail size, grouping and RAW+JPEG pairing."
               : "View. Thumbnail size, grouping and RAW+JPEG pairing."}
@@ -612,7 +624,6 @@
           </button>
           {#if session.viewPanelOpen}
             <GridViewPanel />
-            aria-label="View"
           {/if}
         </div>
         {#if view.mode !== "grid"}
@@ -630,6 +641,7 @@
         <button
           class="commit"
           class:haswork={session.hasCommitWork}
+          aria-label="Review changes"
           title={shortcutHint(session.hasCommitWork ? "Review changes — actions are queued" : "Review changes", "commit.open")}
           onclick={blurring(() => (session.commitDialogOpen = true))}
         >
@@ -641,7 +653,6 @@
 
     {#if catalog.preloading}
       <!-- The only full-screen wait left: until the walk reports back there is
-          aria-label="Review changes"
            genuinely no file list to render. Everything after it (metadata,
            thumbnails, previews) fills in behind the grid's status pill. -->
       <div class="preload">
@@ -769,7 +780,7 @@
     <!-- Blocking: you can't keep working while the project's folder/volume is
          gone. Reconnecting auto-dismisses this (the watcher clears the message);
          otherwise the only way out is to close the project. -->
-    <div class="folder-lost" role="alertdialog" aria-modal="true" aria-label="Project folder unavailable">
+    <div class="folder-lost" role="alertdialog" aria-modal="true" aria-label="Project folder unavailable" use:modalFocus>
       <div class="fl-panel">
         <h2>Project folder unavailable</h2>
         <p>{folderLostMsg}</p>
@@ -1129,6 +1140,12 @@
     .toolbar-right {
       flex: 1 1 100%;
       justify-content: space-between;
+      gap: 4px;
+    }
+    .toolbar .toolbar-right > button,
+    .toolbar-right .filters-anchor > button,
+    .toolbar-right .view-anchor > button {
+      padding-inline: 6px;
     }
     /* The Photos/Videos pill's 1px border + 2px padding inset its content, so it
        reads as ~3px right of the flush buttons that wrap onto the row below.
@@ -1140,12 +1157,6 @@
 
 
   button {
-      gap: 4px;
-    }
-    .toolbar .toolbar-right > button,
-    .toolbar-right .filters-anchor > button,
-    .toolbar-right .view-anchor > button {
-      padding-inline: 6px;
     border-radius: 6px;
     border: 1px solid var(--border-strong);
     padding: 4px 10px;

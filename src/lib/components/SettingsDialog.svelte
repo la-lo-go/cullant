@@ -27,6 +27,7 @@
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
   import { api } from "../api";
+  import { LABEL_COLORS } from "../labels";
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
   import { IS_TOUCH } from "../platform";
@@ -218,9 +219,7 @@
   });
 
   function onKeydown(e: KeyboardEvent) {
-    // A key press ends any armed pointer release, so a control reached with Tab
-    // and changed with the keyboard keeps its focus.
-    pointerPress = false;
+    clearPointerMode();
     e.stopPropagation();
     if (e.key !== "Escape") return;
     // Same order the app's back ladder uses: shed the innermost layer first.
@@ -229,18 +228,41 @@
     else onclose();
   }
 
-  // A pressed control must not keep focus: the ring lingers and the control
-  // then swallows the next key press. Only a real pointer press arms the
-  // release, so keyboard focus survives.
   let pointerPress = false;
+  let pointerMode = $state(false);
+  let touchPointer = $state(false);
 
-  function releaseFocus(e: Event) {
+  function clearPointerMode() {
+    pointerPress = false;
+    pointerMode = false;
+    touchPointer = false;
+  }
+
+  function onPointerPress(e: PointerEvent) {
+    pointerPress = true;
+    pointerMode = true;
+    touchPointer = e.pointerType === "touch";
+  }
+
+  function releaseFocus(e?: Event) {
     if (!pointerPress) return;
     pointerPress = false;
-    (e.currentTarget as HTMLElement | null)?.blur();
-    // Focus goes back to the panel so Escape keeps landing on this dialog
-    // instead of reaching the global keymap.
-    panel?.focus();
+    (e?.currentTarget as HTMLElement | null)?.blur();
+    panel?.focus({ preventScroll: true });
+  }
+
+  function releaseClickedControl(e: MouseEvent) {
+    e.stopPropagation();
+    if (!pointerPress || e.detail === 0 || !(e.target instanceof Element)) return;
+    const control = e.target.closest<HTMLElement>('button, input[type="checkbox"], input[type="radio"]');
+    if (!control || control.matches(":disabled")) return;
+    queueMicrotask(() => {
+      if (!pointerPress || !panel?.isConnected) return;
+      pointerPress = false;
+      const focused = document.activeElement;
+      control.blur();
+      if (focused === control || focused === document.body) panel.focus({ preventScroll: true });
+    });
   }
 
   function releasing<E extends Event>(fn: (e: E) => void): (e: E) => void {
@@ -277,24 +299,28 @@
     const next = pendingQuality;
     pendingQuality = null;
     if (next === null) return;
+    if (catalog.ingesting) {
+      previewMsg = "Wait for photo preparation to finish, then change the preview size.";
+      return;
+    }
     previewBusy = true;
     previewMsg = "";
     try {
       settings.setPreviewQuality(next);
+      catalog.invalidatePreviewReady();
       await api.setPreviewQuality(next);
       if (!catalog.project) {
         previewMsg = "Saved. Previews are rebuilt the next time you open a project.";
         return;
       }
-      // Best-effort: if this fails (a scan is running), the previews are merely
-      // left on disk. The ingest regenerates them anyway, because a row whose
-      // long_edge no longer matches the setting counts as missing.
+      // Discard cached previews only after the active import has finished.
       await api.discardPreviews();
       await api.rescanProject();
       previewMsg = "Rebuilding previews at the new size…";
     } catch (err) {
       previewMsg = String(err);
     } finally {
+      if (catalog.project) await catalog.refreshPreviewReady();
       previewBusy = false;
     }
   }
@@ -479,10 +505,13 @@
 <div class="backdrop" {...dismiss} role="presentation">
   <div
     class="dialog"
+    class:pointer-mode={pointerMode}
+    class:touch-pointer={touchPointer}
     bind:this={panel}
-    use:modalFocus
-    onclick={(e) => e.stopPropagation()}
-    onpointerdown={() => (pointerPress = true)}
+    use:modalFocus={{ onKeyboardInteraction: clearPointerMode }}
+    onclick={releaseClickedControl}
+    onpointerdowncapture={onPointerPress}
+    onpointermovecapture={(e) => { if (e.pointerType === "mouse") touchPointer = false; }}
     onkeydown={onKeydown}
     role="dialog"
     aria-label="Settings"
@@ -535,7 +564,7 @@
         <p class="sub-intro">{openPanel.info}</p>
         {#each COLOR_LABELS as label (label)}
           <label class="label-name">
-            <span>{label}</span>
+            <span class="label-swatch" style:background={LABEL_COLORS[label]} title={label} aria-hidden="true"></span>
             <input
               type="text"
               aria-label={`${label} label name`}
@@ -560,6 +589,7 @@
           itemLabel={(it) => it.label}
           onMove={(from, to) => settings.moveBottomBarItem(from, to)}
           onInteractionChange={setReorderHeld}
+          onPointerRelease={() => releaseFocus()}
           ariaLabel="Bottom bar groups"
         >
           {#snippet row(it)}
@@ -599,6 +629,7 @@
               itemLabel={(it, i) => `sector ${i + 1}: ${slotLabel(it.slot)}`}
               onMove={(from, to) => settings.moveRadialSlot(from, to)}
               onInteractionChange={setReorderHeld}
+              onPointerRelease={() => releaseFocus()}
               ariaLabel="Radial menu sectors"
             >
               {#snippet row(it)}
@@ -606,7 +637,7 @@
                   class="slot"
                   class:on={radialHighlight === it.i}
                   role="presentation"
-                  onpointerenter={() => (radialHighlight = it.i)}
+                  onpointerenter={(e) => { if (e.pointerType === "mouse") radialHighlight = it.i; }}
                   onpointerleave={() => (radialHighlight = -1)}
                 >
                   <!-- Every sector is the same control, `more` included: it is
@@ -846,8 +877,10 @@
     margin: 8px 0;
   }
 
-  .label-name span {
-    width: 60px;
+  .label-swatch {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
     flex: none;
   }
 
@@ -860,6 +893,11 @@
     background: var(--control);
     color: inherit;
     font: inherit;
+  }
+
+  .label-name input:focus {
+    outline: none;
+    border-color: var(--accent);
   }
 
   .backdrop {
@@ -893,6 +931,28 @@
   /* A pressed control keeps focus for the keyboard, never a visible ring. */
   .dialog :global(*:focus:not(:focus-visible)) {
     outline: none;
+  }
+
+  .dialog.pointer-mode :global(select:focus) {
+    outline: none;
+    border-color: var(--border-strong);
+  }
+
+  .dialog.pointer-mode .sw-input:focus-visible ~ .switch {
+    outline: none;
+  }
+
+  .dialog.touch-pointer :global(select:hover) {
+    background-color: var(--control);
+  }
+
+  .dialog.touch-pointer :global(.draglist:not(.reordering) .handle:hover) {
+    color: #6a6a72;
+  }
+
+  .dialog.touch-pointer :global(.tip:not(.open):hover) {
+    opacity: 0.35;
+    color: inherit;
   }
 
   .head {
@@ -1330,44 +1390,43 @@
     padding-top: 8px;
   }
 
-  /* Hover belongs to pointers that can hover. On touch it sticks after a tap and
-     reads as "this row is still selected". */
+  /* Hybrid devices can retain hover after a touch. */
   @media (hover: hover) {
-    .back:hover,
-    .close-x:hover {
+    .dialog:not(.touch-pointer) .back:hover,
+    .dialog:not(.touch-pointer) .close-x:hover {
       opacity: 1;
-      background: var(--surface);
+      background: var(--hover);
     }
 
-    .row:hover,
-    .out:hover,
-    .check:hover {
-      background: var(--surface);
+    .dialog:not(.touch-pointer) .row:hover,
+    .dialog:not(.touch-pointer) .out:hover,
+    .dialog:not(.touch-pointer) .check:hover {
+      background: var(--hover);
     }
 
-    .greset:hover {
+    .dialog:not(.touch-pointer) .greset:hover {
       opacity: 1;
-      background: var(--surface);
+      background: var(--hover);
     }
 
-    .drill:hover {
-      background: var(--surface-2);
+    .dialog:not(.touch-pointer) .wide:hover {
+      background: var(--hover);
     }
 
-    .wide:hover {
-      border-color: var(--border-strong);
-      background: var(--surface-2);
+    .dialog:not(.touch-pointer) .support:hover {
+      background: var(--hover);
     }
 
-    .support:hover {
-      border-color: var(--accent);
-      background: color-mix(in srgb, var(--accent) 20%, transparent);
-    }
-
-    .reset-all:hover {
+    .dialog:not(.touch-pointer) .reset-all:hover {
       opacity: 1;
-      border-color: #b4545c;
+      background: var(--hover);
       color: #ff9ca3;
+    }
+
+    .dialog:not(.touch-pointer) .slot .drop:hover:not(:disabled),
+    .dialog:not(.touch-pointer) .radial-rows .add:hover:not(:disabled) {
+      color: #fff;
+      background: var(--hover);
     }
   }
 
@@ -1486,11 +1545,6 @@
     cursor: pointer;
   }
 
-  .slot .drop:hover:not(:disabled) {
-    color: #fff;
-    border-color: var(--border-strong);
-  }
-
   .slot .drop:disabled {
     opacity: 0.35;
     cursor: default;
@@ -1522,11 +1576,6 @@
     cursor: pointer;
   }
 
-  .radial-rows .add:hover:not(:disabled) {
-    color: #fff;
-    border-color: var(--border-strong);
-  }
-
   .radial-rows .add:disabled {
     opacity: 0.4;
     cursor: default;
@@ -1544,10 +1593,6 @@
   /* Whole-row toggling: the row is the checkbox's label. */
   .row.whole-row {
     cursor: pointer;
-  }
-
-  .row.whole-row:hover {
-    background: var(--hover);
   }
 
   /* Off screen but still focusable, so the switch keeps its place in the tab

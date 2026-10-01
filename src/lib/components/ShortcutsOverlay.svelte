@@ -2,11 +2,13 @@
   import {
     COMMANDS,
     effectiveBindings,
+    formatKey,
     loadOverrides,
     type CommandCategory,
     type CommandId,
   } from "../keyboard/keymap";
   import X from "@lucide/svelte/icons/x";
+  import { modalFocus } from "../modal";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -42,22 +44,6 @@
     })),
   })).filter((s) => s.rows.length > 0);
 
-  const PRETTY_KEY: Record<string, string> = {
-    arrowright: "→",
-    arrowleft: "←",
-    arrowup: "↑",
-    arrowdown: "↓",
-    space: "Space",
-    escape: "Esc",
-    enter: "Enter",
-    delete: "Del",
-    home: "Home",
-    end: "End",
-    "-": "−",
-    "+": "+",
-    "=": "=",
-  };
-
   const MODS: [string, string][] = [
     ["ctrl+", "Ctrl"],
     ["alt+", "Alt"],
@@ -65,7 +51,7 @@
   ];
 
   function prettyKey(k: string): string {
-    return PRETTY_KEY[k] ?? (k.length === 1 ? k.toUpperCase() : k);
+    return formatKey(k);
   }
 
   function keyChips(binding: string): string[] {
@@ -103,6 +89,7 @@
 >
   <div
     class="dialog"
+    use:modalFocus
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
