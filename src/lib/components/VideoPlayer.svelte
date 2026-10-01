@@ -45,11 +45,14 @@
   let mediaErrorCode = $state<number | null>(null);
   let remux: Remux | null = null;
   let triedRemux = false;
+  let remuxGeneration = 0;
+  let playRequested = false;
 
   // The element failed. Try to rewrite the clip into something it will accept
   // before giving up — see lib/video/remux.ts for why that so often works.
   async function onVideoError() {
     const failedItemId = item.id;
+    const generation = remuxGeneration;
     // A WebView may emit `play` before the decoder rejects the first frame.
     // Restore the poster so neither that broken frame nor Chromium's broken-file
     // glyph becomes the backdrop for the remux/fallback UI.
@@ -65,8 +68,10 @@
     remuxing = true;
     remuxProgress = 0;
     try {
-      const handle = await remuxForPlayback(item, (f) => (remuxProgress = f));
-      if (item.id !== failedItemId) {
+      const handle = await remuxForPlayback(item, (f) => {
+        if (generation === remuxGeneration) remuxProgress = f;
+      });
+      if (generation !== remuxGeneration || item.id !== failedItemId) {
         handle.cancel();
         return;
       }
@@ -74,24 +79,27 @@
       remuxSrc = handle.src;
       void handle.done.then(
         () => {
-          if (item.id === failedItemId) remuxing = false;
+          if (generation === remuxGeneration) remuxing = false;
         },
         (e) => {
-          if (item.id !== failedItemId) return;
+          if (generation !== remuxGeneration || item.id !== failedItemId) return;
           console.error("in-app remux failed", e);
           remuxing = false;
           failed = true;
         },
       );
     } catch (e) {
-      if (item.id !== failedItemId) return;
+      if (generation !== remuxGeneration || item.id !== failedItemId) return;
       console.error("in-app remux unavailable", e);
       remuxing = false;
       failed = true;
     }
   }
 
-  $effect(() => () => remux?.cancel());
+  $effect(() => () => {
+    remuxGeneration += 1;
+    remux?.cancel();
+  });
 
   // Paint the cached grid thumbnail immediately, then replace it with the sharp
   // preview when its on-demand video-frame extraction finishes.
@@ -170,6 +178,7 @@
   const IDLE_MS = 2800;
   let uiVisible = $state(true);
   let hovering = $state(false);
+  let controlsFocused = $state(false);
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   function clearIdle() {
@@ -179,13 +188,13 @@
     }
   }
 
-  // Arm the hide timer. Hide only when playing && idle && not hovering a control.
+  // Focused controls must remain visible through playback and idle changes.
   function scheduleHide() {
     clearIdle();
-    if (paused || hovering) return;
+    if (paused || hovering || controlsFocused) return;
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      if (!paused && !hovering) uiVisible = false;
+      if (!paused && !hovering && !controlsFocused) uiVisible = false;
     }, IDLE_MS);
   }
 
@@ -196,9 +205,8 @@
   }
 
   // Keep the UI pinned while paused; resume the idle countdown once playing.
-  // Reading `paused` and `hovering` (via scheduleHide) makes this re-run when
-  // either changes, so hovering a control cancels a pending hide and leaving it
-  // re-arms the timer.
+  // Pointer hover and control focus cancel a pending hide. Leaving the controls
+  // starts the timer again.
   $effect(() => {
     if (paused) {
       uiVisible = true;
@@ -214,6 +222,8 @@
   // is reused (same <video> node, new src), so nothing resets on its own.
   $effect(() => {
     void item.id; // re-run when the clip changes
+    remuxGeneration += 1;
+    playRequested = false;
     currentTime = 0;
     duration = 0;
     paused = true;
@@ -249,8 +259,13 @@
 
   function togglePlay() {
     if (!video) return;
-    if (video.paused) void video.play();
+    playRequested = remuxing ? !playRequested : video.paused;
+    if (playRequested) void video.play().catch(() => {});
     else video.pause();
+  }
+
+  function resumeRequestedPlayback() {
+    if (playRequested) void video?.play().catch(() => {});
   }
 
   async function toggleFullscreen() {
@@ -278,22 +293,21 @@
     return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
   }
 
-  // Space toggles play/pause. We handle it on this focusable wrapper (bubble
-  // phase, innermost element first) and stopPropagation so the global keyboard
-  // dispatcher on window never also fires its Space binding. Every other key is
-  // left untouched so grid navigation / rating shortcuts keep working.
+  // Keep native Space activation on controls. The player surface owns playback
+  // Space, and neither route must reach the global zoom shortcut.
   function onKeydown(e: KeyboardEvent) {
     if (e.key === " " || e.code === "Space") {
-      e.preventDefault();
       e.stopPropagation();
-      togglePlay();
+      if (e.target === e.currentTarget || e.target === video) {
+        e.preventDefault();
+        togglePlay();
+      }
     }
   }
 
-  // Toolbar controls steal DOM focus; releasing it back to the wrapper keeps
-  // Space (and arrow navigation) working, mirroring +page.svelte's blurring().
-  function refocus() {
-    wrap?.focus();
+  // Pointer actions return to culling. Keyboard actions keep control focus.
+  function refocus(e: MouseEvent | PointerEvent) {
+    if (e.type === "pointerup" || e.detail > 0) wrap?.focus();
   }
 </script>
 
@@ -327,6 +341,8 @@
       playsinline
       onclick={togglePlay}
       onplay={() => (showPoster = false)}
+      onloadedmetadata={resumeRequestedPlayback}
+      onended={() => { playRequested = false; }}
       onerror={onVideoError}
     ></video>
   {/key}
@@ -395,8 +411,10 @@
     class:hidden={!uiVisible}
     onpointerenter={() => { hovering = true; uiVisible = true; }}
     onpointerleave={() => { hovering = false; }}
+    onfocusin={() => { controlsFocused = true; revealUi(); }}
+    onfocusout={(e) => { controlsFocused = e.currentTarget.contains(e.relatedTarget as Node | null); }}
   >
-    <button class="ctl" title={paused ? "Play (Space)" : "Pause (Space)"} onclick={() => { togglePlay(); refocus(); }}>
+    <button class="ctl" title={paused ? "Play (Space)" : "Pause (Space)"} onclick={(e) => { togglePlay(); refocus(e); }}>
       {#if paused}<Play size={16} />{:else}<Pause size={16} />{/if}
     </button>
 
@@ -410,7 +428,7 @@
       step="0.01"
       value={currentTime}
       oninput={(e) => { if (video) video.currentTime = e.currentTarget.valueAsNumber; }}
-      onchange={refocus}
+      onpointerup={refocus}
       title="Seek"
     />
 
@@ -428,21 +446,21 @@
             step="0.01"
             value={muted ? 0 : volume}
             oninput={(e) => { volume = e.currentTarget.valueAsNumber; muted = volume === 0; }}
-            onchange={refocus}
+            onpointerup={refocus}
             title="Volume"
           />
         </div>
       {/if}
-      <button class="ctl" title="Volume" aria-label="Volume" onclick={() => { volOpen = !volOpen; refocus(); }}>
+      <button class="ctl" title="Volume" aria-label="Volume" onclick={(e) => { volOpen = !volOpen; refocus(e); }}>
         {#if muted || volume === 0}<VolumeX size={16} />{:else}<Volume2 size={16} />{/if}
       </button>
     </div>
 
-    <button class="ctl" title="Open in external player" onclick={() => { openExternally(); refocus(); }}>
+    <button class="ctl" title="Open in external player" onclick={(e) => { openExternally(); refocus(e); }}>
       <ExternalLink size={16} />
     </button>
 
-    <button class="ctl" title={fullscreen ? "Exit fullscreen" : "Fullscreen"} onclick={() => { void toggleFullscreen(); refocus(); }}>
+    <button class="ctl" title={fullscreen ? "Exit fullscreen" : "Fullscreen"} onclick={(e) => { void toggleFullscreen(); refocus(e); }}>
       {#if fullscreen}<Minimize size={16} />{:else}<Maximize size={16} />{/if}
     </button>
   </div>
@@ -568,6 +586,12 @@
     opacity: 0;
     transform: translateY(8px);
     pointer-events: none;
+  }
+
+  .controls:focus-within {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
   }
 
   /* Hide the cursor along with the chrome whenever the UI is hidden. The video's

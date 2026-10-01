@@ -31,6 +31,7 @@ export class UnplayableError extends Error {}
  * than relaxing the cap — it exists so a huge clip never lands in memory whole.
  */
 const WINDOW = 8 * 1024 * 1024;
+const MAX_METADATA_RANGE = 64 * 1024 * 1024;
 
 async function range(url: string, start: number, endInclusive: number): Promise<Response> {
   const res = await fetch(url, { headers: { Range: `bytes=${start}-${endInclusive}` } });
@@ -50,6 +51,9 @@ async function totalSize(url: string): Promise<number> {
 
 /** Read `[start, end)` from the protocol, in windows it will actually serve. */
 async function readRange(url: string, start: number, end: number): Promise<Uint8Array> {
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end - start > MAX_METADATA_RANGE) {
+    throw new UnplayableError("video metadata range exceeds the memory limit");
+  }
   const out = new Uint8Array(end - start);
   let at = start;
   while (at < end) {
@@ -57,6 +61,7 @@ async function readRange(url: string, start: number, end: number): Promise<Uint8
     const res = await range(url, at, stop - 1);
     const chunk = new Uint8Array(await res.arrayBuffer());
     if (chunk.byteLength === 0) throw new UnplayableError("video range returned no bytes");
+    if (chunk.byteLength > stop - at) throw new UnplayableError("video range returned too many bytes");
     out.set(chunk, at - start);
     at += chunk.byteLength;
   }
@@ -132,13 +137,16 @@ export async function remuxForPlayback(
   const src = URL.createObjectURL(mediaSource);
   let conversion: Awaited<ReturnType<typeof Conversion.init>> | null = null;
   let canceled = false;
+  let finishCanceled: (() => void) | null = null;
 
   const done = new Promise<void>((resolve, reject) => {
+    finishCanceled = resolve;
     // A MediaSource only opens once it is attached to a media element, so the
     // conversion cannot start until the caller has taken `src`.
     mediaSource.addEventListener(
       "sourceopen",
       () => {
+        if (canceled) return;
         void (async () => {
           try {
             const buffer = mediaSource.addSourceBuffer(mime);
@@ -146,6 +154,7 @@ export async function remuxForPlayback(
 
             const writable = new WritableStream<StreamTargetChunk>({
               write(chunk) {
+                if (canceled) return Promise.resolve();
                 // Fragmented output is documented to be written in order, and
                 // appending to a SourceBuffer is the one thing that cannot cope
                 // with a seek. Fail loudly rather than produce a corrupt stream.
@@ -178,6 +187,10 @@ export async function remuxForPlayback(
               output,
               ...(dropAudio ? { audio: { discard: true } } : {}),
             });
+            if (canceled) {
+              await conversion.cancel();
+              return;
+            }
             if (!conversion.isValid) {
               throw new UnplayableError(
                 conversion.discardedTracks.map((t) => t.reason).join(", ") || "nothing to convert",
@@ -210,6 +223,7 @@ export async function remuxForPlayback(
       void conversion?.cancel();
       input.dispose();
       URL.revokeObjectURL(src);
+      finishCanceled?.();
     },
   };
 }
