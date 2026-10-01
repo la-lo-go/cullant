@@ -139,6 +139,33 @@ Android does not provide a stable mapping from every `UsbDevice` to a
 and a PTP camera that is not exposed through a document provider cannot be browsed
 without a separate PTP implementation.
 
+### App data and cloud backup
+
+Cullant sets `android:allowBackup="false"` to disable automatic cloud backup.
+Android 12 and later also use `data_extraction_rules.xml`, which excludes every app data domain from cloud backup.
+This includes private project databases, thumbnails, WebView data, and app preferences.
+These settings do not disable direct device transfers on every Android device.
+See the [Android Auto Backup guide](https://developer.android.com/identity/data/autobackup).
+
+A Drive document provider can still upload files in a folder that the user selects.
+App backup settings do not control that provider or other apps with access to shared folders.
+
+### Android platform verification
+
+Install the current debug APK. Start Cullant on a connected device.
+Forward its `webview_devtools_remote_<pid>` socket to local TCP port 9223.
+Then run:
+
+```sh
+node scripts/e2e-android-platform.mjs .playwright-mcp/android-platform
+```
+
+Use `CULLANT_ADB_DEVICE` to select another device. Use `CULLANT_CDP_PORT` to select another local port.
+The script saves the installed package flags, USB filters, viewport measurements, and a screenshot.
+Set `CULLANT_APK_ONLY=1` to verify the packaged manifest and XML resources without a device.
+Use `CULLANT_APK` to select another APK.
+Connect a camera and a storage device to verify the system chooser with real hardware.
+
 ### Launch (splash) screen
 
 The launch screen is customized: the app theme's `windowBackground` is a
