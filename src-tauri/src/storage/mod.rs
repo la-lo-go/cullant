@@ -28,6 +28,8 @@ pub enum StorageState {
     Disconnected,
     /// The volume is present, but the folder is missing or access was revoked.
     NotFound,
+    /// A recent-project probe did not finish within the refresh budget.
+    Unknown,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +192,16 @@ mod win {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
+fn decode_mount_field(field: &str) -> String {
+    // Decode the backslash last so a literal \040 is not decoded twice.
+    field
+        .replace("\\040", " ")
+        .replace("\\011", "\t")
+        .replace("\\012", "\n")
+        .replace("\\134", "\\")
+}
+
 #[cfg(target_os = "linux")]
 fn volume_present(id: &str) -> bool {
     // A missing folder's volume is "present" if a filesystem is currently
@@ -197,10 +209,11 @@ fn volume_present(id: &str) -> bool {
     // mountpoint drops out of /proc/mounts, so a path under a standard external
     // mount root that no longer has a dedicated mount reads as disconnected.
     let mounts = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
-    let mut best = "";
+    let mut best = String::new();
     for line in mounts.lines() {
         if let Some(mp) = line.split_whitespace().nth(1) {
-            if path_has_prefix(id, mp) && mp.len() > best.len() {
+            let mp = decode_mount_field(mp);
+            if path_has_prefix(id, &mp) && mp.len() > best.len() {
                 best = mp;
             }
         }
@@ -259,7 +272,9 @@ fn probe_saf<R: Runtime>(app: &AppHandle<R>, id: &str) -> StorageInfo {
     // query fails.
     let info = app.saf().volume_info(id).ok();
 
+    let external_storage = is_external_storage_tree(id);
     let kind = match &info {
+        _ if !external_storage => StorageKind::Unknown,
         Some(i) if i.removable => StorageKind::Removable,
         Some(_) => StorageKind::Internal,
         None => uri_kind,
@@ -271,8 +286,13 @@ fn probe_saf<R: Runtime>(app: &AppHandle<R>, id: &str) -> StorageInfo {
 
     let mounted = info.as_ref().map(|i| i.mounted).unwrap_or(true);
     let state = if !mounted {
-        // Volume physically absent → disconnected (removed SD card / USB).
-        StorageState::Disconnected
+        if external_storage {
+            StorageState::Disconnected
+        } else {
+            StorageState::NotFound
+        }
+    } else if info.is_none() && !external_storage {
+        StorageState::NotFound
     } else if app.saf().check_tree_access(id).unwrap_or(false) {
         StorageState::Ok
     } else {
@@ -288,8 +308,18 @@ fn probe_saf<R: Runtime>(app: &AppHandle<R>, id: &str) -> StorageInfo {
 }
 
 #[cfg(target_os = "android")]
+fn is_external_storage_tree(id: &str) -> bool {
+    id.strip_prefix("content://")
+        .and_then(|rest| rest.split('/').next())
+        == Some("com.android.externalstorage.documents")
+}
+
+#[cfg(target_os = "android")]
 /// Classify `primary:` as internal storage and a UUID as removable storage.
 fn saf_volume(id: &str) -> (StorageKind, Option<String>) {
+    if !is_external_storage_tree(id) {
+        return (StorageKind::Unknown, None);
+    }
     let doc_id = id.rsplit('/').next().unwrap_or(id).to_ascii_lowercase();
     if doc_id.starts_with("primary%3a") || doc_id.starts_with("primary:") {
         (StorageKind::Internal, Some("Internal storage".to_string()))
@@ -297,5 +327,28 @@ fn saf_volume(id: &str) -> (StorageKind, Option<String>) {
         (StorageKind::Removable, Some("SD card / USB".to_string()))
     } else {
         (StorageKind::Unknown, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_mount_field;
+
+    #[test]
+    fn linux_mount_fields_decode_kernel_escapes() {
+        assert_eq!(
+            decode_mount_field(r"/media/Work\040Disk"),
+            "/media/Work Disk"
+        );
+        assert_eq!(decode_mount_field(r"a\011b\012c\134d"), "a\tb\nc\\d");
+    }
+
+    #[test]
+    fn linux_mount_fields_preserve_literal_text_and_backslashes() {
+        assert_eq!(decode_mount_field("/media/Álbum"), "/media/Álbum");
+        assert_eq!(decode_mount_field(r"a\777b\04"), r"a\777b\04");
+        assert_eq!(decode_mount_field(r"a\"), r"a\");
+        assert_eq!(decode_mount_field(r"\134040"), r"\040");
+        assert_eq!(decode_mount_field(r"\134134"), r"\134");
     }
 }

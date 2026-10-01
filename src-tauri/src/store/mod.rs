@@ -85,6 +85,80 @@ pub trait ProjectStore: Send + Sync {
     /// Move an entry into an existing directory and return its new relative path.
     fn move_to(&self, rel: &str, new_parent_rel: &str) -> AppResult<String>;
 
+    fn move_file(&self, from: &str, to: &str) -> AppResult<()> {
+        validate_relative(from)?;
+        validate_relative(to)?;
+        if self.exists(to)? {
+            return Err(AppError::Other(format!("target exists: {to}")));
+        }
+        let (parent, name) = split_parent(to);
+        let (source_parent, source_name) = split_parent(from);
+        let renamed = if name == source_name {
+            from.to_string()
+        } else {
+            let intermediate = join_relative(source_parent, name);
+            if self.exists(&intermediate)? {
+                return Err(AppError::Other(format!("target exists: {intermediate}")));
+            }
+            self.rename_in_place(from, name)?
+        };
+        if source_parent == parent {
+            return Ok(());
+        }
+        if let Err(error) = self.move_to(&renamed, parent) {
+            if renamed != from {
+                if let Err(restore) = self.rename_in_place(&renamed, source_name) {
+                    return Err(AppError::Other(format!(
+                        "{error}; source remains at {renamed}: {restore}"
+                    )));
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn write_sidecar(&self, rel: &str, bytes: &[u8]) -> AppResult<()> {
+        use std::io::Write;
+        let temporary = temporary_sibling(self, rel)?;
+        let staged = (|| {
+            let mut file = self.open_write(&temporary, "application/xml")?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            Ok(())
+        })();
+        if let Err(error) = staged {
+            let _ = self.remove_file(&temporary);
+            return Err(error);
+        }
+        let backup = if self.exists(rel)? {
+            let backup = temporary_sibling(self, rel)?;
+            self.move_file(rel, &backup)?;
+            Some(backup)
+        } else {
+            None
+        };
+        if let Err(error) = self.move_file(&temporary, rel) {
+            if let Some(backup) = backup {
+                if let Err(restore) = self.move_file(&backup, rel) {
+                    return Err(AppError::Other(format!(
+                        "{error}; original sidecar is at {backup}: {restore}"
+                    )));
+                }
+            }
+            let _ = self.remove_file(&temporary);
+            return Err(error);
+        }
+        if let Some(backup) = backup {
+            self.remove_file(&backup).map_err(|error| {
+                AppError::Other(format!(
+                    "sidecar was written; old content remains at {backup}: {error}"
+                ))
+            })?;
+        }
+        Ok(())
+    }
+
     /// Copy a file. The parent of `to_rel` must already exist.
     fn copy(&self, from_rel: &str, to_rel: &str) -> AppResult<()>;
 
@@ -185,4 +259,38 @@ pub(crate) fn validate_relative(rel: &str) -> AppResult<()> {
         )));
     }
     Ok(())
+}
+
+pub(crate) fn join_relative(parent: &str, name: &str) -> String {
+    if parent.is_empty() {
+        name.to_string()
+    } else {
+        format!("{parent}/{name}")
+    }
+}
+
+pub(crate) fn collision_name(name: &str, n: usize) -> String {
+    match name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() => format!("{stem}.{n}.{extension}"),
+        _ => format!("{name}.{n}"),
+    }
+}
+
+pub(crate) fn temporary_sibling<S: ProjectStore + ?Sized>(
+    store: &S,
+    rel: &str,
+) -> AppResult<String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let (parent, name) = split_parent(rel);
+    loop {
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let candidate = join_relative(
+            parent,
+            &format!(".{name}.cullant-{}-{id}.tmp", std::process::id()),
+        );
+        if !store.exists(&candidate)? {
+            return Ok(candidate);
+        }
+    }
 }

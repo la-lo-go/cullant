@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use walkdir::WalkDir;
 
-use super::{split_parent, ProjectStore, StoreEntry, WALK_PROGRESS_EVERY};
+use super::{split_parent, validate_relative, ProjectStore, StoreEntry, WALK_PROGRESS_EVERY};
 use crate::error::{AppError, AppResult};
 
 pub struct LocalFsStore {
@@ -17,11 +17,30 @@ pub struct LocalFsStore {
 
 impl LocalFsStore {
     pub fn new(root: impl Into<PathBuf>) -> LocalFsStore {
-        LocalFsStore { root: root.into() }
+        let root = root.into();
+        LocalFsStore {
+            root: root.canonicalize().unwrap_or(root),
+        }
     }
 
-    fn abs(&self, rel: &str) -> PathBuf {
-        self.root.join(rel)
+    fn abs(&self, rel: &str) -> AppResult<PathBuf> {
+        validate_relative(rel)?;
+        let path = self.root.join(rel);
+        let mut ancestor = path.as_path();
+        loop {
+            match ancestor.canonicalize() {
+                Ok(resolved) => {
+                    if !resolved.starts_with(&self.root) {
+                        return Err(AppError::Other(format!("path leaves the project: {rel}")));
+                    }
+                    return Ok(path);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    ancestor = ancestor.parent().ok_or(e)?;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
     }
 }
 
@@ -86,26 +105,29 @@ impl ProjectStore for LocalFsStore {
     }
 
     fn open_read(&self, rel: &str) -> AppResult<std::fs::File> {
-        Ok(std::fs::File::open(self.abs(rel))?)
+        Ok(std::fs::File::open(self.abs(rel)?)?)
     }
 
     fn open_write(&self, rel: &str, _mime_type: &str) -> AppResult<std::fs::File> {
-        Ok(std::fs::File::create(self.abs(rel))?)
+        Ok(std::fs::File::create(self.abs(rel)?)?)
     }
 
     fn create_dir_all(&self, rel: &str) -> AppResult<()> {
-        std::fs::create_dir_all(self.abs(rel))?;
+        std::fs::create_dir_all(self.abs(rel)?)?;
         Ok(())
     }
 
     fn rename_in_place(&self, rel: &str, new_name: &str) -> AppResult<String> {
+        if new_name.contains('/') || new_name.is_empty() {
+            return Err(AppError::Other("invalid file name".into()));
+        }
         let (parent, _) = split_parent(rel);
         let new_rel = if parent.is_empty() {
             new_name.to_string()
         } else {
             format!("{parent}/{new_name}")
         };
-        std::fs::rename(self.abs(rel), self.abs(&new_rel))?;
+        self.move_file(rel, &new_rel)?;
         Ok(new_rel)
     }
 
@@ -116,32 +138,101 @@ impl ProjectStore for LocalFsStore {
         } else {
             format!("{new_parent_rel}/{name}")
         };
-        std::fs::rename(self.abs(rel), self.abs(&new_rel))?;
+        self.move_file(rel, &new_rel)?;
         Ok(new_rel)
     }
 
+    fn move_file(&self, from: &str, to: &str) -> AppResult<()> {
+        let source = self.abs(from)?;
+        let destination = self.abs(to)?;
+        if destination.try_exists()? {
+            return Err(AppError::Other(format!("target exists: {to}")));
+        }
+        std::fs::rename(source, destination)?;
+        Ok(())
+    }
+
+    fn write_sidecar(&self, rel: &str, bytes: &[u8]) -> AppResult<()> {
+        use std::io::Write;
+        let destination = self.abs(rel)?;
+        let temporary = super::temporary_sibling(self, rel)?;
+        let staged = self.abs(&temporary)?;
+        let result = (|| {
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&staged)?;
+            file.write_all(bytes)?;
+            file.sync_all()?;
+            drop(file);
+            std::fs::rename(&staged, &destination)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&staged);
+        }
+        result
+    }
+
     fn copy(&self, from_rel: &str, to_rel: &str) -> AppResult<()> {
-        std::fs::copy(self.abs(from_rel), self.abs(to_rel))?;
+        let mut source = std::fs::File::open(self.abs(from_rel)?)?;
+        let destination = self.abs(to_rel)?;
+        let mut output = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&destination)?;
+        if let Err(error) = std::io::copy(&mut source, &mut output).and_then(|_| output.sync_all())
+        {
+            drop(output);
+            let _ = std::fs::remove_file(&destination);
+            return Err(error.into());
+        }
         Ok(())
     }
 
     fn remove_file(&self, rel: &str) -> AppResult<()> {
-        std::fs::remove_file(self.abs(rel))?;
+        std::fs::remove_file(self.abs(rel)?)?;
         Ok(())
     }
 
     fn exists(&self, rel: &str) -> AppResult<bool> {
-        Ok(self.abs(rel).exists())
+        Ok(self.abs(rel)?.try_exists()?)
     }
 
     fn local_path(&self, rel: &str) -> Option<PathBuf> {
-        Some(self.abs(rel))
+        self.abs(rel).ok()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn data_regression_store_rejects_paths_outside_the_project_and_replacements() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("a.jpg"), b"source").unwrap();
+        std::fs::write(root.join("b.jpg"), b"foreign").unwrap();
+        std::fs::write(dir.path().join("outside.jpg"), b"outside").unwrap();
+        let store = LocalFsStore::new(&root);
+        for path in [
+            "../outside.jpg",
+            "..\\outside.jpg",
+            "/outside.jpg",
+            "C:/outside.jpg",
+        ] {
+            assert!(store.remove_file(path).is_err(), "accepted {path}");
+        }
+        assert!(store.copy("a.jpg", "b.jpg").is_err());
+        assert!(store.rename_in_place("a.jpg", "b.jpg").is_err());
+        assert_eq!(std::fs::read(root.join("b.jpg")).unwrap(), b"foreign");
+        assert_eq!(
+            std::fs::read(dir.path().join("outside.jpg")).unwrap(),
+            b"outside"
+        );
+    }
 
     #[test]
     fn lists_files_skipping_marked_and_dot_dirs() {

@@ -19,6 +19,7 @@ import android.provider.DocumentsContract
 import android.provider.DocumentsContract.Document
 import android.util.Base64
 import androidx.activity.result.ActivityResult
+import androidx.appcompat.app.AppCompatActivity
 import app.tauri.Logger
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -29,6 +30,10 @@ import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 @InvokeArg
 class TreeArgs {
@@ -115,6 +120,27 @@ class HeifStillArgs {
 @TauriPlugin
 class SafPlugin(private val activity: Activity) : Plugin(activity) {
     private val resolver get() = activity.contentResolver
+    private val workers = ThreadPoolExecutor(
+        2, 2, 30L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(64)
+    ).apply { allowCoreThreadTimeOut(true) }
+
+    override fun onDestroy(activity: AppCompatActivity) {
+        workers.shutdown()
+    }
+
+    private fun work(invoke: Invoke, task: () -> Unit) {
+        try {
+            workers.execute {
+                try {
+                    task()
+                } catch (e: Exception) {
+                    invoke.reject(e.message ?: "SAF operation failed")
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            invoke.reject("SAF worker queue is full or closed")
+        }
+    }
 
     private fun docUri(treeUri: String, documentId: String): Uri =
         DocumentsContract.buildDocumentUriUsingTree(Uri.parse(treeUri), documentId)
@@ -157,8 +183,14 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
 
     @ActivityCallback
     fun openTreeResult(invoke: Invoke, result: ActivityResult) {
+        if (result.resultCode == Activity.RESULT_CANCELED) {
+            val res = JSObject()
+            res.put("cancelled", true)
+            invoke.resolve(res)
+            return
+        }
         if (result.resultCode != Activity.RESULT_OK) {
-            invoke.reject("cancelled")
+            invoke.reject("folder picker failed with result ${result.resultCode}")
             return
         }
         val treeUri = result.data?.data
@@ -166,17 +198,22 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject("no tree uri returned")
             return
         }
-        try {
-            val takeFlags =
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            resolver.takePersistableUriPermission(treeUri, takeFlags)
-            val rootId = DocumentsContract.getTreeDocumentId(treeUri)
-            val res = JSObject()
-            res.put("treeUri", treeUri.toString())
-            res.put("rootDocumentId", rootId)
-            invoke.resolve(res)
-        } catch (e: Exception) {
-            invoke.reject(e.message ?: "failed to persist tree permission")
+        work(invoke) {
+            try {
+                val takeFlags =
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                val grantedFlags = (result.data?.flags ?: 0) and takeFlags
+                require(grantedFlags == takeFlags) { "the folder needs read and write permission" }
+                resolver.takePersistableUriPermission(treeUri, takeFlags)
+                require(hasTreePermission(treeUri)) { "read and write permission was not persisted" }
+                val rootId = DocumentsContract.getTreeDocumentId(treeUri)
+                val res = JSObject()
+                res.put("treeUri", treeUri.toString())
+                res.put("rootDocumentId", rootId)
+                invoke.resolve(res)
+            } catch (e: Exception) {
+                invoke.reject(e.message ?: "failed to persist tree permission")
+            }
         }
     }
 
@@ -198,6 +235,16 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    @Command
+    fun checkTreeAccess(invoke: Invoke) = work(invoke) {
+        val args = invoke.parseArgs(TreeArgs::class.java)
+        val uri = Uri.parse(args.treeUri)
+        val ok = hasTreePermission(uri)
+        val res = JSObject()
+        res.put("ok", ok)
+        invoke.resolve(res)
+    }
+
     private fun hasTreePermission(uri: Uri): Boolean {
         val treeUri = DocumentsContract.buildTreeDocumentUri(
             uri.authority, DocumentsContract.getTreeDocumentId(uri)
@@ -207,25 +254,27 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    @Command
-    fun checkTreeAccess(invoke: Invoke) {
-        val args = invoke.parseArgs(TreeArgs::class.java)
-        val uri = Uri.parse(args.treeUri)
-        val ok = hasTreePermission(uri)
-        val res = JSObject()
-        res.put("ok", ok)
-        invoke.resolve(res)
-    }
-
     // Report whether the tree URI's backing storage volume is currently present
     // (mounted), plus its user-visible name and removable flag, via
     // StorageManager. A volume that has been removed (ejected SD card / unplugged
     // USB) is absent from getStorageVolumes(), which we report as not mounted.
     @Command
-    fun volumeInfo(invoke: Invoke) {
+    fun volumeInfo(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(TreeArgs::class.java)
         try {
-            val treeDocId = DocumentsContract.getTreeDocumentId(Uri.parse(args.treeUri))
+            val treeUri = Uri.parse(args.treeUri)
+            val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
+            if (treeUri.authority != "com.android.externalstorage.documents") {
+                val root = docUri(args.treeUri, treeDocId)
+                val mounted = requireNotNull(resolver.query(
+                    root, arrayOf(Document.COLUMN_DOCUMENT_ID), null, null, null
+                )) { "provider returned no root cursor" }.use { it.moveToFirst() }
+                val res = JSObject()
+                res.put("mounted", mounted)
+                res.put("removable", false)
+                invoke.resolve(res)
+                return@work
+            }
             val volId = treeDocId.substringBefore(':')
             val sm = activity.getSystemService(Context.STORAGE_SERVICE) as StorageManager
             val match = sm.storageVolumes.firstOrNull { sv ->
@@ -234,7 +283,8 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
             }
             val res = JSObject()
             if (match != null) {
-                res.put("mounted", true)
+                res.put("mounted", match.state == Environment.MEDIA_MOUNTED ||
+                    match.state == Environment.MEDIA_MOUNTED_READ_ONLY)
                 res.put("removable", match.isRemovable)
                 match.getDescription(activity)?.let { res.put("description", it) }
             } else {
@@ -250,7 +300,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun listChildren(invoke: Invoke) {
+    fun listChildren(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(ListChildrenArgs::class.java)
         val treeUri = Uri.parse(args.treeUri)
         val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
@@ -258,7 +308,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         )
         val entries = JSArray()
         try {
-            resolver.query(
+            requireNotNull(resolver.query(
                 childrenUri,
                 arrayOf(
                     Document.COLUMN_DOCUMENT_ID,
@@ -268,7 +318,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
                     Document.COLUMN_LAST_MODIFIED
                 ),
                 null, null, null
-            )?.use { cursor ->
+            )) { "provider returned no child cursor" }.use { cursor ->
                 val idIdx = cursor.getColumnIndexOrThrow(Document.COLUMN_DOCUMENT_ID)
                 val nameIdx = cursor.getColumnIndexOrThrow(Document.COLUMN_DISPLAY_NAME)
                 val mimeIdx = cursor.getColumnIndexOrThrow(Document.COLUMN_MIME_TYPE)
@@ -294,7 +344,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun getFileDescriptor(invoke: Invoke) {
+    fun getFileDescriptor(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(FdArgs::class.java)
         try {
             val fd = resolver.openFileDescriptor(docUri(args.treeUri, args.documentId), args.mode)
@@ -308,7 +358,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun createDocument(invoke: Invoke) {
+    fun createDocument(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(CreateDocumentArgs::class.java)
         try {
             val parent = docUri(args.treeUri, args.parentDocumentId)
@@ -316,7 +366,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
                 resolver, parent, args.mimeType, args.displayName
             ) ?: run {
                 invoke.reject("createDocument returned null")
-                return
+                return@work
             }
             resolveDocId(invoke, created)
         } catch (e: Exception) {
@@ -325,14 +375,14 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun renameDocument(invoke: Invoke) {
+    fun renameDocument(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(RenameDocumentArgs::class.java)
         try {
             val renamed = DocumentsContract.renameDocument(
                 resolver, docUri(args.treeUri, args.documentId), args.newName
             ) ?: run {
                 invoke.reject("renameDocument returned null")
-                return
+                return@work
             }
             resolveDocId(invoke, renamed)
         } catch (e: Exception) {
@@ -341,7 +391,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun moveDocument(invoke: Invoke) {
+    fun moveDocument(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(MoveDocumentArgs::class.java)
         try {
             val moved = DocumentsContract.moveDocument(
@@ -351,7 +401,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
                 docUri(args.treeUri, args.targetParentDocumentId)
             ) ?: run {
                 invoke.reject("moveDocument returned null")
-                return
+                return@work
             }
             resolveDocId(invoke, moved)
         } catch (e: Exception) {
@@ -360,7 +410,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
-    fun copyDocument(invoke: Invoke) {
+    fun copyDocument(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(CopyDocumentArgs::class.java)
         try {
             val source = docUri(args.treeUri, args.documentId)
@@ -372,7 +422,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
             }
             if (copied != null) {
                 resolveDocId(invoke, copied)
-                return
+                return@work
             }
             // Fallback: manual stream copy for providers without FLAG_SUPPORTS_COPY.
             resolveDocId(invoke, manualCopy(source, targetParent))
@@ -396,18 +446,32 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
         val dest = DocumentsContract.createDocument(resolver, targetParent, mime, name)
             ?: throw IllegalStateException("manual copy: createDocument returned null")
-        resolver.openInputStream(source).use { input ->
-            resolver.openOutputStream(dest).use { output ->
-                requireNotNull(input) { "manual copy: cannot open source" }
-                requireNotNull(output) { "manual copy: cannot open dest" }
-                input.copyTo(output)
+        try {
+            resolver.openInputStream(source).use { input ->
+                resolver.openOutputStream(dest).use { output ->
+                    requireNotNull(input) { "manual copy: cannot open source" }
+                    requireNotNull(output) { "manual copy: cannot open dest" }
+                    input.copyTo(output)
+                }
             }
+        } catch (copyError: Exception) {
+            try {
+                check(DocumentsContract.deleteDocument(resolver, dest)) {
+                    "provider refused to remove incomplete copy $dest"
+                }
+            } catch (cleanupError: Exception) {
+                throw IllegalStateException(
+                    "copy failed: ${copyError.message}; incomplete document $dest remains: ${cleanupError.message}",
+                    copyError
+                )
+            }
+            throw copyError
         }
         return dest
     }
 
     @Command
-    fun deleteDocument(invoke: Invoke) {
+    fun deleteDocument(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(DeleteDocumentArgs::class.java)
         try {
             val ok = DocumentsContract.deleteDocument(
@@ -433,11 +497,19 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     // permanent tax. The chooser survives only for the case it was really
     // covering: nothing on the device claims this document.
     @Command
-    fun openDocument(invoke: Invoke) {
+    fun openDocument(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(OpenDocumentArgs::class.java)
         try {
             val uri = docUri(args.treeUri, args.documentId)
             val mime = args.mimeType ?: resolver.getType(uri) ?: "*/*"
+            activity.runOnUiThread { launchDocument(invoke, uri, mime) }
+        } catch (e: Exception) {
+            invoke.reject(e.message ?: "failed to read document type")
+        }
+    }
+
+    private fun launchDocument(invoke: Invoke, uri: Uri, mime: String) {
+        try {
             val view = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, mime)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -472,7 +544,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     // NOT the returned frame's — the caller records them as the video's size and
     // must not learn the thumbnail's size instead.
     @Command
-    fun videoPoster(invoke: Invoke) {
+    fun videoPoster(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(VideoPosterArgs::class.java)
         val retriever = MediaMetadataRetriever()
         try {
@@ -490,7 +562,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
 
             val frame = firstFrame(retriever, args.maxEdge) ?: run {
                 invoke.reject("no frame could be extracted")
-                return
+                return@work
             }
             val oriented = orient(frame, rotation, display)
             val scaled = clampToMaxEdge(oriented, args.maxEdge)
@@ -534,11 +606,11 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
     // returned image's — the caller records them as the photo's size, and a
     // sampled decode would otherwise teach it the thumbnail's size instead.
     @Command
-    fun heifStill(invoke: Invoke) {
+    fun heifStill(invoke: Invoke) = work(invoke) {
         val args = invoke.parseArgs(HeifStillArgs::class.java)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             invoke.reject("this device has no HEIF decoder")
-            return
+            return@work
         }
         try {
             val uri = docUri(args.treeUri, args.documentId)

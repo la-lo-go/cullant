@@ -113,6 +113,7 @@ impl SafStore {
     /// Resolve a rel_path to its SAF document id, walking (and caching) from the
     /// nearest known ancestor when it isn't already cached. `""` is the root.
     fn resolve(&self, rel: &str) -> AppResult<String> {
+        super::validate_relative(rel)?;
         if rel.is_empty() {
             return Ok(self.root_document_id.clone());
         }
@@ -225,6 +226,7 @@ impl ProjectStore for SafStore {
     }
 
     fn open_write(&self, rel: &str, mime_type: &str) -> AppResult<std::fs::File> {
+        super::validate_relative(rel)?;
         if !self.exists(rel)? {
             let (parent, name) = split_parent(rel);
             self.create_dir_all(parent)?;
@@ -239,6 +241,7 @@ impl ProjectStore for SafStore {
     }
 
     fn create_dir_all(&self, rel: &str) -> AppResult<()> {
+        super::validate_relative(rel)?;
         if rel.is_empty() {
             return Ok(());
         }
@@ -277,6 +280,15 @@ impl ProjectStore for SafStore {
     }
 
     fn rename_in_place(&self, rel: &str, new_name: &str) -> AppResult<String> {
+        super::validate_relative(new_name)?;
+        if new_name.is_empty() || new_name.contains('/') {
+            return Err(AppError::Other("invalid file name".into()));
+        }
+        let (parent, _) = split_parent(rel);
+        let target = super::join_relative(parent, new_name);
+        if self.exists(&target)? {
+            return Err(AppError::Other(format!("target exists: {target}")));
+        }
         let doc = self.resolve(rel)?;
         let new_doc = self
             .saf()
@@ -294,6 +306,12 @@ impl ProjectStore for SafStore {
     }
 
     fn move_to(&self, rel: &str, new_parent_rel: &str) -> AppResult<String> {
+        super::validate_relative(new_parent_rel)?;
+        let (_, name) = split_parent(rel);
+        let target = super::join_relative(new_parent_rel, name);
+        if self.exists(&target)? {
+            return Err(AppError::Other(format!("target exists: {target}")));
+        }
         let doc = self.resolve(rel)?;
         let (src_parent, name) = split_parent(rel);
         let src_parent_doc = self.resolve(src_parent)?;
@@ -314,6 +332,10 @@ impl ProjectStore for SafStore {
     }
 
     fn copy(&self, from_rel: &str, to_rel: &str) -> AppResult<()> {
+        super::validate_relative(to_rel)?;
+        if self.exists(to_rel)? {
+            return Err(AppError::Other(format!("target exists: {to_rel}")));
+        }
         let doc = self.resolve(from_rel)?;
         let (dst_parent, _name) = split_parent(to_rel);
         self.create_dir_all(dst_parent)?;
@@ -327,9 +349,16 @@ impl ProjectStore for SafStore {
         let (_, want_name) = split_parent(to_rel);
         let (_, src_name) = split_parent(from_rel);
         if want_name != src_name {
-            self.saf()
+            if let Err(error) = self
+                .saf()
                 .rename_document(&self.tree_uri, &new_doc, want_name)
-                .map_err(Self::err)?;
+            {
+                let cleanup = self.saf().delete_document(&self.tree_uri, &new_doc);
+                return Err(AppError::Other(format!(
+                    "{}; partial copy cleanup: {cleanup:?}",
+                    Self::err(error)
+                )));
+            }
         }
         self.cache_forget(to_rel)?;
         Ok(())
@@ -405,6 +434,7 @@ impl ProjectStore for SafStore {
     }
 
     fn exists(&self, rel: &str) -> AppResult<bool> {
+        super::validate_relative(rel)?;
         if rel.is_empty() {
             return Ok(true);
         }
@@ -414,7 +444,8 @@ impl ProjectStore for SafStore {
         // Not cached: try to resolve; a "not found" error means it doesn't exist.
         match self.resolve(rel) {
             Ok(_) => Ok(true),
-            Err(_) => Ok(false),
+            Err(AppError::Other(error)) if error.starts_with("saf: path not found:") => Ok(false),
+            Err(error) => Err(error),
         }
     }
 }

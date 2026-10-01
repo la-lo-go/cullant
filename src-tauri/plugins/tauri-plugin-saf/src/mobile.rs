@@ -23,11 +23,18 @@ impl<R: Runtime> Saf<R> {
     /// picked tree, and return `(tree_uri, root_document_id)`. Blocks until the
     /// user picks a folder or cancels.
     pub fn open_tree(&self, prefer_removable: bool) -> Result<(String, String)> {
-        let res: OpenTreeResponse = self.0.run_mobile_plugin(
-            "openTree",
-            OpenTreePayload { prefer_removable },
-        )?;
-        Ok((res.tree_uri, res.root_document_id))
+        let res: OpenTreeResponse = self
+            .0
+            .run_mobile_plugin("openTree", OpenTreePayload { prefer_removable })?;
+        if res.cancelled {
+            return Err(Error::Cancelled);
+        }
+        match (res.tree_uri, res.root_document_id) {
+            (Some(tree), Some(root)) => Ok((tree, root)),
+            _ => Err(Error::Other(
+                "folder picker returned no tree identity".into(),
+            )),
+        }
     }
 
     /// Consume a USB-attach intent delivered to the main Android activity.
@@ -73,11 +80,7 @@ impl<R: Runtime> Saf<R> {
     }
 
     /// List the direct children of `parent_document_id` within `tree_uri`.
-    pub fn list_children(
-        &self,
-        tree_uri: &str,
-        parent_document_id: &str,
-    ) -> Result<Vec<SafEntry>> {
+    pub fn list_children(&self, tree_uri: &str, parent_document_id: &str) -> Result<Vec<SafEntry>> {
         let res: ListChildrenResponse = self.0.run_mobile_plugin(
             "listChildren",
             ListChildrenPayload {
@@ -273,13 +276,19 @@ impl<R: Runtime> Saf<R> {
     /// Permanently delete a document.
     pub fn delete_document(&self, tree_uri: &str, document_id: &str) -> Result<()> {
         // Kotlin resolves `{ "ok": true }`; reuse AccessResponse to decode it.
-        self.0.run_mobile_plugin::<AccessResponse>(
+        let res = self.0.run_mobile_plugin::<AccessResponse>(
             "deleteDocument",
             DeleteDocumentPayload {
                 tree_uri: tree_uri.to_string(),
                 document_id: document_id.to_string(),
             },
         )?;
-        Ok(())
+        if res.ok {
+            Ok(())
+        } else {
+            Err(Error::Other(format!(
+                "provider refused to delete {document_id}"
+            )))
+        }
     }
 }

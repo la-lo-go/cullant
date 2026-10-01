@@ -31,8 +31,10 @@ pub(crate) struct TreePayload {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct OpenTreeResponse {
-    pub tree_uri: String,
-    pub root_document_id: String,
+    pub tree_uri: Option<String>,
+    pub root_document_id: Option<String>,
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 #[derive(Deserialize)]
