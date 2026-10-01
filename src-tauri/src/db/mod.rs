@@ -167,9 +167,11 @@ impl Db {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> AppResult<T> + Send + 'static,
     {
+        let _profile = crate::photo_profile::span("db.write_wait");
         let (result_tx, result_rx) = mpsc::channel();
         self.tx
             .send(Box::new(move |conn| {
+                let _profile = crate::photo_profile::span("db.write_execute");
                 let _ = result_tx.send(f(conn));
             }))
             .map_err(|_| AppError::Other("database thread is gone".into()))?;
@@ -188,6 +190,7 @@ impl Db {
     where
         F: FnOnce(&Connection) -> AppResult<T>,
     {
+        let _profile = crate::photo_profile::span("db.read");
         let guard = self.readers.checkout();
         // `conn` is always `Some` for a freshly checked-out guard.
         f(guard

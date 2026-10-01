@@ -3,6 +3,7 @@ mod db;
 mod decode;
 mod engine;
 mod error;
+mod photo_profile;
 mod protocol;
 mod scan;
 mod storage;

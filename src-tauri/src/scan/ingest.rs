@@ -278,6 +278,8 @@ pub fn run_ingest_inner(
     video_progress: &mut dyn FnMut(usize, usize, &[i64]),
     generate_videos: bool,
 ) -> AppResult<()> {
+    let profile_metadata = crate::photo_profile::span("metadata");
+    crate::photo_profile::report("metadata_start");
     // Each row reports the file itself plus, for a RAW in a live pair, its JPEG
     // sibling. Grouping by whichever file will actually be opened turns a pair
     // into a single read.
@@ -413,6 +415,8 @@ pub fn run_ingest_inner(
         started.elapsed(),
         crate::store::stats::report()
     );
+    drop(profile_metadata);
+    crate::photo_profile::report("metadata_complete");
     meta_done(meta_updated);
 
     // Submitted to the shared ThumbPool as *background* work: interactive
@@ -494,6 +498,7 @@ pub fn run_ingest_inner(
         thumb_progress,
     )?;
 
+    crate::photo_profile::report("photos_complete");
     // Video poster thumbnails last, and only when enabled (the poster tier is the
     // slow one — see AppState::generate_video_thumbs). Skipping here only skips
     // *pregeneration*; a poster is still produced on demand when a video's cell
@@ -514,6 +519,7 @@ pub fn run_ingest_inner(
         )?;
     }
 
+    crate::photo_profile::report("ingest_complete");
     Ok(())
 }
 
@@ -551,11 +557,20 @@ fn generate_pass(
     })?;
 
     let total = pending.len();
+    crate::photo_profile::report(match kind {
+        ThumbKind::Preview => "preview_pass_start",
+        _ => "thumb_pass_start",
+    });
+
     progress(0, total, &[]);
     if total == 0 {
         return Ok(());
     }
 
+    let _profile = crate::photo_profile::span(match kind {
+        ThumbKind::Preview => "pass.preview",
+        _ => "pass.thumb",
+    });
     let started = Instant::now();
     // The channel carries which file finished, so the emit can tell the frontend
     // exactly what became available rather than making it re-read the catalogue.
@@ -761,7 +776,7 @@ fn write_metadata_batch(db: &Arc<Db>, extracted: Vec<Extracted>) -> AppResult<()
                    capture_time = COALESCE(?2, mtime),
                    orientation = CASE WHEN orientation IS NULL OR
                      (COALESCE(state_updated_at, 0) = 0 AND xmp_source_mtime IS NULL)
-                     THEN COALESCE(?3, orientation) ELSE orientation END,
+                     THEN COALESCE(?3, orientation, 1) ELSE orientation END,
                    camera = COALESCE(?4, camera),
                    lens = COALESCE(?5, lens),
                    iso = COALESCE(?6, iso),

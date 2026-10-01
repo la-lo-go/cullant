@@ -20,6 +20,7 @@ vite.config.ts.timestamp-*
 .claude/
 .mcp.json
 .playwright-mcp/
+/artifacts/performance/
 
 # Repository skills are shared with Codex and are intentionally versionable.
 .agents/*

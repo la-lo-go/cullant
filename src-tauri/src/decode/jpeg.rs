@@ -15,11 +15,13 @@ use crate::error::{AppError, AppResult};
 /// factor (zune is faster at scale 1), exotic pixel formats (CMYK, 16-bit),
 /// any decode error, or a result that somehow undershoots the target.
 pub fn decode_scaled(bytes: &[u8], min_long_edge: u32, name: &str) -> AppResult<DynamicImage> {
+    let _profile = crate::photo_profile::span("jpeg_decode");
     match try_scaled(bytes, min_long_edge) {
         Ok(Some(img)) => return Ok(img),
         Ok(None) => {}
         Err(e) => tracing::debug!("scaled JPEG decode failed for {name}, falling back: {e}"),
     }
+    let _profile = crate::photo_profile::span("jpeg_decode.full_pixels");
     image::load_from_memory(bytes).map_err(|e| AppError::Decode(format!("{name}: {e}")))
 }
 
@@ -55,6 +57,7 @@ fn try_scaled(
         return Ok(None);
     }
 
+    let _profile = crate::photo_profile::span("jpeg_decode.scaled_pixels");
     let pixels = decoder.decode()?;
     let (w, h) = (out_w as u32, out_h as u32);
     let img = match decoder.info().map(|i| i.pixel_format) {

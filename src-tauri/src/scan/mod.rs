@@ -223,6 +223,7 @@ pub fn scan_with_store(
     let started = std::time::Instant::now();
     // Reported from inside the walk, not after it: classifying the listing is
     // pure in-memory work, so the walk is the only part worth a progress count.
+    let _profile = crate::photo_profile::span("scan");
     let entries = store.list_recursive(SKIP_DIRS, progress)?;
     let found = collect_found(entries);
     let total_found = found.len();

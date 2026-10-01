@@ -24,6 +24,7 @@ use crate::store::{read_all, ProjectStore};
 /// plain-JPEG decode paths without another read.
 pub fn open_source(store: &dyn ProjectStore, rel: &str) -> AppResult<RawSource> {
     let started = std::time::Instant::now();
+    let _profile = crate::photo_profile::span("source_open");
     let source = open_source_inner(store, rel)?;
     crate::store::stats::source_opened(source.buf().len(), started.elapsed());
     Ok(source)
