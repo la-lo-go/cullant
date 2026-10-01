@@ -45,7 +45,14 @@ fn project(state: &AppState) -> AppResult<(Arc<Db>, Arc<dyn ProjectStore>)> {
 #[tauri::command]
 pub fn get_file_metadata(file_id: i64, state: State<'_, AppState>) -> AppResult<FileMetadata> {
     let (db, store) = project(&state)?;
+    load_file_metadata(file_id, &db, store.as_ref())
+}
 
+fn load_file_metadata(
+    file_id: i64,
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+) -> AppResult<FileMetadata> {
     let mut meta: FileMetadata = db.call(move |conn| {
         Ok(conn.query_row(
             "SELECT rel_path, kind, size, width, height, capture_time, camera, lens, iso
@@ -68,8 +75,12 @@ pub fn get_file_metadata(file_id: i64, state: State<'_, AppState>) -> AppResult<
         )?)
     })?;
 
+    if meta.kind == 2 {
+        return Ok(meta);
+    }
+
     // Best-effort deep read; a file without EXIF still returns the DB fields.
-    if let Ok(source) = decode::open_source(store.as_ref(), &meta.rel_path) {
+    if let Ok(source) = decode::open_source(store, &meta.rel_path) {
         match meta.kind {
             0 => read_raw_exif(&source, &mut meta),
             1 => read_image_exif(source.buf(), &mut meta),
@@ -193,6 +204,55 @@ fn format_shutter(secs: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct RemoteVideoStore;
+    impl ProjectStore for RemoteVideoStore {
+        fn list_recursive(
+            &self,
+            _: &[&str],
+            _: &mut dyn FnMut(usize),
+        ) -> AppResult<Vec<crate::store::StoreEntry>> {
+            unreachable!()
+        }
+        fn open_read(&self, _: &str) -> AppResult<std::fs::File> {
+            panic!("Video metadata must not read the remote source")
+        }
+        fn open_write(&self, _: &str, _: &str) -> AppResult<std::fs::File> {
+            unreachable!()
+        }
+        fn create_dir_all(&self, _: &str) -> AppResult<()> {
+            unreachable!()
+        }
+        fn rename_in_place(&self, _: &str, _: &str) -> AppResult<String> {
+            unreachable!()
+        }
+        fn move_to(&self, _: &str, _: &str) -> AppResult<String> {
+            unreachable!()
+        }
+        fn copy(&self, _: &str, _: &str) -> AppResult<()> {
+            unreachable!()
+        }
+        fn remove_file(&self, _: &str) -> AppResult<()> {
+            unreachable!()
+        }
+        fn exists(&self, _: &str) -> AppResult<bool> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn media_command_regression_video_metadata_uses_indexed_fields() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("clip.mp4"), b"remote video data").unwrap();
+        let db = Arc::new(Db::open(directory.path()).unwrap());
+        crate::scan::scan_project_inner(&db, directory.path(), &mut |_| {}).unwrap();
+        let id: i64 = db
+            .call_read(|conn| Ok(conn.query_row("SELECT id FROM files", [], |row| row.get(0))?))
+            .unwrap();
+        let metadata = load_file_metadata(id, &db, &RemoteVideoStore).unwrap();
+        assert_eq!(metadata.kind, 2);
+        assert_eq!(metadata.rel_path, "clip.mp4");
+    }
 
     #[test]
     fn shutter_formatting() {

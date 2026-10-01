@@ -29,11 +29,12 @@ fn sync_members(conn: &Connection, group_id: i64, from: SyncFrom) -> rusqlite::R
     let source = match from {
         SyncFrom::Raw => {
             "SELECT rating, flag, label FROM files
-               WHERE group_id = ?1 AND kind = 0 AND status = 0 LIMIT 1"
+               WHERE group_id = ?1 AND kind = 0 AND status = 0
+               ORDER BY id = (SELECT primary_file_id FROM groups WHERE id = ?1) DESC, id LIMIT 1"
         }
         SyncFrom::Jpeg => {
             "SELECT rating, flag, label FROM files
-               WHERE group_id = ?1 AND kind = 1 AND status = 0 LIMIT 1"
+               WHERE group_id = ?1 AND kind = 1 AND status = 0 ORDER BY id LIMIT 1"
         }
         // A member never classified has a NULL timestamp, which must lose to one
         // that has been; the id breaks a tie within the same second.
@@ -44,7 +45,7 @@ fn sync_members(conn: &Connection, group_id: i64, from: SyncFrom) -> rusqlite::R
         }
         SyncFrom::None => return Ok(()),
     };
-    conn.execute(
+    let changed = conn.execute(
         &format!(
             "UPDATE files SET
                rating = src.rating, flag = src.flag, label = src.label,
@@ -53,6 +54,21 @@ fn sync_members(conn: &Connection, group_id: i64, from: SyncFrom) -> rusqlite::R
              FROM ({source}) AS src
              WHERE files.group_id = ?1 AND files.status = 0"
         ),
+        params![group_id, now_secs()],
+    )?;
+    if changed == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    conn.execute(
+        "DELETE FROM pending_actions WHERE action = 0 AND file_id IN
+         (SELECT id FROM files WHERE group_id = ?1 AND status = 0 AND flag <> -1)",
+        params![group_id],
+    )?;
+    conn.execute(
+        "INSERT INTO pending_actions(file_id, action, params, origin, created_at)
+         SELECT id, 0, '{}', 0, ?2 FROM files
+         WHERE group_id = ?1 AND status = 0 AND flag = -1
+         ON CONFLICT(file_id, action) DO NOTHING",
         params![group_id, now_secs()],
     )?;
     Ok(())
@@ -124,6 +140,37 @@ pub fn recouple(db: &Arc<Db>, group_id: i64, sync_from: SyncFrom) -> AppResult<(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn syncing_an_unflagged_member_removes_the_old_delete() {
+        use crate::engine::{actions, culling};
+        let (_dir, db, group_id) = paired_project();
+        let raw_id = db
+            .call_read(|conn| {
+                Ok(
+                    conn.query_row("SELECT id FROM files WHERE kind = 0", [], |row| {
+                        row.get::<_, i64>(0)
+                    })?,
+                )
+            })
+            .unwrap();
+        let targets = || culling::Targets {
+            ids: vec![raw_id],
+            as_groups: false,
+        };
+        culling::set_flag(&db, targets(), -1).unwrap();
+        actions::enqueue(
+            &db,
+            targets(),
+            actions::ActionKind::Delete,
+            None,
+            actions::PairScope::Both,
+        )
+        .unwrap();
+        let states = sync_state(&db, group_id, SyncFrom::Jpeg).unwrap();
+        assert!(states.iter().all(|state| state.flag == 0));
+        assert!(actions::list(&db).unwrap().is_empty());
+    }
 
     #[test]
     fn recouple_syncs_state_from_raw() {

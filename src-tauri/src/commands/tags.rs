@@ -27,22 +27,34 @@ pub fn create_task_tag(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<TaskTag> {
-    let tag = tags::create(&project_db(&state)?, name, shortcut, scope, color)?;
-    let _ = app.emit("tags:changed", ());
+    let db = project_db(&state)?;
+    let tag = tags::create(&db, name, shortcut, scope, color)?;
+    let _ = app.emit(
+        "tags:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(tag)
 }
 
 #[tauri::command]
 pub fn update_task_tag(tag: TaskTag, app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
-    tags::update(&project_db(&state)?, tag)?;
-    let _ = app.emit("tags:changed", ());
+    let db = project_db(&state)?;
+    tags::update(&db, tag)?;
+    let _ = app.emit(
+        "tags:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(())
 }
 
 #[tauri::command]
 pub fn delete_task_tag(tag_id: i64, app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
-    tags::delete(&project_db(&state)?, tag_id)?;
-    let _ = app.emit("tags:changed", ());
+    let db = project_db(&state)?;
+    tags::delete(&db, tag_id)?;
+    let _ = app.emit(
+        "tags:changed",
+        serde_json::json!({"projectRoot": db.project_root()}),
+    );
     Ok(())
 }
 
@@ -53,8 +65,12 @@ pub fn toggle_task_tag(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<TagChange>> {
-    let changes = tags::toggle(&project_db(&state)?, targets, tag_id)?;
-    let _ = app.emit("filetags:changed", &changes);
+    let db = project_db(&state)?;
+    let changes = tags::toggle(&db, targets, tag_id)?;
+    let _ = app.emit(
+        "filetags:changed",
+        serde_json::json!({"projectRoot": db.project_root(), "changes": &changes}),
+    );
     Ok(changes)
 }
 
@@ -64,7 +80,11 @@ pub fn clear_task_tags(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<TagChange>> {
-    let changes = tags::clear(&project_db(&state)?, targets)?;
-    let _ = app.emit("filetags:changed", &changes);
+    let db = project_db(&state)?;
+    let changes = tags::clear(&db, targets)?;
+    let _ = app.emit(
+        "filetags:changed",
+        serde_json::json!({"projectRoot": db.project_root(), "changes": &changes}),
+    );
     Ok(changes)
 }

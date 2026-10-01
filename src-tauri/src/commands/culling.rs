@@ -12,8 +12,11 @@ fn project_db(state: &AppState) -> AppResult<Arc<Db>> {
     Ok(guard.as_ref().ok_or(AppError::NoProject)?.db.clone())
 }
 
-fn emit_changed(app: &AppHandle, changed: &[CullState]) {
-    let _ = app.emit("state:changed", changed);
+fn emit_changed(app: &AppHandle, db: &Db, changed: &[CullState]) {
+    let _ = app.emit(
+        "state:changed",
+        serde_json::json!({"projectRoot": db.project_root(), "states": changed}),
+    );
 }
 
 #[tauri::command]
@@ -23,8 +26,9 @@ pub fn set_rating(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<CullState>> {
-    let changed = culling::set_rating(&project_db(&state)?, targets, rating)?;
-    emit_changed(&app, &changed);
+    let db = project_db(&state)?;
+    let changed = culling::set_rating(&db, targets, rating)?;
+    emit_changed(&app, &db, &changed);
     Ok(changed)
 }
 
@@ -35,8 +39,9 @@ pub fn set_flag(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<CullState>> {
-    let changed = culling::set_flag(&project_db(&state)?, targets, flag)?;
-    emit_changed(&app, &changed);
+    let db = project_db(&state)?;
+    let changed = culling::set_flag(&db, targets, flag)?;
+    emit_changed(&app, &db, &changed);
     Ok(changed)
 }
 
@@ -48,8 +53,9 @@ pub fn rotate(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<CullState>> {
-    let changed = culling::rotate(&project_db(&state)?, targets, steps)?;
-    emit_changed(&app, &changed);
+    let db = project_db(&state)?;
+    let changed = culling::rotate(&db, targets, steps)?;
+    emit_changed(&app, &db, &changed);
     Ok(changed)
 }
 
@@ -60,7 +66,8 @@ pub fn set_label(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<CullState>> {
-    let changed = culling::set_label(&project_db(&state)?, targets, label)?;
-    emit_changed(&app, &changed);
+    let db = project_db(&state)?;
+    let changed = culling::set_label(&db, targets, label)?;
+    emit_changed(&app, &db, &changed);
     Ok(changed)
 }

@@ -2,6 +2,7 @@ pub mod migrations;
 pub mod sql;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -21,6 +22,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 /// answer perfectly well a moment later.
 const OPEN_ATTEMPTS: u32 = 4;
 const OPEN_RETRY_DELAY: Duration = Duration::from_millis(400);
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 /// Handle to the project database. Writes go through a single writer thread
 /// that owns one connection (they must serialize anyway); reads can instead
@@ -31,6 +33,7 @@ pub struct Db {
     tx: mpsc::Sender<Job>,
     readers: ReaderPool,
     path: PathBuf,
+    generation: u64,
 }
 
 /// A bounded set of read-only connections handed out to whatever thread needs a
@@ -148,7 +151,12 @@ impl Db {
                 }
             })?;
 
-        Ok(Db { tx, readers, path })
+        Ok(Db {
+            tx,
+            readers,
+            path,
+            generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
+        })
     }
 
     /// Run a closure on the single writer thread and wait for its result. Use
@@ -191,11 +199,55 @@ impl Db {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn project_root(&self) -> String {
+        self.call_read(|conn| {
+            Ok(
+                conn.query_row("SELECT root_path FROM project WHERE id = 1", [], |row| {
+                    row.get::<_, String>(0)
+                })?,
+            )
+        })
+        .unwrap_or_else(|_| {
+            self.path
+                .parent()
+                .and_then(Path::parent)
+                .unwrap_or(Path::new(""))
+                .to_string_lossy()
+                .into_owned()
+        })
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_event_identity_uses_the_stored_saf_uri() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(dir.path()).unwrap();
+        db.call(|conn| {
+            conn.execute(
+                "INSERT INTO project (id, root_path, created_at) VALUES (1, 'content://provider/tree/photos', 0)",
+                [],
+            )?;
+            Ok(())
+        }).unwrap();
+        assert_eq!(db.project_root(), "content://provider/tree/photos");
+    }
+
+    #[test]
+    fn reopened_projects_have_a_distinct_generation() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = Db::open(dir.path()).unwrap();
+        let second = Db::open(dir.path()).unwrap();
+        assert_ne!(first.generation(), second.generation());
+    }
 
     #[test]
     fn open_creates_db_and_applies_schema() {
@@ -204,7 +256,7 @@ mod tests {
 
         assert!(db.path().exists());
         let version = db.call(|conn| migrations::current_version(conn)).unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
 
         let table_count = db
             .call(|conn| {
@@ -227,7 +279,7 @@ mod tests {
         drop(Db::open(dir.path()).unwrap());
         let db = Db::open(dir.path()).unwrap();
         let version = db.call(|conn| migrations::current_version(conn)).unwrap();
-        assert_eq!(version, 10);
+        assert_eq!(version, 11);
     }
 
     #[test]

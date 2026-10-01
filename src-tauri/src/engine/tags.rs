@@ -29,17 +29,33 @@ pub const DEFAULT_TAGS: &[(&str, i64, &str)] = &[
 ];
 
 pub fn seed_defaults(conn: &Connection) -> AppResult<()> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM task_tags", [], |r| r.get(0))?;
-    if count > 0 {
+    let seeded: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM settings WHERE key = 'default_tags_seeded')",
+        [],
+        |r| r.get(0),
+    )?;
+    if seeded {
         return Ok(());
     }
-    let mut stmt = conn.prepare(
-        "INSERT INTO task_tags (name, scope, color, sort_order, builtin)
-         VALUES (?1, ?2, ?3, ?4, 1)",
-    )?;
-    for (i, (name, scope, color)) in DEFAULT_TAGS.iter().enumerate() {
-        stmt.execute(params![name, scope, color, i as i64])?;
+    let tx = conn.unchecked_transaction()?;
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM task_tags", [], |r| r.get(0))?;
+    let established: bool =
+        conn.query_row("SELECT EXISTS(SELECT 1 FROM project)", [], |r| r.get(0))?;
+    if count == 0 && !established {
+        let mut stmt = tx.prepare(
+            "INSERT INTO task_tags (name, scope, color, sort_order, builtin)
+             VALUES (?1, ?2, ?3, ?4, 1)",
+        )?;
+        for (i, (name, scope, color)) in DEFAULT_TAGS.iter().enumerate() {
+            stmt.execute(params![name, scope, color, i as i64])?;
+        }
     }
+    tx.execute(
+        "INSERT INTO settings (key, value) VALUES ('default_tags_seeded', 'true')
+         ON CONFLICT(key) DO NOTHING",
+        [],
+    )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -250,6 +266,18 @@ pub fn clear(db: &Arc<Db>, targets: Targets) -> AppResult<Vec<TagChange>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn removed_default_tags_do_not_return_after_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        {
+            let db = std::sync::Arc::new(crate::db::Db::open(dir.path()).unwrap());
+            for tag in super::list(&db).unwrap() {
+                super::delete(&db, tag.id).unwrap();
+            }
+        }
+        let db = std::sync::Arc::new(crate::db::Db::open(dir.path()).unwrap());
+        assert!(super::list(&db).unwrap().is_empty());
+    }
     use super::*;
     use std::fs;
 

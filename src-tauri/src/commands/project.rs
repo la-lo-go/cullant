@@ -87,14 +87,17 @@ fn unix_now() -> i64 {
 
 /// Clears `AppState::scan_active` however the scanner thread ends — including
 /// the early returns for a failed scan and an empty folder.
-struct ScanActive(AppHandle);
+struct ScanActive(AppHandle, u64);
 
 impl Drop for ScanActive {
     fn drop(&mut self) {
-        self.0
-            .state::<AppState>()
-            .scan_active
-            .store(false, std::sync::atomic::Ordering::Relaxed);
+        let state = self.0.state::<AppState>();
+        let guard = state.project.lock().unwrap();
+        if guard.as_ref().is_some_and(|p| p.db.generation() == self.1) {
+            state
+                .scan_active
+                .store(false, std::sync::atomic::Ordering::Release);
+        }
     }
 }
 
@@ -117,45 +120,92 @@ fn spawn_scan(
     root: PathBuf,
     thumbs: Arc<ThumbPool>,
     initial_open_id: Option<String>,
-) {
+) -> AppResult<()> {
     app.state::<AppState>()
         .scan_active
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+        .store(true, std::sync::atomic::Ordering::Release);
+    let active = ScanActive(app.clone(), db.generation());
     std::thread::Builder::new()
         .name("scanner".into())
         .spawn(move || {
-            // Cleared on every exit path below, including the early returns.
-            let _active = ScanActive(app.clone());
-            let done = match scan::scan_project(&app, &db, store.as_ref()) {
-                Ok(done) => done,
-                Err(e) => {
-                    tracing::error!("scan failed: {e}");
-                    let _ = app.emit("scan:error", e.to_string());
-                    return;
-                }
-            };
-            if let Some(id) = initial_open_id {
-                if done.file_count == 0 {
-                    tracing::info!("opened folder has no recognized photos/videos: {id}");
-                    // Only close if this scan's project is still the active one
-                    // (guards a race with the user closing/opening something
-                    // else while an empty folder's near-instant scan ran).
-                    let state = app.state::<AppState>();
-                    let mut guard = state.project.lock().unwrap();
-                    if guard.as_ref().is_some_and(|p| p.root == root) {
-                        *guard = None;
-                    }
-                    drop(guard);
-                    let _ = crate::commands::recent::delete_project_data(app.clone(), id);
-                    let _ = app.emit("scan:empty", ());
-                    return;
-                }
-            }
-            if let Err(e) = scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &thumbs) {
-                tracing::error!("ingest pass failed: {e}");
-            }
+            let _active = active;
+            run_scan(app, db, store, root, thumbs, initial_open_id);
         })
-        .expect("failed to spawn scanner thread");
+        .map_err(|error| AppError::Other(format!("could not start scanner: {error}")))?;
+    Ok(())
+}
+
+fn run_scan(
+    app: AppHandle,
+    db: Arc<Db>,
+    store: Arc<dyn ProjectStore>,
+    root: PathBuf,
+    thumbs: Arc<ThumbPool>,
+    initial_open_id: Option<String>,
+) {
+    let done = match scan::scan_project(&app, &db, store.as_ref()) {
+        Ok(done) => done,
+        Err(error) => {
+            emit_scan_error(&app, &db.project_root(), error.to_string());
+            return;
+        }
+    };
+    if done.file_count == 0 {
+        if let Some(id) = initial_open_id {
+            let result = rollback_fresh_empty(&app, db, store, root, thumbs);
+            match result {
+                Ok(true) => {
+                    let _ = crate::commands::recent::delete_project_data(app.clone(), id.clone());
+                    let _ = app.emit("scan:empty", serde_json::json!({"projectRoot": id}));
+                }
+                Ok(false) => {}
+                Err(error) => emit_scan_error(&app, &id, error.to_string()),
+            }
+            return;
+        }
+    }
+    if let Err(error) = scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &thumbs) {
+        emit_scan_error(&app, &db.project_root(), error.to_string());
+    }
+}
+
+// Only a data directory created by this open operation can reach this path.
+fn rollback_fresh_empty(
+    app: &AppHandle,
+    db: Arc<Db>,
+    store: Arc<dyn ProjectStore>,
+    root: PathBuf,
+    thumbs: Arc<ThumbPool>,
+) -> AppResult<bool> {
+    let state = app.state::<AppState>();
+    let previous = {
+        let mut guard = state.project.lock().unwrap();
+        if guard
+            .as_ref()
+            .is_none_or(|p| p.db.generation() != db.generation())
+        {
+            return Ok(false);
+        }
+        guard.take()
+    };
+    if let Some(previous) = previous {
+        previous.thumbs.shutdown();
+    }
+    state
+        .scan_active
+        .store(false, std::sync::atomic::Ordering::Release);
+    drop(thumbs);
+    drop(store);
+    drop(db);
+    remove_dir_with_retry(&root.join(".cullant"))?;
+    Ok(true)
+}
+
+fn emit_scan_error(app: &AppHandle, project_root: &str, error: String) {
+    let _ = app.emit(
+        "scan:error",
+        serde_json::json!({"projectRoot": project_root, "error": error}),
+    );
 }
 
 #[tauri::command]
@@ -187,10 +237,8 @@ pub fn pick_saf_tree(app: AppHandle, prefer_removable: Option<bool>) -> AppResul
         use tauri_plugin_saf::SafExt;
         match app.saf().open_tree(prefer_removable.unwrap_or(false)) {
             Ok((tree_uri, _root)) => Ok(Some(tree_uri)),
-            Err(e) => {
-                tracing::info!("SAF picker returned no folder: {e}");
-                Ok(None)
-            }
+            Err(tauri_plugin_saf::Error::Cancelled) => Ok(None),
+            Err(e) => Err(crate::error::AppError::Other(e.to_string())),
         }
     }
     #[cfg(not(target_os = "android"))]
@@ -242,6 +290,7 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
         ));
     }
 
+    let fresh_data = !root.join(".cullant").exists();
     let db = Arc::new(Db::open(&root)?);
     let db_path = db.path().to_string_lossy().into_owned();
     let root_str = root.to_string_lossy().into_owned();
@@ -255,13 +304,16 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
             params![root_for_db, unix_now()],
         )?;
         let version = migrations::current_version(conn)?;
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files WHERE status = 0", [], |row| {
-                row.get(0)
-            })?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE status = 0 AND kind IN (0, 1, 2)",
+            [],
+            |row| row.get(0),
+        )?;
         Ok((version, count))
     })?;
 
+    close_project_inner(state);
+    crate::thumbs::prune_cache(&db, &root)?;
     let thumbs = Arc::new(ThumbPool::start(db.clone(), store.clone(), root.clone()));
     {
         // Replacing an already-open project must stop its background generation
@@ -280,7 +332,14 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
     tracing::info!("opened project at {root_str}");
     crate::commands::recent::record_opened(app, &root_str);
 
-    spawn_scan(app.clone(), db, store, root, thumbs, Some(root_str.clone()));
+    spawn_scan(
+        app.clone(),
+        db,
+        store,
+        root,
+        thumbs,
+        fresh_data.then(|| root_str.clone()),
+    )?;
 
     Ok(ProjectInfo {
         display_name: project_display_name(&root_str),
@@ -329,6 +388,7 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
     let base = project_data_base(app, tree_uri)?;
     std::fs::create_dir_all(&base)?;
 
+    let fresh_data = !base.join(".cullant").exists();
     let db = Arc::new(Db::open(&base)?);
     let db_path = db.path().to_string_lossy().into_owned();
     let store: Arc<dyn ProjectStore> = Arc::new(crate::store::SafStore::new(
@@ -346,13 +406,16 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
             params![tree_owned, unix_now()],
         )?;
         let version = migrations::current_version(conn)?;
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files WHERE status = 0", [], |row| {
-                row.get(0)
-            })?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE status = 0 AND kind IN (0, 1, 2)",
+            [],
+            |row| row.get(0),
+        )?;
         Ok((version, count))
     })?;
 
+    close_project_inner(state);
+    crate::thumbs::prune_cache(&db, &base)?;
     let thumbs = Arc::new(ThumbPool::start(db.clone(), store.clone(), base.clone()));
     {
         // Stop a previously-open project's background generation before replacing.
@@ -376,8 +439,8 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
         store,
         base,
         thumbs,
-        Some(tree_uri.to_string()),
-    );
+        fresh_data.then(|| tree_uri.to_string()),
+    )?;
 
     Ok(ProjectInfo {
         display_name: project_display_name(tree_uri),
@@ -390,23 +453,24 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
 
 #[tauri::command]
 pub fn current_project(state: State<'_, AppState>) -> AppResult<Option<ProjectInfo>> {
-    let (db, root) = {
+    let db = {
         let guard = state.project.lock().unwrap();
         match guard.as_ref() {
             None => return Ok(None),
-            Some(p) => (p.db.clone(), p.root.clone()),
+            Some(p) => p.db.clone(),
         }
     };
     let db_path = db.path().to_string_lossy().into_owned();
     let (schema_version, file_count) = db.call(|conn| {
         let version = migrations::current_version(conn)?;
-        let count: i64 =
-            conn.query_row("SELECT COUNT(*) FROM files WHERE status = 0", [], |row| {
-                row.get(0)
-            })?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE status = 0 AND kind IN (0, 1, 2)",
+            [],
+            |row| row.get(0),
+        )?;
         Ok((version, count))
     })?;
-    let root_path = root.to_string_lossy().into_owned();
+    let root_path = db.project_root();
     Ok(Some(ProjectInfo {
         display_name: project_display_name(&root_path),
         root_path,
@@ -437,6 +501,20 @@ pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<(
     let (db, store, root, thumbs) = {
         let guard = state.project.lock().unwrap();
         let project = guard.as_ref().ok_or(AppError::NoProject)?;
+        if state
+            .scan_active
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return Err(AppError::Other(
+                "Cullant is still reading this project. Wait for it to finish.".into(),
+            ));
+        }
         (
             project.db.clone(),
             project.store.clone(),
@@ -444,8 +522,7 @@ pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<(
             project.thumbs.clone(),
         )
     };
-    spawn_scan(app, db, store, root, thumbs, None);
-    Ok(())
+    spawn_scan(app, db, store, root, thumbs, None)
 }
 
 /// Forget everything Cullant has stored about the open project and read the
@@ -540,6 +617,9 @@ fn close_project_inner(state: &AppState) {
     // Cache keys embed file ids, which are only unique within one project's
     // database, so the next project must not inherit any of them.
     crate::thumbs::memcache::clear();
+    state
+        .scan_active
+        .store(false, std::sync::atomic::Ordering::Release);
 }
 
 #[tauri::command]
