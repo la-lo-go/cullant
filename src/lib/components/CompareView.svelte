@@ -8,6 +8,7 @@
   import { formatColorLabel } from "../colorLabels";
   import { tags } from "../stores/tags.svelte";
   import { FIT_ZOOM, sameZoom, type ZoomSnapshot } from "../zoom";
+  import { tooltips } from "../tooltips";
   import ZoomImage from "./ZoomImage.svelte";
   import Filmstrip from "./Filmstrip.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -19,9 +20,11 @@
   import Layers from "@lucide/svelte/icons/layers";
   import Link2 from "@lucide/svelte/icons/link-2";
   import Unlink2 from "@lucide/svelte/icons/unlink-2";
+  import Focus from "@lucide/svelte/icons/focus";
   import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
+  const selectionDescription = "Current item. Actions use the current item or active selection, including paired files in mirror mode.";
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -68,9 +71,16 @@
 
   const focusedSide = $derived<Side>(pinnedSide === "left" ? "right" : "left");
   let activeZoomSide = $state<Side | null>(null);
-  const zoomSide = $derived<Side>(
-    activeZoomSide === "right" && !right ? "left" : activeZoomSide ?? focusedSide,
-  );
+  const zoomSide = $derived.by<Side | null>(() => {
+    const preferred = activeZoomSide ?? focusedSide;
+    const item = preferred === "left" ? left : right;
+    if (item && item.kind !== 2) return preferred;
+    if (left && left.kind !== 2) return "left";
+    if (right && right.kind !== 2) return "right";
+    return null;
+  });
+  const canSyncZoom = $derived(Boolean(left && right && left.kind !== 2 && right.kind !== 2));
+  const syncEnabled = $derived(canSyncZoom && settings.compareZoomSync);
 
   let paneZoom = $state<Record<Side, ZoomSnapshot>>({
     left: { ...FIT_ZOOM },
@@ -84,8 +94,8 @@
   let syncWasOn = false;
 
   $effect(() => {
-    const enabled = settings.compareZoomSync;
-    if (enabled && !syncWasOn) {
+    const enabled = syncEnabled;
+    if (enabled && !syncWasOn && zoomSide) {
       sharedZoom = { leader: zoomSide, zoom: { ...paneZoom[zoomSide] }, animate: false };
     }
     if (!enabled) sharedZoom = null;
@@ -95,7 +105,7 @@
   function recordZoom(side: Side, zoom: ZoomSnapshot, animate: boolean) {
     paneZoom[side] = { ...zoom };
     if (
-      settings.compareZoomSync &&
+      syncEnabled &&
       (sharedZoom?.leader !== side || sharedZoom.animate !== animate || !sameZoom(sharedZoom.zoom, zoom))
     ) {
       sharedZoom = { leader: side, zoom: { ...zoom }, animate };
@@ -182,11 +192,12 @@
   });
 </script>
 
-<div class="compare">
+<div class="compare" use:tooltips>
   <div class="panes" bind:this={panes}>
     <button
       class="back"
       title="Back to grid (Esc)"
+      aria-label="Back to grid"
       onclick={(e) => {
         view.mode = "grid";
         (e.currentTarget as HTMLElement).blur();
@@ -196,6 +207,7 @@
       class="back fullscreen-btn"
       class:active={view.fullscreen}
       title={view.fullscreen ? "Exit full screen" : "Full screen"}
+      aria-label={view.fullscreen ? "Exit full screen" : "Full screen"}
       onclick={(e) => {
         view.toggleFullscreen();
         (e.currentTarget as HTMLElement).blur();
@@ -203,19 +215,21 @@
     >
       {#if view.fullscreen}<Minimize size={16} />{:else}<Maximize size={16} />{/if}
     </button>
-    <button
-      class="back sync-btn"
-      class:active={settings.compareZoomSync}
-      title={settings.compareZoomSync ? "Stop syncing zoom" : "Sync zoom and pan"}
-      aria-label={settings.compareZoomSync ? "Stop syncing zoom" : "Sync zoom and pan"}
-      aria-pressed={settings.compareZoomSync}
-      onclick={(e) => {
-        settings.setCompareZoomSync(!settings.compareZoomSync);
-        e.currentTarget.blur();
-      }}
-    >
-      {#if settings.compareZoomSync}<Link2 size={15} />{:else}<Unlink2 size={15} />{/if}
-    </button>
+    {#if canSyncZoom}
+      <button
+        class="back sync-btn"
+        class:active={settings.compareZoomSync}
+        title={settings.compareZoomSync ? "Stop syncing zoom" : "Sync zoom and pan"}
+        aria-label={settings.compareZoomSync ? "Stop syncing zoom" : "Sync zoom and pan"}
+        aria-pressed={settings.compareZoomSync}
+        onclick={(e) => {
+          settings.setCompareZoomSync(!settings.compareZoomSync);
+          e.currentTarget.blur();
+        }}
+      >
+        {#if settings.compareZoomSync}<Link2 size={15} />{:else}<Unlink2 size={15} />{/if}
+      </button>
+    {/if}
     {#if left}
       <div
         class="pane"
@@ -223,7 +237,7 @@
         class:classification-target={focusedSide === "left"}
         class:pinned={pinnedSide === "left"}
         role="group"
-        aria-label={`Left comparison${focusedSide === "left" ? `: Selected ${left.name}.${left.ext}` : ""}${zoomSide === "left" ? ": keyboard zoom active" : ""}`}
+        aria-label={`Left comparison: ${left.name}.${left.ext}${focusedSide === "left" ? ": current item" : ""}${zoomSide === "left" ? ": keyboard zoom target" : ""}`}
         onpointerdown={() => { activeZoomSide = "left"; }}
         onfocusin={() => { activeZoomSide = "left"; }}
         onwheel={() => { activeZoomSide = "left"; }}
@@ -234,7 +248,7 @@
           keyboardActive={zoomSide === "left"}
           onPage={pagerFor("left")}
           onWheelPage={pagePair}
-          syncZoom={settings.compareZoomSync && sharedZoom && sharedZoom.leader !== "left"
+          syncZoom={syncEnabled && sharedZoom && sharedZoom.leader !== "left"
             ? sharedZoom.zoom
             : null}
           syncAnimate={sharedZoom?.animate ?? false}
@@ -244,6 +258,7 @@
           class="pin-btn"
           class:active={pinnedSide === "left"}
           title={pinnedSide === "left" ? "Unpin" : "Pin this photo"}
+          aria-label={pinnedSide === "left" ? "Unpin" : "Pin this item"}
           onclick={(e) => {
             togglePin("left", left);
             e.currentTarget.blur();
@@ -252,8 +267,12 @@
           {#if pinnedSide === "left"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
         <div class="target-status">
-          {#if focusedSide === "left"}<span class="selected-target">Selected: {left.name}.{left.ext}</span>{/if}
-          {#if zoomSide === "left"}<span class="zoom-target">Keyboard zoom</span>{/if}
+          {#if focusedSide === "left"}
+            <span class="selection-indicator" role="img" aria-label={selectionDescription} title={selectionDescription}></span>
+          {/if}
+          {#if zoomSide === "left"}
+            <span class="zoom-indicator" role="img" aria-label="Keyboard zoom target" title="Keyboard zoom target"><Focus size={11} /></span>
+          {/if}
         </div>
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(left.id)}
@@ -284,7 +303,7 @@
         class:classification-target={focusedSide === "right"}
         class:pinned={pinnedSide === "right"}
         role="group"
-        aria-label={`Right comparison${focusedSide === "right" ? `: Selected ${right.name}.${right.ext}` : ""}${zoomSide === "right" ? ": keyboard zoom active" : ""}`}
+        aria-label={`Right comparison: ${right.name}.${right.ext}${focusedSide === "right" ? ": current item" : ""}${zoomSide === "right" ? ": keyboard zoom target" : ""}`}
         onpointerdown={() => { activeZoomSide = "right"; }}
         onfocusin={() => { activeZoomSide = "right"; }}
         onwheel={() => { activeZoomSide = "right"; }}
@@ -295,7 +314,7 @@
           keyboardActive={zoomSide === "right"}
           onPage={pagerFor("right")}
           onWheelPage={pagePair}
-          syncZoom={settings.compareZoomSync && sharedZoom && sharedZoom.leader !== "right"
+          syncZoom={syncEnabled && sharedZoom && sharedZoom.leader !== "right"
             ? sharedZoom.zoom
             : null}
           syncAnimate={sharedZoom?.animate ?? false}
@@ -305,6 +324,7 @@
           class="pin-btn"
           class:active={pinnedSide === "right"}
           title={pinnedSide === "right" ? "Unpin" : "Pin this photo"}
+          aria-label={pinnedSide === "right" ? "Unpin" : "Pin this item"}
           onclick={(e) => {
             togglePin("right", right);
             e.currentTarget.blur();
@@ -313,8 +333,12 @@
           {#if pinnedSide === "right"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
         <div class="target-status">
-          {#if focusedSide === "right"}<span class="selected-target">Selected: {right.name}.{right.ext}</span>{/if}
-          {#if zoomSide === "right"}<span class="zoom-target">Keyboard zoom</span>{/if}
+          {#if focusedSide === "right"}
+            <span class="selection-indicator" role="img" aria-label={selectionDescription} title={selectionDescription}></span>
+          {/if}
+          {#if zoomSide === "right"}
+            <span class="zoom-indicator" role="img" aria-label="Keyboard zoom target" title="Keyboard zoom target"><Focus size={11} /></span>
+          {/if}
         </div>
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(right.id)}
@@ -432,8 +456,8 @@
   }
 
   .pane.classification-target {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
+    outline: 1px solid rgba(var(--accent-rgb), 0.5);
+    outline-offset: -1px;
   }
 
   .target-status {
@@ -442,23 +466,33 @@
     left: calc(10px + var(--safe-left));
     max-width: calc(100% - 20px - var(--safe-left));
     display: flex;
-    flex-wrap: wrap;
     gap: 4px;
-    font-size: 11px;
+    align-items: center;
     pointer-events: none;
     z-index: 4;
   }
 
   .target-status span {
-    background: rgba(0, 0, 0, 0.7);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background: rgba(0, 0, 0, 0.45);
     border-radius: 4px;
-    padding: 3px 6px;
-    overflow-wrap: anywhere;
+    pointer-events: auto;
   }
 
-  .selected-target {
-    color: var(--accent);
-    font-weight: 600;
+  .selection-indicator::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .zoom-indicator {
+    color: rgba(255, 255, 255, 0.65);
   }
 
   .pin-btn {
