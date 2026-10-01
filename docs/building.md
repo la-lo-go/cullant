@@ -118,14 +118,21 @@ an import is bound by reading files or by something else.
 
 ### Attached cameras and removable storage
 
-The Android manifest registers Cullant for USB attachment without a class filter so
-it appears in the system app chooser for cameras and removable storage. Many MTP
-cameras identify the device or interface as composite/vendor-specific instead of
-class 6 or 8, so a class-only filter silently excludes them. Cullant never claims the
-raw USB interface: after the user chooses it, a cold or warm attach opens the Storage
-Access Framework folder picker.
-On Android 10 or later, the picker starts at the removable volume when exactly one
-mounted removable volume is available; otherwise it opens at the normal root list.
+Cullant registers USB classes 6 (PTP cameras), 8 (storage), and 255 (vendor interfaces).
+Some cameras use a vendor interface for MTP. Android also checks interfaces in composite devices.
+Cullant does not register for every USB device.
+
+Android shows installed apps whose USB filters match the attached device.
+A saved default can cause Android to open one app without the chooser.
+Clear that default in Android's app settings to select another app.
+Cullant cannot change another app's filters or grant USB permission to it.
+See the [Android USB host guide](https://developer.android.com/develop/connectivity/usb/host).
+
+After the user selects Cullant, the app opens the Storage Access Framework folder picker.
+Cullant does not open a raw USB interface or request its permission.
+The folder picker grants read and write access to the selected folder.
+On Android 10 or later, the picker starts at the only mounted removable volume, if one exists.
+Otherwise, it shows the normal root list.
 
 Android does not provide a stable mapping from every `UsbDevice` to a
 `StorageVolume`. An internally mounted SD card does not emit the USB attach intent,

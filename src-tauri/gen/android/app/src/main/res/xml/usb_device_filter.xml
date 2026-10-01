@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Some cameras expose MTP through a vendor-specific composite interface,
-         so filtering only class 6/8 keeps Cullant out of Android's USB chooser.
-         The chooser is the user-facing filter; Cullant still opens Android's
-         document picker and never claims a raw USB interface itself. -->
-    <usb-device />
+    <!-- Android also matches composite interfaces. Some cameras use a vendor
+         interface for MTP. The system chooser owns USB permission. -->
+    <usb-device class="6" />
+    <usb-device class="8" />
+    <usb-device class="255" />
 </resources>
