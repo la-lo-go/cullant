@@ -185,13 +185,14 @@
                       </g>
                     </svg>
                   </span>
-                  <img
-                    class="peek peek-{i}"
-                    src={recentThumbUrl(index, slot, project.path)}
-                    alt=""
-                    loading="lazy"
-                    onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
-                  />
+                  <span class="peek peek-{i} thumbnail">
+                    <img
+                      src={recentThumbUrl(index, slot, project.path)}
+                      alt=""
+                      loading="lazy"
+                      onerror={(e) => { if (e.currentTarget.parentElement) e.currentTarget.parentElement.style.display = "none"; }}
+                    />
+                  </span>
                 {/each}
               {:else if st.state === "disconnected"}
                 <Unplug size={38} strokeWidth={1.25} />
@@ -304,10 +305,9 @@
     position: absolute;
     width: 84px;
     height: 84px;
-    object-fit: cover;
+    overflow: hidden;
     border-radius: 5px;
-    border: 2px solid var(--bg);
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
     transition: transform 180ms ease-out;
   }
 
@@ -374,6 +374,23 @@
     white-space: nowrap;
     direction: rtl;
     text-align: left;
+  }
+
+  .peek::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 2px solid rgba(255, 255, 255, 0.16);
+    box-shadow: inset 0 0 4px 2px rgba(255, 255, 255, 0.16);
+    border-radius: inherit;
+    box-sizing: border-box;
+    pointer-events: none;
+  }
+
+  .thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
 
   .meta {

@@ -760,7 +760,7 @@
       <div class="welcome">
         <img class="logo" src={homeLogoUrl} alt="" />
         <h1>Cullant</h1>
-        <p>Fast, keyboard-first photo culling</p>
+        <p>Find the shots worth keeping.</p>
         {#if recent.list.length === 0}
           <p class="hint">Point Cullant at a folder of photos or videos to start.</p>
         {/if}
