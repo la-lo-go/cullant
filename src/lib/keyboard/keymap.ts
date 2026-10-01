@@ -18,6 +18,7 @@ export type CommandId =
   | "flag.reject"
   | "flag.unflag"
   | "flag.toggle"
+  | "undo.rejection"
   | "label.red"
   | "label.yellow"
   | "label.green"
@@ -92,6 +93,7 @@ export const COMMANDS: CommandMeta[] = [
   { id: "flag.reject", title: "Flag as reject", category: "Rating & flags", classify: true },
   { id: "flag.unflag", title: "Remove flag", category: "Rating & flags", classify: true },
   { id: "flag.toggle", title: "Toggle pick flag", category: "Rating & flags", classify: true },
+  { id: "undo.rejection", title: "Undo last rejection", category: "Rating & flags" },
   { id: "label.red", title: "Red label", category: "Labels", classify: true },
   { id: "label.yellow", title: "Yellow label", category: "Labels", classify: true },
   { id: "label.green", title: "Green label", category: "Labels", classify: true },
@@ -148,6 +150,7 @@ export const DEFAULT_BINDINGS: Record<CommandId, string[]> = {
   "flag.reject": ["x"],
   "flag.unflag": ["u"],
   "flag.toggle": ["`"],
+  "undo.rejection": ["ctrl+z"],
   "label.red": ["6"],
   "label.yellow": ["7"],
   "label.green": ["8"],

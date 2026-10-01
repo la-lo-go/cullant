@@ -33,6 +33,12 @@ class TagsStore {
     if (changed) session.clampFocus();
   }
 
+  resetForNewProject() {
+    this.refreshRequest += 1;
+    this.all = [];
+    this.editorOpen = false;
+  }
+
   applyChanges(changes: TagChange[]) {
     if (changes.length === 0) return;
     const byFile = new Map<number, TagChange[]>();
@@ -52,10 +58,15 @@ class TagsStore {
         }
       }
     }
+    session.clampFocus();
   }
 }
 
 export const tags = new TagsStore();
 
-listen<TagChange[]>("filetags:changed", (e) => tags.applyChanges(e.payload));
-listen("tags:changed", () => tags.refresh());
+listen<{ projectRoot: string; changes: TagChange[] }>("filetags:changed", (e) => {
+  if (catalog.acceptEvent(e.payload)) tags.applyChanges(e.payload.changes);
+});
+listen<{ projectRoot: string }>("tags:changed", (e) => {
+  if (catalog.acceptEvent(e.payload)) void tags.refresh();
+});

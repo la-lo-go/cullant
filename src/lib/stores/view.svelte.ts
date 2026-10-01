@@ -15,6 +15,7 @@ export const MAX_SCALE = 6;
  */
 class ViewStore {
   mode = $state<ViewMode>("grid");
+  surveyDetail = $state(false);
   zoomed = $state(false);
   scale = $state(1);
   cx = $state(0.5);
@@ -108,5 +109,6 @@ $effect.root(() => {
   // loupe next time starts un-fullscreened by default.
   $effect(() => {
     if (view.mode === "grid" && view.fullscreen) view.fullscreen = false;
+    if (view.mode !== "survey" && view.surveyDetail) view.surveyDetail = false;
   });
 });

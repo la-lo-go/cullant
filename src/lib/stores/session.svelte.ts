@@ -12,7 +12,7 @@ import {
   type Targets,
 } from "../api";
 import { adaptiveGap, computeBursts } from "../bursts";
-import { dayKey, groupCompare, type GroupContext } from "../gridGroups";
+import { dayKey, groupCompare, groupDim, type GroupContext } from "../gridGroups";
 import {
   apertureBucket,
   focalBucket,
@@ -43,6 +43,47 @@ export type TypeFilter = "all" | "raw" | "jpeg" | "rawjpeg";
 export type OrientationFilter = "all" | "portrait" | "landscape" | "square";
 /** Burst membership filter; inert while the project has no burst. */
 export type BurstFilter = "all" | "burst" | "single";
+
+interface RejectionUndo {
+  generation: number;
+  epoch: number;
+  focusId: number | null;
+  flags: { id: number; flag: number }[];
+  deleteIds: number[];
+  compareWithId: number | null;
+}
+
+interface SurveyUndo extends Omit<RejectionUndo, "compareWithId"> {
+  ids: number[];
+  selection: SurveySelection;
+}
+
+interface SurveySelection {
+  ids: number[];
+  anchorId: number | null;
+  headId: number | null;
+}
+
+interface SurveyReview {
+  ids: number[];
+  keepIds: number[];
+  rejectIds: number[];
+  keepFiles: number;
+  rejectFiles: number;
+  asGroups: boolean;
+}
+
+function savedChoice<T>(value: unknown, choices: readonly T[], fallback: T): T {
+  return choices.includes(value as T) ? value as T : fallback;
+}
+
+function savedString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function savedRating(value: unknown): number {
+  return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 5 ? Number(value) : 0;
+}
 
 /** Shape of the per-project session blob persisted in the DB (migration v4).
  *  Every field is optional so blobs written by an older or newer build degrade
@@ -192,6 +233,16 @@ class SessionStore {
   shutterFilter = $state<string | null>(null);
   /** UTC capture day, `today`, or `last7days`; null = any. */
   dateFilter = $state<string | null>(null);
+  todayDay = $state(new Date().toISOString().slice(0, 10));
+  last7DaysStart = $derived(
+    new Date(Date.parse(`${this.todayDay}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10),
+  );
+
+  matchesDateFilter(day: string, filter = this.dateFilter): boolean {
+    if (filter === "today") return day === this.todayDay;
+    if (filter === "last7days") return day >= this.last7DaysStart && day <= this.todayDay;
+    return filter === null || day === filter;
+  }
   /** One specific burst to scope the grid to, by burst key; null = any.
    *  Deliberately NOT persisted: burst keys are derived from the current gap
    *  setting, so a restored one could name a burst this session never forms and
@@ -222,27 +273,13 @@ class SessionStore {
       (this.burstFilter !== "all" && this.hasBursts) ||
       // The five photographic-settings filters are photo-only, so they never
       // badge the button while the videos tab is active (matching typeFilter).
-      ((this.cameraFilter !== null ||
-        this.lensFilter !== null ||
-        this.isoFilter !== null ||
-        this.apertureFilter !== null ||
-        this.focalFilter !== null ||
-        this.shutterFilter !== null) &&
-        catalog.media === "photos"),
+      this.hasPhotoMetadataFilters,
   );
+  private hasPhotoMetadataFilters = $derived(catalog.media === "photos" &&
+    [this.cameraFilter, this.lensFilter, this.isoFilter, this.apertureFilter, this.focalFilter, this.shutterFilter].some((filter) => filter !== null));
 
   /** Clear the filter controls and keep the selected folders. */
   clearFilters() {
-  todayDay = $state(new Date().toISOString().slice(0, 10));
-  last7DaysStart = $derived(
-    new Date(Date.parse(`${this.todayDay}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10),
-  );
-
-  matchesDateFilter(day: string, filter = this.dateFilter): boolean {
-    if (filter === "today") return day === this.todayDay;
-    if (filter === "last7days") return day >= this.last7DaysStart && day <= this.todayDay;
-    return filter === null || day === filter;
-  }
     this.flagFilter = "all";
     this.minRating = 0;
     this.labelFilter = null;
@@ -274,9 +311,28 @@ class SessionStore {
   resetForNewProject() {
     this.folderFilter = null;
     this.clearFilters();
+    this.invalidateRejectionUndo();
+    this.clearFocus();
     this.groupBy = [];
     this.gridDensity = "medium";
     this.stickyGroupHeader = false;
+    this.shownAlt = {};
+    this.expandedBursts = new Set();
+    this.gridHiddenIds = new Set();
+    this.resetSurvey();
+    this.compareWithId = null;
+    this.pendingFocusKey = null;
+    this.pendingDeleteIds = new Set();
+    this.pendingCount = 0;
+    this.xmpDirtyCount = 0;
+    this.recoupleDialogFor = null;
+    this.commitDone = null;
+    this.commitDialogOpen = false;
+    this.moveDialogOpen = false;
+    this.moveDialogTargets = null;
+    this.filtersPanelOpen = false;
+    this.searchOpen = false;
+    this.viewPanelOpen = false;
   }
 
   /** Single-folder fallback for project sessions saved by older versions. */
@@ -337,6 +393,7 @@ class SessionStore {
 
   /** Multi-selection: file ids of selected items (reassigned on every change). */
   selectedIds = $state<Set<number>>(new Set());
+  gridHiddenIds = $state<Set<number>>(new Set());
   /** Index into `filtered` where the last explicit selection started (Shift ranges). */
   selectionAnchor = $state<number | null>(null);
   /** Far end of the last Shift range, so a keyboard extension continues from
@@ -442,6 +499,7 @@ class SessionStore {
 
   /** groupId -> member id the user flipped to with J (mirror mode only). */
   shownAlt = $state<Record<number, number>>({});
+  private itemById = $derived(new Map(catalog.items.map((item) => [item.id, item])));
 
   /** Fast lookup of a group's members. */
   groupIndex = $derived.by(() => {
@@ -558,7 +616,16 @@ class SessionStore {
   hasBursts = $derived(this.bursts.sizes.size > 0);
 
   /** What the grouping dimensions need beyond the item itself. */
-  groupContext = $derived<GroupContext>({ bursts: this.bursts });
+  groupContext = $derived.by<GroupContext>(() => {
+    const burstStarts = new Map<string, number>();
+    for (const item of catalog.items) {
+      const key = this.bursts.byFile.get(item.id);
+      if (!key) continue;
+      const time = item.captureTime ?? item.mtime;
+      burstStarts.set(key, Math.min(burstStarts.get(key) ?? time, time));
+    }
+    return { bursts: this.bursts, burstStarts };
+  });
 
   folderScopedItems = $derived.by(() => {
     let out: ItemLite[];
@@ -854,9 +921,20 @@ class SessionStore {
     return view.mode === "grid" ? this.gridCellStarts : null;
   }
 
+  private visibleNavigationStarts(): number[] | null {
+    if (view.mode === "survey") {
+      const wanted = new Set(this.surveyItems.map((item) => item.id));
+      return this.filtered.flatMap((item, index) => wanted.has(item.id) ? [index] : []);
+    }
+    if (view.mode !== "grid" || this.gridHiddenIds.size === 0) return null;
+    return (this.gridCellStarts ?? this.filtered.map((_, index) => index))
+      .filter((index) => !this.gridHiddenIds.has(this.filtered[index].id));
+  }
+
   /** Step within the focused photo's burst (`,` and `.`), stopping at its own
    *  ends rather than walking on into the next one. */
   stepBurst(delta: number) {
+    if (view.mode === "survey") return this.moveFocus(delta);
     const burst = this.focusedBurst;
     if (!burst) return;
     const next = burst.position - 1 + delta;
@@ -871,6 +949,13 @@ class SessionStore {
    *  eliminated — that is the whole point of the view, and why this is its own
    *  list rather than a filter over `filtered`. */
   surveyIds = $state<number[]>([]);
+  surveyRemainingIds = $state<number[]>([]);
+  surveyBatch = $state(1);
+  surveyBusy = $state(false);
+  surveyReview = $state<SurveyReview | null>(null);
+  surveyUndo = $state<SurveyUndo | null>(null);
+  private surveyEpoch = 0;
+  private surveyDetailSelection: SurveySelection | null = null;
 
   /** The survey's live items, in filtered order. An id that has left the filter
    *  (rejected while "Picks only" is on, say) simply drops out. */
@@ -884,9 +969,15 @@ class SessionStore {
    *  many they are too small to judge anyway. */
   static readonly MAX_SURVEY = 16;
 
-  /** How many photos were asked for, when that exceeded MAX_SURVEY; 0 when the
-   *  whole set fits. Surfaced in the view rather than truncating in silence. */
+  /** Total candidates in this Survey, including later batches. */
   surveyRequested = $state(0);
+  surveyRemainingCount = $derived.by(() => {
+    const remaining = new Set(this.surveyRemainingIds);
+    return this.filtered.filter((item) => remaining.has(item.id)).length;
+  });
+  surveyKeeperIds = $derived(this.surveyItems
+    .filter((item) => this.selectedIds.size > 0 ? this.selectedIds.has(item.id) : item.flag === 1)
+    .map((item) => item.id));
 
   /** Candidates for a survey, in filtered order: an explicit selection first,
    *  otherwise the focused photo's burst. Returns [] when there is nothing
@@ -902,13 +993,16 @@ class SessionStore {
 
   /** True when there is something to survey — drives whether the entry points
    *  offer it at all, so the command is never a silent no-op. */
-  canSurvey = $derived(this.selectedIds.size >= 2 || this.focusedBurst !== null);
+  canSurvey = $derived(this.surveyCandidates().length >= 2);
 
   openSurvey() {
+    if (view.mode === "survey") return this.leaveSurveyDetail();
     const all = this.surveyCandidates();
     if (all.length < 2) return;
-    this.surveyRequested = all.length > SessionStore.MAX_SURVEY ? all.length : 0;
+    this.resetSurvey();
+    this.surveyRequested = all.length;
     const ids = all.slice(0, SessionStore.MAX_SURVEY);
+    this.surveyRemainingIds = all.slice(SessionStore.MAX_SURVEY);
     this.surveyIds = ids;
     const first = this.filtered.findIndex((i) => i.id === ids[0]);
     if (first >= 0) {
@@ -923,26 +1017,96 @@ class SessionStore {
   }
 
   closeSurvey() {
+    this.resetSurvey();
+    view.mode = "grid";
+  }
+
+  private resetSurvey() {
+    this.surveyEpoch++;
     this.surveyIds = [];
     this.surveyRequested = 0;
-    view.mode = "grid";
+    this.surveyRemainingIds = [];
+    this.surveyBatch = 1;
+    this.surveyBusy = false;
+    this.surveyReview = null;
+    this.surveyUndo = null;
+    this.surveyDetailSelection = null;
+    view.surveyDetail = false;
+  }
+
+  nextSurveyBatch() {
+    if (this.surveyBusy) return;
+    const remaining = new Set(this.surveyRemainingIds);
+    const ids = this.filtered.filter((item) => remaining.has(item.id))
+      .slice(0, SessionStore.MAX_SURVEY).map((item) => item.id);
+    if (ids.length === 0) return;
+    const shown = new Set(ids);
+    this.surveyRemainingIds = this.surveyRemainingIds.filter((id) => !shown.has(id));
+    this.surveyIds = ids;
+    this.surveyBatch++;
+    this.surveyUndo = null;
+    this.surveyReview = null;
+    this.leaveSurveyDetail();
+    this.focusSurveyItem(ids[0]);
+  }
+
+  inspectSurvey() {
+    if (view.surveyDetail) return;
+    const id = this.focused?.id;
+    if (id === undefined || !this.surveyItems.some((item) => item.id === id)) return;
+    this.surveyDetailSelection = this.captureSurveySelection();
+    this.collapseSelection();
+    view.resetZoom();
+    view.surveyDetail = true;
+  }
+
+  leaveSurveyDetail(): boolean {
+    if (!view.surveyDetail) return false;
+    const selection = this.surveyDetailSelection;
+    this.surveyDetailSelection = null;
+    view.surveyDetail = false;
+    view.resetZoom();
+    if (selection) this.restoreSurveySelection(selection);
+    return true;
+  }
+
+  private captureSurveySelection(): SurveySelection {
+    return {
+      ids: [...this.selectedIds],
+      anchorId: this.filtered[this.selectionAnchor ?? -1]?.id ?? null,
+      headId: this.filtered[this.rangeHead ?? -1]?.id ?? null,
+    };
+  }
+
+  private restoreSurveySelection(selection: SurveySelection) {
+    if (view.surveyDetail) {
+      this.surveyDetailSelection = selection;
+      return;
+    }
+    const visible = new Set(this.surveyItems.map((item) => item.id));
+    this.selectedIds = new Set(selection.ids.filter((id) => visible.has(id)));
+    this.selectionAnchor = this.surveyIndexOf(selection.anchorId);
+    this.rangeHead = this.surveyIndexOf(selection.headId);
+  }
+
+  private surveyIndexOf(id: number | null): number | null {
+    const index = this.filtered.findIndex((item) => item.id === id);
+    return index >= 0 ? index : null;
   }
 
   /** Move focus to the next/previous survey candidate, stopping at the ends. */
   stepSurvey(delta: number) {
-    const items = this.surveyItems;
-    if (items.length === 0) return;
-    const current = items.findIndex((i) => i.id === this.focused?.id);
-    const next = Math.min(items.length - 1, Math.max(0, current + delta));
-    if (next === current) return;
-    const idx = this.filtered.findIndex((i) => i.id === items[next].id);
-    if (idx >= 0) this.focusedIndex = idx;
+    this.moveFocus(delta);
   }
 
   /** Focus a survey tile directly (click/tap). */
   focusSurveyItem(id: number) {
+    if (!this.surveyItems.some((item) => item.id === id)) return;
     const idx = this.filtered.findIndex((i) => i.id === id);
-    if (idx >= 0) this.focusedIndex = idx;
+    if (idx < 0) return;
+    this.collapseSelection();
+    this.focusedIndex = idx;
+    this.selectionAnchor = idx;
   }
 
   /** Take a photo out of the running. The survey narrows to the remainder and
@@ -957,7 +1121,9 @@ class SessionStore {
 
     const left = this.surveyItems;
     if (left.length === 0) {
-      this.closeSurvey();
+      this.focusedIndex = -1;
+      this.clearSelection();
+      this.leaveSurveyDetail();
       return;
     }
     // Prefer whatever slid into the vacated slot, else the new last one.
@@ -965,9 +1131,146 @@ class SessionStore {
     this.focusSurveyItem(target.id);
   }
 
+  private physicalTargetIds(t: Targets, items = catalog.items): number[] {
+    const ids = new Set(t.ids);
+    const groups = new Set(items.filter((item) => ids.has(item.id) && !item.decoupled).map((item) => item.groupId));
+    return items.filter((item) => ids.has(item.id) || (t.asGroups && !item.decoupled && groups.has(item.groupId)))
+      .map((item) => item.id);
+  }
+
+  targetFileCount(t: Targets): number {
+    return this.physicalTargetIds(t).length;
+  }
+
+  reviewSurveyKeepers() {
+    const keepIds = this.surveyKeeperIds;
+    const kept = new Set(keepIds);
+    const ids = this.surveyItems.map((item) => item.id);
+    const rejectIds = ids.filter((id) => !kept.has(id));
+    if (this.surveyBusy || keepIds.length === 0 || rejectIds.length === 0) return;
+    const asGroups = this.mirrorMode;
+    this.surveyReview = {
+      ids, keepIds, rejectIds, asGroups,
+      keepFiles: this.physicalTargetIds({ ids: keepIds, asGroups }).length,
+      rejectFiles: this.physicalTargetIds({ ids: rejectIds, asGroups }).length,
+    };
+  }
+
+  private surveySnapshotCurrent(snapshot: SurveyUndo): boolean {
+    return snapshot.generation === catalog.generation && snapshot.epoch === this.surveyEpoch && view.mode === "survey";
+  }
+
+  private async captureSurveyUndo(t: Targets): Promise<SurveyUndo | null> {
+    const generation = catalog.generation;
+    const epoch = this.surveyEpoch;
+    const ids = [...this.surveyIds];
+    const focusId = this.focused?.id ?? null;
+    const selection = this.surveyDetailSelection ?? this.captureSurveySelection();
+    const [items, pending] = await Promise.all([
+      api.queryItems(catalog.sort, catalog.media, catalog.sortDesc), api.listPending(),
+    ]);
+    const affected = new Set(this.physicalTargetIds(t, items));
+    const snapshot = {
+      generation, epoch, ids, focusId, selection,
+      flags: items.filter((item) => affected.has(item.id)).map((item) => ({ id: item.id, flag: item.flag })),
+      deleteIds: pending.filter((action) => action.action === "delete" && affected.has(action.fileId)).map((action) => action.fileId),
+    };
+    return this.surveySnapshotCurrent(snapshot) ? snapshot : null;
+  }
+
+  private async restoreSurveyFlags(snapshot: SurveyUndo): Promise<boolean> {
+    return this.restoreRejectionFlags(snapshot, () => this.surveySnapshotCurrent(snapshot));
+  }
+
+  private async restoreRejectionFlags(
+    snapshot: Pick<RejectionUndo, "flags" | "deleteIds">,
+    isCurrent: () => boolean,
+  ): Promise<boolean> {
+    for (const flag of [-1, 0, 1]) {
+      if (!isCurrent()) return false;
+      const ids = snapshot.flags.filter((state) => state.flag === flag).map((state) => state.id);
+      if (ids.length === 0) continue;
+      const states = await api.setFlag({ ids, asGroups: false }, flag);
+      if (!isCurrent()) return false;
+      this.applyStates(states);
+    }
+    const t = { ids: snapshot.flags.map((state) => state.id), asGroups: false };
+    if (!isCurrent()) return false;
+    await api.removePendingForFiles(t, "delete");
+    if (!isCurrent()) return false;
+    if (snapshot.deleteIds.length > 0) {
+      await api.enqueueAction({ ids: snapshot.deleteIds, asGroups: false }, "delete", null, "both");
+    }
+    return isCurrent();
+  }
+
+  async undoSurveyRejection() {
+    const snapshot = this.surveyUndo;
+    if (!snapshot || this.surveyBusy || !this.surveySnapshotCurrent(snapshot)) return;
+    this.surveyBusy = true;
+    try {
+      if (!await this.restoreSurveyFlags(snapshot)) return;
+      this.surveyIds = snapshot.ids;
+      this.surveyUndo = null;
+      this.clearSelection();
+      this.focusSurveyItem(snapshot.focusId ?? this.surveyItems[0]?.id ?? -1);
+      this.restoreSurveySelection(snapshot.selection);
+      await this.refreshPending();
+    } catch (error) {
+      if (this.surveySnapshotCurrent(snapshot)) await this.recoverWrite(error);
+    } finally {
+      if (snapshot.epoch === this.surveyEpoch) this.surveyBusy = false;
+    }
+  }
+
+  async applySurveyReview() {
+    const review = this.surveyReview;
+    if (!review || this.surveyBusy) return;
+    this.surveyReview = null;
+    const current = this.surveyItems.map((item) => item.id);
+    if (review.asGroups !== this.mirrorMode || current.join() !== review.ids.join()) return;
+    const epoch = this.surveyEpoch;
+    this.surveyBusy = true;
+    try {
+      const snapshot = await this.captureSurveyUndo({ ids: review.ids, asGroups: review.asGroups });
+      if (!snapshot) return;
+      this.surveyUndo = snapshot;
+      if (!await this.writeSurveyReviewFlags(review, snapshot)) return;
+      this.eliminateFromSurvey(review.rejectIds);
+      await this.refreshPending();
+    } catch (error) {
+      if (epoch === this.surveyEpoch) await this.recoverWrite(error);
+    } finally {
+      if (epoch === this.surveyEpoch) this.surveyBusy = false;
+    }
+  }
+
+  private async writeSurveyReviewFlags(review: SurveyReview, snapshot: SurveyUndo): Promise<boolean> {
+    if (!await this.writeFlag({ ids: review.keepIds, asGroups: review.asGroups }, 1) || !this.surveySnapshotCurrent(snapshot)) return false;
+    return await this.writeFlag({ ids: review.rejectIds, asGroups: review.asGroups }, -1) && this.surveySnapshotCurrent(snapshot);
+  }
+
+  private async rejectSurvey(t: Targets, event?: KeyboardEvent, override?: Targets) {
+    const epoch = this.surveyEpoch;
+    this.surveyBusy = true;
+    try {
+      const snapshot = await this.captureSurveyUndo(t);
+      if (!snapshot) return;
+      this.advanceFor(t, override, event);
+      this.surveyUndo = snapshot;
+      if (!await this.writeFlag(t, -1) || !this.surveySnapshotCurrent(snapshot)) return;
+      this.eliminateFromSurvey(t.ids);
+      await this.refreshPending();
+    } catch (error) {
+      if (epoch === this.surveyEpoch) await this.recoverWrite(error);
+    } finally {
+      if (epoch === this.surveyEpoch) this.surveyBusy = false;
+    }
+  }
+
   /** Flip which half of the focused pair is displayed (J). */
-  togglePairHalf() {
-    const item = this.focused;
+  togglePairHalf(override?: ItemLite) {
+    const item = override ?? this.focused;
     if (!item || item.groupSize < 2) return;
     const members = this.groupIndex.get(item.groupId) ?? [];
     const other = members.find((m) => m.id !== item.id);
@@ -1031,6 +1334,7 @@ class SessionStore {
    *  matching item loads. Best-effort: any error or missing/invalid blob leaves
    *  the defaults chosen at open time untouched. */
   async restoreSessionState() {
+    const generation = catalog.generation;
     try {
       if (!settings.rememberSession) return;
       let raw: string | null;
@@ -1039,6 +1343,7 @@ class SessionStore {
       } catch {
         return;
       }
+      if (generation !== catalog.generation) return;
       if (!raw) return;
       let s: SavedSession;
       try {
@@ -1046,42 +1351,46 @@ class SessionStore {
       } catch {
         return;
       }
-      if (s.gridDensity) this.gridDensity = s.gridDensity;
-      if (Array.isArray(s.groupBy)) this.groupBy = s.groupBy.filter((k) => typeof k === "string");
+      if (!s || typeof s !== "object" || Array.isArray(s)) return;
+      this.gridDensity = savedChoice(s.gridDensity, ["small", "medium", "large"] as const, "medium");
+      if (Array.isArray(s.groupBy)) this.groupBy = [...new Set(s.groupBy.filter((k) => typeof k === "string" && groupDim(k)))];
       if (typeof s.stickyGroupHeader === "boolean") this.stickyGroupHeader = s.stickyGroupHeader;
       const f = s.filters;
       if (f) {
-        if (f.flagFilter) this.flagFilter = f.flagFilter;
-        if (typeof f.minRating === "number") this.minRating = f.minRating;
-        this.labelFilter = f.labelFilter ?? null;
-        this.tagFilter = f.tagFilter ?? null;
-        this.nameFilter = f.nameFilter ?? "";
-        if (f.typeFilter) this.typeFilter = f.typeFilter;
-        this.extFilter = f.extFilter ?? null;
-        if (f.orientationFilter) this.orientationFilter = f.orientationFilter;
-        if (f.burstFilter) this.burstFilter = f.burstFilter;
-        this.cameraFilter = f.cameraFilter ?? null;
-        this.lensFilter = f.lensFilter ?? null;
-        this.isoFilter = f.isoFilter ?? null;
-        this.apertureFilter = f.apertureFilter ?? null;
-        this.focalFilter = f.focalFilter ?? null;
-        this.shutterFilter = f.shutterFilter ?? null;
-        this.folderFilter = f.folderFilter ?? null;
+        this.flagFilter = savedChoice(f.flagFilter, ["all", "pick", "reject", "unflagged", "anyflag", "notrejected"] as const, "all");
+        this.minRating = savedRating(f.minRating);
+        this.labelFilter = savedChoice<string | null>(f.labelFilter, ["Red", "Yellow", "Green", "Blue", "Purple"], null);
+        this.tagFilter = Number.isSafeInteger(f.tagFilter) && f.tagFilter! > 0 ? f.tagFilter! : null;
+        this.nameFilter = savedString(f.nameFilter) ?? "";
+        this.typeFilter = savedChoice(f.typeFilter, ["all", "raw", "jpeg", "rawjpeg"] as const, "all");
+        this.orientationFilter = savedChoice(f.orientationFilter, ["all", "portrait", "landscape", "square"] as const, "all");
+        this.burstFilter = savedChoice(f.burstFilter, ["all", "burst", "single"] as const, "all");
+        for (const key of ["extFilter", "cameraFilter", "lensFilter", "isoFilter", "apertureFilter", "focalFilter", "shutterFilter", "folderFilter", "dateFilter"] as const) {
+          this[key] = savedString(f[key]);
+        }
         folders.restoreScope(f.folderScope);
-        this.dateFilter = f.dateFilter ?? null;
       }
-      this.pendingFocusKey = s.focusKey ?? null;
+      this.pendingFocusKey = savedString(s.focusKey);
       // Sort/media re-query the catalog to reorder/reselect the visible items.
       if (s.sort || s.media || typeof s.sortDesc === "boolean") {
-        await catalog.applyRestoredView(s.sort, s.sortDesc, s.media);
+        const sort = savedChoice<SortKey | undefined>(s.sort, ["capture", "name", "size"], undefined);
+        const media = savedChoice<MediaTab | undefined>(s.media, ["photos", "videos"], undefined);
+        await catalog.applyRestoredView(sort, s.sortDesc, media);
       }
       this.clampFocus();
     } finally {
-      this.restoring = false;
+      if (generation === catalog.generation) this.restoring = false;
     }
   }
 
   clampFocus() {
+    if (view.mode === "survey") {
+      if (this.selectedIds.size > 0) return;
+      const items = this.surveyItems;
+      const item = items.find((candidate) => candidate.id === this.stickyFocusId) ?? items[0];
+      this.focusedIndex = item ? this.filtered.findIndex((candidate) => candidate.id === item.id) : -1;
+      return;
+    }
     // Identity first. A filter that hides the focused photo and is then relaxed
     // has to come back to that photo — clamping alone silently moved the focus
     // to whichever item had inherited the index, and a filter matching nothing
@@ -1164,7 +1473,8 @@ class SessionStore {
    *  key event to invert it. Read by the views that have to advance something
    *  other than the focus — compare's second pane cannot go through
    *  `maybeAdvance`, which only ever moves the focus. */
-  autoAdvanceActive = $derived(this.autoAdvancePref || (settings.fastCulling && view.mode !== "grid"));
+  capsLockActive = $state(false);
+  autoAdvanceActive = $derived(this.capsLockActive || this.autoAdvancePref || (settings.fastCulling && view.mode !== "grid"));
 
   /** Step compare's second pane through the filtered order on its own, leaving
    *  the focus (and therefore the other pane) exactly where it is. */
@@ -1193,6 +1503,14 @@ class SessionStore {
   private nextFocusIndex(delta: number): number | null {
     const max = this.filtered.length - 1;
     if (max < 0) return null;
+    const visible = this.visibleNavigationStarts();
+    if (visible) {
+      if (visible.length === 0) return null;
+      if (this.focusedIndex < 0) return visible[0];
+      const at = visible.findIndex((index) => index >= this.focusedIndex);
+      const next = Math.min(visible.length - 1, Math.max(0, at + delta));
+      return visible[next] === this.focusedIndex ? null : visible[next];
+    }
     if (this.focusedIndex < 0) return 0;
 
     const starts = this.activeCellStarts();
@@ -1236,6 +1554,12 @@ class SessionStore {
 
   focusEdge(end: boolean) {
     this.collapseSelection();
+    const visible = this.visibleNavigationStarts();
+    if (visible) {
+      this.focusedIndex = (end ? visible.at(-1) : visible[0]) ?? -1;
+      this.selectionAnchor = this.focusedIndex >= 0 ? this.focusedIndex : null;
+      return;
+    }
     const starts = this.activeCellStarts();
     if (!end || this.filtered.length === 0) this.focusedIndex = 0;
     else if (starts && starts.length > 0) this.focusedIndex = starts[starts.length - 1];
@@ -1258,15 +1582,17 @@ class SessionStore {
    *  the first two: `right` derives as `focusedIndex + 1` when unpinned). A
    *  no-op when something is already focused. */
   ensureFocus() {
+    if (view.mode === "survey") return this.clampFocus();
     if (this.focusedIndex === -1 && this.filtered.length > 0) {
-      this.focusedIndex = 0;
-      this.selectionAnchor = 0;
+      this.focusedIndex = this.visibleNavigationStarts()?.[0] ?? (this.gridHiddenIds.size > 0 ? -1 : 0);
+      this.selectionAnchor = this.focusedIndex >= 0 ? this.focusedIndex : null;
     }
   }
 
 
   /** Plain click: focus only, drop any selection. */
   selectOnly(index: number) {
+    if (view.mode === "survey" && !this.surveyItems.some((item) => item.id === this.filtered[index]?.id)) return;
     this.focusedIndex = index;
     this.selectionAnchor = index;
     if (this.selectedIds.size > 0) this.selectedIds = new Set();
@@ -1277,7 +1603,8 @@ class SessionStore {
    *  selection, so a surviving focus outline would claim a cell the next action
    *  is not going to hit. */
   selectIds(ids: Iterable<number>) {
-    const next = new Set(ids);
+    const allowed = new Set(this.selectionItems().map((item) => item.id));
+    const next = new Set([...ids].filter((id) => allowed.has(id)));
     if (next.size === 0) return;
     this.selectedIds = next;
     this.focusedIndex = -1;
@@ -1287,7 +1614,7 @@ class SessionStore {
    *  collapsed burst toggles as a block — every frame it hides goes with it. */
   toggleSelect(index: number) {
     const item = this.filtered[index];
-    if (!item) return;
+    if (!item || !this.selectionItems().some((candidate) => candidate.id === item.id)) return;
     const ids = this.cellIdsAt(index);
     const wasEmpty = this.selectedIds.size === 0;
     const next = new Set(this.selectedIds);
@@ -1321,16 +1648,17 @@ class SessionStore {
       hi = this.gridCellEnd(this.gridCellAt(hi)) - 1;
     }
     const next = additive ? new Set(this.selectedIds) : new Set<number>();
+    const allowed = new Set(this.selectionItems().map((item) => item.id));
     for (let i = lo; i <= hi; i++) {
       const item = this.filtered[i];
-      if (item) next.add(item.id);
+      if (item && allowed.has(item.id)) next.add(item.id);
     }
     this.selectedIds = next;
   }
 
   /** Shift+click: contiguous range from the anchor. `additive` = Ctrl held. */
   rangeSelect(index: number, additive = false) {
-    if (this.filtered.length === 0) return;
+    if (!this.selectionItems().some((item) => item.id === this.filtered[index]?.id)) return;
     const anchor = this.selectionAnchor ?? this.focusedIndex;
     this.fillRange(anchor, index, additive);
     // Drop focus while a selection exists (see toggleSelect); keep the anchor.
@@ -1356,6 +1684,13 @@ class SessionStore {
   extendSelection(delta: number) {
     if (this.filtered.length === 0) return;
     const head = this.selectionHeadIndex();
+    const visible = this.visibleNavigationStarts();
+    if (visible) {
+      const at = visible.findIndex((index) => index >= head);
+      const next = visible[Math.min(visible.length - 1, Math.max(0, at + delta))];
+      if (next !== undefined && next !== head) this.extendTo(next);
+      return;
+    }
     const starts = this.activeCellStarts();
     if (starts) {
       const cell = this.gridCellAt(head);
@@ -1373,6 +1708,12 @@ class SessionStore {
   /** Shift+Home / Shift+End: extend the selection to the first/last item. */
   extendToEdge(end: boolean) {
     if (this.filtered.length === 0) return;
+    const visible = this.visibleNavigationStarts();
+    if (visible) {
+      const next = end ? visible.at(-1) : visible[0];
+      if (next !== undefined) this.extendTo(next);
+      return;
+    }
     this.extendTo(end ? this.filtered.length - 1 : 0);
   }
 
@@ -1391,7 +1732,7 @@ class SessionStore {
   }
 
   selectAll() {
-    this.selectedIds = new Set(this.filtered.map((i) => i.id));
+    this.selectedIds = new Set(this.selectionItems().map((item) => item.id));
     // No focus while a selection exists (see toggleSelect).
     this.focusedIndex = -1;
   }
@@ -1399,7 +1740,7 @@ class SessionStore {
   /** Select everything the current selection leaves out. */
   invertSelection() {
     const next = new Set<number>();
-    for (const item of this.filtered) {
+    for (const item of this.selectionItems()) {
       if (!this.selectedIds.has(item.id)) next.add(item.id);
     }
     this.selectedIds = next;
@@ -1428,12 +1769,109 @@ class SessionStore {
     this.clampFocus();
   }
 
-  private targets(): Targets | null {
+  private selectionItems(): ItemLite[] {
+    return view.mode === "survey" ? this.surveyItems : this.filtered.filter((item) => !this.gridHiddenIds.has(item.id));
+  }
+
+  private directTargetIds(): number[] {
+    return this.selectedIds.size > 0 ? [...this.selectedIds] : this.focused ? [this.focused.id] : [];
+  }
+
+  private surveyTargets(override?: Targets): Targets | null {
+    if (this.surveyBusy || this.surveyReview) return null;
+    const items = view.surveyDetail ? this.surveyItems.filter((item) => item.id === this.focused?.id) : this.surveyItems;
+    const allowed = new Set(items.map((item) => item.id));
+    const wanted = override?.ids ?? (view.surveyDetail ? items.map((item) => item.id) : this.directTargetIds());
+    const ids = wanted.filter((id) => allowed.has(id));
+    return ids.length > 0 ? { ids, asGroups: override?.asGroups ?? this.mirrorMode } : null;
+  }
+
+  private invalidateSurveyUndo(t: Targets) {
+    const affected = new Set(this.physicalTargetIds(t));
+    if (this.surveyUndo?.flags.some((state) => affected.has(state.id))) this.surveyUndo = null;
+    if (this.lastRejection?.flags.some((state) => affected.has(state.id))) this.invalidateRejectionUndo();
+  }
+
+  private lastRejection = $state<RejectionUndo | null>(null);
+  private rejectionBusy = $state(false);
+  private rejectionEpoch = 0;
+
+  invalidateRejectionUndo() {
+    this.rejectionEpoch++;
+    this.lastRejection = null;
+    this.rejectionBusy = false;
+    this.surveyUndo = null;
+  }
+
+  private rejectionSnapshotCurrent(snapshot: RejectionUndo): boolean {
+    return snapshot.generation === catalog.generation && snapshot.epoch === this.rejectionEpoch;
+  }
+
+  private async captureRejectionUndo(t: Targets): Promise<RejectionUndo | null> {
+    const generation = catalog.generation;
+    const epoch = this.rejectionEpoch;
+    const focusId = this.focused?.id ?? null;
+    const compareWithId = this.compareWithId;
+    const [items, pending] = await Promise.all([
+      api.queryItems(catalog.sort, catalog.media, catalog.sortDesc), api.listPending(),
+    ]);
+    const affected = new Set(this.physicalTargetIds(t, items));
+    const snapshot = {
+      generation, epoch, focusId, compareWithId,
+      flags: items.filter((item) => affected.has(item.id)).map((item) => ({ id: item.id, flag: item.flag })),
+      deleteIds: pending.filter((action) => action.action === "delete" && affected.has(action.fileId)).map((action) => action.fileId),
+    };
+    return this.rejectionSnapshotCurrent(snapshot) ? snapshot : null;
+  }
+
+  async undoLastRejection() {
+    const snapshot = this.lastRejection;
+    if (!snapshot || !this.canUndoRejection) return;
+    this.rejectionBusy = true;
+    try {
+      if (!await this.restoreRejectionFlags(snapshot, () => this.rejectionSnapshotCurrent(snapshot))) return;
+      this.lastRejection = null;
+      const index = this.filtered.findIndex((item) => item.id === snapshot.focusId);
+      if (index >= 0) {
+        this.clearSelection();
+        this.focusedIndex = index;
+        this.compareWithId = snapshot.compareWithId;
+      }
+      await this.refreshPending();
+    } catch (error) {
+      if (this.rejectionSnapshotCurrent(snapshot)) await this.recoverWrite(error);
+    } finally {
+      if (this.rejectionSnapshotCurrent(snapshot)) this.rejectionBusy = false;
+    }
+  }
+
+  private async rejectWithRecovery(t: Targets, event?: KeyboardEvent, override?: Targets) {
+    const epoch = ++this.rejectionEpoch;
+    this.lastRejection = null;
+    this.rejectionBusy = true;
+    try {
+      const snapshot = await this.captureRejectionUndo(t);
+      if (!snapshot) return;
+      this.advanceFor(t, override, event);
+      if (!await this.writeFlag(t, -1, () => this.rejectionSnapshotCurrent(snapshot))) return;
+      this.lastRejection = snapshot;
+      await this.refreshPending();
+    } catch (error) {
+      if (epoch === this.rejectionEpoch) await this.recoverWrite(error);
+    } finally {
+      if (epoch === this.rejectionEpoch) this.rejectionBusy = false;
+    }
+  }
+
+  targets(override?: Targets): Targets | null {
+    if (view.mode === "survey") return this.surveyTargets(override);
+    if (override) return override;
     if (this.selectedIds.size > 0) {
-      return { ids: [...this.selectedIds], asGroups: this.mirrorMode };
+      const ids = [...this.selectedIds].filter((id) => !this.gridHiddenIds.has(id));
+      return ids.length > 0 ? { ids, asGroups: this.mirrorMode } : null;
     }
     const item = this.focused;
-    if (!item) return null;
+    if (!item || (view.mode === "grid" && this.gridHiddenIds.has(item.id))) return null;
     // A collapsed burst cell stands for every frame under it, so a rating, a
     // flag or a tag applied to the stack lands on the whole burst.
     const ids = this.cellIdsAt(this.focusedIndex);
@@ -1454,6 +1892,34 @@ class SessionStore {
         item.orientation = s.orientation;
       }
     }
+    this.clampFocus();
+  }
+
+  private async classify(t: Targets, patch: Partial<CullState>, run: () => Promise<CullState[]>): Promise<boolean> {
+    const generation = catalog.generation;
+    const previous = t.ids.map((id) => this.localGuess(id, {}));
+    this.applyStates(t.ids.map((id) => this.localGuess(id, patch)));
+    try {
+      const states = await run();
+      if (generation !== catalog.generation) return false;
+      this.applyStates(states);
+      return true;
+    } catch (error) {
+      if (generation !== catalog.generation) return false;
+      this.applyStates(previous);
+      await this.recoverWrite(error);
+      return false;
+    }
+  }
+
+  private async recoverWrite(error: unknown) {
+    const generation = catalog.generation;
+    try {
+      await catalog.refresh();
+    } catch {
+      // Keep the write error when recovery also fails.
+    }
+    if (generation === catalog.generation) catalog.error = String(error);
   }
 
   private maybeAdvance(event?: KeyboardEvent) {
@@ -1481,31 +1947,39 @@ class SessionStore {
   }
 
   async rate(rating: number, event?: KeyboardEvent, override?: Targets) {
-    const t = override ?? this.targets();
+    const t = this.targets(override);
     if (!t) return;
-    this.applyStates(t.ids.map((id) => this.localGuess(id, { rating })));
     this.advanceFor(t, override, event);
-    this.applyStates(await api.setRating(t, rating));
+    await this.classify(t, { rating }, () => api.setRating(t, rating));
   }
 
   async flag(flag: number, event?: KeyboardEvent, override?: Targets) {
-    const t = override ?? this.targets();
-    if (!t) return;
-    this.applyStates(t.ids.map((id) => this.localGuess(id, { flag })));
+    const t = this.targets(override);
+    if (!t || this.rejectionBusy) return;
+    if (flag === -1 && view.mode === "survey") return this.rejectSurvey(t, event, override);
+    this.invalidateSurveyUndo(t);
+    if (flag === -1 && view.mode !== "grid") return this.rejectWithRecovery(t, event, override);
     this.advanceFor(t, override, event);
-    this.applyStates(await api.setFlag(t, flag));
+    if (!await this.writeFlag(t, flag)) return;
+    await this.refreshPending();
+  }
+
+  private async writeFlag(t: Targets, flag: number, isCurrent: () => boolean = () => true): Promise<boolean> {
+    const generation = catalog.generation;
+    const current = () => generation === catalog.generation && isCurrent();
+    if (!current() || !await this.classify(t, { flag }, () => api.setFlag(t, flag)) || !current()) return false;
     // Invariant: reject flag = queued delete. Every flag write funnels through
     // here, so this is the single place that keeps the two in sync: rejecting
     // enqueues a delete, un-rejecting/picking removes it. Same Targets as the
     // flag write, so the backend pair fan-out matches.
-    if (flag === -1) await api.enqueueAction(t, "delete", null, "both");
-    else await api.removePendingForFiles(t, "delete");
-    // In the survey, rejecting is how you eliminate: the photo leaves the
-    // running and the survivors grow. Hooked here rather than in the view so it
-    // holds for every route to a reject — key, action bar or touch.
-    if (flag === -1 && view.mode === "survey") this.eliminateFromSurvey(t.ids);
-    // The pending:changed listener refreshes too; this keeps ordering explicit.
-    await this.refreshPending();
+    try {
+      if (flag === -1) await api.enqueueAction(t, "delete", null, "both");
+      else await api.removePendingForFiles(t, "delete");
+    } catch (error) {
+      if (generation === catalog.generation) await this.recoverWrite(error);
+      return false;
+    }
+    return current();
   }
 
   async toggleFlag(event?: KeyboardEvent) {
@@ -1520,9 +1994,8 @@ class SessionStore {
     const item = this.focused;
     // Pressing the same label key again clears it (Lightroom behaviour).
     const next = item && item.label === label ? null : label;
-    this.applyStates(t.ids.map((id) => this.localGuess(id, { label: next })));
     this.maybeAdvance(event);
-    this.applyStates(await api.setLabel(t, next));
+    await this.classify(t, { label: next }, () => api.setLabel(t, next));
   }
 
   /** Apply a label (null clears) exactly as given — no toggle. The bars use
@@ -1530,13 +2003,12 @@ class SessionStore {
    *  they display, unlike the keyboard path (`label`), which toggles off the
    *  focused item Lightroom-style. */
   async setLabel(label: string | null, override?: Targets) {
-    const t = override ?? this.targets();
+    const t = this.targets(override);
     if (!t) return;
-    this.applyStates(t.ids.map((id) => this.localGuess(id, { label })));
     // Fast culling advances on any classification from the bars too, matching the
     // keyboard `label()` path. No-ops outside fast culling / outside loupe-compare.
     this.advanceFor(t, override);
-    this.applyStates(await api.setLabel(t, label));
+    await this.classify(t, { label }, () => api.setLabel(t, label));
   }
 
   /** Wipe ALL classification off the current targets in one action: rating,
@@ -1546,13 +2018,22 @@ class SessionStore {
    *  cull step. */
   async clearClassification() {
     const t = this.targets();
-    if (!t) return;
-    this.applyStates(t.ids.map((id) => this.localGuess(id, { rating: 0, flag: 0, label: null })));
-    this.applyStates(await api.setRating(t, 0));
-    this.applyStates(await api.setFlag(t, 0));
-    this.applyStates(await api.setLabel(t, null));
-    await api.removePendingForFiles(t, "delete");
-    tags.applyChanges(await api.clearTaskTags(t));
+    if (!t || this.rejectionBusy) return;
+    this.invalidateSurveyUndo(t);
+    const generation = catalog.generation;
+    if (!await this.classify(t, { rating: 0 }, () => api.setRating(t, 0))) return;
+    if (!await this.classify(t, { flag: 0 }, () => api.setFlag(t, 0))) return;
+    if (!await this.classify(t, { label: null }, () => api.setLabel(t, null))) return;
+    try {
+      await api.removePendingForFiles(t, "delete");
+      if (generation !== catalog.generation) return;
+      const changes = await api.clearTaskTags(t);
+      if (generation !== catalog.generation) return;
+      tags.applyChanges(changes);
+    } catch (error) {
+      if (generation === catalog.generation) await this.recoverWrite(error);
+      return;
+    }
     await this.refreshPending();
   }
 
@@ -1560,31 +2041,41 @@ class SessionStore {
    *  The new orientation comes back from the backend instead of being guessed
    *  locally, so the EXIF rotation table lives in exactly one place. */
   async rotate(steps: number, override?: Targets) {
-    const t = override ?? this.targets();
+    const t = this.targets(override);
     if (!t) return;
+    const generation = catalog.generation;
     const previous = t.ids.map((id) => this.localGuess(id, {}));
     this.applyStates(
       t.ids.map((id) => {
-        const current = catalog.items.find((item) => item.id === id);
+        const current = this.itemById.get(id);
         return this.localGuess(id, {
           orientation: rotatedOrientation(current?.orientation ?? null, steps),
         });
       }),
     );
     try {
-      this.applyStates(await api.rotate(t, steps));
+      const states = await api.rotate(t, steps);
+      if (generation === catalog.generation) this.applyStates(states);
     } catch (error) {
+      if (generation !== catalog.generation) return;
       this.applyStates(previous);
-      throw error;
+      await this.recoverWrite(error);
     }
   }
 
   /** Toggle a task tag on the focused photo (fan-out included). */
   async toggleTag(tagId: number, event?: KeyboardEvent, override?: Targets) {
-    const t = override ?? this.targets();
+    const t = this.targets(override);
     if (!t) return;
+    const generation = catalog.generation;
     this.advanceFor(t, override, event);
-    tags.applyChanges(await api.toggleTaskTag(t, tagId));
+    try {
+      const changes = await api.toggleTaskTag(t, tagId);
+      if (generation !== catalog.generation) return;
+      tags.applyChanges(changes);
+    } catch (error) {
+      if (generation === catalog.generation) await this.recoverWrite(error);
+    }
   }
 
   /** File ids with a queued delete (for grid badges). */
@@ -1595,7 +2086,10 @@ class SessionStore {
    *  label edit leaves nothing in the queue yet still needs a commit. */
   xmpDirtyCount = $state(0);
   commitDialogOpen = $state(false);
+  canUndoRejection = $derived(this.lastRejection !== null && !this.rejectionBusy &&
+    this.lastRejection.generation === catalog.generation && !this.commitDialogOpen);
   moveDialogOpen = $state(false);
+  moveDialogTargets = $state<Targets | null>(null);
   /** Result of the most recent commit, surfaced as a popup AFTER the commit
    *  dialog closes (null = nothing to announce). */
   commitDone = $state<{ title: string; message: string } | null>(null);
@@ -1605,19 +2099,24 @@ class SessionStore {
   hasCommitWork = $derived(this.pendingCount > 0 || this.xmpDirtyCount > 0);
 
   async refreshPending() {
+    const generation = catalog.generation;
+    const request = ++this.pendingRequest;
     const [pending, xmpDirty] = await Promise.all([api.listPending(), api.xmpDirtyCount()]);
+    if (generation !== catalog.generation || request !== this.pendingRequest) return;
     this.pendingCount = pending.length;
     this.xmpDirtyCount = xmpDirty;
     this.pendingDeleteIds = new Set(
       pending.filter((p) => p.action === "delete").map((p) => p.fileId)
     );
   }
+  private pendingRequest = 0;
 
   /** Reconcile rejects made before the reject-flag/delete-queue sync existed:
    *  enqueue a delete for every file in the catalog still at flag -1. Runs once
    *  per project open; enqueueAction upserts, so it's idempotent. Queries both
    *  media tabs (the full catalog) rather than the currently loaded one. */
   async syncRejectedToQueue() {
+    const generation = catalog.generation;
     const ids: number[] = [];
     // The active tab is already loaded, and this runs during the open, when the
     // storage and the DB are at their busiest — so read the flags off what is
@@ -1626,18 +2125,28 @@ class SessionStore {
     const other = catalog.media === "photos" ? "videos" : "photos";
     if (catalog.mediaCounts[other] > 0) {
       const items = await api.queryItems("capture", other, false);
+      if (generation !== catalog.generation) return;
       for (const i of items) if (i.flag === -1) ids.push(i.id);
     }
     if (ids.length === 0) return;
-    await api.enqueueAction({ ids, asGroups: true }, "delete", null, "both");
+    await api.enqueueAction({ ids, asGroups: false }, "delete", null, "both");
+    if (generation !== catalog.generation) return;
     await this.refreshPending();
   }
 
   /** Queue a delete for the focused photo. Scope picks pair members. */
   async queueDelete(scope: PairScope, event?: KeyboardEvent, override?: Targets) {
-    const t = override ?? this.targets();
-    if (!t) return;
-    await api.enqueueAction(t, "delete", null, scope);
+    const t = this.targets(override);
+    if (!t || this.rejectionBusy) return;
+    this.invalidateSurveyUndo(t);
+    const generation = catalog.generation;
+    try {
+      await api.enqueueAction(t, "delete", null, scope);
+    } catch (error) {
+      if (generation === catalog.generation) await this.recoverWrite(error);
+      return;
+    }
+    if (generation !== catalog.generation) return;
     this.advanceFor(t, override, event);
     await this.refreshPending();
   }
@@ -1646,8 +2155,8 @@ class SessionStore {
   recoupleDialogFor = $state<number | null>(null);
 
   /** Ctrl+J: decouple a linked pair, or start recoupling a split one. */
-  async togglePairCoupling() {
-    const item = this.focused;
+  async togglePairCoupling(override?: ItemLite) {
+    const item = override ?? this.focused;
     if (!item || item.groupSize < 2) return;
     if (item.decoupled) {
       this.recoupleDialogFor = item.groupId;
@@ -1667,11 +2176,17 @@ class SessionStore {
    *  authoritative rows, so this reconciles like any other state write and needs
    *  no catalog refresh. */
   async syncPair(groupId: number, syncFrom: SyncFrom) {
-    this.applyStates(await api.syncPairState(groupId, syncFrom));
+    const generation = catalog.generation;
+    try {
+      const states = await api.syncPairState(groupId, syncFrom);
+      if (generation === catalog.generation) this.applyStates(states);
+    } catch (error) {
+      if (generation === catalog.generation) await this.recoverWrite(error);
+    }
   }
 
   private localGuess(id: number, patch: Partial<CullState>): CullState {
-    const current = catalog.items.find((i) => i.id === id);
+    const current = this.itemById.get(id);
     return {
       id,
       rating: patch.rating ?? current?.rating ?? 0,
@@ -1700,11 +2215,19 @@ $effect.root(() => {
   });
 
   $effect(() => {
-    const present = new Set(session.filtered.map((i) => i.id));
+    const items = view.mode === "survey" ? session.surveyItems : session.filtered;
+    const present = new Set(items.map((i) => i.id));
     const kept = [...session.selectedIds].filter((id) => present.has(id));
     if (kept.length !== session.selectedIds.size) {
       session.selectedIds = new Set(kept);
     }
+  });
+
+  $effect(() => {
+    if (view.mode !== "survey") return;
+    void session.surveyItems;
+    void session.selectedIds.size;
+    untrack(() => session.clampFocus());
   });
 
   // Any view-mode transition (grid <-> loupe/compare, either direction) drops
@@ -1781,17 +2304,27 @@ export async function flushSessionSave() {
 
 // Multi-window / background changes reconcile through the same merge.
 let workRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-listen<CullState[]>("state:changed", (e) => {
-  session.applyStates(e.payload);
+listen<{ projectRoot: string; states: CullState[] }>("state:changed", (e) => {
+  if (!catalog.acceptEvent(e.payload)) return;
+  const generation = catalog.generation;
+  session.applyStates(e.payload.states);
   // A rating/label edit dirties XMP without queueing a pending action, so the
   // queue's own `pending:changed` never fires — refresh the commit-work
   // indicator here too, debounced so a fast-culling key burst is one query.
   if (workRefreshTimer !== null) clearTimeout(workRefreshTimer);
   workRefreshTimer = setTimeout(() => {
     workRefreshTimer = null;
-    void session.refreshPending();
+    if (generation === catalog.generation) void session.refreshPending();
   }, 250);
 });
-listen("groups:changed", () => catalog.refresh());
-listen("pending:changed", () => session.refreshPending());
-listen("commit:done", () => catalog.refresh());
+listen<{ projectRoot: string }>("groups:changed", (e) => {
+  if (catalog.acceptEvent(e.payload)) void catalog.refresh();
+});
+listen<{ projectRoot: string }>("pending:changed", (e) => {
+  if (catalog.acceptEvent(e.payload)) void session.refreshPending();
+});
+listen<{ projectRoot: string }>("commit:done", (e) => {
+  if (!catalog.acceptEvent(e.payload)) return;
+  session.invalidateRejectionUndo();
+  void catalog.refresh();
+});

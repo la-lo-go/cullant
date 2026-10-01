@@ -42,15 +42,21 @@
   const WARM_DWELL_MS = 300;
   $effect(() => {
     const idx = session.focusedIndex;
+    const warming: HTMLImageElement[] = [];
     const timer = setTimeout(() => {
       for (const off of WARM_OFFSETS) {
         const n = session.filtered[idx + off];
         if (n && n.kind !== 2) {
-          new Image().src = previewUrl(n);
+          const image = new Image();
+          warming.push(image);
+          image.src = previewUrl(n);
         }
       }
     }, WARM_DWELL_MS);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      for (const image of warming) image.src = "";
+    };
   });
 
   let stage = $state<HTMLElement | null>(null);

@@ -28,6 +28,7 @@ import {
 } from "./metadataFacets";
 import { LABELS, session } from "./stores/session.svelte";
 import { tags } from "./stores/tags.svelte";
+import { formatColorLabel } from "./colorLabels";
 import { view } from "./stores/view.svelte";
 
 import ArrowDownUp from "@lucide/svelte/icons/arrow-down-up";
@@ -160,7 +161,7 @@ function classifyBlock(item: ItemLite): MenuNode[] {
         },
         ...LABELS.map((l) => ({
           kind: "item" as const,
-          label: l,
+          label: formatColorLabel(l),
           checked: item.label === l,
           run: () => void session.setLabel(item.label === l ? null : l),
         })),

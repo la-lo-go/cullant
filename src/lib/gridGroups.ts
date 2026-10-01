@@ -30,6 +30,7 @@ export interface GroupBucket {
  *  imported *by* it — reaching back would be a cycle. */
 export interface GroupContext {
   bursts: Bursts;
+  burstStarts?: Map<string, number>;
 }
 
 export const EMPTY_GROUP_CONTEXT: GroupContext = { bursts: NO_BURSTS };
@@ -95,7 +96,7 @@ export const GROUP_DIMS: GroupDim[] = [
       // grid grouped by burst reads as "the bursts, then everything else".
       if (!key) return UNKNOWN;
       const n = ctx.bursts.sizes.get(key) ?? 0;
-      return { key, label: `Burst · ${n} shots`, sort: i.captureTime ?? i.mtime };
+      return { key, label: `Burst · ${n} shots`, sort: ctx.burstStarts?.get(key) ?? key };
     },
   },
   {
@@ -278,8 +279,10 @@ function cmpBucket(a: GroupBucket, b: GroupBucket): number {
   const au = a.key === UNKNOWN.key;
   const bu = b.key === UNKNOWN.key;
   if (au !== bu) return au ? 1 : -1;
-  if (typeof a.sort === "number" && typeof b.sort === "number") return a.sort - b.sort;
-  return String(a.sort).localeCompare(String(b.sort));
+  const order = typeof a.sort === "number" && typeof b.sort === "number"
+    ? a.sort - b.sort
+    : String(a.sort).localeCompare(String(b.sort));
+  return order || a.key.localeCompare(b.key);
 }
 
 /** Stable multi-level comparator: compare each active dimension in order; the

@@ -5,6 +5,7 @@ import {
   effectiveBindings,
   COMMANDS,
   DEFAULT_BINDINGS,
+  isModifierKey,
   loadOverrides,
   normalizeKey,
   saveOverrides,
@@ -45,8 +46,19 @@ class KeymapStore {
 
 export const keymap = new KeymapStore();
 
+const NO_REPEAT = new Set<CommandId>([
+  "undo.rejection",
+  "flag.toggle", "label.red", "label.yellow", "label.green", "label.blue", "label.purple",
+  "ui.toggleFilterBar", "ui.search", "ui.toggleFolderTree", "ui.toggleMirror", "ui.toggleFilmstrip", "ui.toggleShortcuts",
+  "view.fullscreen", "info.toggle", "pair.toggleShown", "pair.toggleCoupling", "edit.rotateLeft", "edit.rotateRight",
+]);
+
 function execute(id: CommandId, e?: KeyboardEvent) {
   switch (id) {
+    case "undo.rejection":
+      if (view.mode === "survey") void session.undoSurveyRejection();
+      else if (view.mode !== "grid") void session.undoLastRejection();
+      return;
     // Shift on a navigation key extends the selection instead of moving focus.
     // It keeps its auto-advance-inverter meaning on classification keys, which
     // go through `maybeAdvance` on a separate path.
@@ -54,19 +66,15 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     // In the survey, arrows walk the candidates rather than the whole catalog:
     // stepping out of the field on show would defeat the point of the view.
     case "nav.next":
-      if (view.mode === "survey") return session.stepSurvey(1);
       return e?.shiftKey ? session.extendSelection(1) : session.moveFocus(1);
     case "nav.prev":
-      if (view.mode === "survey") return session.stepSurvey(-1);
       return e?.shiftKey ? session.extendSelection(-1) : session.moveFocus(-1);
     case "nav.down": {
-      if (view.mode === "survey") return session.stepSurvey(1);
-      const rows = session.gridCols ?? 1;
+      const rows = view.mode === "survey" ? 1 : session.gridCols ?? 1;
       return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
     }
     case "nav.up": {
-      if (view.mode === "survey") return session.stepSurvey(-1);
-      const rows = -(session.gridCols ?? 1);
+      const rows = view.mode === "survey" ? -1 : -(session.gridCols ?? 1);
       return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
     }
     case "nav.home":
@@ -120,6 +128,7 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       view.mode = "grid";
       return;
     case "view.viewer":
+      if (view.mode === "survey") return session.inspectSurvey();
       session.ensureFocus();
       view.mode = "viewer";
       return;
@@ -134,7 +143,9 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       return;
     case "view.back":
       // Esc returns to the grid from loupe/compare; in grid it clears selection.
-      if (view.mode === "survey") session.closeSurvey();
+      if (view.mode === "survey") {
+        if (!session.leaveSurveyDetail()) session.closeSurvey();
+      }
       else if (view.mode !== "grid") view.mode = "grid";
       else session.clearSelection();
       return;
@@ -173,6 +184,7 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     case "edit.rotateRight":
       return void session.rotate(1);
     case "action.moveCopy":
+      session.moveDialogTargets = null;
       session.moveDialogOpen = true;
       return;
     case "commit.open":
@@ -224,6 +236,8 @@ export function runCommand(id: CommandId) {
 }
 
 export function handleKeydown(e: KeyboardEvent) {
+  session.capsLockActive = e.getModifierState("CapsLock");
+  if (e.defaultPrevented) return;
   // Contain keys even when a pointer choice or the toolbar moves DOM focus out.
   if (session.filtersPanelOpen) {
     if (e.key === "Escape") {
@@ -232,12 +246,16 @@ export function handleKeydown(e: KeyboardEvent) {
     }
     return;
   }
-  const target = e.target as HTMLElement | null;
-  if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+  const target = e.target instanceof Element ? e.target : null;
+  if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
 
   const normalized = normalizeKey(e);
 
   if (keymap.rebinding) {
+    if (isModifierKey(e)) {
+      e.preventDefault();
+      return;
+    }
     if (normalized !== "escape") keymap.rebind(keymap.rebinding, normalized);
     keymap.rebinding = null;
     e.preventDefault();
@@ -259,6 +277,8 @@ export function handleKeydown(e: KeyboardEvent) {
     return;
   }
 
+  if ((e.key === "Enter" || e.key === " ") && target?.closest('button, a[href], summary, [role="button"], [role="menuitem"], [role="switch"], [role="checkbox"], [role="radio"], [role="tab"]')) return;
+
   if (handleChord(e)) {
     e.preventDefault();
     return;
@@ -270,6 +290,7 @@ export function handleKeydown(e: KeyboardEvent) {
     keymap.bindings.get(normalized) ?? keymap.bindings.get(normalizeKey(e, false));
   if (command) {
     e.preventDefault();
+    if (e.repeat && NO_REPEAT.has(command)) return;
     execute(command, e);
     return;
   }
@@ -277,6 +298,7 @@ export function handleKeydown(e: KeyboardEvent) {
   const tag = tags.all.find((t) => t.shortcut === normalized);
   if (tag) {
     e.preventDefault();
+    if (e.repeat) return;
     void session.toggleTag(tag.id, e);
   }
 }

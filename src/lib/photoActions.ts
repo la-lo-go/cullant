@@ -60,6 +60,14 @@ export function runPhotoCommand(id: CommandId, item: ItemLite, targets: Targets)
       return void session.rotate(-1, targets);
     case "edit.rotateRight":
       return void session.rotate(1, targets);
+    case "pair.toggleShown":
+      return session.togglePairHalf(item);
+    case "pair.toggleCoupling":
+      return void session.togglePairCoupling(item);
+    case "action.moveCopy":
+      session.moveDialogTargets = { ids: [...targets.ids], asGroups: targets.asGroups };
+      session.moveDialogOpen = true;
+      return;
     default:
       return runCommand(id);
   }
@@ -124,6 +132,7 @@ export function buildPhotoMenu(item: ItemLite, targets: Targets): MenuNode[] {
     { kind: "sep" },
     cmd("edit.rotateLeft"),
     cmd("edit.rotateRight"),
+    cmd("action.moveCopy"),
     { kind: "sep" },
     cmd("delete.pair"),
     ...(isPair ? [cmd("delete.rawOnly"), cmd("delete.jpegOnly")] : []),

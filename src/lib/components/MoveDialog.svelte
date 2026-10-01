@@ -1,16 +1,21 @@
 <script lang="ts">
   import { api } from "../api";
   import { session } from "../stores/session.svelte";
+  import { catalog } from "../stores/catalog.svelte";
   import { backdropDismiss } from "../backdrop";
+  import { modalFocus } from "../modal";
 
   let dest = $state("selects");
-  let input = $state<HTMLInputElement | null>(null);
   let busy = $state(false);
   let error = $state("");
+  let lastDest = $state<string | null>(null);
 
   $effect(() => {
-    input?.focus();
-    input?.select();
+    try {
+      lastDest = localStorage.getItem("cullant.lastMoveDestination");
+    } catch {
+      lastDest = null;
+    }
   });
 
   // Keep the destination a relative path under the project root. Drop empty,
@@ -24,19 +29,17 @@
       .join("/"),
   );
 
-  // Use the whole selection, or the focused item when there is no selection.
   function moveTargets() {
-    const ids =
-      session.selectedIds.size > 0
-        ? [...session.selectedIds]
-        : session.focused
-          ? [session.focused.id]
-          : [];
-    return { ids, asGroups: session.mirrorMode };
+    return session.targets(session.moveDialogTargets ?? undefined);
   }
+
+  const targets = $derived(moveTargets());
+  const photoCount = $derived(targets?.ids.length ?? 0);
+  const fileCount = $derived(targets ? session.targetFileCount(targets) : 0);
 
   function close() {
     session.moveDialogOpen = false;
+    session.moveDialogTargets = null;
   }
 
   const dismiss = backdropDismiss(close);
@@ -44,12 +47,21 @@
   async function queue(action: "move" | "copy") {
     if (busy) return;
     const targets = moveTargets();
-    if (targets.ids.length === 0 || !safeFolder) return;
+    if (!targets || !safeFolder) return;
+    const destination = safeFolder;
     busy = true;
+    const generation = catalog.generation;
     error = "";
     try {
-      await api.enqueueAction(targets, action, safeFolder, "both");
+      await api.enqueueAction(targets, action, destination, "both");
+      if (generation !== catalog.generation) return;
       await session.refreshPending();
+      if (generation !== catalog.generation) return;
+      try {
+        localStorage.setItem("cullant.lastMoveDestination", destination);
+      } catch {
+        // A storage failure must not change the queued action result.
+      }
       close();
     } catch (e) {
       error = String(e);
@@ -59,7 +71,10 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter") queue(e.ctrlKey ? "copy" : "move");
+    if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) {
+      e.preventDefault();
+      void queue(e.ctrlKey ? "copy" : "move");
+    }
     if (e.key === "Escape") close();
     e.stopPropagation();
   }
@@ -71,18 +86,24 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
+    aria-label="Queue move / copy"
     tabindex="-1"
+    use:modalFocus={{ initialFocus: "input" }}
   >
     <h2>Queue move / copy</h2>
+    <p class="targets">{photoCount} {catalog.media === "videos" ? (photoCount === 1 ? "video" : "videos") : (photoCount === 1 ? "photo" : "photos")} · {fileCount} {fileCount === 1 ? "file" : "files"}</p>
     <p class="hint">
-      Destination subfolder inside the project (created on commit).
+      Destination subfolder inside the project (created when you execute reviewed changes).
       Enter = move · Ctrl+Enter = copy · Esc = cancel
     </p>
-    <input bind:this={input} bind:value={dest} placeholder="e.g. selects or deliver/client" />
+    <input aria-label="Destination subfolder" disabled={busy} bind:value={dest} onfocus={(e) => e.currentTarget.select()} placeholder="e.g. selects or deliver/client" />
+    {#if lastDest}
+      <button class="last-destination" disabled={busy} onclick={() => (dest = lastDest ?? dest)}>Use last destination: {lastDest}</button>
+    {/if}
     {#if error}<p class="error">{error}</p>{/if}
     <div class="buttons">
-      <button onclick={() => queue("move")} disabled={busy || !safeFolder}>Queue move</button>
-      <button onclick={() => queue("copy")} disabled={busy || !safeFolder}>Queue copy</button>
+      <button onclick={() => queue("move")} disabled={busy || !safeFolder || !targets}>Queue move</button>
+      <button onclick={() => queue("copy")} disabled={busy || !safeFolder || !targets}>Queue copy</button>
     </div>
   </div>
 </div>
@@ -122,6 +143,17 @@
     font-size: 12px;
     opacity: 0.6;
     margin: 0;
+  }
+
+  .targets {
+    margin: 0;
+    font-size: 13px;
+  }
+
+  .last-destination {
+    text-align: left;
+    overflow-wrap: anywhere;
+    font-size: 12px;
   }
 
   input,
