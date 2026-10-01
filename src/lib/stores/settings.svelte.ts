@@ -1,6 +1,7 @@
 /** App-wide user preferences, persisted in localStorage. */
 
 import type { BurstMode } from "../bursts";
+import ArrowRight from "@lucide/svelte/icons/arrow-right";
 import FolderInput from "@lucide/svelte/icons/folder-input";
 import Flag from "@lucide/svelte/icons/flag";
 import Star from "@lucide/svelte/icons/star";
@@ -174,6 +175,7 @@ function loadGridPhotoFit(): GridPhotoFit {
  *  the bar's own visual grouping. The contextual selection/navigation controls
  *  are not listed here — they appear on their own when relevant. */
 export const BOTTOM_BAR_ITEMS = [
+  { id: "auto", label: "Auto", icon: ArrowRight },
   { id: "moveCopy", label: "Move / Copy", icon: FolderInput },
   { id: "flags", label: "Pick / Reject", icon: Flag },
   { id: "rating", label: "Star rating", icon: Star },

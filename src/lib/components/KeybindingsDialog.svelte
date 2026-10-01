@@ -90,7 +90,7 @@
     </header>
     <p class="hint">
       Click a shortcut, then press the new key. Esc cancels. Hold Shift to reverse
-      auto-advance for one classification. This also applies to Fast culling and Caps Lock.
+      auto-advance for one classification. This also applies to Auto and Caps Lock.
     </p>
     <label class="find">
       <Search size={14} />

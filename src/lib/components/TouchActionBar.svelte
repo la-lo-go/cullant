@@ -7,6 +7,7 @@
   import { runCommand } from "$lib/keyboard/dispatcher.svelte";
   import { shortcutHint } from "$lib/keyboard/hints";
   import { formatColorLabel } from "$lib/colorLabels";
+  import { tooltips } from "$lib/tooltips";
   import type { CommandId } from "$lib/keyboard/keymap";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -16,6 +17,8 @@
   import Eraser from "@lucide/svelte/icons/eraser";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import FolderInput from "@lucide/svelte/icons/folder-input";
+  import ArrowRight from "@lucide/svelte/icons/arrow-right";
+  import Undo2 from "@lucide/svelte/icons/undo-2";
 
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
   // opt-in: the parent flips `forceShow` from a toolbar toggle. `hidden` lets
@@ -119,9 +122,15 @@
     // Tapping the current rating clears it, Lightroom-style.
     runCommand((rating === n ? "rate.0" : `rate.${n}`) as CommandId);
   }
+
+  function toggleAutoAdvance() {
+    const enabled = !session.autoAdvanceActive;
+    session.autoAdvancePref = false;
+    settings.setFastCulling(enabled);
+  }
 </script>
 
-<div class="touchbar" class:forced={forceShow} class:disabled={!focused && !hasSelection} class:hidden>
+<div class="touchbar" use:tooltips class:forced={forceShow} class:disabled={!focused && !hasSelection} class:hidden>
   {#if hasSelection}
     <div class="group select">
       <button class="btn" title="Clear selection" aria-label="Clear selection" onclick={act(() => session.clearSelection())}>
@@ -145,11 +154,25 @@
     </div>
   {/if}
 
+  {#if view.mode === "viewer" || view.mode === "compare"}
+    <div class="group recovery">
+      <button class="btn" disabled={!session.canUndoRejection} aria-label="Undo last rejection" title={shortcutHint("Undo last rejection", "undo.rejection")} onclick={act(() => void session.undoLastRejection())}>
+        <Undo2 size={18} />
+      </button>
+    </div>
+  {/if}
+
   {#each visibleBarItems as itemId (itemId)}
-    {#if itemId === "moveCopy"}
+    {#if itemId === "auto" && (view.mode === "viewer" || view.mode === "compare")}
+      <div class="group recovery">
+        <button class="btn task" class:active={session.autoAdvanceActive} disabled={session.capsLockActive} aria-label="Auto" aria-pressed={session.autoAdvanceActive} title={session.capsLockActive ? "Caps Lock enables keyboard auto-advance. Turn Caps Lock off to use Auto. Shift reverses keyboard auto-advance for one action." : "Auto: advance after classification. Shift reverses this setting for one action."} onclick={act(toggleAutoAdvance)}>
+          <ArrowRight size={17} /> Auto
+        </button>
+      </div>
+    {:else if itemId === "moveCopy"}
       <div class="group file-actions">
-        <button class="btn task" title="Move or copy to folder" aria-label="Move or copy to folder" onclick={act(() => runCommand("action.moveCopy"))}>
-          <FolderInput size={18} /> Move / Copy
+        <button class="btn" title="Move or copy to folder" aria-label="Move or copy to folder" onclick={act(() => runCommand("action.moveCopy"))}>
+          <FolderInput size={18} />
         </button>
       </div>
     {:else if itemId === "flags"}
@@ -209,7 +232,7 @@
             <button
               class="btn tagbtn"
               class:active={tagActive(tag.id)}
-              title={tag.name}
+              title={`Toggle tag: ${tag.name}`}
               style="--c: {tag.color ?? '#888'}"
               onclick={act(() => session.toggleTag(tag.id))}
             >
@@ -272,7 +295,7 @@
     display: none;
   }
 
-  .touchbar.disabled {
+  .touchbar.disabled .group:not(.recovery) {
     opacity: 0.45;
     pointer-events: none;
   }
@@ -307,6 +330,15 @@
     background: var(--hover);
   }
 
+  @media (hover: hover) {
+    .btn:hover:not(:disabled) {
+      background: var(--hover);
+    }
+  }
+
+  .btn:disabled { opacity: 0.4; }
+  .btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-fill); }
+
   .task {
     gap: 5px;
     padding: 0 9px;
@@ -330,15 +362,6 @@
      thumbnail badges and the desktop selection bar; "active" adds the tinted
      highlight. */
   .pick {
-  @media (hover: hover) {
-    .btn:hover:not(:disabled) {
-      background: var(--hover);
-    }
-  }
-
-  .btn:disabled { opacity: 0.4; }
-  .btn.active { color: var(--accent); border-color: var(--accent); background: var(--accent-fill); }
-
     color: #6be675;
   }
 

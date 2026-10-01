@@ -38,11 +38,12 @@
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
   import SearchOverlay from "$lib/components/SearchOverlay.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
+  import { modalFocus } from "$lib/modal";
+  import { tooltips } from "$lib/tooltips";
   import TitleBar from "$lib/components/TitleBar.svelte";
   import { api } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import Search from "@lucide/svelte/icons/search";
   import Eye from "@lucide/svelte/icons/eye";
   import Columns2 from "@lucide/svelte/icons/columns-2";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
@@ -366,15 +367,6 @@
     return () => { void unlisten.then((off) => off()); };
   });
 
-  const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
-
-  // The grid view differs from its defaults — colours the View toolbar button,
-  // the same way active filters colour Sort & Filter. Separate mode counts:
-  // it changes what every cell in the grid stands for, so now that the toggle
-  // lives inside the panel this badge is the only thing left saying so.
-  // Thumbnail size is deliberately not part of this. It is a comfort setting,
-  // not a view that hides or regroups anything, so marking the button for it
-  // would flag a state the user has nothing to undo.
   // The project name lives in the window title (OS taskbar/Alt-Tab, and the
   // custom TitleBar below) rather than the toolbar — kept out of the way
   // there, still one glance/hover away from anyone who needs the full path.
@@ -392,6 +384,15 @@
   // away (drive unplugged, folder moved/deleted) warn once, and clear the
   // warning if it comes back. Desktop is reliable; on Android this depends on
   // the id form (SAF tree URI vs a restored app-dir path).
+  const hasRaws = $derived(catalog.items.some((i) => i.kind === 0));
+
+  // The grid view differs from its defaults — colours the View toolbar button,
+  // the same way active filters colour Sort & Filter. Separate mode counts:
+  // it changes what every cell in the grid stands for, so now that the toggle
+  // lives inside the panel this badge is the only thing left saying so.
+  // Thumbnail size is deliberately not part of this. It is a comfort setting,
+  // not a view that hides or regroups anything, so marking the button for it
+  // would flag a state the user has nothing to undo.
   $effect(() => {
     const proj = catalog.project;
     if (!proj) {
@@ -531,7 +532,7 @@
   {/if}
   {#if catalog.project}
     {#if !view.fullscreen}
-    <header class="toolbar">
+    <header class="toolbar" use:tooltips>
       <div class="toolbar-left">
         <div class="media-toggle">
           <button
@@ -549,6 +550,7 @@
             class="media-btn"
             class:active={catalog.media === "videos"}
             disabled={catalog.mediaCounts.videos === 0}
+            aria-label="Photos"
             title={catalog.mediaCounts.videos === 0 ? "No videos in this project" : "Show videos"}
             onclick={blurring(() => void catalog.setMedia("videos").then(() => session.clampFocus()))}
           >
@@ -560,15 +562,13 @@
       </div>
       <div class="toolbar-center">
         <div class="segmented">
+            aria-label="Videos"
           <button class:active={view.mode === "grid"} aria-label="Grid" title={shortcutHint("Grid", "view.grid")} onclick={blurring(() => (view.mode = "grid"))}><Grid3x3 size={14} /></button>
           <button class:active={view.mode === "viewer"} aria-label="Loupe" title={shortcutHint("Loupe", "view.viewer")} onclick={blurring(() => { session.ensureFocus(); view.mode = "viewer"; })}><Eye size={14} /></button>
           <button class:active={view.mode === "compare"} aria-label="Compare" title={shortcutHint("Compare", "view.compare")} onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
         </div>
       </div>
       <div class="toolbar-right">
-        <button aria-label="Search filenames" title={shortcutHint("Search filenames", "ui.search")} class:haswork={session.nameFilter.trim() !== ""} onclick={blurring(() => (session.searchOpen = true))}>
-          <Search size={14} />
-        </button>
         <div class="filters-anchor">
           <button
             class:active={session.filtersPanelOpen}
@@ -584,6 +584,7 @@
             <span class="sort-hint">
               <span
                 >{catalog.sort === "capture"
+            aria-label="Sort & Filter"
                   ? "Date"
                   : catalog.sort === "name"
                     ? "Name"
@@ -611,6 +612,7 @@
           </button>
           {#if session.viewPanelOpen}
             <GridViewPanel />
+            aria-label="View"
           {/if}
         </div>
         {#if view.mode !== "grid"}
@@ -624,7 +626,7 @@
             <PanelBottom size={14} />
           </button>
         {/if}
-        <button title="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
+        <button title="Settings" aria-label="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
         <button
           class="commit"
           class:haswork={session.hasCommitWork}
@@ -639,6 +641,7 @@
 
     {#if catalog.preloading}
       <!-- The only full-screen wait left: until the walk reports back there is
+          aria-label="Review changes"
            genuinely no file list to render. Everything after it (metadata,
            thumbnails, previews) fills in behind the grid's status pill. -->
       <div class="preload">
@@ -1137,6 +1140,12 @@
 
 
   button {
+      gap: 4px;
+    }
+    .toolbar .toolbar-right > button,
+    .toolbar-right .filters-anchor > button,
+    .toolbar-right .view-anchor > button {
+      padding-inline: 6px;
     border-radius: 6px;
     border: 1px solid var(--border-strong);
     padding: 4px 10px;
