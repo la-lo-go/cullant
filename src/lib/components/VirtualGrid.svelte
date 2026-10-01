@@ -765,6 +765,14 @@
     drag = null;
   });
 
+  function cellContains(index: number, x: number, y: number): boolean {
+    const inset = GAP / 2 + (session.selectedIds.has(cellItem(index).id) ? SELECTED_INSET : 0);
+    const left = layout.itemX[index] + inset;
+    const top = layout.itemY[index] + inset;
+    const size = CELL - inset * 2;
+    return x >= left && x < left + size && y >= top && y < top + size;
+  }
+
   /** Geometry hit-test against the laid-out cell positions (which may include
    *  group headers). Returns null off-grid (scrollbar), else the hit cell —
    *  `onCell` false when the point falls in a header, a gutter, or past the end. */
@@ -775,6 +783,8 @@
     const viewY = e.clientY - rect.top;
     if (x >= viewport.clientWidth) return null; // scrollbar, not the grid
     const y = viewY + viewport.scrollTop;
+    if (layout.headers.some((header) => y >= header.y && y < header.y + header.h)) return null;
+    if (stickyHeader && viewY < 30) return null;
     const { itemX, itemY, hidden } = layout;
     const n = cellCount;
     if (n === 0) return { x, y, index: 0, onCell: false };
@@ -788,7 +798,7 @@
     const targetCol = Math.floor((x - padX) / CELL);
     if (targetCol < 0 || targetCol >= cols) return { x, y, index: k, onCell: false };
     const idx = rowStart + targetCol;
-    const onCell = idx >= 0 && idx < n && itemY[idx] === itemY[k];
+    const onCell = idx >= 0 && idx < n && itemY[idx] === itemY[k] && cellContains(idx, x, y);
     return { x, y, index: onCell ? idx : k, onCell };
   }
 
@@ -812,6 +822,7 @@
     marquee = null;
 
     const hit = hitTest(e);
+    if (!hit) return;
     let index: number | null = null;
     if (hit?.onCell) {
       index = cellFirst(hit.index);
@@ -885,7 +896,7 @@
       if (e.shiftKey) session.rangeSelect(cellFirst(index), e.ctrlKey);
       else if (e.ctrlKey) session.toggleSelect(cellFirst(index));
       else session.selectOnly(cellFirst(index));
-    }
+    } else if (!e.ctrlKey && !e.shiftKey) session.clearFocus();
     if (e.shiftKey) return; // Shift is range-select; never starts a marquee
 
     // Empty space starts the marquee at once (a plain click there clears the
@@ -961,9 +972,9 @@
     const n = cellCount;
     const next = new Set(drag.base);
     for (let i = lowerBound(itemY, y0 - CELL); i < n; i++) {
-      if (itemY[i] > y1) break;
-      const ix = itemX[i];
-      if (ix + CELL > x0 && ix < x1) {
+      if (itemY[i] + GAP / 2 > y1) break;
+      const ix = itemX[i] + GAP / 2;
+      if (ix + CELL - GAP > x0 && ix < x1 && itemY[i] + CELL - GAP / 2 > y0) {
         const from = cellFirst(i);
         for (let k = from; k < from + cellSpan(i); k++) next.add(items[k].id);
       }
@@ -1016,7 +1027,7 @@
         if (!tap.onCell) {
           // A clean tap on empty grid space clears the whole selection, matching
           // the desktop empty-space click (which resolves to an empty marquee).
-          session.clearSelection();
+          session.clearFocus();
         } else if (session.selectedIds.size > 0) {
           // A selection is already active (started via long-press): a single tap
           // toggles membership so you can build a multi-selection one tap at a
