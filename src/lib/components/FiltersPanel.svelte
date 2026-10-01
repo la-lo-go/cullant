@@ -12,8 +12,8 @@
     type OrientationFilter,
   } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
-  import { formatColorLabel } from "../colorLabels";
   import { folders } from "../stores/folders.svelte";
+  import { formatColorLabel } from "../colorLabels";
   import {
     APERTURE_BUCKETS,
     FOCAL_BUCKETS,
@@ -160,6 +160,13 @@
   // Capture days present, newest first — a shoot is usually looked for from the
   // most recent end. Keys are ISO dates, so a plain string sort is chronological.
   const presentDays = $derived([...facets.days].sort().reverse());
+  const datePresets = $derived(
+    [
+      { value: "today", label: "Today" },
+      { value: "last7days", label: "Last 7 days" },
+    ].filter((preset) => session.dateFilter === preset.value ||
+      presentDays.some((day) => session.matchesDateFilter(day, preset.value))),
+  );
 
   const dayFormatter = new Intl.DateTimeFormat("en", {
     weekday: "short",
@@ -381,6 +388,38 @@
     </div>
   </section>
 
+  {#if presentDays.length > 1 || datePresets.length > 0 || session.dateFilter !== null}
+    <section>
+      <span class="lbl">Capture day</span>
+      <label class="dayselect">
+        <CalendarDays size={14} />
+        <select
+          aria-label="Capture day"
+          value={session.dateFilter ?? ""}
+          onpointerdown={() => (pointerPick = true)}
+          onkeydown={() => (pointerPick = false)}
+          onchange={(e) => {
+            session.dateFilter = e.currentTarget.value || null;
+            session.clampFocus();
+            releaseAfterPointerPick();
+          }}
+        >
+          {#each datePresets as preset (preset.value)}
+            <option value={preset.value}>{preset.label}</option>
+          {/each}
+          <option value="">All capture days</option>
+          {#each dayGroups as group (group.key)}
+            <optgroup label={group.label}>
+              {#each group.days as day (day)}
+                <option value={day}>{dayFormatter.format(dateFromDayKey(day))}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+      </label>
+    </section>
+  {/if}
+
   <section>
     <span class="lbl">File name</span>
     <input
@@ -525,35 +564,6 @@
           </button>
         {/each}
       </div>
-    </section>
-  {/if}
-
-  {#if presentDays.length > 1 || session.dateFilter !== null}
-    <section>
-      <span class="lbl">Capture day</span>
-      <label class="dayselect">
-        <CalendarDays size={14} />
-        <select
-          aria-label="Capture day"
-          value={session.dateFilter ?? ""}
-          onpointerdown={() => (pointerPick = true)}
-          onkeydown={() => (pointerPick = false)}
-          onchange={(e) => {
-            session.dateFilter = e.currentTarget.value || null;
-            session.clampFocus();
-            releaseAfterPointerPick();
-          }}
-        >
-          <option value="">All capture days</option>
-          {#each dayGroups as group (group.key)}
-            <optgroup label={group.label}>
-              {#each group.days as day (day)}
-                <option value={day}>{dayFormatter.format(dateFromDayKey(day))}</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
-      </label>
     </section>
   {/if}
 

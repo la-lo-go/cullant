@@ -87,6 +87,7 @@
   const flagNames = { all: "All", pick: "Picked", reject: "Rejected", unflagged: "Unflagged", anyflag: "Flagged", notrejected: "Not rejected" };
   const activeFilterSummary = $derived([
     session.nameFilter.trim() && `Filename: ${session.nameFilter}`,
+  const dateNames: Record<string, string> = { today: "Today", last7days: "Last 7 days" };
     session.flagFilter !== "all" && `Flag: ${flagNames[session.flagFilter]}`,
     session.minRating > 0 && `Rating: ${session.minRating}+ stars`,
     session.labelFilter && `Label: ${formatColorLabel(session.labelFilter)}`,
@@ -94,7 +95,7 @@
     catalog.media === "photos" && session.typeFilter !== "all" && `Type: ${session.typeFilter.toUpperCase()}`,
     session.extFilter && `Extension: ${session.extFilter}`,
     session.orientationFilter !== "all" && `Orientation: ${session.orientationFilter}`,
-    session.dateFilter && `Date: ${session.dateFilter}`,
+    session.dateFilter && `Date: ${dateNames[session.dateFilter] ?? session.dateFilter}`,
     session.hasBursts && session.burstFilter !== "all" && `Burst: ${session.burstFilter}`,
     session.burstKeyFilter && "Burst: selected burst",
     ...Object.entries(folders.scope).map(([path, included]) => `${included ? "Folder" : "Excluded folder"}: ${path || "project root"}`),

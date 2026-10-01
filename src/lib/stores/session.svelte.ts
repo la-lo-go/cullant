@@ -190,8 +190,7 @@ class SessionStore {
   apertureFilter = $state<string | null>(null);
   focalFilter = $state<string | null>(null);
   shutterFilter = $state<string | null>(null);
-  /** Single calendar day (`YYYY-MM-DD`, UTC) to scope the grid to; null = any.
-   *  Keyed by `dayKey`, the same function the Date grouping dimension uses. */
+  /** UTC capture day, `today`, or `last7days`; null = any. */
   dateFilter = $state<string | null>(null);
   /** One specific burst to scope the grid to, by burst key; null = any.
    *  Deliberately NOT persisted: burst keys are derived from the current gap
@@ -234,6 +233,16 @@ class SessionStore {
 
   /** Clear the filter controls and keep the selected folders. */
   clearFilters() {
+  todayDay = $state(new Date().toISOString().slice(0, 10));
+  last7DaysStart = $derived(
+    new Date(Date.parse(`${this.todayDay}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10),
+  );
+
+  matchesDateFilter(day: string, filter = this.dateFilter): boolean {
+    if (filter === "today") return day === this.todayDay;
+    if (filter === "last7days") return day >= this.last7DaysStart && day <= this.todayDay;
+    return filter === null || day === filter;
+  }
     this.flagFilter = "all";
     this.minRating = 0;
     this.labelFilter = null;
@@ -684,7 +693,7 @@ class SessionStore {
       }
     }
     if (this.dateFilter !== null) {
-      out = out.filter((i) => dayKey(i) === this.dateFilter);
+      out = out.filter((i) => this.matchesDateFilter(dayKey(i)));
     }
     // Grouping is a stable multi-level sort applied last, so items of the same
     // bucket become contiguous while the active catalog sort survives within the
@@ -1678,6 +1687,18 @@ export const session = new SessionStore();
 // Keep the selection valid: when `filtered` changes (filters, mirror mode,
 // rescans) prune ids that are no longer visible.
 $effect.root(() => {
+  $effect(() => {
+    const updateDay = () => { session.todayDay = new Date().toISOString().slice(0, 10); };
+    const timer = setInterval(updateDay, 60000);
+    window.addEventListener("focus", updateDay);
+    document.addEventListener("visibilitychange", updateDay);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("focus", updateDay);
+      document.removeEventListener("visibilitychange", updateDay);
+    };
+  });
+
   $effect(() => {
     const present = new Set(session.filtered.map((i) => i.id));
     const kept = [...session.selectedIds].filter((id) => present.has(id));
