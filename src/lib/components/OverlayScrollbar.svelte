@@ -79,6 +79,15 @@
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
+  function onTrackDown(e: PointerEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const at = coord(e) - (orientation === "vertical" ? rect.top : rect.left);
+    onSeek(Math.min(maxScroll, Math.max(0, position + (at < thumbPos ? -viewport : viewport))));
+  }
+
   function onMove(e: PointerEvent) {
     if (!dragging || e.pointerId !== dragPointer) return;
     const range = track - thumbSize;
@@ -98,7 +107,7 @@
 </script>
 
 {#if scrollable}
-  <div class="track {orientation}">
+  <div class="track {orientation}" role="presentation" onpointerdown={onTrackDown}>
     <div
       class="thumb"
       class:dragging
