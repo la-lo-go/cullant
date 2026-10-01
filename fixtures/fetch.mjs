@@ -29,7 +29,11 @@ const flag = (name) => {
 
 const all = args.includes("--all");
 const tier = flag("tier");
-const maxMb = flag("max-mb") ? Number(flag("max-mb")) : undefined;
+const maxMbValue = flag("max-mb");
+const maxMb = maxMbValue === undefined ? undefined : Number(maxMbValue);
+if (maxMbValue !== undefined && (typeof maxMbValue !== "string" || !Number.isFinite(maxMb) || maxMb <= 0)) {
+  throw new Error("--max-mb must be a positive finite number.");
+}
 
 async function sha256(path) {
   const hash = createHash("sha256");
