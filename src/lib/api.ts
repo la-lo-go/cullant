@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { IS_ANDROID, IS_WINDOWS } from "./platform";
+import { settings } from "./stores/settings.svelte";
+
+let mediaProjectRoot = "";
+export function setMediaProjectRoot(root: string | null) {
+  mediaProjectRoot = root ?? "";
+}
 
 export interface ProjectInfo {
   rootPath: string;
@@ -12,7 +18,7 @@ export interface ProjectInfo {
 }
 
 /** Whether a remembered project's folder is reachable, and if not, why. */
-export type StorageState = "ok" | "disconnected" | "notFound";
+export type StorageState = "ok" | "disconnected" | "notFound" | "unknown";
 /** Coarse storage classification, for the gallery badge. */
 export type StorageKind = "internal" | "removable" | "network" | "unknown";
 
@@ -41,6 +47,7 @@ export interface ItemLite {
   name: string;
   ext: string;
   mtime: number;
+  sourceVersion: string;
   captureTime: number | null;
   rating: number;
   flag: number; // -1 reject, 0 unflagged, 1 pick
@@ -193,9 +200,11 @@ export type SortKey = "capture" | "name" | "size";
 export type MediaTab = "photos" | "videos";
 
 export interface ScanProgress {
+  projectRoot: string;
   found: number;
 }
 export interface ScanDone {
+  projectRoot: string;
   fileCount: number;
   newFiles: number;
   missingFiles: number;
@@ -372,7 +381,7 @@ export function cullantUrl(path: string): string {
  *  Must match `CacheVersion` in the backend — the protocol builds its cache
  *  path straight from these params, so a mismatch means a permanent miss. */
 export function mediaVersion(item: ItemLite): string {
-  return `v=${item.mtime}&o=${item.orientation ?? 1}`;
+  return `v=${item.mtime}&o=${item.orientation ?? 1}&p=${encodeURIComponent(mediaProjectRoot)}&q=${settings.previewQuality}&b=${encodeURIComponent(item.sourceVersion ?? "")}&d=${Number(item.decoupled)}&g=${item.groupId}`;
 }
 
 /** Match the backend's EXIF quarter-turn cycles for immediate UI feedback. */
@@ -398,7 +407,7 @@ export function previewUrl(item: ItemLite): string {
 }
 
 export function videoUrl(item: ItemLite): string {
-  return cullantUrl(`video/${item.id}?v=${item.mtime}`);
+  return cullantUrl(`video/${item.id}?v=${item.mtime}&p=${encodeURIComponent(mediaProjectRoot)}`);
 }
 
 /** Preview thumbnail for a homepage recent-project card (0-based list index +

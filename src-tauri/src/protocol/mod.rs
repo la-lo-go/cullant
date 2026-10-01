@@ -3,7 +3,9 @@ use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
 
 use crate::commands::recent;
 use crate::error::AppResult;
-use crate::thumbs::{cache_rel_path, memcache, CacheVersion, ThumbKind, ThumbRequest};
+use crate::thumbs::{
+    memcache, read_cached_jpeg, resolved_cache_rel_path, CacheVersion, ThumbKind, ThumbRequest,
+};
 use crate::AppState;
 
 /// Handler for the `cullant://` scheme (served as `http://cullant.localhost/…`
@@ -50,10 +52,55 @@ pub fn handle<R: Runtime>(
     // lookup.
     let known = query_version(request.uri().query());
 
+    if matches!(route, "thumb" | "preview" | "full" | "video") {
+        if let Some(expected) = query_param(request.uri().query(), "p") {
+            let state = app.state::<AppState>();
+            let current = state
+                .project
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|project| project.db.project_root());
+            if current.as_deref() != Some(expected.as_str()) {
+                responder.respond(plain(StatusCode::GONE, "project changed".into()));
+                return;
+            }
+        }
+        if route == "preview"
+            && query_param(request.uri().query(), "q")
+                .and_then(|value| value.parse::<u32>().ok())
+                .is_some_and(|edge| edge != crate::thumbs::preview_long_edge())
+        {
+            responder.respond(plain(StatusCode::GONE, "preview quality changed".into()));
+            return;
+        }
+    }
+
     match (route, rest.parse::<i64>()) {
-        ("thumb", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Thumb, known),
-        ("preview", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Preview, known),
-        ("full", Ok(id)) => respond_thumb(app, responder, id, ThumbKind::Full, known),
+        ("thumb", Ok(id)) => respond_thumb(
+            app,
+            responder,
+            id,
+            ThumbKind::Thumb,
+            known,
+            query_param(request.uri().query(), "b"),
+        ),
+        ("preview", Ok(id)) => respond_thumb(
+            app,
+            responder,
+            id,
+            ThumbKind::Preview,
+            known,
+            query_param(request.uri().query(), "b"),
+        ),
+        ("full", Ok(id)) => respond_thumb(
+            app,
+            responder,
+            id,
+            ThumbKind::Full,
+            known,
+            query_param(request.uri().query(), "b"),
+        ),
         ("video", Ok(id)) => respond_video(app, responder, id, &request),
         ("test", _) => responder.respond(
             Response::builder()
@@ -90,15 +137,23 @@ fn query_version(query: Option<&str>) -> Option<CacheVersion> {
     })
 }
 
+fn query_param(query: Option<&str>, name: &str) -> Option<String> {
+    let url = tauri::Url::parse(&format!("http://localhost/?{}", query?)).ok()?;
+    url.query_pairs()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.into_owned())
+}
+
 fn respond_thumb<R: Runtime>(
     app: &AppHandle<R>,
     responder: UriSchemeResponder,
     file_id: i64,
     kind: ThumbKind,
     known: Option<CacheVersion>,
+    expected_source: Option<String>,
 ) {
     let state = app.state::<AppState>();
-    let (thumbs, root) = {
+    let (thumbs, root, db) = {
         let guard = state.project.lock().unwrap();
         let Some(project) = guard.as_ref() else {
             responder.respond(plain(
@@ -107,8 +162,26 @@ fn respond_thumb<R: Runtime>(
             ));
             return;
         };
-        (project.thumbs.clone(), project.root.clone())
+        (
+            project.thumbs.clone(),
+            project.root.clone(),
+            project.db.clone(),
+        )
     };
+
+    if let Some(expected) = expected_source {
+        match crate::thumbs::source_version_for(&db, file_id, ThumbKind::Thumb) {
+            Ok(source) if expected == format!("{source:016x}") => {}
+            Ok(_) => {
+                responder.respond(plain(StatusCode::GONE, "source changed".into()));
+                return;
+            }
+            Err(error) => {
+                responder.respond(plain(StatusCode::NOT_FOUND, error.to_string()));
+                return;
+            }
+        }
+    }
 
     // Fast path: an already-cached artifact (with a known version) is served
     // straight from disk by THIS handler thread, without queuing a pool worker.
@@ -119,22 +192,29 @@ fn respond_thumb<R: Runtime>(
     // and caches exactly as before. (temp-file+rename writes make the read
     // race-safe — a cache file is never partially written.)
     if let Some(version) = known {
-        let cache_rel = cache_rel_path(file_id, version, kind);
+        let cache_rel = match resolved_cache_rel_path(&db, file_id, version, kind) {
+            Ok(path) => path,
+            Err(error) => {
+                responder.respond(plain(StatusCode::NOT_FOUND, error.to_string()));
+                return;
+            }
+        };
+        let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
+        let memory_key = cache_abs.to_string_lossy();
         // Memory first. On Android the WebView is forbidden from caching these
         // (wry rewrites the header to `no-store`), so a cell that scrolls out
         // and back asks again from scratch -- and during an import that wait is
         // long enough to leave a hole where a painted thumbnail used to be.
-        if let Some(bytes) = memcache::get(&cache_rel) {
+        if let Some(bytes) = memcache::get(&memory_key) {
             responder.respond(jpeg_ok(bytes.as_ref().clone()));
             return;
         }
-        let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
-        if let Ok(bytes) = std::fs::read(&cache_abs) {
+        if let Some(bytes) = read_cached_jpeg(&cache_abs) {
             // Only grid thumbnails are worth holding: hundreds are on screen at
             // once and each is tens of kilobytes, where a preview is hundreds
             // and is looked at one at a time.
             if kind == ThumbKind::Thumb {
-                memcache::put(&cache_rel, std::sync::Arc::new(bytes.clone()));
+                memcache::put(&memory_key, std::sync::Arc::new(bytes.clone()));
             }
             responder.respond(jpeg_ok(bytes));
             return;
@@ -162,7 +242,7 @@ fn respond_thumb<R: Runtime>(
 /// A cached-image OK response. URLs carry `?v={mtime}`, so aggressive immutable
 /// caching in the webview is safe.
 fn jpeg_ok(bytes: Vec<u8>) -> Response<Vec<u8>> {
-    Response::builder()
+    cors(Response::builder())
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "image/jpeg")
         .header(header::CACHE_CONTROL, "public, max-age=31536000, immutable")
@@ -236,31 +316,14 @@ fn respond_video<R: Runtime>(
         let range = request
             .headers()
             .get(header::RANGE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("bytes="))
-            .and_then(|v| {
-                let (s, e) = v.split_once('-')?;
-                let start: u64 = s.parse().ok()?;
-                let end: Option<u64> = e.parse().ok();
-                Some((start, end))
-            });
-
-        let (start, end) = match range {
-            Some((s, e)) => {
-                let e = e
-                    .unwrap_or(len.saturating_sub(1))
-                    .min(len.saturating_sub(1));
-                (s, e.min(s + WINDOW - 1))
-            }
-            None => (0, (WINDOW - 1).min(len.saturating_sub(1))),
-        };
-        if start >= len {
+            .map(|value| value.to_str().unwrap_or(""));
+        let Some((start, end)) = video_range(range, len, WINDOW) else {
             return Ok(cors(Response::builder())
                 .status(StatusCode::RANGE_NOT_SATISFIABLE)
                 .header(header::CONTENT_RANGE, format!("bytes */{len}"))
                 .body(Vec::new())
                 .unwrap());
-        }
+        };
 
         let chunk_len = (end - start + 1) as usize;
         let mut buf = vec![0u8; chunk_len];
@@ -334,8 +397,9 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
         .ok()
         .and_then(|conn| {
             conn.query_row(
-                "SELECT id, mtime, orientation FROM (
+                "SELECT id, mtime, orientation, cache_path FROM (
                    SELECT f.id AS id, f.mtime AS mtime, f.orientation AS orientation,
+                     t.cache_path AS cache_path,
                      ROW_NUMBER() OVER (
                        PARTITION BY f.group_id
                        ORDER BY (t.file_id IS NOT NULL) DESC, f.id ASC
@@ -356,25 +420,24 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
                         r.get::<_, i64>(0)?,
                         r.get::<_, i64>(1)?,
                         r.get::<_, Option<i64>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
                     ))
                 },
             )
             .ok()
         });
 
-    let Some((file_id, mtime, orientation)) = candidate else {
+    let Some((_file_id, _mtime, _orientation, Some(cache_rel))) = candidate else {
         responder.respond(plain(StatusCode::NOT_FOUND, "no thumb available".into()));
         return;
     };
 
-    let version = CacheVersion {
-        mtime,
-        orientation: orientation.unwrap_or(1),
+    let Some(cache_abs) = crate::thumbs::cached_artifact_path(&base, &cache_rel) else {
+        responder.respond(plain(StatusCode::NOT_FOUND, "invalid cache path".into()));
+        return;
     };
-    let cache_rel = cache_rel_path(file_id, version, ThumbKind::Thumb);
-    let cache_abs = base.join(".cullant").join("thumbs").join(cache_rel);
-    match std::fs::read(&cache_abs) {
-        Ok(bytes) => responder.respond(
+    match read_cached_jpeg(&cache_abs) {
+        Some(bytes) => responder.respond(
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "image/jpeg")
@@ -382,14 +445,50 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
                 .body(bytes)
                 .unwrap(),
         ),
-        Err(_) => responder.respond(plain(StatusCode::NOT_FOUND, "thumb not cached".into())),
+        None => responder.respond(plain(StatusCode::NOT_FOUND, "thumb not cached".into())),
     }
+}
+
+fn video_range(range: Option<&str>, len: u64, window: u64) -> Option<(u64, u64)> {
+    if len == 0 {
+        return None;
+    }
+    let last = len - 1;
+    let (start, end) = match range {
+        None => (0, last),
+        Some(value) => {
+            let (start, end) = value.strip_prefix("bytes=")?.split_once('-')?;
+            if start.is_empty() {
+                let suffix: u64 = end.parse().ok()?;
+                if suffix == 0 {
+                    return None;
+                }
+                (len.saturating_sub(suffix), last)
+            } else {
+                let start: u64 = start.parse().ok()?;
+                let end: u64 = if end.is_empty() {
+                    last
+                } else {
+                    end.parse().ok()?
+                };
+                (start, end.min(last))
+            }
+        }
+    };
+    if start >= len || end < start {
+        return None;
+    }
+    Some((
+        start,
+        end.min(start.saturating_add(window.saturating_sub(1))),
+    ))
 }
 
 fn plain(status: StatusCode, message: String) -> Response<Vec<u8>> {
     cors(Response::builder())
         .status(status)
         .header(header::CONTENT_TYPE, "text/plain")
+        .header(header::CACHE_CONTROL, "no-store")
         .body(message.into_bytes())
         .unwrap()
 }
@@ -415,6 +514,18 @@ mod tests {
 
     fn v(mtime: i64, orientation: i64) -> Option<CacheVersion> {
         Some(CacheVersion { mtime, orientation })
+    }
+
+    #[test]
+    fn media_regression_image_errors_are_not_cached() {
+        let response = super::plain(
+            tauri::http::StatusCode::NOT_FOUND,
+            "image version changed".into(),
+        );
+        assert_eq!(
+            response.headers()[tauri::http::header::CACHE_CONTROL],
+            "no-store"
+        );
     }
 
     #[test]

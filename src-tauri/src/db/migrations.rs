@@ -208,6 +208,11 @@ const MIGRATIONS: &[&str] = &[
     r#"
     ALTER TABLE thumbnails ADD COLUMN long_edge INTEGER NOT NULL DEFAULT 0;
     "#,
+    // v11: detect sidecar replacements within one timestamp second.
+    r#"
+    ALTER TABLE files ADD COLUMN xmp_source_version TEXT;
+    UPDATE files SET capture_time = NULL WHERE kind = 2 AND capture_time = mtime;
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {

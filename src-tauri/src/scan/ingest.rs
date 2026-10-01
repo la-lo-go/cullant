@@ -70,6 +70,7 @@ const PROGRESS_THROTTLE_MS: u64 = if cfg!(target_os = "android") {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct Progress {
+    project_root: String,
     done: usize,
     total: usize,
     /// Files finished since the previous emit. Lets the frontend learn which
@@ -81,12 +82,14 @@ struct Progress {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct MetadataDone {
+    project_root: String,
     updated: usize,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct ThumbsDone {
+    project_root: String,
     total: usize,
 }
 
@@ -118,7 +121,7 @@ struct MetaWork {
     /// sensor's and are backfilled later if it is ever decoded.
     source_id: Option<i64>,
     /// Rows borrowing this read. Empty for an unpaired file.
-    borrowers: Vec<i64>,
+    borrowers: Vec<(i64, String)>,
 }
 
 /// EXIF fields extracted during Phase A, batched to the writer thread.
@@ -170,6 +173,8 @@ pub fn run_ingest_pass(
         .generate_video_thumbs
         .load(std::sync::atomic::Ordering::Relaxed);
 
+    let project_root = db.project_root();
+    let thumb_project_root = project_root.clone();
     run_ingest_inner(
         db,
         store,
@@ -180,6 +185,7 @@ pub fn run_ingest_pass(
             let _ = app.emit(
                 "metadata:progress",
                 Progress {
+                    project_root: project_root.clone(),
                     done,
                     total,
                     ids: Vec::new(),
@@ -187,7 +193,13 @@ pub fn run_ingest_pass(
             );
         },
         &mut |updated| {
-            let _ = app.emit("metadata:done", MetadataDone { updated });
+            let _ = app.emit(
+                "metadata:done",
+                MetadataDone {
+                    project_root: project_root.clone(),
+                    updated,
+                },
+            );
         },
         // `done >= total` also holds for an empty pass (0 >= 0), so reopening a
         // project with nothing left to do announced the phase complete on every
@@ -198,6 +210,7 @@ pub fn run_ingest_pass(
                 let _ = app.emit(
                     "thumbs:progress",
                     Progress {
+                        project_root: thumb_project_root.clone(),
                         done,
                         total,
                         ids: Vec::new(),
@@ -205,7 +218,13 @@ pub fn run_ingest_pass(
                 );
                 if done >= total && !announced {
                     announced = true;
-                    let _ = app.emit("thumbs:done", ThumbsDone { total });
+                    let _ = app.emit(
+                        "thumbs:done",
+                        ThumbsDone {
+                            project_root: thumb_project_root.clone(),
+                            total,
+                        },
+                    );
                 }
             }
         },
@@ -213,6 +232,7 @@ pub fn run_ingest_pass(
             let _ = app.emit(
                 "previews:progress",
                 Progress {
+                    project_root: project_root.clone(),
                     done,
                     total,
                     ids: ids.to_vec(),
@@ -223,6 +243,7 @@ pub fn run_ingest_pass(
             let _ = app.emit(
                 "videos:progress",
                 Progress {
+                    project_root: project_root.clone(),
                     done,
                     total,
                     ids: Vec::new(),
@@ -319,7 +340,7 @@ pub fn run_ingest_inner(
                         borrowers: Vec::new(),
                     })
                     .borrowers
-                    .push(row.id);
+                    .push((row.id, row.rel_path));
             }
             None => {
                 let entry = by_source
@@ -526,7 +547,7 @@ fn generate_pass(
     let started = Instant::now();
     // The channel carries which file finished, so the emit can tell the frontend
     // exactly what became available rather than making it re-read the catalogue.
-    let (tx, rx) = mpsc::channel::<i64>();
+    let (tx, rx) = mpsc::channel::<(i64, bool)>();
     // Submitted in one batch: one lock and one wake for the whole tier, rather
     // than both per file for the entire library.
     let requests: Vec<ThumbRequest> = pending
@@ -541,8 +562,12 @@ fn generate_pass(
                 cache_checked: false,
                 known_version: Some(version),
                 // The disk cache is the point; the bytes are discarded here.
-                respond: Box::new(move |_| {
-                    let _ = tx.send(file_id);
+                respond: Box::new(move |result| {
+                    let success = result.is_ok();
+                    if let Err(error) = result {
+                        tracing::debug!("background {kind:?} {file_id} failed: {error}");
+                    }
+                    let _ = tx.send((file_id, success));
                 }),
             }
         })
@@ -553,9 +578,11 @@ fn generate_pass(
     let mut done = 0usize;
     let mut last_emit_ms = 0u64;
     let mut since_emit: Vec<i64> = Vec::new();
-    while let Ok(file_id) = rx.recv() {
+    while let Ok((file_id, success)) = rx.recv() {
         done += 1;
-        since_emit.push(file_id);
+        if success {
+            since_emit.push(file_id);
+        }
         let now = started.elapsed().as_millis() as u64;
         if done == total || now.saturating_sub(last_emit_ms) >= PROGRESS_THROTTLE_MS {
             last_emit_ms = now;
@@ -578,17 +605,14 @@ fn generate_pass(
 /// so the batched COALESCE update falls capture_time back to mtime and
 /// unreadable files aren't retried forever.
 fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted> {
-    let ids = || {
-        work.source_id
-            .into_iter()
-            .chain(work.borrowers.iter().copied())
-    };
-    let blank = || ids().map(Extracted::empty).collect::<Vec<_>>();
+    let blank = || metadata_rows(store, work, &Extracted::empty(0));
 
-    // Videos carry no image-path EXIF, so capture_time falls back to mtime via
-    // the batched COALESCE update, with no file read at all.
+    // A bounded container probe can supply a video date; absent or invalid
+    // metadata still falls back to mtime in the batched update.
     if work.source_kind == 2 {
-        return blank();
+        let mut e = Extracted::empty(0);
+        e.capture_time = decode::video::capture_time(store, &work.source_rel);
+        return metadata_rows(store, work, &e);
     }
 
     let source = match decode::open_source(store, &work.source_rel) {
@@ -629,20 +653,45 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
         e.height = meta.height;
     }
 
-    ids()
+    metadata_rows(store, work, &e)
+}
+
+fn metadata_rows(
+    store: &dyn ProjectStore,
+    work: &MetaWork,
+    extracted: &Extracted,
+) -> Vec<Extracted> {
+    let mut rows: Vec<_> = work
+        .source_id
+        .into_iter()
         .map(|id| {
-            let mut row = e.clone();
+            let mut row = extracted.clone();
             row.id = id;
-            // Dimensions describe the file that was decoded. A borrowing RAW's
-            // own are the sensor's, which differ from its JPEG's, so they stay
-            // NULL until something actually decodes the RAW.
-            if Some(id) != work.source_id {
-                row.width = None;
-                row.height = None;
-            }
             row
         })
-        .collect()
+        .collect();
+    for (id, relative) in &work.borrowers {
+        let mut row = if extracted.width.is_none() || extracted.height.is_none() {
+            extract_metadata(
+                store,
+                &MetaWork {
+                    source_rel: relative.clone(),
+                    source_kind: 0,
+                    source_id: Some(*id),
+                    borrowers: Vec::new(),
+                },
+            )
+            .pop()
+            .unwrap_or_else(|| Extracted::empty(*id))
+        } else {
+            extracted.clone()
+        };
+        row.id = *id;
+        row.width = None;
+        row.height = None;
+        rows.push(row);
+    }
+    rows
 }
 
 /// Batched, transactional metadata update on the writer thread. Files whose
@@ -676,7 +725,9 @@ fn write_metadata_batch(db: &Arc<Db>, extracted: Vec<Extracted>) -> AppResult<()
             let mut stmt = tx.prepare(
                 "UPDATE files SET
                    capture_time = COALESCE(?2, mtime),
-                   orientation = COALESCE(?3, orientation),
+                   orientation = CASE WHEN orientation IS NULL OR
+                     (COALESCE(state_updated_at, 0) = 0 AND xmp_source_mtime IS NULL)
+                     THEN COALESCE(?3, orientation) ELSE orientation END,
                    camera = COALESCE(?4, camera),
                    lens = COALESCE(?5, lens),
                    iso = COALESCE(?6, iso),
@@ -705,6 +756,82 @@ mod tests {
     use rusqlite::params;
     use std::path::Path;
     use std::sync::Mutex;
+
+    #[test]
+    fn media_ingest_regression_explicit_orientation_survives_metadata() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let image = image::RgbImage::from_pixel(80, 60, image::Rgb([20, 80, 120]));
+        let exif = crate::bench::SyntheticExif {
+            date_time_original: "2024:06:15 14:30:05",
+            orientation: 6,
+            make: "Test",
+            model: "Camera",
+            iso: 100,
+        };
+        let jpeg = crate::bench::jpeg_with_exif(&image, &exif);
+        std::fs::write(dir.path().join("imported.jpg"), &jpeg).unwrap();
+        std::fs::write(dir.path().join("edited.jpg"), &jpeg).unwrap();
+        std::fs::write(dir.path().join("imported.xmp"), r#"<rdf:Description xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:tiff="http://ns.adobe.com/tiff/1.0/" tiff:Orientation="8"/>"#).unwrap();
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        crate::scan::scan_project_inner(&db, dir.path(), &mut |_| {}).unwrap();
+        let id: i64 = db
+            .call_read(|c| {
+                Ok(c.query_row(
+                    "SELECT id FROM files WHERE rel_path='edited.jpg'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        crate::engine::culling::rotate(
+            &db,
+            crate::engine::culling::Targets {
+                ids: vec![id],
+                as_groups: false,
+            },
+            2,
+        )
+        .unwrap();
+        run_all(&db, dir.path());
+        let orientations: (i64, i64) = db.call_read(|c| Ok(c.query_row("SELECT (SELECT orientation FROM files WHERE rel_path='imported.jpg'),(SELECT orientation FROM files WHERE rel_path='edited.jpg')", [], |r| Ok((r.get(0)?,r.get(1)?)))?)).unwrap();
+        assert_eq!(
+            orientations,
+            (8, 3),
+            "EXIF cannot replace imported or edited rotation"
+        );
+    }
+
+    #[test]
+    fn media_ingest_regression_bad_sibling_falls_back_to_raw_metadata() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fixtures/media/Olympus - E-M1MarkII - 16bit (4-3).ORF");
+        if !fixture.is_file() {
+            eprintln!("skipped: local RAW corpus is not installed");
+            return;
+        }
+        std::fs::copy(fixture, dir.path().join("shot.orf")).unwrap();
+        std::fs::write(dir.path().join("shot.jpg"), b"corrupt JPEG sibling").unwrap();
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        crate::scan::scan_project_inner(&db, dir.path(), &mut |_| {}).unwrap();
+        run_all(&db, dir.path());
+        let (camera, capture, mtime): (Option<String>, i64, i64) = db
+            .call_read(|c| {
+                Ok(c.query_row(
+                    "SELECT camera,capture_time,mtime FROM files WHERE kind=0",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?)
+            })
+            .unwrap();
+        assert!(
+            camera.is_some(),
+            "A corrupt sibling must not remove readable RAW metadata"
+        );
+        assert_ne!(capture, mtime);
+    }
 
     fn project_with_jpegs(root: &Path, n: u32) -> Arc<Db> {
         for i in 0..n {
@@ -1490,6 +1617,108 @@ mod tests {
 
         // Second pass at the same mtime: nothing to retry.
         assert_eq!(run_all(&db, root), (0, 0, 0));
+    }
+
+    #[test]
+    fn media_ingest_regression_video_creation_date_and_missing_probe_fallback() {
+        let _guard = ingest_guard();
+        const CHILD_ROOT: &str = "CULLANT_TEST_MISSING_FFPROBE_PROJECT";
+        if let Some(root) = std::env::var_os(CHILD_ROOT) {
+            let root = Path::new(&root);
+            let db = Arc::new(Db::open(root).unwrap());
+            db.call(|c| {
+                c.execute("UPDATE files SET capture_time=NULL WHERE kind=2", [])?;
+                Ok(())
+            })
+            .unwrap();
+            run_all(&db, root);
+            let (capture, mtime): (i64, i64) = db
+                .call_read(|c| {
+                    Ok(c.query_row(
+                        "SELECT capture_time,mtime FROM files WHERE kind=2",
+                        [],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )?)
+                })
+                .unwrap();
+            assert_eq!(
+                capture, mtime,
+                "Missing ffprobe must preserve the mtime fallback"
+            );
+            return;
+        }
+        let ffmpeg_ready = decode::video::ffmpeg()
+            .arg("-version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        let mut probe = std::process::Command::new("ffprobe");
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            probe.creation_flags(0x0800_0000);
+        }
+        let probe_ready = probe
+            .arg("-version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        if !ffmpeg_ready || !probe_ready {
+            eprintln!("skipped: container date regression needs ffmpeg and ffprobe");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dated.mp4");
+        let status = decode::video::ffmpeg()
+            .args([
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=160x120:d=2",
+                "-c:v",
+                "mpeg4",
+                "-metadata",
+                "creation_time=2024-06-15T14:30:05Z",
+            ])
+            .arg(&path)
+            .status()
+            .expect("This real-video regression requires ffmpeg");
+        assert!(status.success());
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        crate::scan::scan_project_inner(&db, dir.path(), &mut |_| {}).unwrap();
+        run_all(&db, dir.path());
+        let capture: i64 = db
+            .call_read(|c| {
+                Ok(
+                    c.query_row("SELECT capture_time FROM files WHERE kind=2", [], |r| {
+                        r.get(0)
+                    })?,
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            capture, 1718461805,
+            "Video capture time must come from container creation_time, not copy mtime"
+        );
+        drop(db);
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                std::thread::current().name().unwrap(),
+                "--nocapture",
+            ])
+            .env(CHILD_ROOT, dir.path())
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "Missing-probe child failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]

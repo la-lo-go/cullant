@@ -14,6 +14,7 @@ pub struct ItemLite {
     pub name: String,
     pub ext: String,
     pub mtime: i64,
+    pub source_version: String,
     pub capture_time: Option<i64>,
     pub rating: i64,
     pub flag: i64,
@@ -114,50 +115,72 @@ pub fn media_counts(state: State<'_, AppState>) -> AppResult<MediaCounts> {
     })
 }
 
-/// File ids that currently have a valid loupe preview (a `kind = 1` thumbnail
-/// row that is not a failure tombstone and matches the file's current mtime).
+/// File ids with a valid cached preview for the current source and quality.
 /// Drives the grid's per-cell "full preview still generating" spinner. The
 /// payload is just a list of ids (a few hundred at most), cheap to re-query as
 /// the background preview pass progresses.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn preview_ready_ids(state: State<'_, AppState>) -> AppResult<Vec<i64>> {
-    let db = {
+    let (db, root) = {
         let guard = state.project.lock().unwrap();
-        guard
-            .as_ref()
-            .ok_or(crate::error::AppError::NoProject)?
-            .db
-            .clone()
+        let project = guard.as_ref().ok_or(crate::error::AppError::NoProject)?;
+        (project.db.clone(), project.root.clone())
     };
-    db.call_read(|conn| {
-        let mut stmt = conn.prepare(
-            "SELECT t.file_id FROM thumbnails t
+    let candidates = db.call_read(|conn| {
+        let mut stmt = conn.prepare(&format!(
+            "SELECT t.file_id, t.cache_path, f.mtime, COALESCE(f.orientation, 1), {source}
+             FROM thumbnails t
              JOIN files f ON f.id = t.file_id
+             JOIN groups g ON g.id = f.group_id
              WHERE t.kind = 1 AND t.failed = 0
-               AND t.source_mtime = f.mtime AND f.status = 0",
-        )?;
-        let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+               AND t.source_mtime = f.mtime AND f.status = 0
+               AND (t.long_edge = 0 OR t.long_edge = {edge})",
+            source = crate::thumbs::source_version_sql(),
+            edge = crate::thumbs::preview_long_edge()
+        ))?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                crate::thumbs::CacheVersion {
+                    mtime: r.get(2)?,
+                    orientation: r.get(3)?,
+                },
+                r.get::<_, String>(4)?,
+            ))
+        })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
-    })
+    })?;
+    Ok(candidates
+        .into_iter()
+        .filter(|(id, path, version, source)| {
+            crate::thumbs::cached_row_ready(
+                &root,
+                path,
+                *id,
+                *version,
+                crate::thumbs::ThumbKind::Preview,
+                crate::thumbs::source_version(source),
+            )
+        })
+        .map(|(id, _, _, _)| id)
+        .collect())
 }
 
 /// Return the light-weight index of all present files for one media tab.
 /// ~100 bytes per item; the whole catalog crosses IPC once and the frontend
 /// filters/virtualizes locally.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn query_items(
     sort: Option<SortKey>,
     media: Option<MediaTab>,
     desc: Option<bool>,
     state: State<'_, AppState>,
 ) -> AppResult<Vec<ItemLite>> {
-    let db = {
+    let (db, root) = {
         let guard = state.project.lock().unwrap();
-        guard
-            .as_ref()
-            .ok_or(crate::error::AppError::NoProject)?
-            .db
-            .clone()
+        let project = guard.as_ref().ok_or(crate::error::AppError::NoProject)?;
+        (project.db.clone(), project.root.clone())
     };
 
     let sort = sort.unwrap_or_default();
@@ -191,36 +214,56 @@ pub fn query_items(
                     f.orientation AS orientation,
                     f.camera, f.lens, f.iso, f.focal_length, f.f_number, f.exposure_time,
                     fa.phash,
-                    EXISTS(SELECT 1 FROM thumbnails tr
+                    (SELECT tr.cache_path FROM thumbnails tr
                       WHERE tr.file_id = f.id AND tr.kind = 0
-                        AND tr.failed = 0 AND tr.source_mtime = f.mtime) AS thumb_ready,
+                        AND tr.failed = 0 AND tr.source_mtime = f.mtime) AS thumb_cache_path,
                     EXISTS(SELECT 1 FROM thumbnails pf
                       WHERE pf.file_id = f.id AND pf.kind = 1
-                        AND pf.failed = 1 AND pf.source_mtime = f.mtime) AS preview_failed
+                        AND pf.failed = 1 AND pf.source_mtime = f.mtime) AS preview_failed,
+                    {source_version} AS source_version
              FROM files f
              JOIN groups g ON g.id = f.group_id
              -- A plain join avoids another correlated subquery in this wide row.
              LEFT JOIN file_analysis fa ON fa.file_id = f.id
              WHERE f.status = 0 AND {kind_filter}
-             ORDER BY {order}"
+             ORDER BY {order}",
+            source_version = crate::thumbs::source_version_sql()
         );
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map([], |r| {
+            let id = r.get(0)?;
+            let mtime = r.get(6)?;
+            let orientation: Option<i64> = r.get(18)?;
+            let source_version = crate::thumbs::source_version(&r.get::<_, String>(28)?);
+            let thumb_ready = r.get::<_, Option<String>>(26)?.is_some_and(|path| {
+                crate::thumbs::cached_row_ready(
+                    &root,
+                    &path,
+                    id,
+                    crate::thumbs::CacheVersion {
+                        mtime,
+                        orientation: orientation.unwrap_or(1),
+                    },
+                    crate::thumbs::ThumbKind::Thumb,
+                    source_version,
+                )
+            });
             Ok(ItemLite {
-                id: r.get(0)?,
+                id,
                 group_id: r.get(1)?,
                 kind: r.get(2)?,
                 rel_path: r.get(3)?,
                 name: r.get(4)?,
                 ext: r.get(5)?,
-                mtime: r.get(6)?,
+                mtime,
+                source_version: format!("{source_version:016x}"),
                 capture_time: r.get(7)?,
                 rating: r.get(8)?,
                 flag: r.get(9)?,
                 label: r.get(10)?,
                 width: r.get(11)?,
                 height: r.get(12)?,
-                orientation: r.get(18)?,
+                orientation,
                 camera: r.get(19)?,
                 lens: r.get(20)?,
                 iso: r.get(21)?,
@@ -241,7 +284,7 @@ pub fn query_items(
                     .get::<_, Option<Vec<u8>>>(25)?
                     .filter(|b| b.len() == 8)
                     .map(hex8),
-                thumb_ready: r.get::<_, i64>(26)? != 0,
+                thumb_ready,
                 preview_failed: r.get::<_, i64>(27)? != 0,
             })
         })?;

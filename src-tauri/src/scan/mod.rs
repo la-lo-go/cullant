@@ -30,11 +30,13 @@ struct FoundFile {
 #[serde(rename_all = "camelCase")]
 pub struct ScanProgress {
     pub found: usize,
+    pub project_root: String,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanDone {
+    pub project_root: String,
     pub file_count: i64,
     pub new_files: usize,
     pub missing_files: usize,
@@ -104,8 +106,15 @@ pub fn scan_project(
     store: &dyn ProjectStore,
 ) -> AppResult<ScanDone> {
     let app_progress = app.clone();
+    let project_root = db.project_root();
     let done = scan_with_store(db, store, &mut move |found| {
-        let _ = app_progress.emit("scan:progress", ScanProgress { found });
+        let _ = app_progress.emit(
+            "scan:progress",
+            ScanProgress {
+                found,
+                project_root: project_root.clone(),
+            },
+        );
     })?;
     let _ = app.emit("scan:done", done.clone());
     Ok(done)
@@ -351,18 +360,23 @@ pub fn scan_with_store(
         }
         merge_group(&tx, &members)?;
 
+        promote_live_primaries(&tx)?;
+
         let missing: i64 =
             tx.query_row("SELECT COUNT(*) FROM files WHERE status = 1", [], |r| {
                 r.get(0)
             })?;
-        let count: i64 = tx.query_row("SELECT COUNT(*) FROM files WHERE status = 0", [], |r| {
-            r.get(0)
-        })?;
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM files WHERE status = 0 AND kind IN (0, 1, 2)",
+            [],
+            |r| r.get(0),
+        )?;
         tx.commit()?;
         Ok((new_files, missing as usize, count))
     })?;
 
     let xmp_imported = import_sidecars(db, store, &sidecar_mtimes)?;
+    crate::thumbs::invalidate_cache_rows(db)?;
 
     tracing::info!(
         "scan finished: {total_found} on disk, {new_files} new, {missing_files} missing, \
@@ -370,6 +384,7 @@ pub fn scan_with_store(
         started.elapsed()
     );
     Ok(ScanDone {
+        project_root: db.project_root(),
         file_count,
         new_files,
         missing_files,
@@ -378,10 +393,40 @@ pub fn scan_with_store(
 }
 
 /// A photo whose sidecar has not been read at its current mtime.
+fn promote_live_primaries(tx: &Transaction) -> rusqlite::Result<()> {
+    let members: Vec<(i64, i64, String)> = {
+        let mut stmt = tx.prepare(
+            "SELECT f.group_id, f.id, f.ext FROM files f JOIN groups g ON g.id = f.group_id
+             LEFT JOIN files p ON p.id = g.primary_file_id
+             WHERE f.status = 0 AND f.kind IN (0, 1, 2)
+               AND (p.id IS NULL OR p.status <> 0 OR p.group_id <> g.id)
+             ORDER BY f.group_id, f.rel_path",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    let mut best: HashMap<i64, (i64, u8)> = HashMap::new();
+    for (group, id, ext) in members {
+        let rank = crate::decode::primary_rank(&ext);
+        let entry = best.entry(group).or_insert((id, rank));
+        if rank < entry.1 {
+            *entry = (id, rank);
+        }
+    }
+    for (group, (id, _)) in best {
+        tx.execute(
+            "UPDATE groups SET primary_file_id = ?2 WHERE id = ?1",
+            params![group, id],
+        )?;
+    }
+    Ok(())
+}
+
 struct SidecarCandidate {
     file_id: i64,
     sc_rel: String,
     sc_mtime: i64,
+    version: String,
     /// When this photo's state was last changed inside Cullant; NULL/0 means
     /// never, which is the fresh-import case.
     state_updated_at: i64,
@@ -401,10 +446,6 @@ fn import_sidecars(
     store: &dyn ProjectStore,
     sidecar_mtimes: &HashMap<String, i64>,
 ) -> AppResult<usize> {
-    if sidecar_mtimes.is_empty() {
-        return Ok(0);
-    }
-
     // Every photo that maps to a sidecar we have, paired with what we know.
     // Both halves of a RAW+JPEG pair map to the same sidecar, exactly as the
     // writer does — so exporting and re-importing round-trips instead of
@@ -412,17 +453,22 @@ fn import_sidecars(
     // reads from that one instead: the writer gives a member its own file only
     // when the pair disagrees, and reading the shared one here would import the
     // partner's state over the difference the user made on purpose.
-    let photos: Vec<(i64, String, i64, Option<i64>)> = db.call_read(|conn| {
+    let photos: Vec<(i64, String, i64, Option<String>, bool)> = db.call_read(|conn| {
         let mut stmt = conn.prepare(
-            "SELECT id, rel_path, COALESCE(state_updated_at, 0), xmp_source_mtime
+            "SELECT id, rel_path, COALESCE(state_updated_at, 0), xmp_source_version,
+                    xmp_source_mtime IS NOT NULL
              FROM files WHERE status = 0 AND kind IN (0, 1)",
         )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+        let rows = stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     })?;
 
     let mut todo: Vec<SidecarCandidate> = Vec::new();
-    for (file_id, rel_path, state_updated_at, imported_from) in photos {
+    let mut contents: HashMap<String, Option<(String, String)>> = HashMap::new();
+    let mut absent = Vec::new();
+    for (file_id, rel_path, state_updated_at, imported_from, was_imported) in photos {
         let own = crate::engine::xmp::sidecar_rel_per_file(&rel_path);
         let sc_rel = if sidecar_mtimes.contains_key(own.as_str()) {
             own
@@ -430,71 +476,106 @@ fn import_sidecars(
             crate::engine::xmp::sidecar_rel(&rel_path)
         };
         let Some(&sc_mtime) = sidecar_mtimes.get(sc_rel.as_str()) else {
+            if was_imported || imported_from.is_some() {
+                absent.push(file_id);
+            }
             continue;
         };
-        if imported_from == Some(sc_mtime) {
+        let content = contents.entry(sc_rel.clone()).or_insert_with(|| {
+            let bytes = crate::store::read_all(store, &sc_rel).ok()?;
+            let version = format!("{sc_mtime}:{:016x}", xxhash_rust::xxh3::xxh3_64(&bytes));
+            Some((version, String::from_utf8(bytes).ok()?))
+        });
+        let Some((version, _)) = content else {
+            continue;
+        };
+        if imported_from.as_ref() == Some(version) {
             continue; // this exact version of the sidecar has been read already
         }
         todo.push(SidecarCandidate {
             file_id,
             sc_rel,
             sc_mtime,
+            version: version.clone(),
             state_updated_at,
         });
     }
-    if todo.is_empty() {
-        return Ok(0);
+    if !absent.is_empty() {
+        db.call(move |conn| {
+            let tx = conn.transaction()?;
+            for file_id in absent {
+                tx.execute(
+                "UPDATE files SET xmp_source_mtime = NULL, xmp_source_version = NULL WHERE id = ?1",
+                params![file_id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })?;
     }
 
     // Parse each distinct sidecar once, even when a pair shares it.
-    let mut parsed: HashMap<String, Option<crate::engine::xmp::XmpState>> = HashMap::new();
-    let mut updates: Vec<(i64, i64, Option<crate::engine::xmp::XmpState>)> = Vec::new();
+    let mut parsed: HashMap<String, Option<crate::engine::xmp::XmpImport>> = HashMap::new();
+    let mut updates = Vec::new();
     for c in todo {
         let state = parsed.entry(c.sc_rel.clone()).or_insert_with(|| {
-            crate::store::read_all(store, &c.sc_rel)
-                .ok()
-                .and_then(|bytes| String::from_utf8(bytes).ok())
-                .as_deref()
-                .and_then(crate::engine::xmp::read_sidecar)
+            contents
+                .get(&c.sc_rel)
+                .and_then(Option::as_ref)
+                .and_then(|(_, xml)| crate::engine::xmp::read_sidecar_import(xml))
         });
         let Some(state) = state else {
             // Unreadable or not XMP we understand: remember the mtime anyway so
             // it is not re-parsed every scan, but change nothing.
-            updates.push((c.file_id, c.sc_mtime, None));
+            updates.push((c.file_id, c.sc_mtime, c.version, None));
             continue;
         };
         // Newer wins. A photo never touched in Cullant has no state to defend,
         // so the sidecar always wins the first import — the onboarding case,
         // which needs no prompt.
         let sidecar_wins = c.state_updated_at == 0 || c.sc_mtime > c.state_updated_at;
-        updates.push((c.file_id, c.sc_mtime, sidecar_wins.then(|| state.clone())));
+        updates.push((
+            c.file_id,
+            c.sc_mtime,
+            c.version,
+            sidecar_wins.then(|| state.clone()),
+        ));
     }
 
-    let applied = updates.iter().filter(|(_, _, s)| s.is_some()).count();
+    let applied = updates.iter().filter(|(_, _, _, s)| s.is_some()).count();
     db.call(move |conn| {
         let tx = conn.transaction()?;
         {
-            let mut mark = tx.prepare("UPDATE files SET xmp_source_mtime = ?2 WHERE id = ?1")?;
+            let mut mark = tx.prepare("UPDATE files SET xmp_source_mtime = ?2, xmp_source_version = ?3 WHERE id = ?1")?;
             // Importing must NOT set xmp_dirty: marking a file dirty for state
             // that came out of its own sidecar would queue a write-back of what
             // was just read, and light the commit button on every scan forever.
             let mut apply = tx.prepare(
-                "UPDATE files SET rating = ?2, flag = ?3, label = ?4, orientation = ?5,
-                        xmp_source_mtime = ?6
+                "UPDATE files SET rating = ?2, flag = ?3, label = ?4, orientation = COALESCE(?5, orientation),
+                        xmp_source_mtime = ?6, xmp_source_version = ?7
                  WHERE id = ?1",
             )?;
-            for (file_id, sc_mtime, state) in &updates {
+            for (file_id, sc_mtime, version, state) in &updates {
                 match state {
                     Some(s) => apply.execute(params![
                         file_id,
-                        s.rating,
-                        s.flag,
-                        s.label,
-                        s.orientation,
-                        sc_mtime
+                        s.state.rating,
+                        s.state.flag,
+                        s.state.label,
+                        s.has_orientation.then_some(s.state.orientation),
+                        sc_mtime,
+                        version
                     ])?,
-                    None => mark.execute(params![file_id, sc_mtime])?,
+                    None => mark.execute(params![file_id, sc_mtime, version])?,
                 };
+                if let Some(import) = state {
+                    if import.state.flag == -1 {
+                        tx.execute("INSERT INTO pending_actions(file_id, action, params, origin, created_at)
+                            VALUES (?1, 0, '{}', 0, ?2) ON CONFLICT(file_id, action) DO NOTHING", params![file_id, sc_mtime])?;
+                    } else {
+                        tx.execute("DELETE FROM pending_actions WHERE file_id = ?1 AND action = 0", params![file_id])?;
+                    }
+                }
             }
         }
         tx.commit()?;
@@ -508,6 +589,86 @@ fn import_sidecars(
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn an_unchanged_rescan_without_sidecars_does_not_write_photo_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "x.jpg");
+        touch(dir.path(), "y.jpg");
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        scan(&db, dir.path());
+        let before = db.call(|c| Ok(c.total_changes())).unwrap();
+        scan(&db, dir.path());
+        let after = db.call(|c| Ok(c.total_changes())).unwrap();
+        assert_eq!(before, after, "A no-op scan must not rewrite every photo");
+    }
+
+    #[test]
+    fn a_missing_primary_is_replaced_by_a_live_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        touch(root, "x.orf");
+        touch(root, "x.ori");
+        touch(root, "x.jpg");
+        let db = Arc::new(Db::open(root).unwrap());
+        scan(&db, root);
+        fs::rename(root.join("x.orf"), root.join("x.saved")).unwrap();
+        scan(&db, root);
+        assert_eq!(group_of_path(&db, "x.jpg").1, "x.jpg");
+    }
+
+    #[test]
+    fn sidecars_are_not_counted_as_media() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "x.xmp");
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        assert_eq!(scan(&db, dir.path()).file_count, 0);
+    }
+
+    #[test]
+    fn importing_a_reject_queues_a_delete_and_keeps_existing_orientation() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "x.jpg");
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        scan(&db, dir.path());
+        db.call(|c| {
+            c.execute("UPDATE files SET orientation = 8", [])?;
+            Ok(())
+        })
+        .unwrap();
+        fs::write(dir.path().join("x.xmp"), r#"<rdf:Description xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:xmp="http://ns.adobe.com/xap/1.0/" xmp:Rating="-1"/>"#).unwrap();
+        scan(&db, dir.path());
+        assert_eq!(crate::engine::actions::list(&db).unwrap().len(), 1);
+        assert_eq!(
+            db.call_read(|c| Ok(c.query_row(
+                "SELECT orientation FROM files WHERE kind = 1",
+                [],
+                |r| r.get::<_, i64>(0)
+            )?))
+            .unwrap(),
+            8
+        );
+    }
+
+    #[test]
+    fn a_sidecar_replacement_in_the_same_second_is_imported() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "x.jpg");
+        write_sidecar_file(dir.path(), "x.xmp", 2);
+        let path = dir.path().join("x.xmp");
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        scan(&db, dir.path());
+        write_sidecar_file(dir.path(), "x.xmp", 5);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert_eq!(scan(&db, dir.path()).xmp_imported, 1);
+        assert_eq!(state_of(&db, "x.jpg").0, 5);
+    }
 
     fn touch(root: &Path, rel: &str) {
         let p = root.join(rel);

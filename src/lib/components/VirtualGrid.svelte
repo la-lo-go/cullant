@@ -9,8 +9,8 @@
 </script>
 
 <script lang="ts">
-  import { tick } from "svelte";
-  import { api, thumbUrl, displayDims, type ItemLite } from "../api";
+  import { onDestroy, tick, untrack } from "svelte";
+  import { api, previewUrl, thumbUrl, displayDims, type ItemLite } from "../api";
   import { SvelteMap } from "svelte/reactivity";
   import { catalog } from "../stores/catalog.svelte";
   import { describeHalf, session } from "../stores/session.svelte";
@@ -173,6 +173,17 @@
   // shows a small "generating preview" spinner.
   const previewReady = catalog.previewReady;
 
+  async function retryPreview(e: MouseEvent) {
+    e.stopPropagation();
+    (e.currentTarget as HTMLButtonElement).blur();
+    catalog.resetPreviewPass();
+    try {
+      await api.rescanProject();
+    } catch (error) {
+      catalog.error = String(error);
+    }
+  }
+
   let viewport = $state<HTMLDivElement | null>(null);
   let canvasEl = $state<HTMLDivElement | null>(null);
   let scrollTop = $state(0);
@@ -284,7 +295,28 @@
     if (next.has(key)) next.delete(key);
     else next.add(key);
     collapsedKeys = next;
+    syncHiddenTargets();
   }
+
+  function syncHiddenTargets() {
+    const hidden = new Set<number>();
+    for (let cell = 0; cell < layout.hidden.length; cell++) {
+      if (!layout.hidden[cell]) continue;
+      const first = cellFirst(cell);
+      const end = cell + 1 < cellCount ? cellFirst(cell + 1) : items.length;
+      for (let index = first; index < end; index++) hidden.add(items[index].id);
+    }
+    session.gridHiddenIds = hidden;
+    session.selectedIds = new Set([...session.selectedIds].filter((id) => !hidden.has(id)));
+    if (session.focused && hidden.has(session.focused.id)) session.clearFocus();
+  }
+
+  $effect(() => {
+    void layout.hidden;
+    void items;
+    untrack(syncHiddenTargets);
+  });
+  $effect(() => () => { session.gridHiddenIds = new Set(); });
 
   /** The `items` range a header's cell range covers. */
   function headerItems(h: Header): { from: number; to: number } {
@@ -309,12 +341,13 @@
    *  section. Adds to/subtracts from the existing selection rather than
    *  replacing it, so group checkboxes compose across sections. */
   function toggleGroupSelect(h: Header) {
+    if (h.collapsed) toggleCollapsed(h.key);
     const selectAll = !groupAllSelected(h);
     const next = new Set(session.selectedIds);
     const { from, to } = headerItems(h);
     for (let i = from; i < to; i++) {
       const id = items[i].id;
-      if (selectAll) next.add(id);
+      if (selectAll && !session.gridHiddenIds.has(id)) next.add(id);
       else next.delete(id);
     }
     session.selectedIds = next;
@@ -559,6 +592,62 @@
       });
     }
     return out;
+  });
+
+  const memberWarmers = new Map<number, {
+    image: HTMLImageElement;
+    src: string;
+    generation: number;
+  }>();
+
+  function cancelMemberWarm(id: number) {
+    const request = memberWarmers.get(id);
+    if (!request) return;
+    memberWarmers.delete(id);
+    request.image.onload = request.image.onerror = null;
+    request.image.src = "";
+  }
+
+  function warmMemberPreview(item: ItemLite) {
+    const image = new Image();
+    const src = previewUrl(item);
+    const generation = catalog.generation;
+    const finish = (success: boolean) => {
+      if (memberWarmers.get(item.id)?.image !== image) return;
+      memberWarmers.delete(item.id);
+      const current = catalog.items.find((row) => row.id === item.id);
+      if (generation !== catalog.generation || !current || previewUrl(current) !== src) return;
+      if (success) catalog.markPreviewReady([item.id]);
+      else catalog.markPreviewUnavailable(item.id);
+    };
+    image.onload = () => finish(true);
+    image.onerror = () => finish(false);
+    memberWarmers.set(item.id, { image, src, generation });
+    image.src = src;
+  }
+
+  // The import prepares primary files. Prepare other members only when visible.
+  $effect(() => {
+    const wanted = new Map(visible.filter(({ item, y }) =>
+      y + CELL > scrollTop && y < scrollTop + height &&
+      item.kind !== 2 && !item.isPrimary && !item.decoupled &&
+      !item.thumbFailed && !item.previewFailed && loaded.has(item.id) &&
+      !previewReady.has(item.id) && !catalog.previewUnavailable.has(item.id),
+    ).map(({ item }) => [item.id, item]));
+    for (const [id, request] of memberWarmers) {
+      const item = wanted.get(id);
+      if (!item || request.generation !== catalog.generation || request.src !== previewUrl(item)) {
+        cancelMemberWarm(id);
+      }
+    }
+    for (const item of wanted.values()) {
+      if (memberWarmers.size >= 2) break;
+      if (!memberWarmers.has(item.id)) warmMemberPreview(item);
+    }
+  });
+
+  onDestroy(() => {
+    for (const id of memberWarmers.keys()) cancelMemberWarm(id);
   });
 
   const visibleHeaders = $derived.by(() =>
@@ -1179,6 +1268,7 @@
       {@const inset = selected ? SELECTED_INSET : 0}
       {@const dims = displayDims(v.item)}
       {@const stacked = v.span > 1}
+      {@const summary = stacked ? stackSummary(v.first, v.span) : null}
       {@const wholePhoto = settings.gridPhotoFit === "fit" && dims !== null}
       {@const burstAt = stacked ? null : session.burstPositionAt(v.first)}
       {@const isFocused =
@@ -1267,100 +1357,100 @@
                 onerror={() => retryThumb(v.item.id)}
               />
             {/if}
-            <!-- Spins for as long as this photo genuinely lacks a preview.
-                 It used to also require the background pass to be running,
-                 which meant the spinner vanished the moment the pass finished
-                 (or had not restarted yet after a half-finished import) even
-                 though the preview still was not there. `previewFailed` is what
-                 stops it now: a real answer rather than a proxy. -->
+            <!-- A completed pass shows a retry control for missing previews. -->
             {#if v.item.kind !== 2 && !v.item.thumbFailed && !v.item.previewFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id)}
-              <span class="preview-spin" title="Generating full preview…">
-                <Loader size={12} />
-              </span>
+              {#if catalog.previewUnavailable.has(v.item.id)}
+                <button
+                  class="preview-unavailable"
+                  title="Preview unavailable. Rescan to retry."
+                  aria-label="Preview unavailable. Rescan to retry."
+                  onpointerdown={(e) => e.stopPropagation()}
+                  onclick={retryPreview}
+                ><FileWarning size={12} /></button>
+              {:else}
+                <span class="preview-spin" title="Generating full preview…">
+                  <Loader size={12} />
+                </span>
+              {/if}
             {/if}
             {#if v.item.label}
               <span class="label-bar" title={formatColorLabel(v.item.label)} style:border-color={labelColors[v.item.label]}></span>
             {/if}
-            {#if stacked}
-              <span class="burst" title="Burst of {v.span} photos">
-                <Layers size={10} />{v.span}
-              </span>
-            {:else if burstAt}
-              <span
-                class="burst"
-                title="Shot {burstAt.position} of a burst of {burstAt.total}"
-              >
-                <Layers size={10} />{burstAt.position}/{burstAt.total}
-              </span>
-            {/if}
-            {#if session.mirrorMode && v.item.groupSize > 1}
-              {@const pair = session.pairHalves(v.item)}
-              <span
-                class="chip pair"
-                class:split={v.item.decoupled}
-                class:below-burst={stacked || burstAt}
-                title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
-              >
-                {#if v.item.decoupled}
-                  <Scissors size={10} /><span>SPLIT</span>
-                {:else if pair?.diverged}
-                  <!-- Halves shown separately only once they disagree, so the
-                       ordinary pair keeps drawing exactly as it always has. -->
-                  {#each pair.halves as h, hi (h.id)}
-                    {#if hi > 0}<span class="half-sep"></span>{/if}
-                    <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
-                  {/each}
-                {:else}
-                  RAW+JPG
+            <div class="info-top">
+              {#if stacked}
+                <span class="burst" title="Burst of {v.span} photos">
+                  <Layers size={10} />{v.span}
+                </span>
+              {:else if burstAt}
+                <span
+                  class="burst"
+                  title="Shot {burstAt.position} of a burst of {burstAt.total}"
+                >
+                  <Layers size={10} />{burstAt.position}/{burstAt.total}
+                </span>
+              {/if}
+              {#if session.mirrorMode && v.item.groupSize > 1}
+                {@const pair = session.pairHalves(v.item)}
+                <span
+                  class="chip pair"
+                  class:split={v.item.decoupled}
+                  title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
+                >
+                  {#if v.item.decoupled}
+                    <Scissors size={10} /><span>SPLIT</span>
+                  {:else if pair?.diverged}
+                    <!-- Halves shown separately only once they disagree, so the
+                         ordinary pair keeps drawing exactly as it always has. -->
+                    {#each pair.halves as h, hi (h.id)}
+                      {#if hi > 0}<span class="half-sep"></span>{/if}
+                      <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
+                    {/each}
+                  {:else}
+                    RAW+JPG
+                  {/if}
+                </span>
+              {:else if v.item.kind === 0}
+                <span class="chip raw">RAW</span>
+              {/if}
+              {#if summary}
+                {#if summary.picks > 0 || summary.rejects > 0}
+                  <span class="badge counts" title={stackTitle(summary, v.span)}>
+                    {#if summary.picks > 0}
+                      <span class="pick"><Check size={11} />{summary.picks}</span>
+                    {/if}
+                    {#if summary.rejects > 0}
+                      <span class="reject"><X size={11} />{summary.rejects}</span>
+                    {/if}
+                  </span>
                 {/if}
-              </span>
-            {:else if v.item.kind === 0}
-              <span class="chip raw" class:below-burst={stacked || burstAt}>RAW</span>
-            {/if}
-            {#if stacked}
-              <!-- A stack stands for many photos, so the first frame's flag would
-                   speak for frames it knows nothing about. Sum them instead: a
-                   burst with some picks and some rejects is one that has been
-                   worked, not one in conflict. -->
-              {@const sum = stackSummary(v.first, v.span)}
-              {#if sum.picks > 0 || sum.rejects > 0}
-                <span class="badge counts" title={stackTitle(sum, v.span)}>
-                  {#if sum.picks > 0}
-                    <span class="pick"><Check size={11} />{sum.picks}</span>
-                  {/if}
-                  {#if sum.rejects > 0}
-                    <span class="reject"><X size={11} />{sum.rejects}</span>
-                  {/if}
-                </span>
+              {:else}
+                {#if session.pendingDeleteIds.has(v.item.id)}
+                  <span class="badge pending" title="Queued for deletion"><X size={12} /></span>
+                {:else if v.item.flag !== 0}
+                  <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
+                    {#if v.item.flag === 1}<Check size={12} />{:else}<X size={12} />{/if}
+                  </span>
+                {/if}
               {/if}
-              {#if sum.maxRating > 0}
-                <span class="stars" title="Best rating in this burst">
-                  {"★".repeat(sum.maxRating)}
-                </span>
-              {/if}
-            {:else}
-              {#if session.pendingDeleteIds.has(v.item.id)}
-                <span class="badge pending" title="Queued for deletion"><X size={12} /></span>
-              {:else if v.item.flag !== 0}
-                <span class="badge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
-                  {#if v.item.flag === 1}<Check size={12} />{:else}<X size={12} />{/if}
-                </span>
-              {/if}
-              {#if v.item.rating > 0}
+            </div>
+            <div class="info-bottom">
+              {#if summary && summary.maxRating > 0}
+                <span class="stars" title="Best rating in this burst">{"★".repeat(summary.maxRating)}</span>
+              {:else if !summary && v.item.rating > 0}
                 <span class="stars">{"★".repeat(v.item.rating)}</span>
               {/if}
-            {/if}
-            {#if v.item.tagIds.length > 0}
-              <span class="tags">
-                {#each v.item.tagIds.slice(0, 4) as tagId}
-                  <span
-                    class="tagdot"
-                    style="background: {tags.byId.get(tagId)?.color ?? '#888'}"
-                    title={tags.byId.get(tagId)?.name}
-                  ></span>
-                {/each}
-              </span>
-            {/if}
+              {#if v.item.tagIds.length > 0}
+                <span class="tags">
+                  {#each v.item.tagIds.slice(0, 4) as tagId}
+                    <span
+                      class="tagdot"
+                      style="background: {tags.byId.get(tagId)?.color ?? '#888'}"
+                      title={tags.byId.get(tagId)?.name}
+                    ></span>
+                  {/each}
+                </span>
+              {/if}
+            </div>
           </div>
         </div>
         {#if session.showNames}
@@ -1710,15 +1800,7 @@
     justify-content: center;
   }
 
-  /* The actual visible-photo box: fills .frame for landscape/square/unknown-
-     dims items (cropped via object-fit: cover below), but for a portrait item
-     is sized to its REAL aspect ratio (inline style, computed from the item's
-     displayed w/h) instead of the full square frame — full height, auto width,
-     so it's flush top/bottom and pillarboxed left/right without cropping.
-     Every chip/badge/stars/tags/label-color below is positioned relative to
-     THIS box (it's their nearest `position: relative` ancestor), which is
-     exactly what keeps them inside the actual photo instead of spilling into
-     the empty letterbox gutters. */
+  /* All badges use this box, so they stay within the fitted image. */
   .photo {
     position: relative;
     width: 100%;
@@ -1730,13 +1812,9 @@
     border-radius: inherit;
   }
 
-  /* Marked for deletion (reject flag or queued delete): dim the image itself,
-     not .photo — opacity on the wrapper would wash out the red-X badge (and
-     the other chips), which must stay fully readable. Same treatment as
-     Filmstrip.svelte. */
+  /* Brightness keeps the front card opaque above the other burst frames. */
   .photo.queued img {
-    opacity: 0.4;
-    filter: grayscale(35%);
+    filter: brightness(0.4) grayscale(35%);
   }
 
   /* Label-color indicator: a colored strip flush along the photo's bottom
@@ -1761,6 +1839,10 @@
   .frame.stacked {
     box-sizing: border-box;
     padding: 8px 8px 0 0;
+  }
+
+  .frame.stacked .photo {
+    background: var(--bg-stage);
   }
 
   /* Both deck cards trace the photo's own box (the frame minus that padding)
@@ -1808,10 +1890,6 @@
   }
 
   img {
-    /* .photo is already sized to the exact box the image should occupy (the
-       full frame for landscape/unknown dims, or the true aspect-ratio box for
-       portrait) — cover always fills it exactly, with no cropping in the
-       portrait case since the box ratio already matches the image's. */
     width: 100%;
     height: 100%;
     object-fit: cover;
@@ -1935,11 +2013,6 @@
     opacity: 0.55;
   }
 
-  /* Second row of the top-left stack: the burst badge owns the corner. */
-  .chip.below-burst {
-    top: 24px;
-  }
-
   /* Burst badge: the same pill as the loupe's info bar, sized for a cell. It
      reads "how many" on a collapsed stack and "which one" on a loose frame. */
   .burst {
@@ -2028,10 +2101,57 @@
     gap: 3px;
   }
 
+  .info-top,
+  .info-bottom {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 3px;
+    pointer-events: none;
+  }
+
+  .info-top {
+    top: 4px;
+  }
+
+  .info-bottom {
+    bottom: 9px;
+    justify-content: space-between;
+  }
+
+  .info-top > .chip,
+  .info-top > .burst,
+  .info-top > .badge,
+  .info-bottom > .stars,
+  .info-bottom > .tags {
+    position: static;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .info-top > .chip {
+    order: 2;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .info-top > .badge {
+    margin-left: auto;
+  }
+
+  .badge.counts,
+  .info-bottom > .tags {
+    flex-wrap: wrap;
+  }
+
   /* "Full preview still generating" hint. Bottom-right is free for photos during
      the preview pass (the video chip is video-only; rating/flag/tag chips get
      added later, while culling). */
-  .preview-spin {
+  .preview-spin,
+  .preview-unavailable {
     position: absolute;
     bottom: 4px;
     right: 4px;
@@ -2043,8 +2163,17 @@
     color: #fff;
     background: rgba(0, 0, 0, 0.5);
     box-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+  }
+
+  .preview-spin {
     animation: pill-spin 1s linear infinite;
     pointer-events: none;
+  }
+
+  .preview-unavailable {
+    border: none;
+    cursor: pointer;
+    color: #ffcf7a;
   }
 
   .tagdot {

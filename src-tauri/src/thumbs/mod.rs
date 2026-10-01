@@ -3,7 +3,7 @@ pub mod memcache;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,7 +14,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::db::Db;
 use crate::decode;
 use crate::error::{AppError, AppResult};
-use crate::store::{read_all, ProjectStore};
+use crate::store::ProjectStore;
 
 pub const THUMB_LONG_EDGE: u32 = 384;
 
@@ -64,7 +64,7 @@ pub enum ThumbKind {
 /// belongs here as much as mtime: rotating a photo changes the rendered pixels
 /// without touching the file on disk, so keying the cache on mtime alone would
 /// keep serving the old rotation forever.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CacheVersion {
     pub mtime: i64,
     pub orientation: i64,
@@ -92,12 +92,13 @@ pub struct ThumbRequest {
 }
 
 type Responder = Box<dyn FnOnce(AppResult<Vec<u8>>) + Send>;
+type WorkKey = (i64, u8, Option<CacheVersion>, u64, u32);
 
 /// One unit of work — a `(file, kind)` pair — plus everyone waiting on it.
 /// Requests are coalesced into these, so the same artifact is never decoded
 /// twice concurrently no matter how many callers ask for it.
 struct Pending {
-    key: (i64, u8),
+    key: WorkKey,
     kind: ThumbKind,
     also_thumb: bool,
     cache_checked: bool,
@@ -148,10 +149,11 @@ struct Queues {
     /// Keys a worker is decoding right now, holding the responders that arrived
     /// after the decode started. The worker drains this when it finishes, so a
     /// late caller adopts the in-flight result instead of starting a second one.
-    in_flight: HashMap<(i64, u8), Vec<Responder>>,
+    in_flight: HashMap<WorkKey, Vec<Responder>>,
 }
 
 struct Queue {
+    cancelled: Arc<AtomicBool>,
     items: Mutex<Option<Queues>>,
     signal: Condvar,
     /// Ceiling on the interactive queue. A fast scroll can ask for hundreds of
@@ -167,6 +169,7 @@ struct Queue {
 /// exclusive: DB access goes through the shared writer thread, files are
 /// read-only. Interactive requests always preempt background ones.
 pub struct ThumbPool {
+    db: Mutex<Option<Arc<Db>>>,
     queue: Arc<Queue>,
     /// Kept so shutdown can wait for the workers rather than merely ask them to
     /// stop — see `shutdown`. Taken on the first shutdown, so a later drop joins
@@ -192,6 +195,7 @@ impl ThumbPool {
         };
 
         let queue = Arc::new(Queue {
+            cancelled: Arc::new(AtomicBool::new(false)),
             items: Mutex::new(Some(Queues {
                 interactive: VecDeque::new(),
                 background: VecDeque::new(),
@@ -221,6 +225,7 @@ impl ThumbPool {
         }
 
         ThumbPool {
+            db: Mutex::new(Some(db)),
             queue,
             handles: Mutex::new(handles),
         }
@@ -233,12 +238,18 @@ impl ThumbPool {
     /// second decode. A request already sitting in the background tier is
     /// *promoted* — the user is looking at it now.
     pub fn enqueue(&self, request: ThumbRequest) {
+        let key = match self.request_key(&request) {
+            Ok(key) => key,
+            Err(error) => {
+                (request.respond)(Err(error));
+                return;
+            }
+        };
         let mut guard = self.queue.items.lock().unwrap();
         let Some(q) = guard.as_mut() else {
             (request.respond)(Err(AppError::Other("thumb pool shut down".into())));
             return;
         };
-        let key = (request.file_id, request.kind as u8);
 
         if let Some(waiters) = q.in_flight.get_mut(&key) {
             waiters.push(request.respond);
@@ -295,15 +306,24 @@ impl ThumbPool {
     /// by the size of the pass — but not from coalescing, so a file the user has
     /// already looked at is not decoded a second time here.
     pub fn enqueue_background_batch(&self, requests: Vec<ThumbRequest>) {
+        let requests: Vec<_> = requests
+            .into_iter()
+            .filter_map(|request| match self.request_key(&request) {
+                Ok(key) => Some((request, key)),
+                Err(error) => {
+                    (request.respond)(Err(error));
+                    None
+                }
+            })
+            .collect();
         let mut guard = self.queue.items.lock().unwrap();
         let Some(q) = guard.as_mut() else {
-            for request in requests {
+            for (request, _) in requests {
                 (request.respond)(Err(AppError::Other("thumb pool shut down".into())));
             }
             return;
         };
-        for request in requests {
-            let key = (request.file_id, request.kind as u8);
+        for (request, key) in requests {
             if let Some(waiters) = q.in_flight.get_mut(&key) {
                 waiters.push(request.respond);
                 continue;
@@ -332,11 +352,39 @@ impl ThumbPool {
         self.queue.signal.notify_all();
     }
 
+    fn request_key(&self, request: &ThumbRequest) -> AppResult<WorkKey> {
+        let db = self
+            .db
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or_else(|| AppError::Other("thumb pool shut down".into()))?;
+        let version = match request.known_version {
+            Some(version) => version,
+            None => {
+                let (_, _, mtime, orientation) = file_row(&db, request.file_id)?;
+                CacheVersion {
+                    mtime,
+                    orientation: orientation.unwrap_or(1),
+                }
+            }
+        };
+        let source = source_version_for(&db, request.file_id, request.kind)?;
+        Ok((
+            request.file_id,
+            request.kind as u8,
+            Some(version),
+            source,
+            preview_long_edge(),
+        ))
+    }
+
     /// Stop accepting work and unblock all workers (they exit). Draining calls
     /// every pending request's `respond` with an error, so a caller blocked on a
     /// completion channel (ingest Phase B) is always released.
     pub fn shutdown(&self) {
         self.stop_queue();
+        self.db.lock().unwrap().take();
         // Then WAIT for the workers to go. Each holds its own `Arc<Db>`, so
         // until they have exited the database is still open — which on Windows
         // means its file cannot be deleted, and reimporting a project is exactly
@@ -349,6 +397,7 @@ impl ThumbPool {
     }
 
     fn stop_queue(&self) {
+        self.queue.cancelled.store(true, Ordering::Relaxed);
         let mut guard = self.queue.items.lock().unwrap();
         if let Some(dropped) = guard.take() {
             drop(guard);
@@ -375,6 +424,7 @@ impl Drop for ThumbPool {
 }
 
 fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, root: PathBuf) {
+    decode::video::set_cancellation(queue.cancelled.clone());
     loop {
         let pending = {
             let mut guard = queue.items.lock().unwrap();
@@ -428,7 +478,17 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
     }
 }
 
+#[cfg(test)]
 pub(crate) fn cache_rel_path(file_id: i64, version: CacheVersion, kind: ThumbKind) -> String {
+    cache_rel_path_for_edge(file_id, version, kind, preview_long_edge())
+}
+
+fn cache_rel_path_for_edge(
+    file_id: i64,
+    version: CacheVersion,
+    kind: ThumbKind,
+    preview_edge: u32,
+) -> String {
     let bucket = (file_id % 256) as u8;
     // The preview's target size is a user setting, so it belongs in the path:
     // two sizes then occupy different files instead of one overwriting the
@@ -436,11 +496,388 @@ pub(crate) fn cache_rel_path(file_id: i64, version: CacheVersion, kind: ThumbKin
     // served the wrong one from a cache hit.
     let suffix = match kind {
         ThumbKind::Thumb => "t".to_string(),
-        ThumbKind::Preview => format!("p{}", preview_long_edge()),
+        ThumbKind::Preview => format!("p{preview_edge}"),
         ThumbKind::Full => "f".to_string(),
     };
     let CacheVersion { mtime, orientation } = version;
-    format!("{bucket:02x}/{file_id}_{mtime}_{orientation}_{suffix}.jpg")
+    format!("{bucket:02x}/{file_id}_{mtime}_{orientation}_r2_{suffix}.jpg")
+}
+
+pub(crate) fn source_version_sql() -> String {
+    format!(
+        "CASE WHEN f.kind = 0 THEN CAST(f.group_id AS TEXT) || ':' || g.decoupled || ':' ||
+        CASE WHEN g.decoupled = 0 AND f.ext NOT IN ({secondary}) THEN
+          COALESCE((SELECT CAST(s.id AS TEXT) || ':' || s.mtime || ':' || s.size || ':' ||
+              COALESCE(s.orientation, 1) || ':' || s.rel_path
+            FROM files s WHERE s.group_id=f.group_id AND s.kind=1 AND s.status=0
+              AND s.ext IN ({images}) ORDER BY s.id LIMIT 1), 'self')
+          ELSE 'self' END ELSE '' END",
+        secondary = crate::db::sql::secondary_raw_exts(),
+        images = crate::db::sql::image_exts()
+    )
+}
+
+pub(crate) fn source_version(value: &str) -> u64 {
+    if value.is_empty() {
+        0
+    } else {
+        xxhash_rust::xxh3::xxh3_64(value.as_bytes())
+    }
+}
+
+pub(crate) fn source_version_for(db: &Arc<Db>, file_id: i64, kind: ThumbKind) -> AppResult<u64> {
+    if kind == ThumbKind::Full {
+        return Ok(0);
+    }
+    db.call_read(move |conn| {
+        let sql = format!(
+            "SELECT {} FROM files f JOIN groups g ON g.id=f.group_id WHERE f.id=?1 AND f.status=0",
+            source_version_sql()
+        );
+        let value: String = conn.query_row(&sql, [file_id], |r| r.get(0))?;
+        Ok(source_version(&value))
+    })
+}
+
+fn source_cache_rel_path(
+    file_id: i64,
+    version: CacheVersion,
+    kind: ThumbKind,
+    source_version: u64,
+) -> String {
+    source_cache_rel_path_for_edge(file_id, version, kind, source_version, preview_long_edge())
+}
+
+fn source_cache_rel_path_for_edge(
+    file_id: i64,
+    version: CacheVersion,
+    kind: ThumbKind,
+    source_version: u64,
+    preview_edge: u32,
+) -> String {
+    let base = cache_rel_path_for_edge(file_id, version, kind, preview_edge);
+    if source_version == 0 {
+        base
+    } else {
+        base.replace("_r2_", &format!("_r2s{source_version:016x}_"))
+    }
+}
+
+pub(crate) fn resolved_cache_rel_path(
+    db: &Arc<Db>,
+    file_id: i64,
+    version: CacheVersion,
+    kind: ThumbKind,
+) -> AppResult<String> {
+    Ok(source_cache_rel_path(
+        file_id,
+        version,
+        kind,
+        source_version_for(db, file_id, kind)?,
+    ))
+}
+
+/// Call before thumbnail workers start. Delete only unreferenced cache artifacts.
+pub(crate) fn prune_cache(db: &Arc<Db>, root: &Path) -> AppResult<usize> {
+    db.call(|conn| {
+        let tx = conn.transaction()?;
+        let first = tx.execute(
+            "INSERT OR IGNORE INTO settings (key, value) VALUES ('cacheFailureRecovery', '1')",
+            [],
+        )?;
+        // Old failure rows can contain temporary source errors. Retry them once.
+        if first != 0 {
+            tx.execute("DELETE FROM thumbnails WHERE failed = 1", [])?;
+        }
+        tx.commit()?;
+        Ok(())
+    })?;
+    invalidate_cache_rows(db)?;
+    let referenced: std::collections::HashSet<String> = db.call_read(|conn| {
+        let mut statement = conn.prepare("SELECT t.cache_path FROM thumbnails t JOIN files f ON f.id=t.file_id WHERE t.failed=0 AND f.status=0 AND t.source_mtime=f.mtime")?;
+        let paths = statement.query_map([], |row| row.get(0))?;
+        Ok(paths.collect::<Result<_, _>>()?)
+    })?;
+    let directory = root.join(".cullant/thumbs");
+    for path in [root.join(".cullant"), directory.clone()] {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(AppError::Other(
+                    "refuse to prune a linked cache directory".into(),
+                ))
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let buckets = match std::fs::read_dir(directory) {
+        Ok(buckets) => buckets,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error.into()),
+    };
+    let mut removed = 0;
+    for bucket in buckets {
+        let bucket = bucket?;
+        let name = bucket.file_name().to_string_lossy().into_owned();
+        if name.len() != 2
+            || !name.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || !bucket.file_type()?.is_dir()
+        {
+            continue;
+        }
+        for entry in std::fs::read_dir(bucket.path())? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let path = entry.path();
+            if !matches!(
+                path.extension().and_then(|ext| ext.to_str()),
+                Some("jpg" | "tmp")
+            ) {
+                continue;
+            }
+            let relative = format!("{name}/{}", entry.file_name().to_string_lossy());
+            if !referenced.contains(&relative) {
+                std::fs::remove_file(path)?;
+                removed += 1;
+            }
+        }
+    }
+    Ok(removed)
+}
+
+pub(crate) fn invalidate_cache_rows(db: &Arc<Db>) -> AppResult<()> {
+    let root = db
+        .path()
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| AppError::Other("project database has no data directory".into()))?
+        .to_path_buf();
+    db.call(move |conn| {
+        conn.execute("UPDATE files SET width=NULL, height=NULL WHERE kind=0 AND EXISTS(SELECT 1 FROM thumbnails t WHERE t.file_id=files.id AND t.failed=0 AND t.cache_path NOT LIKE '%_r2_%' AND t.cache_path NOT LIKE '%_r2s%')", [])?;
+        let sql = format!("SELECT t.file_id, t.kind, t.cache_path, f.mtime, COALESCE(f.orientation,1), {}, t.failed, t.source_mtime, t.long_edge FROM thumbnails t JOIN files f ON f.id=t.file_id JOIN groups g ON g.id=f.group_id WHERE f.status=0", source_version_sql());
+        let mut statement = conn.prepare(&sql)?;
+        let entries = statement.query_map([], |row| Ok((row.get::<_,i64>(0)?, row.get::<_,i64>(1)?, row.get::<_,String>(2)?, row.get::<_,i64>(3)?, row.get::<_,i64>(4)?, row.get::<_,String>(5)?, row.get::<_,bool>(6)?, row.get::<_,i64>(7)?, row.get::<_,u32>(8)?)))?.collect::<Result<Vec<_>,_>>()?;
+        drop(statement);
+        for (id, kind, path, mtime, orientation, source, failed, source_mtime, long_edge) in entries {
+            let kind = match kind { 0 => ThumbKind::Thumb, 1 => ThumbKind::Preview, 3 => ThumbKind::Full, _ => continue };
+            let source = if kind == ThumbKind::Full { 0 } else { source_version(&source) };
+            let current = path == source_cache_rel_path(id, CacheVersion { mtime, orientation }, kind, source)
+                && source_mtime == mtime
+                && (kind != ThumbKind::Preview || long_edge == 0 || long_edge == preview_long_edge());
+            // A decode tombstone has no JPEG. It must survive a valid cache check.
+            if !current || (!failed && !cached_artifact_ready(&root, &path)) {
+                conn.execute("DELETE FROM thumbnails WHERE file_id=?1 AND kind=?2", params![id, kind as i64])?;
+            }
+        }
+        Ok(())
+    })
+}
+
+pub(crate) fn cached_artifact_path(root: &Path, relative: &str) -> Option<PathBuf> {
+    let (bucket, name) = relative.split_once('/')?;
+    if bucket.len() != 2
+        || !bucket.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || name.contains(['/', '\\'])
+        || !name.ends_with(".jpg")
+    {
+        return None;
+    }
+    Some(root.join(".cullant/thumbs").join(bucket).join(name))
+}
+
+pub(crate) fn cached_row_ready(
+    root: &Path,
+    relative: &str,
+    file_id: i64,
+    version: CacheVersion,
+    kind: ThumbKind,
+    source_version: u64,
+) -> bool {
+    relative == source_cache_rel_path(file_id, version, kind, source_version)
+        && cached_artifact_ready(root, relative)
+}
+
+pub(crate) fn cached_artifact_ready(root: &Path, relative: &str) -> bool {
+    cached_artifact_path(root, relative).is_some_and(|path| cached_jpeg_dimensions(&path).is_some())
+}
+
+fn cached_jpeg_dimensions(path: &Path) -> Option<(u32, u32)> {
+    let file = std::fs::File::open(path).ok()?;
+    cache_jpeg_dimensions(std::io::BufReader::new(file))
+}
+
+fn cache_jpeg_dimensions<R: std::io::BufRead + std::io::Seek>(mut reader: R) -> Option<(u32, u32)> {
+    use std::io::SeekFrom;
+    let mut marker = [0; 2];
+    reader.read_exact(&mut marker).ok()?;
+    if marker != [0xff, 0xd8] {
+        return None;
+    }
+    let image_end = reader.seek(SeekFrom::End(-2)).ok()?;
+    reader.read_exact(&mut marker).ok()?;
+    if marker != [0xff, 0xd9] {
+        return None;
+    }
+    reader.seek(SeekFrom::Start(2)).ok()?;
+    cache_jpeg_header(&mut reader, image_end)?;
+    reader.seek(SeekFrom::Start(0)).ok()?;
+    let mut decoder = jpeg_decoder::Decoder::new(reader);
+    decoder.read_info().ok()?;
+    let info = decoder.info()?;
+    (info.width > 0 && info.height > 0).then_some((u32::from(info.width), u32::from(info.height)))
+}
+
+fn cache_jpeg_header<R: std::io::BufRead + std::io::Seek>(
+    reader: &mut R,
+    image_end: u64,
+) -> Option<()> {
+    let mut components = Vec::new();
+    let mut quantization = 0;
+    let mut huffman = 0;
+    loop {
+        let mut header = [0; 4];
+        reader.read_exact(&mut header).ok()?;
+        if header[0] != 0xff {
+            return None;
+        }
+        let length = u16::from_be_bytes([header[2], header[3]]).checked_sub(2)?;
+        let segment_end = reader
+            .stream_position()
+            .ok()?
+            .checked_add(u64::from(length))?;
+        // Generated cache headers are small. Bound malformed segment reads.
+        if segment_end >= image_end || segment_end > 64 * 1024 {
+            return None;
+        }
+        let mut payload = vec![0; usize::from(length)];
+        reader.read_exact(&mut payload).ok()?;
+        match header[1] {
+            0xc0 if components.is_empty() => components = cache_jpeg_components(&payload)?,
+            0xdb => quantization |= cache_jpeg_quantization(&payload)?,
+            0xc4 => huffman |= cache_jpeg_huffman(&payload)?,
+            0xda => return cache_jpeg_scan(&payload, &components, quantization, huffman),
+            0xe0..=0xef | 0xfe => {}
+            0xdd if payload.len() == 2 => {}
+            _ => return None,
+        }
+    }
+}
+
+fn cache_jpeg_components(payload: &[u8]) -> Option<Vec<(u8, u8)>> {
+    let count = usize::from(*payload.get(5)?);
+    if !(1..=4).contains(&count) || payload[0] != 8 || payload.len() != 6 + 3 * count {
+        return None;
+    }
+    let mut components = Vec::with_capacity(count);
+    for component in payload[6..].chunks_exact(3) {
+        if component[2] > 3 || components.iter().any(|&(id, _)| id == component[0]) {
+            return None;
+        }
+        components.push((component[0], component[2]));
+    }
+    Some(components)
+}
+
+fn cache_jpeg_quantization(payload: &[u8]) -> Option<u8> {
+    let tables = payload.chunks_exact(65);
+    if payload.is_empty() || !tables.remainder().is_empty() {
+        return None;
+    }
+    let mut mask = 0;
+    for table in tables {
+        if table[0] > 3 || table[1..].contains(&0) {
+            return None;
+        }
+        mask |= 1 << table[0];
+    }
+    Some(mask)
+}
+
+fn cache_jpeg_huffman(mut payload: &[u8]) -> Option<u8> {
+    if payload.is_empty() {
+        return None;
+    }
+    let mut mask = 0;
+    while !payload.is_empty() {
+        let definition = *payload.first()?;
+        let class = definition >> 4;
+        let id = definition & 0x0f;
+        if class > 1 || id > 3 {
+            return None;
+        }
+        let counts = payload.get(1..17)?;
+        let mut available = 1i32;
+        for &count in counts {
+            available = available * 2 - i32::from(count);
+            if available < 0 {
+                return None;
+            }
+        }
+        let symbols = counts
+            .iter()
+            .map(|&count| usize::from(count))
+            .sum::<usize>();
+        if symbols == 0 || symbols > 256 {
+            return None;
+        }
+        let values = payload.get(17..17 + symbols)?;
+        let invalid_symbol = |&value: &u8| {
+            if class == 0 {
+                value > 11
+            } else {
+                let size = value & 0x0f;
+                size > 10 || (size == 0 && value != 0 && value != 0xf0)
+            }
+        };
+        if values.iter().any(invalid_symbol) {
+            return None;
+        }
+        payload = payload.get(17 + symbols..)?;
+        mask |= 1 << (4 * class + id);
+    }
+    Some(mask)
+}
+
+fn cache_jpeg_scan(
+    payload: &[u8],
+    components: &[(u8, u8)],
+    quantization: u8,
+    huffman: u8,
+) -> Option<()> {
+    let count = usize::from(*payload.first()?);
+    if components.is_empty()
+        || count != components.len()
+        || payload.len() != 4 + 2 * count
+        || !payload.ends_with(&[0, 63, 0])
+    {
+        return None;
+    }
+    let mut seen = Vec::with_capacity(count);
+    for scan in payload[1..1 + 2 * count].chunks_exact(2) {
+        let &(_, quantization_id) = components.iter().find(|&&(id, _)| id == scan[0])?;
+        let dc = scan[1] >> 4;
+        let ac = scan[1] & 0x0f;
+        if dc > 3 || ac > 3 || seen.contains(&scan[0]) {
+            return None;
+        }
+        let required_huffman = (1 << dc) | (1 << (4 + ac));
+        if quantization & (1 << quantization_id) == 0
+            || huffman & required_huffman != required_huffman
+        {
+            return None;
+        }
+        seen.push(scan[0]);
+    }
+    Some(())
+}
+
+pub(crate) fn read_cached_jpeg(path: &Path) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(path).ok()?;
+    cache_jpeg_dimensions(std::io::Cursor::new(&bytes))?;
+    Some(bytes)
 }
 
 /// Pixel dimensions from an encoded image's header, without decoding it.
@@ -523,7 +960,7 @@ static PAIRED_JPEG_SQL: std::sync::LazyLock<String> = std::sync::LazyLock::new(|
            AND s.ext IN ({images})
          WHERE f.id = ?1 AND f.kind = 0 AND f.status = 0 AND g.decoupled = 0
            AND f.ext NOT IN ({secondary})
-         LIMIT 1",
+         ORDER BY s.id LIMIT 1",
         images = crate::db::sql::image_exts(),
         secondary = crate::db::sql::secondary_raw_exts()
     )
@@ -582,11 +1019,7 @@ pub(crate) fn decode_for(
             if let Some(jpeg) = decode::raw::embedded_jpeg(source.buf()) {
                 match decode::jpeg::decode_scaled(jpeg, min_long_edge, rel_path) {
                     Ok(img) => {
-                        let dims = image::ImageReader::new(std::io::Cursor::new(jpeg))
-                            .with_guessed_format()
-                            .ok()
-                            .and_then(|r| r.into_dimensions().ok());
-                        return Ok(Decoded::new(img, dims));
+                        return Ok(Decoded::new(img, None));
                     }
                     // A corrupt embedded JPEG is rare; fall back to rawler rather
                     // than tombstoning a file rawler might still decode.
@@ -596,8 +1029,7 @@ pub(crate) fn decode_for(
                 }
             }
             let raw = decode::raw::embedded_preview_scaled(&source, min_long_edge, rel_path)?;
-            let dims = raw.is_full.then(|| (raw.image.width(), raw.image.height()));
-            Ok(Decoded::new(raw.image, dims))
+            Ok(Decoded::new(raw.image, None))
         }
         1 if decode::is_heif(rel_path) => {
             // A HEIF is never opened here: no in-process decoder can read one,
@@ -656,6 +1088,9 @@ pub(crate) struct SourceMeta {
     /// cache path, because that is what the DB holds and what the frontend puts
     /// in the request URL.
     pub pre_oriented: bool,
+    pub source_orientation: i64,
+    pub source_version: u64,
+    pub preview_edge: u32,
     /// ORIGINAL image dimensions when reliably known (JPEG header or full-size
     /// embedded RAW image); only then are `files.width/height` backfilled.
     pub src_dims: Option<(u32, u32)>,
@@ -672,6 +1107,8 @@ pub(crate) struct ThumbRow {
     out_w: u32,
     out_h: u32,
     mtime: i64,
+    orientation: i64,
+    source_version: u64,
     /// ORIGINAL dims to backfill into `files`, when the decode was full-size.
     src_dims: Option<(u32, u32)>,
     /// Perceptual hash of the rendered thumbnail; `None` for every kind but
@@ -724,30 +1161,73 @@ pub(crate) fn render_to_cache(
         mtime,
         orientation,
         pre_oriented,
+        source_orientation,
+        source_version,
+        preview_edge,
         src_dims,
     } = *meta;
     let (long_edge, quality) = match kind {
         ThumbKind::Thumb => (THUMB_LONG_EDGE, 80),
-        ThumbKind::Preview => (preview_long_edge(), 80),
+        ThumbKind::Preview => (preview_edge, 80),
         ThumbKind::Full => (u32::MAX, 90),
     };
     let resized = resize_long_edge(decoded, long_edge)?;
-    let oriented = apply_orientation(resized, if pre_oriented { 1 } else { orientation });
+    let unrotated = if pre_oriented {
+        apply_orientation(
+            resized,
+            match source_orientation {
+                6 => 8,
+                8 => 6,
+                other => other,
+            },
+        )
+    } else {
+        resized
+    };
+    let oriented = apply_orientation(unrotated, orientation);
     let jpeg = encode_jpeg(&oriented, quality)?;
 
-    let cache_rel = cache_rel_path(file_id, CacheVersion { mtime, orientation }, kind);
+    let cache_rel = source_cache_rel_path_for_edge(
+        file_id,
+        CacheVersion { mtime, orientation },
+        kind,
+        source_version,
+        preview_edge,
+    );
     let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
     if let Some(parent) = cache_abs.parent() {
         std::fs::create_dir_all(parent)?;
     }
     // Write via temp file + rename so a crashed worker never leaves a
     // truncated JPEG in the cache.
-    let tmp = cache_abs.with_extension("tmp");
-    std::fs::write(&tmp, &jpeg)?;
-    std::fs::rename(&tmp, &cache_abs).or_else(|_| {
-        // Another worker may have won the race; that's fine.
-        std::fs::remove_file(&tmp)
-    })?;
+    static TEMP_ID: AtomicU64 = AtomicU64::new(0);
+    let tmp = cache_abs.with_extension(format!(
+        "{}.{}.tmp",
+        std::process::id(),
+        TEMP_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let written = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        file.write_all(&jpeg)?;
+        drop(file);
+        match std::fs::rename(&tmp, &cache_abs) {
+            Ok(()) => Ok(()),
+            Err(_) if cached_jpeg_dimensions(&cache_abs).is_some() => std::fs::remove_file(&tmp),
+            Err(_) if cache_abs.is_file() => {
+                std::fs::remove_file(&cache_abs)?;
+                std::fs::rename(&tmp, &cache_abs)
+            }
+            Err(error) => Err(error),
+        }
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written?;
 
     let row = ThumbRow {
         file_id,
@@ -756,6 +1236,8 @@ pub(crate) fn render_to_cache(
         out_w: oriented.width(),
         out_h: oriented.height(),
         mtime,
+        orientation,
+        source_version,
         src_dims,
         phash: (kind == ThumbKind::Thumb).then(|| dhash(&oriented)),
         long_edge,
@@ -765,6 +1247,31 @@ pub(crate) fn render_to_cache(
 
 /// Apply one rendered thumbnail's row writes on the DB thread's connection.
 fn write_thumb_row(conn: &Connection, row: &ThumbRow) -> rusqlite::Result<()> {
+    let sql = format!("SELECT f.mtime, COALESCE(f.orientation,1), {} FROM files f JOIN groups g ON g.id=f.group_id WHERE f.id=?1 AND f.status=0", source_version_sql());
+    let current = conn
+        .query_row(&sql, [row.file_id], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .optional()?;
+    let Some((mtime, orientation, source)) = current else {
+        return Ok(());
+    };
+    let source = if row.kind_i == ThumbKind::Full as i64 {
+        0
+    } else {
+        source_version(&source)
+    };
+    if mtime != row.mtime
+        || orientation != row.orientation
+        || source != row.source_version
+        || (row.kind_i == ThumbKind::Preview as i64 && row.long_edge != preview_long_edge())
+    {
+        return Ok(());
+    }
     conn.execute(
         "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at, failed, long_edge)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, ?8)
@@ -810,7 +1317,44 @@ pub(crate) fn render_and_store(
     kind: ThumbKind,
 ) -> AppResult<Vec<u8>> {
     let (jpeg, row) = render_to_cache(root, meta, decoded, kind)?;
-    db.call(move |conn| Ok(write_thumb_row(conn, &row)?))?;
+    let old_path: Option<String> = db.call(move |conn| {
+        let old = conn
+            .query_row(
+                "SELECT cache_path FROM thumbnails WHERE file_id=?1 AND kind=?2",
+                params![row.file_id, row.kind_i],
+                |r| r.get(0),
+            )
+            .optional()?;
+        write_thumb_row(conn, &row)?;
+        let current: Option<String> = conn
+            .query_row(
+                "SELECT cache_path FROM thumbnails WHERE file_id=?1 AND kind=?2",
+                params![row.file_id, row.kind_i],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(if current.as_deref() == Some(row.cache_rel.as_str()) {
+            old
+        } else {
+            None
+        })
+    })?;
+    if let Some(old) = old_path.filter(|old| {
+        *old != source_cache_rel_path_for_edge(
+            meta.file_id,
+            CacheVersion {
+                mtime: meta.mtime,
+                orientation: meta.orientation,
+            },
+            kind,
+            meta.source_version,
+            meta.preview_edge,
+        )
+    }) {
+        if let Some(path) = cached_artifact_path(root, &old) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
     Ok(jpeg)
 }
 
@@ -856,11 +1400,10 @@ impl Produce {
 /// URL's `?v=` and `?o=`). When present, the disk-cache path is built
 /// from it and read FIRST — a cache hit returns with zero DB access, keeping the
 /// single writer thread out of the hot scroll path. On a miss (or when `None`),
-/// the authoritative `file_row` lookup runs and the full generate path proceeds
-/// exactly as before. `known` always mirrors `files.mtime`/`files.orientation`
-/// (the frontend sources both from the same columns), so the cache path is
-/// identical to the one `render_and_store` wrote — correct even when mtime is 0
-/// (SAF providers).
+/// the authoritative `file_row` lookup runs. If its version differs from the
+/// URL, return an error. An optimistic rotation can request the next orientation
+/// before the database write completes. Returning current pixels would cache
+/// the wrong rotation under that immutable URL.
 pub(crate) fn produce_cached(
     db: &Arc<Db>,
     store: &dyn ProjectStore,
@@ -879,9 +1422,9 @@ pub(crate) fn produce_cached(
     // Full-of-plain-image has no cache file, so it's left to the miss path
     // below (it needs rel_path anyway); every other kind can hit here.
     if let Some(version) = known.filter(|_| !cache_checked) {
-        let cache_rel = cache_rel_path(file_id, version, kind);
+        let cache_rel = resolved_cache_rel_path(db, file_id, version, kind)?;
         let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
-        if let Ok(bytes) = std::fs::read(&cache_abs) {
+        if let Some(bytes) = read_cached_jpeg(&cache_abs) {
             // Only the pregeneration pass gets here with `record_hit`, and only
             // for a file it already established has no usable row. Rebuilding a
             // project's DB while `.cullant/thumbs` survives would otherwise
@@ -896,6 +1439,8 @@ pub(crate) fn produce_cached(
                         out_w: w,
                         out_h: h,
                         mtime: version.mtime,
+                        orientation: version.orientation,
+                        source_version: source_version_for(db, file_id, kind)?,
                         // Both come from decoding the source, which is exactly
                         // what this path skipped.
                         src_dims: None,
@@ -915,21 +1460,42 @@ pub(crate) fn produce_cached(
 
     let (rel_path, file_kind, mtime, orientation) = file_row(db, file_id)?;
     let orientation = orientation.unwrap_or(1);
-
-    // Full view of a plain image: stream the original, no transcode, no cache.
-    // A HEIF takes the normal render path instead, exactly as a RAW does: the
-    // webview cannot render the original bytes, so they have to be decoded and
-    // re-encoded like any other artifact.
-    if kind == ThumbKind::Full && file_kind == 1 && !decode::is_heif(&rel_path) {
-        return read_all(store, &rel_path);
+    if known.is_some_and(|version| version != (CacheVersion { mtime, orientation })) {
+        return Err(AppError::Other("image version changed".into()));
     }
 
-    let cache_rel = cache_rel_path(file_id, CacheVersion { mtime, orientation }, kind);
+    if kind == ThumbKind::Full
+        && file_kind == 1
+        && matches!(
+            Path::new(&rel_path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("jpg" | "jpeg")
+        )
+    {
+        let source = decode::open_source(store, &rel_path)?;
+        let original = decode::exif::read_metadata(source.buf())?
+            .orientation
+            .map(i64::from)
+            .unwrap_or(1);
+        if original == orientation && source.buf().starts_with(&[255, 216]) {
+            return Ok(source.buf().to_vec());
+        }
+    }
+    let source_version = source_version_for(db, file_id, kind)?;
+    let cache_rel = source_cache_rel_path(
+        file_id,
+        CacheVersion { mtime, orientation },
+        kind,
+        source_version,
+    );
     let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
     // Re-check the cache under the authoritative version. Skipped work only when
     // `known` was present AND equal to it AND already missed above; the
     // redundant read is a cheap stat on the cold/miss path.
-    if let Ok(bytes) = std::fs::read(&cache_abs) {
+    if let Some(bytes) = read_cached_jpeg(&cache_abs) {
         return Ok(bytes);
     }
 
@@ -966,7 +1532,7 @@ pub(crate) fn produce_cached(
     // A grid thumbnail or a loupe preview of a paired RAW is rendered from the
     // JPEG half instead: same frame, a fraction of the bytes. `Full` is
     // excluded — zooming in is exactly when the RAW's own pixels are the point.
-    let (source_rel, source_kind) = match kind {
+    let (mut source_rel, mut source_kind) = match kind {
         ThumbKind::Full => (rel_path.clone(), file_kind),
         _ => match paired_jpeg(db, file_id) {
             Some(sibling) => (sibling, 1),
@@ -974,18 +1540,50 @@ pub(crate) fn produce_cached(
         },
     };
 
-    let decoded = match decode_for(store, &source_rel, source_kind, min_long_edge_for(kind)) {
+    let preview_edge = preview_long_edge();
+    let min_edge = min_long_edge_for(kind);
+    let attempt = decode_for(store, &source_rel, source_kind, min_edge).or_else(|error| {
+        if source_rel == rel_path {
+            return Err(error);
+        }
+        tracing::debug!("{source_rel}: sibling decode failed, trying {rel_path}: {error}");
+        source_rel = rel_path.clone();
+        source_kind = file_kind;
+        decode_for(store, &source_rel, source_kind, min_edge)
+    });
+    let decoded = match attempt {
         Ok(d) => d,
         Err(e) => {
-            record_decode_failure(db, file_id, mtime, kind)?;
+            if decode::video::cancelled() {
+                return Err(e);
+            }
+            // A disconnected source or SAF access error can succeed on the next scan.
+            if matches!(&e, AppError::Decode(_)) {
+                record_decode_failure(db, file_id, mtime, kind)?;
+            }
             return Err(e);
         }
     };
+    if decode::video::cancelled() {
+        return Err(AppError::Decode("thumbnail cancelled".into()));
+    }
     let meta = SourceMeta {
         file_id,
         mtime,
         orientation,
         pre_oriented: decoded.pre_oriented,
+        source_orientation: if decoded.pre_oriented && decode::is_heif(&source_rel) {
+            decode::open_source(store, &source_rel)
+                .ok()
+                .and_then(|source| decode::exif::read_metadata(source.buf()).ok())
+                .and_then(|meta| meta.orientation)
+                .map(i64::from)
+                .unwrap_or(1)
+        } else {
+            1
+        },
+        source_version,
+        preview_edge,
         // Dimensions describe whatever was decoded. Backfilling a RAW's row
         // from its JPEG would record the wrong numbers, so only a decode of the
         // file itself may claim them.
@@ -1020,14 +1618,24 @@ pub(crate) fn record_decode_failure(
     kind: ThumbKind,
 ) -> AppResult<()> {
     let kind_i = kind as i64;
+    let (_, _, _, orientation) = file_row(db, file_id)?;
+    let cache_rel = resolved_cache_rel_path(
+        db,
+        file_id,
+        CacheVersion {
+            mtime,
+            orientation: orientation.unwrap_or(1),
+        },
+        kind,
+    )?;
     db.call(move |conn| {
         conn.execute(
             "INSERT INTO thumbnails (file_id, kind, cache_path, width, height, source_mtime, generated_at, failed)
-             VALUES (?1, ?2, '', NULL, NULL, ?3, ?4, 1)
+             VALUES (?1, ?2, ?5, NULL, NULL, ?3, ?4, 1)
              ON CONFLICT(file_id, kind) DO UPDATE SET
-               cache_path = '', width = NULL, height = NULL,
+               cache_path = excluded.cache_path, width = NULL, height = NULL,
                source_mtime = ?3, generated_at = ?4, failed = 1",
-            params![file_id, kind_i, mtime, now_secs()],
+            params![file_id, kind_i, mtime, now_secs(), cache_rel],
         )?;
         Ok(())
     })
@@ -1035,11 +1643,21 @@ pub(crate) fn record_decode_failure(
 
 fn is_tombstoned(db: &Arc<Db>, file_id: i64, kind: ThumbKind, mtime: i64) -> AppResult<bool> {
     let kind_i = kind as i64;
+    let (_, _, _, orientation) = file_row(db, file_id)?;
+    let cache_rel = resolved_cache_rel_path(
+        db,
+        file_id,
+        CacheVersion {
+            mtime,
+            orientation: orientation.unwrap_or(1),
+        },
+        kind,
+    )?;
     db.call_read(move |conn| {
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM thumbnails
-             WHERE file_id = ?1 AND kind = ?2 AND failed = 1 AND source_mtime = ?3",
-            params![file_id, kind_i, mtime],
+             WHERE file_id = ?1 AND kind = ?2 AND failed = 1 AND source_mtime = ?3 AND cache_path=?4",
+            params![file_id, kind_i, mtime, cache_rel],
             |r| r.get(0),
         )?;
         Ok(n > 0)
@@ -1134,6 +1752,324 @@ fn encode_jpeg(img: &DynamicImage, quality: u8) -> AppResult<Vec<u8>> {
 mod tests {
     use super::*;
 
+    fn media_project(files: &[(&str, &[u8])]) -> (tempfile::TempDir, Arc<Db>) {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, bytes) in files {
+            std::fs::write(dir.path().join(name), bytes).unwrap();
+        }
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        crate::scan::scan_project_inner(&db, dir.path(), &mut |_| {}).unwrap();
+        (dir, db)
+    }
+
+    fn corpus_raw() -> Option<Vec<u8>> {
+        let result = std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../fixtures/media/Olympus - E-M1MarkII - 16bit (4-3).ORF"),
+        );
+        match result {
+            Ok(bytes) => Some(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("skipped: local RAW corpus is not installed");
+                None
+            }
+            Err(error) => panic!("could not read local RAW fixture: {error}"),
+        }
+    }
+
+    #[test]
+    fn media_regression_bad_sibling_preserves_good_raw() {
+        let Some(raw) = corpus_raw() else { return };
+        let (dir, db) = media_project(&[("shot.orf", &raw), ("shot.jpg", b"corrupt sibling")]);
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let id = db
+            .call_read(|c| Ok(c.query_row("SELECT id FROM files WHERE kind=0", [], |r| r.get(0))?))
+            .unwrap();
+        for kind in [ThumbKind::Thumb, ThumbKind::Preview, ThumbKind::Full] {
+            let bytes = produce_cached(
+                &db,
+                &store,
+                dir.path(),
+                Produce::interactive(id, kind, None),
+            )
+            .unwrap();
+            assert!(image::load_from_memory(&bytes).is_ok());
+        }
+        let failed: i64 = db
+            .call_read(move |c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM thumbnails WHERE file_id=?1 AND failed=1",
+                    [id],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(failed, 0, "A bad sibling must not tombstone the RAW");
+    }
+
+    #[test]
+    fn media_regression_source_and_pair_changes_refresh_raw_cache() {
+        let Some(raw) = corpus_raw() else { return };
+        let jpeg = |color| {
+            encode_jpeg(
+                &DynamicImage::ImageRgb8(image::RgbImage::from_pixel(600, 400, image::Rgb(color))),
+                90,
+            )
+            .unwrap()
+        };
+        let (dir, db) = media_project(&[("shot.orf", &raw), ("shot.jpg", &jpeg([250, 5, 5]))]);
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let id: i64 = db
+            .call_read(|c| Ok(c.query_row("SELECT id FROM files WHERE kind=0", [], |r| r.get(0))?))
+            .unwrap();
+        let before = produce_cached(
+            &db,
+            &store,
+            dir.path(),
+            Produce::interactive(id, ThumbKind::Preview, None),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("shot.jpg"), jpeg([5, 5, 250])).unwrap();
+        db.call(|c| {
+            c.execute("UPDATE files SET mtime=mtime+1 WHERE kind=1", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let after = produce_cached(
+            &db,
+            &store,
+            dir.path(),
+            Produce::interactive(id, ThumbKind::Preview, None),
+        )
+        .unwrap();
+        assert_ne!(
+            before, after,
+            "The selected sibling version must key the RAW cache"
+        );
+        db.call(|c| {
+            c.execute("UPDATE groups SET decoupled=1", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let decoupled = produce_cached(
+            &db,
+            &store,
+            dir.path(),
+            Produce::interactive(id, ThumbKind::Preview, None),
+        )
+        .unwrap();
+        assert_ne!(
+            after, decoupled,
+            "Decoupling must stop serving the borrowed image"
+        );
+    }
+
+    #[test]
+    fn media_regression_raw_preview_is_not_sensor_dimensions() {
+        let Some(raw) = corpus_raw() else { return };
+        let (dir, db) = media_project(&[("shot.orf", &raw)]);
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let decoded = decode_for(&store, "shot.orf", 0, 384).unwrap();
+        assert!(
+            decoded.src_dims.is_none() || decoded.src_dims == Some((5184, 3888)),
+            "A reduced Olympus preview is not the sensor size: {:?}",
+            decoded.src_dims
+        );
+        drop(db);
+    }
+
+    #[test]
+    fn media_regression_full_honors_rotation_and_decodes_tiff() {
+        let img = image::RgbImage::from_pixel(80, 60, image::Rgb([30, 100, 200]));
+        let jpeg = encode_jpeg(&DynamicImage::ImageRgb8(img.clone()), 90).unwrap();
+        let mut tiff = std::io::Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(img)
+            .write_to(&mut tiff, image::ImageFormat::Tiff)
+            .unwrap();
+        let (dir, db) = media_project(&[("photo.jpg", &jpeg), ("photo.tiff", &tiff.into_inner())]);
+        let store = crate::store::LocalFsStore::new(dir.path());
+        db.call(|c| {
+            c.execute("UPDATE files SET orientation=6", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let ids: Vec<i64> = db
+            .call_read(|c| {
+                Ok(c.prepare("SELECT id FROM files")?
+                    .query_map([], |r| r.get(0))?
+                    .collect::<Result<Vec<_>, _>>()?)
+            })
+            .unwrap();
+        for id in ids {
+            let bytes = produce_cached(
+                &db,
+                &store,
+                dir.path(),
+                Produce::interactive(id, ThumbKind::Full, None),
+            )
+            .unwrap();
+            assert_eq!(
+                &bytes[..2],
+                &[255, 216],
+                "Full output must match its JPEG MIME"
+            );
+            let image = image::load_from_memory(&bytes).unwrap();
+            assert_eq!((image.width(), image.height()), (60, 80));
+        }
+    }
+
+    #[test]
+    fn media_regression_rotation_request_cannot_cache_previous_orientation() {
+        let jpeg = encode_jpeg(
+            &DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                600,
+                800,
+                image::Rgb([30, 100, 200]),
+            )),
+            90,
+        )
+        .unwrap();
+        let (dir, db) = media_project(&[("photo.jpg", &jpeg)]);
+        db.call(|conn| {
+            conn.execute("UPDATE files SET orientation=6", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let (id, mtime): (i64, i64) = db
+            .call_read(|conn| {
+                Ok(conn.query_row("SELECT id, mtime FROM files", [], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?)
+            })
+            .unwrap();
+        let pool = ThumbPool::start(
+            db.clone(),
+            Arc::new(crate::store::LocalFsStore::new(dir.path())),
+            dir.path().to_path_buf(),
+        );
+        let request = |kind, orientation| {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            pool.enqueue(ThumbRequest {
+                file_id: id,
+                kind,
+                known_version: Some(CacheVersion { mtime, orientation }),
+                also_thumb: false,
+                cache_checked: true,
+                respond: Box::new(move |result| sender.send(result).unwrap()),
+            });
+            receiver
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .unwrap()
+        };
+        for kind in [ThumbKind::Thumb, ThumbKind::Preview, ThumbKind::Full] {
+            let before = image::load_from_memory(&request(kind, 6).unwrap()).unwrap();
+            assert!(before.width() > before.height());
+            assert!(
+                request(kind, 3).is_err(),
+                "A future orientation URL must not receive previous-orientation pixels: {kind:?}"
+            );
+        }
+        crate::engine::culling::rotate(
+            &db,
+            crate::engine::culling::Targets {
+                ids: vec![id],
+                as_groups: false,
+            },
+            1,
+        )
+        .unwrap();
+        for kind in [ThumbKind::Thumb, ThumbKind::Preview, ThumbKind::Full] {
+            let after = image::load_from_memory(&request(kind, 3).unwrap()).unwrap();
+            assert!(after.width() < after.height());
+        }
+    }
+
+    #[test]
+    fn media_regression_concurrent_atomic_cache_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let decoded = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            600,
+            400,
+            image::Rgb([90, 60, 30]),
+        ));
+        let meta = SourceMeta {
+            file_id: 7,
+            mtime: 1,
+            orientation: 1,
+            pre_oriented: false,
+            source_orientation: 1,
+            source_version: 0,
+            preview_edge: preview_long_edge(),
+            src_dims: None,
+        };
+        let barrier = std::sync::Barrier::new(16);
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        for _ in 0..8 {
+                            render_to_cache(dir.path(), &meta, &decoded, ThumbKind::Thumb).unwrap();
+                        }
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.join().unwrap();
+            }
+        });
+        let path = dir.path().join(".cullant/thumbs").join(cache_rel_path(
+            7,
+            CacheVersion {
+                mtime: 1,
+                orientation: 1,
+            },
+            ThumbKind::Thumb,
+        ));
+        assert!(image::load_from_memory(&std::fs::read(path).unwrap()).is_ok());
+    }
+
+    #[test]
+    fn media_regression_old_disk_cache_versions_are_removed() {
+        let jpeg = encode_jpeg(
+            &DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                80,
+                60,
+                image::Rgb([10, 20, 30]),
+            )),
+            90,
+        )
+        .unwrap();
+        let (dir, db) = media_project(&[("photo.jpg", &jpeg)]);
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let id: i64 = db
+            .call_read(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
+            .unwrap();
+        for orientation in [1, 6, 3, 8] {
+            db.call(move |c| {
+                c.execute("UPDATE files SET orientation=?1", [orientation])?;
+                Ok(())
+            })
+            .unwrap();
+            produce_cached(
+                &db,
+                &store,
+                dir.path(),
+                Produce::interactive(id, ThumbKind::Thumb, None),
+            )
+            .unwrap();
+        }
+        let bucket = dir
+            .path()
+            .join(".cullant/thumbs")
+            .join(format!("{:02x}", id % 256));
+        assert_eq!(
+            std::fs::read_dir(bucket).unwrap().count(),
+            1,
+            "Only the current rendered version is retained"
+        );
+    }
+
     /// The queue's coalescing/bounding logic, exercised directly against
     /// `Queues` so it needs neither worker threads nor real image files.
     mod queue {
@@ -1142,7 +2078,7 @@ mod tests {
 
         /// Stand-in for `ThumbPool::enqueue`, minus the pool plumbing.
         fn enqueue(q: &mut Queues, max: usize, key_id: i64, respond: Responder) {
-            let key = (key_id, ThumbKind::Thumb as u8);
+            let key = (key_id, ThumbKind::Thumb as u8, None, 0, 0);
             if let Some(waiters) = q.in_flight.get_mut(&key) {
                 waiters.push(respond);
                 return;
@@ -1238,7 +2174,7 @@ mod tests {
         #[test]
         fn a_late_caller_adopts_the_decode_already_running() {
             let mut q = empty();
-            let key = (9, ThumbKind::Thumb as u8);
+            let key = (9, ThumbKind::Thumb as u8, None, 0, 0);
             // A worker has claimed this key and is decoding it.
             q.in_flight.insert(key, Vec::new());
 
@@ -1349,20 +2285,18 @@ mod tests {
         .unwrap();
         assert_eq!(bytes, hit);
 
-        // A stale mtime misses the fast path and falls back to the authoritative
-        // lookup, which regenerates against the real version — still succeeds.
+        // A stale URL must not receive bytes from a different cache version.
         let stale = CacheVersion {
             mtime: mtime + 999,
             orientation: 1,
         };
-        let fallback = produce_cached(
+        let stale_result = produce_cached(
             &db,
             &store,
             root,
             Produce::interactive(id, ThumbKind::Thumb, Some(stale)),
-        )
-        .unwrap();
-        assert_eq!(bytes, fallback);
+        );
+        assert!(stale_result.is_err());
 
         // Same file, same mtime, different orientation: the cache must NOT be
         // reused, because the rendered pixels differ. This is the rotate case.
@@ -1555,6 +2489,9 @@ mod tests {
             mtime,
             orientation: 1,
             pre_oriented: false,
+            source_orientation: 1,
+            source_version: 0,
+            preview_edge: preview_long_edge(),
             src_dims: None,
         };
         render_and_store(&db, root, &meta, &decoded, ThumbKind::Thumb).unwrap();

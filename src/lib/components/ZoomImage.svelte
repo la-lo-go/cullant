@@ -233,15 +233,10 @@
   // Double-buffer the fit view: keep showing the previous photo until the new
   // preview has loaded, so rapid arrowing never flashes a blank pane.
   //
-  // On first mount there's no previous frame to hold, so with progressive loupe
-  // on we start from the (already cached) grid thumb, softened, and let the
-  // effect below swap in the sharp preview once it loads — matching what happens
-  // when arrowing to another photo. Without this the initial `displayedSrc`
-  // would equal the effect's target and the effect would early-out, so opening a
-  // photo whose preview isn't generated yet showed a blank pane instead of the
-  // blurry thumb. Progressive off keeps the old behavior (blank until the
-  // preview decodes), consistent with the double-buffer elsewhere.
-  const progressiveStart = untrack(() => settings.progressiveLoupe);
+  // A cached preview starts sharp. The thumbnail covers only a missing preview.
+  const progressiveStart = untrack(
+    () => settings.progressiveLoupe && !catalog.previewReady.has(item.id),
+  );
   let displayedSrc = $state(
     untrack(() => (progressiveStart ? thumbUrl(item) : previewUrl(item))),
   );
@@ -281,8 +276,7 @@
 
     const loadPreview = () => {
       loader = new Image();
-      // On error swap anyway — a broken image beats silently showing the wrong photo.
-      loader.onload = loader.onerror = () => {
+      const showTarget = () => {
         if (softTimer !== undefined) clearTimeout(softTimer);
         softPreview = false;
         displayedSrc = target;
@@ -290,25 +284,21 @@
         displayedItemId = targetItemId;
         displayedOrientation = targetOrientation;
       };
+      loader.onload = () => {
+        catalog.markPreviewReady([targetItemId]);
+        showTarget();
+      };
+      loader.onerror = () => {
+        catalog.markPreviewUnavailable(targetItemId);
+        showTarget();
+      };
       loader.src = target;
       // Progressive fit: if the sharp preview takes longer than a beat, paint
       // the (virtually always cached) grid thumb, softened, until it lands.
-      if (progressive) softTimer = setTimeout(showSoftThumb, 80);
+      if (progressive && !alreadyGenerated) softTimer = setTimeout(showSoftThumb, 80);
     };
 
-    // DO NOT COLLAPSE THESE TWO BRANCHES. This has now been broken twice.
-    //
-    // "Progressive loading" exists to cover the latency of GENERATING a preview.
-    // When the preview already exists there is no latency to cover: the protocol
-    // serves it from the disk cache with no pool work at all, so it lands within
-    // a frame. Showing the blurred thumbnail first in that case puts a
-    // deliberate blur in front of an image that is already sitting on disk --
-    // it is not a nicety, it changes the whole feel of the app.
-    //
-    // The previous removal argued that `previewReady` lagged by up to 600ms and
-    // so the branch misfired anyway. That was true when readiness came from a
-    // polled refetch; `previews:progress` now carries the ids as they complete,
-    // so this is accurate the moment a preview exists.
+    // Load cached previews immediately. Delay only previews that need generation.
     if (alreadyGenerated || sameItem) {
       loadPreview();
     } else {
@@ -513,6 +503,9 @@
     previewNaturalW = img.naturalWidth;
     previewNaturalH = img.naturalHeight;
     fitPainted = true;
+    if (img.getAttribute("src") === fitSrc && displayedItemId === item.id) {
+      catalog.markPreviewReady([item.id]);
+    }
   }
 
   /** True once the fit image has painted anything at all — the sharp preview or
@@ -846,6 +839,13 @@
       pinchIds = null;
       pinchStartDist = 0;
       pinchFrameRect = null;
+    }
+  }
+
+  function onFitError(e: Event) {
+    const img = e.currentTarget as HTMLImageElement;
+    if (img.getAttribute("src") === fitSrc && displayedItemId === item.id) {
+      catalog.markPreviewUnavailable(item.id);
     }
   }
 
@@ -1225,6 +1225,7 @@
         : null}
       draggable="false"
       onload={onFitLoad}
+      onerror={onFitError}
     />
   {:else if !fullPainted}
     <!-- Animate the already-painted preview with the exact same camera as the

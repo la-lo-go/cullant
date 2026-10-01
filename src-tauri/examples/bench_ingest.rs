@@ -1,7 +1,7 @@
 //! Time the scan + ingest pipeline against a folder, without the GUI:
 //! `cargo run --release --example bench_ingest -- <dir>`
 //!
-//! Deletes the folder's `.cullant` sidecar first so every run is cold.
+//! Each run uses a new temporary database and cache. Source project data stays unchanged.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,12 +13,8 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let dir: PathBuf = args.next().expect("usage: bench_ingest <dir>").into();
 
-    let sidecar = dir.join(".cullant");
-    if sidecar.exists() {
-        std::fs::remove_dir_all(&sidecar).expect("failed to clear .cullant");
-    }
-
-    let db = Arc::new(bench::open_db(&dir));
+    let cache = tempfile::tempdir().expect("failed to create benchmark cache");
+    let db = Arc::new(bench::open_db(cache.path()));
     let store = bench::local_store(&dir);
 
     let t0 = Instant::now();
@@ -26,7 +22,7 @@ fn main() {
     let t_scan = t0.elapsed();
 
     let t1 = Instant::now();
-    let (meta, thumbs, previews) = bench::ingest(&db, &store, &dir);
+    let (meta, thumbs, previews) = bench::ingest(&db, &store, cache.path());
     let t_ingest = t1.elapsed();
 
     println!("scan:   {found} files in {t_scan:.2?}");
