@@ -158,11 +158,11 @@ try{
   await send('Emulation.clearDeviceMetricsOverride');await send('Emulation.setTouchEmulationEnabled',{enabled:false});await settle();
   await check('Compare keeps action and photo zoom targets separate without repeated text badges',async()=>{
     await fixtureRows();
-    assert(await evaluate("!document.querySelector('.selected-target,.zoom-target') && document.querySelectorAll('.classification-target .selection-indicator').length===1"),'Compare still repeats Selected filename or Keyboard zoom, or lacks the action mark');
+    assert(await evaluate("!document.querySelector('.selected-target,.zoom-target,.selection-indicator,.zoom-indicator')"),'Compare still shows action or zoom indicators beside the filenames');
     await evaluate("document.querySelectorAll('.compare .pane')[1].dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,pointerType:'mouse',button:0}))");await settle();
-    assert(await evaluate("document.querySelectorAll('.compare .pane')[0].classList.contains('classification-target') && document.querySelectorAll('.compare .pane')[1].classList.contains('zoom-active') && document.querySelectorAll('.zoom-indicator').length===1"),'Choosing the right zoom target moves the classification target');
+    assert(await evaluate("document.querySelectorAll('.compare .pane')[0].classList.contains('classification-target') && document.querySelectorAll('.compare .pane')[1].classList.contains('zoom-active')"),'Choosing the right zoom target moves the classification target');
     await click('.compare .pane.classification-target .pin-btn');
-    assert(await evaluate("document.querySelectorAll('.compare .pane')[1].classList.contains('classification-target') && document.querySelectorAll('.classification-target .selection-indicator').length===1"),'Pinning the action target does not move its mark to the unpinned pane');await screenshot('photo-compare');
+    assert(await evaluate("document.querySelectorAll('.compare .pane')[1].classList.contains('classification-target') && !document.querySelector('.selection-indicator,.zoom-indicator')"),'Pinning the action target does not move its outline to the unpinned pane');await screenshot('photo-compare');
   });
   await check('Video compare omits photo zoom markers and sync controls',async()=>{
     await fixtureRows(true);

@@ -20,11 +20,9 @@
   import Layers from "@lucide/svelte/icons/layers";
   import Link2 from "@lucide/svelte/icons/link-2";
   import Unlink2 from "@lucide/svelte/icons/unlink-2";
-  import Focus from "@lucide/svelte/icons/focus";
   import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
-  const selectionDescription = "Current item. Actions use the current item or active selection, including paired files in mirror mode.";
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -266,14 +264,6 @@
         >
           {#if pinnedSide === "left"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
-        <div class="target-status">
-          {#if focusedSide === "left"}
-            <span class="selection-indicator" role="img" aria-label={selectionDescription} title={selectionDescription}></span>
-          {/if}
-          {#if zoomSide === "left"}
-            <span class="zoom-indicator" role="img" aria-label="Keyboard zoom target" title="Keyboard zoom target"><Focus size={11} /></span>
-          {/if}
-        </div>
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(left.id)}
           <span class="caption" class:focused-caption={focusedSide === "left"}>
@@ -332,14 +322,6 @@
         >
           {#if pinnedSide === "right"}<Pin size={14} fill="currentColor" />{:else}<PinOff size={14} />{/if}
         </button>
-        <div class="target-status">
-          {#if focusedSide === "right"}
-            <span class="selection-indicator" role="img" aria-label={selectionDescription} title={selectionDescription}></span>
-          {/if}
-          {#if zoomSide === "right"}
-            <span class="zoom-indicator" role="img" aria-label="Keyboard zoom target" title="Keyboard zoom target"><Focus size={11} /></span>
-          {/if}
-        </div>
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(right.id)}
           <span class="caption" class:focused-caption={focusedSide === "right"}>
@@ -458,41 +440,6 @@
   .pane.classification-target {
     outline: 1px solid rgba(var(--accent-rgb), 0.5);
     outline-offset: -1px;
-  }
-
-  .target-status {
-    position: absolute;
-    bottom: 36px;
-    left: calc(10px + var(--safe-left));
-    max-width: calc(100% - 20px - var(--safe-left));
-    display: flex;
-    gap: 4px;
-    align-items: center;
-    pointer-events: none;
-    z-index: 4;
-  }
-
-  .target-status span {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
-    background: rgba(0, 0, 0, 0.45);
-    border-radius: 4px;
-    pointer-events: auto;
-  }
-
-  .selection-indicator::before {
-    content: "";
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-  }
-
-  .zoom-indicator {
-    color: rgba(255, 255, 255, 0.65);
   }
 
   .pin-btn {
