@@ -59,7 +59,7 @@ jobs:
         run: cargo fmt --check
         working-directory: src-tauri
       - name: clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets -- -W clippy::cognitive_complexity -D warnings
         working-directory: src-tauri
       - name: tests
         run: cargo test
