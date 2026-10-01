@@ -38,6 +38,11 @@ export function collectFolderPaths(node: TreeNode, out: Set<string> = new Set())
   return out;
 }
 
+export function hasCollapsedBranch(node: TreeNode, collapsed: ReadonlySet<string>): boolean {
+  return node.children.size > 0 && (collapsed.has(node.path) ||
+    [...node.children.values()].some((child) => hasCollapsedBranch(child, collapsed)));
+}
+
 export function visibleFolderPaths(node: TreeNode, collapsed: ReadonlySet<string>, out: string[] = []): string[] {
   for (const child of node.children.values()) {
     out.push(child.path);

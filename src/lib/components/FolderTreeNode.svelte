@@ -53,7 +53,7 @@
     <span class="chevron-spacer"></span>
     <Folder size={13} />
     <span class="name">{node.name}</span>
-    <span class="count">{node.count}</span>
+    <span class="count">{node.count} {node.count === 1 ? "file" : "files"}</span>
   </button>
   {#if hasChildren}
     <button
@@ -116,7 +116,6 @@
   .node.menu-target {
     background: var(--hover);
     color: var(--accent);
-    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .chevron-spacer {

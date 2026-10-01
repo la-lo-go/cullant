@@ -4,11 +4,12 @@
   import { folders, folderContains } from "../stores/folders.svelte";
   import { api } from "../api";
   import { folderContextMenu } from "../folderContextMenu";
+  import { shortcutHint } from "../keyboard/hints";
   import ContextMenu from "./ContextMenu.svelte";
   import type { MenuNode } from "../menu";
   import FolderTreeNode from "./FolderTreeNode.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
-  import { buildFolderTree, collectFolderPaths, visibleFolderPaths } from "./folderTree";
+  import { buildFolderTree, collectFolderPaths, hasCollapsedBranch, visibleFolderPaths, type TreeNode } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
@@ -53,9 +54,27 @@
     }
   }
 
+  function branchActionsFor(path: string): MenuNode[] {
+    let node: TreeNode | undefined = tree;
+    for (const segment of path.split("/")) node = node?.children.get(segment);
+    const branchActions: MenuNode[] = [];
+    if (node?.children.size) {
+      if (hasCollapsedBranch(node, folders.collapsed)) branchActions.push({
+        kind: "item", label: "Expand branch", run: () => {
+          for (const folder of folders.collapsed) if (folderContains(path, folder)) folders.collapsed.delete(folder);
+        },
+      });
+      if (!folders.collapsed.has(path)) branchActions.push({
+        kind: "item", label: "Collapse branch", run: () => folders.collapsed.add(path),
+      });
+    }
+    return branchActions;
+  }
+
   function openMenu(path: string, x: number, y: number) {
     const ignoredBy = folders.ignoredBy(path);
     const inherited = ignoredBy !== undefined && ignoredBy !== path;
+    const branchActions = branchActionsFor(path);
     menu = { path, x, y, items: [
       { kind: "header", label: path },
       {
@@ -66,11 +85,7 @@
       },
       { kind: "sep" },
       { kind: "item", label: "Create a project for this folder", icon: FolderPlus, run: () => void createProject(path) },
-      { kind: "sep" },
-      { kind: "item", label: "Expand branch", run: () => {
-        for (const folder of folders.collapsed) if (folderContains(path, folder)) folders.collapsed.delete(folder);
-      } },
-      { kind: "item", label: "Collapse branch", run: () => folders.collapsed.add(path) },
+      ...(branchActions.length ? [{ kind: "sep" as const }, ...branchActions] : []),
     ] };
   }
 
@@ -149,7 +164,7 @@
           use:folderContextMenu={openAllMenu} onclick={(e) => { showAll(); e.currentTarget.blur(); }}>
           <Images size={13} />
           <span class="name">All</span>
-          <span class="count">{tree.count}</span>
+          <span class="count">{tree.count} {tree.count === 1 ? "file" : "files"}</span>
         </button>
         {#each children as child (child.path)}
           <FolderTreeNode node={child} depth={0} onmenu={openMenu} onselect={selectFolder} menuPath={menu?.path ?? null} />
@@ -183,7 +198,7 @@
          handle and overlay scrollbar (higher z-index) so it stays clickable. -->
     <button
       class="tree-hide"
-      title="Hide folder tree (D)"
+      title={shortcutHint("Hide folder tree", "ui.toggleFolderTree")}
       aria-label="Hide folder tree"
       onclick={() => (session.folderTreeVisible = false)}
     >
@@ -304,7 +319,6 @@
 
   .tree-hide:hover {
     background: var(--hover);
-    border-color: var(--accent);
   }
 
   .header {
@@ -355,7 +369,6 @@
   .node.root.menu-target {
     background: var(--hover);
     color: var(--accent);
-    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .name {
