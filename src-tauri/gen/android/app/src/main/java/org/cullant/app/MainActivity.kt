@@ -36,6 +36,11 @@ class MainActivity : TauriActivity() {
   // same place the `back-button` event goes.
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
+    webView.settings.apply {
+      setSupportZoom(false)
+      builtInZoomControls = false
+      displayZoomControls = false
+    }
     onBackPressedDispatcher.addCallback(this) {
       webView.evaluateJavascript("window.__cullantBack && window.__cullantBack()", null)
     }

@@ -120,6 +120,11 @@
     settingsQuery = "";
   }
 
+  function handleAppKeydown(event: KeyboardEvent) {
+    if (!folderLostMsg) handleKeydown(event);
+    if ((event.ctrlKey || event.metaKey) && ["+", "=", "-", "0"].includes(event.key)) event.preventDefault();
+  }
+
   /** Close a dialog Settings opened, going back to Settings if that is where it
    *  was opened from. */
   function leaveSubDialog(close: () => void) {
@@ -142,6 +147,22 @@
   // Mirrors the storage watcher's last verdict, so the auto-rescan below can skip
   // ticks while a drive is disconnected instead of probing a second time.
   let storageOk = $state(true);
+
+  $effect(() => {
+    const preventZoom = (event: Event) => event.preventDefault();
+    const preventWheelZoom = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey) event.preventDefault();
+    };
+    // Cancel the browser default; image components still receive each gesture.
+    window.addEventListener("wheel", preventWheelZoom, { capture: true, passive: false });
+    window.addEventListener("gesturestart", preventZoom, { passive: false });
+    window.addEventListener("gesturechange", preventZoom, { passive: false });
+    return () => {
+      window.removeEventListener("wheel", preventWheelZoom, true);
+      window.removeEventListener("gesturestart", preventZoom);
+      window.removeEventListener("gesturechange", preventZoom);
+    };
+  });
 
   // Keep the backend's video-thumbnail preference in sync with the setting.
   // Runs once on mount (pushing the persisted value) and again on every toggle,
@@ -526,7 +547,7 @@
 <!-- While the project's folder is unavailable, swallow all shortcuts so the user
      can't keep culling a project whose files are gone. -->
 <svelte:window
-  onkeydown={(e) => folderLostMsg || handleKeydown(e)}
+  onkeydown={handleAppKeydown}
   oncontextmenu={(e) => {
     const target = e.target;
     if (!(target instanceof Element) || !target.closest('input, textarea, select, [contenteditable="true"]')) e.preventDefault();
@@ -907,6 +928,7 @@
     margin: 0;
     height: 100%;
     overflow: hidden;
+    touch-action: pan-x pan-y;
   }
 
   /* Kill the WebView's default tap-highlight flash (a blue overlay on every
