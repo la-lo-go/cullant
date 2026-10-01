@@ -114,6 +114,12 @@
    *  grid, so it remembers where the user came from. */
   let returnToSettings = $state(false);
 
+  function closeSubDialog(close: () => void) {
+    close();
+    returnToSettings = false;
+    settingsQuery = "";
+  }
+
   /** Close a dialog Settings opened, going back to Settings if that is where it
    *  was opened from. */
   function leaveSubDialog(close: () => void) {
@@ -811,7 +817,10 @@
   {/if}
 
   {#if showKeybindings}
-    <KeybindingsDialog onclose={() => leaveSubDialog(() => (showKeybindings = false))} />
+    <KeybindingsDialog
+      onback={returnToSettings ? () => leaveSubDialog(() => (showKeybindings = false)) : undefined}
+      onclose={() => closeSubDialog(() => (showKeybindings = false))}
+    />
   {/if}
 
   {#if showSettings}
@@ -833,7 +842,10 @@
   {/if}
 
   {#if tags.editorOpen}
-    <TagEditor onclose={() => leaveSubDialog(() => (tags.editorOpen = false))} />
+    <TagEditor
+      onback={returnToSettings ? () => leaveSubDialog(() => (tags.editorOpen = false)) : undefined}
+      onclose={() => closeSubDialog(() => (tags.editorOpen = false))}
+    />
   {/if}
 
   {#if session.commitDialogOpen}

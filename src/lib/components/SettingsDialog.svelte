@@ -22,14 +22,13 @@
     type SettingGroup,
   } from "../settingsSchema";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import SettingsPanel from "./SettingsPanel.svelte";
   import InfoTip from "./InfoTip.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
   import { api } from "../api";
   import { LABEL_COLORS } from "../labels";
-  import { backdropDismiss } from "../backdrop";
-  import { modalFocus } from "../modal";
   import { IS_TOUCH } from "../platform";
   import { getVersion } from "@tauri-apps/api/app";
   import DragList from "./DragList.svelte";
@@ -49,7 +48,6 @@
     type RadialSlot,
   } from "../radial";
   import type { CommandId } from "../keyboard/keymap";
-  import { shortcutHint } from "../keyboard/hints";
   import { FREE_WAYS, MONEY_WAYS } from "../support";
 
   /** Which sector the panel is pointing at, so hovering a row lights up the
@@ -124,7 +122,6 @@
   import Heart from "@lucide/svelte/icons/heart";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import DatabaseBackup from "@lucide/svelte/icons/database-backup";
-  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import X from "@lucide/svelte/icons/x";
@@ -147,8 +144,6 @@
   // A touch platform reaches the manual rescan via pull-to-refresh; desktop uses
   // the title-bar menu. The tail hint reflects whichever this has.
   const isTouch = IS_TOUCH;
-
-  const dismiss = backdropDismiss(() => onclose());
 
   let panel = $state<HTMLDivElement | null>(null);
 
@@ -502,33 +497,22 @@
   </section>
 {/snippet}
 
-<div class="backdrop" {...dismiss} role="presentation">
-  <div
-    class="dialog"
-    class:pointer-mode={pointerMode}
-    class:touch-pointer={touchPointer}
-    bind:this={panel}
-    use:modalFocus={{ onKeyboardInteraction: clearPointerMode }}
-    onclick={releaseClickedControl}
-    onpointerdowncapture={onPointerPress}
-    onpointermovecapture={(e) => { if (e.pointerType === "mouse") touchPointer = false; }}
-    onkeydown={onKeydown}
-    role="dialog"
-    aria-label="Settings"
-    tabindex="-1"
-  >
-    <header class="head">
-      {#if openPanel}
-        <button
-          class="back"
-          onclick={releasing(() => (view.settingsPanel = null))}
-          aria-label="Back"
-        >
-          <ChevronLeft size={18} />
-        </button>
-        <h2>{openPanel.label}</h2>
-      {:else}
-        <h2>Settings</h2>
+<SettingsPanel
+  title={openPanel?.label ?? "Settings"}
+  ariaLabel="Settings"
+  {onclose}
+  onback={openPanel ? () => { view.settingsPanel = null; releaseFocus(); } : undefined}
+  bind:panel
+  modalOptions={{ onKeyboardInteraction: clearPointerMode }}
+  {pointerMode}
+  {touchPointer}
+  onclick={releaseClickedControl}
+  onpointerdowncapture={onPointerPress}
+  onpointermovecapture={(e) => { if (e.pointerType === "mouse") touchPointer = false; }}
+  onkeydown={onKeydown}
+>
+  {#snippet headerActions()}
+      {#if !openPanel}
         <label class="find">
           <Search size={13} />
           <input
@@ -539,10 +523,8 @@
           />
         </label>
       {/if}
-      <button class="close-x" onclick={onclose} aria-label="Close settings" title="Close">
-        <X size={18} />
-      </button>
-    </header>
+  {/snippet}
+  <div class="preferences" class:pointer-mode={pointerMode} class:touch-pointer={touchPointer}>
 
     {#if openPanel?.kind === "panel" && openPanel.panel === "filmstripBadges"}
       <div class="content sub">
@@ -788,11 +770,9 @@
             </section>
         {/if}
 
-        {#if !query}
+        {#if !query && isTouch}
           <p class="hint tail">
-            {isTouch
-              ? "Pull down on the grid to rescan the project now."
-              : shortcutHint("Show configured shortcuts", "ui.toggleShortcuts")}
+            Pull down on the grid to rescan the project now.
           </p>
         {/if}
 
@@ -828,7 +808,7 @@
       />
     {/if}
   </div>
-</div>
+</SettingsPanel>
 
 {#if pendingQuality !== null}
   <ConfirmDialog
@@ -900,73 +880,33 @@
     border-color: var(--accent);
   }
 
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 60;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0, 0, 0, 0.55);
-    padding: var(--dialog-edge-margin);
-    padding-top: calc(var(--inset-top) + var(--dialog-edge-margin));
-    padding-bottom: calc(var(--inset-bottom) + var(--dialog-edge-margin));
-  }
-
-  .dialog {
-    outline: none;
+  .preferences {
     display: flex;
     flex-direction: column;
-    /* Two columns of label-only rows fit every desktop screen without scrolling,
-       which is the whole point of the layout: no navigation and no hidden state. */
-    width: 720px;
-    max-width: 100%;
-    max-height: 100%;
-    background: #232329;
-    border: 1px solid var(--border-strong);
-    border-radius: 12px;
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+    min-height: 0;
+    overflow: hidden;
   }
 
-  /* A pressed control keeps focus for the keyboard, never a visible ring. */
-  .dialog :global(*:focus:not(:focus-visible)) {
-    outline: none;
-  }
-
-  .dialog.pointer-mode :global(select:focus) {
+  .preferences.pointer-mode :global(select:focus) {
     outline: none;
     border-color: var(--border-strong);
   }
 
-  .dialog.pointer-mode .sw-input:focus-visible ~ .switch {
+  .preferences.pointer-mode .sw-input:focus-visible ~ .switch {
     outline: none;
   }
 
-  .dialog.touch-pointer :global(select:hover) {
+  .preferences.touch-pointer :global(select:hover) {
     background-color: var(--control);
   }
 
-  .dialog.touch-pointer :global(.draglist:not(.reordering) .handle:hover) {
+  .preferences.touch-pointer :global(.draglist:not(.reordering) .handle:hover) {
     color: #6a6a72;
   }
 
-  .dialog.touch-pointer :global(.tip:not(.open):hover) {
+  .preferences.touch-pointer :global(.tip:not(.open):hover) {
     opacity: 0.35;
     color: inherit;
-  }
-
-  .head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 8px 12px 16px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 15px;
-    font-weight: 600;
   }
 
   .find {
@@ -999,29 +939,6 @@
   /* The platform search affordance is a second, redundant clear button. */
   .find input::-webkit-search-cancel-button {
     display: none;
-  }
-
-  .back,
-  .close-x {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 32px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: inherit;
-    opacity: 0.6;
-    cursor: pointer;
-  }
-
-  .close-x {
-    margin-left: auto;
-  }
-
-  .back {
-    margin-left: -6px;
   }
 
   /* The scroll container carries no top padding: a sticky group header offsets
@@ -1170,24 +1087,6 @@
     background-color: var(--surface);
     color: inherit;
     font-size: 11.5px;
-  }
-
-  .drill {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 4px 3px 8px;
-    border: 0;
-    border-radius: 6px;
-    background: none;
-    color: inherit;
-    cursor: pointer;
-  }
-
-  .summary {
-    font-size: 11.5px;
-    opacity: 0.65;
   }
 
   .jump {
@@ -1392,52 +1291,39 @@
 
   /* Hybrid devices can retain hover after a touch. */
   @media (hover: hover) {
-    .dialog:not(.touch-pointer) .back:hover,
-    .dialog:not(.touch-pointer) .close-x:hover {
+    .preferences:not(.touch-pointer) .row:hover,
+    .preferences:not(.touch-pointer) .out:hover,
+    .preferences:not(.touch-pointer) .check:hover {
+      background: var(--hover);
+    }
+
+    .preferences:not(.touch-pointer) .greset:hover {
       opacity: 1;
       background: var(--hover);
     }
 
-    .dialog:not(.touch-pointer) .row:hover,
-    .dialog:not(.touch-pointer) .out:hover,
-    .dialog:not(.touch-pointer) .check:hover {
+    .preferences:not(.touch-pointer) .wide:hover {
       background: var(--hover);
     }
 
-    .dialog:not(.touch-pointer) .greset:hover {
-      opacity: 1;
+    .preferences:not(.touch-pointer) .support:hover {
       background: var(--hover);
     }
 
-    .dialog:not(.touch-pointer) .wide:hover {
-      background: var(--hover);
-    }
-
-    .dialog:not(.touch-pointer) .support:hover {
-      background: var(--hover);
-    }
-
-    .dialog:not(.touch-pointer) .reset-all:hover {
+    .preferences:not(.touch-pointer) .reset-all:hover {
       opacity: 1;
       background: var(--hover);
       color: #ff9ca3;
     }
 
-    .dialog:not(.touch-pointer) .slot .drop:hover:not(:disabled),
-    .dialog:not(.touch-pointer) .radial-rows .add:hover:not(:disabled) {
+    .preferences:not(.touch-pointer) .slot .drop:hover:not(:disabled),
+    .preferences:not(.touch-pointer) .radial-rows .add:hover:not(:disabled) {
       color: #fff;
       background: var(--hover);
     }
   }
 
   @media (max-width: 600px) {
-    /* Still a card, not a full-screen takeover: the edge margin and the safe-area
-       insets on the backdrop keep it clear of the screen edges, and the dialog
-       just takes the width available. */
-    .dialog {
-      width: 100%;
-    }
-
     /* One column, and the group header sticks so you always know which group the
        rows under your thumb belong to. Full-bleed, so nothing slides past it
        through a gap at the sides. */

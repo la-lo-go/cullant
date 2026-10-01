@@ -3,15 +3,11 @@
   import { tags } from "../stores/tags.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
   import Pencil from "@lucide/svelte/icons/pencil";
-  import X from "@lucide/svelte/icons/x";
-  import { backdropDismiss } from "../backdrop";
-  import { modalFocus } from "../modal";
+  import SettingsPanel from "./SettingsPanel.svelte";
   import { COMMANDS, formatKey, isModifierKey, normalizeKey } from "../keyboard/keymap";
   import { keymap } from "../keyboard/dispatcher.svelte";
 
-  let { onclose }: { onclose: () => void } = $props();
-
-  const dismiss = backdropDismiss(() => onclose());
+  let { onclose, onback }: { onclose: () => void; onback?: () => void } = $props();
 
   let newName = $state("");
   let newScope = $state(2);
@@ -127,35 +123,22 @@
   // The capture handler cancels a recording before Escape can close the dialog.
   function onDialogKeydown(e: KeyboardEvent) {
     e.stopPropagation();
-    if (e.key === "Escape") onclose();
+    if (e.key === "Escape") (onback ?? onclose)();
   }
 </script>
 
-<div
-  class="backdrop"
-  {...dismiss}
-  onkeydown={(e) => e.key === "Escape" && recording === null && onclose()}
-  role="presentation"
->
-  <div
-    class="dialog"
-    use:modalFocus={{ isRecording: () => recording !== null }}
-    onclick={(e) => e.stopPropagation()}
-    onfocusin={(e) => {
+<SettingsPanel
+  title="Task tags"
+  {onback}
+  {onclose}
+  modalOptions={{ isRecording: () => recording !== null }}
+  onfocusin={(e) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) recording = null;
     }}
     onkeydowncapture={(e) => recording !== null && void onKeydown(e)}
-    onkeydown={onDialogKeydown}
-    role="dialog"
-    aria-label="Task tags"
-    tabindex="-1"
-  >
-    <header>
-      <h2>Task tags</h2>
-      <button class="close-x" onclick={onclose} aria-label="Close" title="Close">
-        <X size={18} />
-      </button>
-    </header>
+  onkeydown={onDialogKeydown}
+>
+  <div class="content">
     <p class="hint">
       Task tags mark work to do after culling (retouch, trim…). Assign a direct
       shortcut, or use the chord: <b>T</b> then <b>1-9</b> (list order). Backspace
@@ -199,54 +182,16 @@
     </div>
     {#if error}<p class="error" role="alert">{error}</p>{/if}
   </div>
-</div>
+</SettingsPanel>
 
 <style>
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.55);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-    /* Keep the centered panel inside the safe area (system bars, cutout). */
-    padding: var(--inset-top) var(--inset-right) var(--inset-bottom) var(--inset-left);
-    box-sizing: border-box;
-  }
-
-  .dialog {
-    /* The dialog takes focus on open (so keys stop here); suppress the ring. */
-    outline: none;
-    background: var(--surface-2);
-    border: 1px solid var(--border-strong);
-    border-radius: 10px;
-    padding: 16px 20px;
-    /* border-box so the horizontal padding is included in max-width — otherwise
-       the padding sits outside the cap and the panel overflows the viewport
-       (clipped laterally) on narrow phones. */
-    box-sizing: border-box;
-    width: 480px;
-    /* Honor the safe-area insets the backdrop pads with, so the cap matches the
-       space actually available between the system bars/cutout. */
-    max-width: calc(
-      100vw - var(--dialog-edge-margin) * 2 - var(--inset-left) - var(--inset-right)
-    );
-    max-height: 80vh;
+  .content {
     display: flex;
     flex-direction: column;
     gap: 8px;
-  }
-
-  header {
-    display: flex;
-    align-items: center;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 16px;
-    flex: 1;
+    min-height: 0;
+    padding: 12px 16px 22px;
+    overflow: hidden;
   }
 
   .hint {
@@ -340,28 +285,6 @@
 
   button:hover {
     border-color: var(--accent);
-  }
-
-  /* Corner dismiss: borderless icon button, ≥40px hit area for touch. */
-  .close-x {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 40px;
-    height: 40px;
-    flex: none;
-    padding: 0;
-    border: none;
-    border-radius: 8px;
-    background: transparent;
-    color: inherit;
-    opacity: 0.7;
-  }
-
-  .close-x:hover {
-    background: var(--hover);
-    border: none;
-    opacity: 1;
   }
 
   .del,
