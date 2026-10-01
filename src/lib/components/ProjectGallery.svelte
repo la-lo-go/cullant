@@ -8,6 +8,7 @@
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Usb from "@lucide/svelte/icons/usb";
   import Network from "@lucide/svelte/icons/network";
+  import CircleHelp from "@lucide/svelte/icons/circle-help";
 
   let { onopen }: { onopen: (path: string) => void } = $props();
 
@@ -148,7 +149,10 @@
             class="card"
             class:unavailable={st.state !== "ok"}
             class:disconnected={st.state === "disconnected"}
-            title={project.path}
+            class:unknown={st.state === "unknown"}
+            title={st.state === "unknown"
+              ? `${project.path}\nStorage status unavailable. Return to this window to retry.`
+              : project.path}
             onclick={() => openCard(project)}
           >
             <span class="kind-badge" title={st.volumeName ?? st.kind}>
@@ -191,6 +195,8 @@
                 {/each}
               {:else if st.state === "disconnected"}
                 <Unplug size={38} strokeWidth={1.25} />
+              {:else if st.state === "unknown"}
+                <CircleHelp size={40} strokeWidth={1.25} />
               {:else}
                 <ImageOff size={40} strokeWidth={1.25} />
               {/if}
@@ -202,6 +208,8 @@
                 Opened {relativeTime(project.lastOpened)}
               {:else if st.state === "disconnected"}
                 {st.volumeName ? `${st.volumeName} is not connected` : "Not connected"}
+              {:else if st.state === "unknown"}
+                Storage status unavailable
               {:else}
                 Folder not found
               {/if}
@@ -382,6 +390,11 @@
      amber rather than red to distinguish "not connected" from "folder gone". */
   .card.disconnected .meta {
     color: #ffcf8f;
+    opacity: 0.9;
+  }
+
+  .card.unknown .meta {
+    color: #b8b8c2;
     opacity: 0.9;
   }
 
