@@ -10,6 +10,8 @@ those instructions because duplicate rules can drift.
 - `CLAUDE.md` contains extended implementation notes for RAW, HEIF, Android, video, and
   platform decoders.
 - `docs/backlog.md` contains open product work.
+- `docs/audit/` contains the source-audit findings, split by area. Read
+  `docs/audit/README.md` before you fix a defect.
 
 ## Agent integration
 

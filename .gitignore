@@ -29,3 +29,4 @@ vite.config.ts.timestamp-*
 
 # Adversarial review run artifacts (ledger, reports, backlog)
 .cullant-review/
+/docs/audit/
