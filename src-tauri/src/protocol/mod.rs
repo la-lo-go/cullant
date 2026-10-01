@@ -169,7 +169,7 @@ fn respond_thumb<R: Runtime>(
         )
     };
 
-    if let Some(expected) = expected_source {
+    if let Some(expected) = expected_source.filter(|_| known.is_none_or(|v| v.orientation != 0)) {
         match crate::thumbs::source_version_for(&db, file_id, ThumbKind::Thumb) {
             Ok(source) if expected == format!("{source:016x}") => {}
             Ok(_) => {
@@ -191,7 +191,7 @@ fn respond_thumb<R: Runtime>(
     // second to appear. A cache miss falls through to the pool, which generates
     // and caches exactly as before. (temp-file+rename writes make the read
     // race-safe — a cache file is never partially written.)
-    if let Some(version) = known {
+    if let Some(version) = known.filter(|v| v.orientation != 0) {
         let cache_rel = match resolved_cache_rel_path(&db, file_id, version, kind) {
             Ok(path) => path,
             Err(error) => {
@@ -230,7 +230,15 @@ fn respond_thumb<R: Runtime>(
         // The fast path above already tried this exact cache entry.
         cache_checked: known.is_some(),
         respond: Box::new(move |result: AppResult<Vec<u8>>| match result {
-            Ok(bytes) => responder.respond(jpeg_ok(bytes)),
+            Ok(bytes) => {
+                let mut response = jpeg_ok(bytes);
+                if known.is_none_or(|v| v.orientation == 0) {
+                    response
+                        .headers_mut()
+                        .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+                }
+                responder.respond(response);
+            }
             Err(e) => {
                 tracing::debug!("thumb {file_id} failed: {e}");
                 responder.respond(plain(StatusCode::NOT_FOUND, e.to_string()))

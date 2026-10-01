@@ -242,7 +242,7 @@
   );
   let displayedAlt = $state(untrack(() => item.name));
   let displayedItemId = $state(untrack(() => item.id));
-  let displayedOrientation = $state(untrack(() => item.orientation ?? 1));
+  let displayedOrientation = $state(untrack(() => item.orientation));
   /** True while the fit view shows the upscaled grid thumb as a stand-in. */
   let softPreview = $state(progressiveStart);
 
@@ -252,7 +252,7 @@
     const progressive = settings.progressiveLoupe;
     const thumb = thumbUrl(item);
     const targetItemId = item.id;
-    const targetOrientation = item.orientation ?? 1;
+    const targetOrientation = item.orientation;
     const sameItem = targetItemId === untrack(() => displayedItemId);
     // Whether the sharp preview ALREADY EXISTS on disk. Read untracked so the
     // preview pass reporting progress cannot restart the dwell below.
@@ -322,6 +322,7 @@
 
   const previewTurn = $derived.by(() => {
     if (displayedItemId !== item.id) return 0;
+    if (displayedOrientation == null) return 0;
     const target = item.orientation ?? 1;
     for (let steps = 0; steps < 4; steps++) {
       if (rotatedOrientation(displayedOrientation, steps) === target) return steps;

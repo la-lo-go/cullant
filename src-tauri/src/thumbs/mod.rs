@@ -67,6 +67,7 @@ pub enum ThumbKind {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CacheVersion {
     pub mtime: i64,
+    /// Zero is an unresolved request, never an immutable cache version.
     pub orientation: i64,
 }
 
@@ -98,6 +99,7 @@ type WorkKey = (i64, u8, Option<CacheVersion>, u64, u32);
 /// Requests are coalesced into these, so the same artifact is never decoded
 /// twice concurrently no matter how many callers ask for it.
 struct Pending {
+    queued_at: Option<std::time::Instant>,
     key: WorkKey,
     kind: ThumbKind,
     also_thumb: bool,
@@ -271,6 +273,7 @@ impl ThumbPool {
                 pending
             }
             None => Pending {
+                queued_at: crate::photo_profile::start(),
                 key,
                 kind: request.kind,
                 also_thumb: request.also_thumb,
@@ -339,6 +342,7 @@ impl ThumbPool {
                 continue;
             }
             q.background.push_back(Pending {
+                queued_at: crate::photo_profile::start(),
                 key,
                 kind: request.kind,
                 also_thumb: request.also_thumb,
@@ -450,6 +454,15 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             }
         };
 
+        crate::photo_profile::record(
+            if pending.needs_row {
+                "queue.background"
+            } else {
+                "queue.interactive"
+            },
+            pending.queued_at,
+        );
+        let profile_work = crate::photo_profile::span("worker");
         let result = produce_cached(
             &db,
             store.as_ref(),
@@ -464,6 +477,7 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             },
         );
 
+        drop(profile_work);
         let mut responders = pending.responders;
         {
             let mut guard = queue.items.lock().unwrap();
@@ -986,6 +1000,8 @@ pub(crate) struct Decoded {
     pub src_dims: Option<(u32, u32)>,
     /// See [`SourceMeta::pre_oriented`].
     pub pre_oriented: bool,
+    /// Read from the source only for first-import requests or native rotation.
+    pub source_orientation: Option<i64>,
 }
 
 impl Decoded {
@@ -995,6 +1011,7 @@ impl Decoded {
             image,
             src_dims,
             pre_oriented: false,
+            source_orientation: None,
         }
     }
 }
@@ -1006,10 +1023,19 @@ pub(crate) fn decode_for(
     rel_path: &str,
     file_kind: i64,
     min_long_edge: u32,
+    resolve_orientation: bool,
 ) -> AppResult<Decoded> {
     match file_kind {
         0 => {
             let source = decode::open_source(store, rel_path)?;
+            let orientation = resolve_orientation.then(|| {
+                decode::raw::RawSession::open(&source)
+                    .and_then(|session| session.metadata(rel_path))
+                    .ok()
+                    .and_then(|meta| meta.orientation)
+                    .map(i64::from)
+                    .unwrap_or(1)
+            });
             // Fast path: many RAW containers embed a full-resolution JPEG
             // (Fujifilm .RAF, etc.) that rawler only surfaces via a FULL-res
             // decode. Extracting the bytes and running our IDCT-scaled JPEG
@@ -1019,7 +1045,10 @@ pub(crate) fn decode_for(
             if let Some(jpeg) = decode::raw::embedded_jpeg(source.buf()) {
                 match decode::jpeg::decode_scaled(jpeg, min_long_edge, rel_path) {
                     Ok(img) => {
-                        return Ok(Decoded::new(img, None));
+                        return Ok(Decoded {
+                            source_orientation: orientation,
+                            ..Decoded::new(img, None)
+                        });
                     }
                     // A corrupt embedded JPEG is rare; fall back to rawler rather
                     // than tombstoning a file rawler might still decode.
@@ -1029,7 +1058,10 @@ pub(crate) fn decode_for(
                 }
             }
             let raw = decode::raw::embedded_preview_scaled(&source, min_long_edge, rel_path)?;
-            Ok(Decoded::new(raw.image, None))
+            Ok(Decoded {
+                source_orientation: orientation,
+                ..Decoded::new(raw.image, None)
+            })
         }
         1 if decode::is_heif(rel_path) => {
             // A HEIF is never opened here: no in-process decoder can read one,
@@ -1037,21 +1069,40 @@ pub(crate) fn decode_for(
             // machine has. Callers guard on `heif::possible` first, so an absent
             // decoder never reaches here as a "failure".
             let (img, dims, pre_oriented) = decode::heif::decode(store, rel_path, min_long_edge)?;
+            let source_orientation = (resolve_orientation || pre_oriented).then(|| {
+                decode::open_source(store, rel_path)
+                    .ok()
+                    .and_then(|source| decode::exif::read_metadata(source.buf()).ok())
+                    .and_then(|meta| meta.orientation)
+                    .map(i64::from)
+                    .unwrap_or(1)
+            });
             Ok(Decoded {
                 image: img,
                 src_dims: Some(dims),
                 pre_oriented,
+                source_orientation,
             })
         }
         1 => {
             let source = decode::open_source(store, rel_path)?;
+            let source_orientation = resolve_orientation.then(|| {
+                decode::exif::read_metadata(source.buf())
+                    .ok()
+                    .and_then(|meta| meta.orientation)
+                    .map(i64::from)
+                    .unwrap_or(1)
+            });
             // Header-only original dimensions (cheap, no decode).
             let dims = image::ImageReader::new(std::io::Cursor::new(source.buf()))
                 .with_guessed_format()
                 .ok()
                 .and_then(|r| r.into_dimensions().ok());
             let img = decode::jpeg::decode_scaled(source.buf(), min_long_edge, rel_path)?;
-            Ok(Decoded::new(img, dims))
+            Ok(Decoded {
+                source_orientation,
+                ..Decoded::new(img, dims)
+            })
         }
         2 => {
             // Videos: extract a poster frame through whichever extractor this
@@ -1066,6 +1117,7 @@ pub(crate) fn decode_for(
                 image: img,
                 src_dims: Some(dims),
                 pre_oriented: true,
+                source_orientation: Some(1),
             })
         }
         _ => Err(AppError::Decode(format!(
@@ -1129,6 +1181,7 @@ pub(crate) struct ThumbRow {
 /// than pulling in `image_hasher`, which would risk a second `image` version
 /// for what amounts to twenty lines.
 fn dhash(img: &DynamicImage) -> u64 {
+    let _profile = crate::photo_profile::span("dhash");
     // Grey first, then resample: the filter then runs over one channel instead
     // of three, and the hash only ever looks at luminance anyway.
     let small =
@@ -1171,7 +1224,18 @@ pub(crate) fn render_to_cache(
         ThumbKind::Preview => (preview_edge, 80),
         ThumbKind::Full => (u32::MAX, 90),
     };
+    let profile_resize = crate::photo_profile::span(match kind {
+        ThumbKind::Thumb => "resize.thumb",
+        ThumbKind::Preview => "resize.preview",
+        _ => "resize.full",
+    });
     let resized = resize_long_edge(decoded, long_edge)?;
+    drop(profile_resize);
+    let profile_orientation = crate::photo_profile::span(match kind {
+        ThumbKind::Thumb => "orientation.thumb",
+        ThumbKind::Preview => "orientation.preview",
+        _ => "orientation.full",
+    });
     let unrotated = if pre_oriented {
         apply_orientation(
             resized,
@@ -1185,7 +1249,15 @@ pub(crate) fn render_to_cache(
         resized
     };
     let oriented = apply_orientation(unrotated, orientation);
+    drop(profile_orientation);
+    let profile_encode = crate::photo_profile::span(match kind {
+        ThumbKind::Thumb => "jpeg_encode.thumb",
+        ThumbKind::Preview => "jpeg_encode.preview",
+        _ => "jpeg_encode.full",
+    });
     let jpeg = encode_jpeg(&oriented, quality)?;
+    drop(profile_encode);
+    let profile_write = crate::photo_profile::span("cache_write");
 
     let cache_rel = source_cache_rel_path_for_edge(
         file_id,
@@ -1228,6 +1300,7 @@ pub(crate) fn render_to_cache(
         let _ = std::fs::remove_file(&tmp);
     }
     written?;
+    drop(profile_write);
 
     let row = ThumbRow {
         file_id,
@@ -1421,7 +1494,7 @@ pub(crate) fn produce_cached(
     // Fast path: a trusted version lets us try the cache before touching the DB.
     // Full-of-plain-image has no cache file, so it's left to the miss path
     // below (it needs rel_path anyway); every other kind can hit here.
-    if let Some(version) = known.filter(|_| !cache_checked) {
+    if let Some(version) = known.filter(|v| !cache_checked && v.orientation != 0) {
         let cache_rel = resolved_cache_rel_path(db, file_id, version, kind)?;
         let cache_abs = root.join(".cullant").join("thumbs").join(&cache_rel);
         if let Some(bytes) = read_cached_jpeg(&cache_abs) {
@@ -1459,12 +1532,16 @@ pub(crate) fn produce_cached(
     }
 
     let (rel_path, file_kind, mtime, orientation) = file_row(db, file_id)?;
+    let unresolved = orientation.is_none();
     let orientation = orientation.unwrap_or(1);
-    if known.is_some_and(|version| version != (CacheVersion { mtime, orientation })) {
+    if known.is_some_and(|version| {
+        version.mtime != mtime || (version.orientation != 0 && version.orientation != orientation)
+    }) {
         return Err(AppError::Other("image version changed".into()));
     }
 
     if kind == ThumbKind::Full
+        && !unresolved
         && file_kind == 1
         && matches!(
             Path::new(&rel_path)
@@ -1495,7 +1572,10 @@ pub(crate) fn produce_cached(
     // Re-check the cache under the authoritative version. Skipped work only when
     // `known` was present AND equal to it AND already missed above; the
     // redundant read is a cheap stat on the cold/miss path.
-    if let Some(bytes) = read_cached_jpeg(&cache_abs) {
+    if let Some(bytes) = (!unresolved)
+        .then(|| read_cached_jpeg(&cache_abs))
+        .flatten()
+    {
         return Ok(bytes);
     }
 
@@ -1542,15 +1622,26 @@ pub(crate) fn produce_cached(
 
     let preview_edge = preview_long_edge();
     let min_edge = min_long_edge_for(kind);
-    let attempt = decode_for(store, &source_rel, source_kind, min_edge).or_else(|error| {
-        if source_rel == rel_path {
-            return Err(error);
-        }
-        tracing::debug!("{source_rel}: sibling decode failed, trying {rel_path}: {error}");
-        source_rel = rel_path.clone();
-        source_kind = file_kind;
-        decode_for(store, &source_rel, source_kind, min_edge)
+    let profile_decode = crate::photo_profile::span(if source_rel != rel_path {
+        "decode.paired_jpeg"
+    } else if source_kind == 0 {
+        "decode.raw"
+    } else if source_kind == 1 {
+        "decode.image"
+    } else {
+        "decode.video"
     });
+    let attempt =
+        decode_for(store, &source_rel, source_kind, min_edge, unresolved).or_else(|error| {
+            if source_rel == rel_path {
+                return Err(error);
+            }
+            tracing::debug!("{source_rel}: sibling decode failed, trying {rel_path}: {error}");
+            source_rel = rel_path.clone();
+            source_kind = file_kind;
+            decode_for(store, &source_rel, source_kind, min_edge, unresolved)
+        });
+    drop(profile_decode);
     let decoded = match attempt {
         Ok(d) => d,
         Err(e) => {
@@ -1567,21 +1658,22 @@ pub(crate) fn produce_cached(
     if decode::video::cancelled() {
         return Err(AppError::Decode("thumbnail cancelled".into()));
     }
+    let (orientation, source_version) = if unresolved {
+        let detected = decoded.source_orientation.unwrap_or(1);
+        let resolved = db.call(move |conn| {
+            conn.execute("UPDATE files SET orientation=?3 WHERE id=?1 AND mtime=?2 AND status=0 AND orientation IS NULL", params![file_id, mtime, detected])?;
+            Ok(conn.query_row("SELECT orientation FROM files WHERE id=?1 AND mtime=?2 AND status=0", params![file_id, mtime], |r| r.get::<_, i64>(0))?)
+        })?;
+        (resolved, source_version_for(db, file_id, kind)?)
+    } else {
+        (orientation, source_version)
+    };
     let meta = SourceMeta {
         file_id,
         mtime,
         orientation,
         pre_oriented: decoded.pre_oriented,
-        source_orientation: if decoded.pre_oriented && decode::is_heif(&source_rel) {
-            decode::open_source(store, &source_rel)
-                .ok()
-                .and_then(|source| decode::exif::read_metadata(source.buf()).ok())
-                .and_then(|meta| meta.orientation)
-                .map(i64::from)
-                .unwrap_or(1)
-        } else {
-            1
-        },
+        source_orientation: decoded.source_orientation.unwrap_or(1),
         source_version,
         preview_edge,
         // Dimensions describe whatever was decoded. Backfilling a RAW's row
@@ -1762,6 +1854,101 @@ mod tests {
         (dir, db)
     }
 
+    // First-import requests arrive before metadata. Check all EXIF transforms,
+    // companion borrowing and reuse after resolution.
+    #[test]
+    fn first_import_resolves_orientation_before_first_pixels() {
+        for orientation in [6u16, 1, 2, 3, 4, 5, 7, 8] {
+            let original = DynamicImage::ImageRgb8(image::RgbImage::from_fn(80, 60, |x, y| {
+                image::Rgb([
+                    if x < 40 { 240 } else { 20 },
+                    if y < 30 { 240 } else { 20 },
+                    30,
+                ])
+            }));
+            let jpeg = encode_jpeg(&original, 95).unwrap();
+            let mut exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0".to_vec();
+            exif.extend_from_slice(&orientation.to_le_bytes());
+            exif.extend_from_slice(&[0; 6]);
+            let mut tagged = vec![255, 216, 255, 225];
+            tagged.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+            tagged.extend(exif);
+            tagged.extend_from_slice(&jpeg[2..]);
+            for paired in [false, true] {
+                let mut files = vec![("portrait.jpg", tagged.as_slice())];
+                if paired {
+                    files.push(("portrait.raf", b"unused RAW companion"));
+                }
+                let (dir, db) = media_project(&files);
+                let store = crate::store::LocalFsStore::new(dir.path());
+                let (id, mtime): (i64, i64) = db
+                    .call_read(move |c| {
+                        Ok(c.query_row(
+                            "SELECT id,mtime FROM files WHERE kind=?1",
+                            [if paired { 0 } else { 1 }],
+                            |r| Ok((r.get(0)?, r.get(1)?)),
+                        )?)
+                    })
+                    .unwrap();
+                let expected = apply_orientation(Cow::Borrowed(&original), i64::from(orientation));
+                for kind in [ThumbKind::Thumb, ThumbKind::Preview] {
+                    let bytes = produce_cached(
+                        &db,
+                        &store,
+                        dir.path(),
+                        Produce::interactive(id, kind, None),
+                    )
+                    .unwrap();
+                    let image = image::load_from_memory(&bytes).unwrap().to_rgb8();
+                    assert_eq!(image.dimensions(), (expected.width(), expected.height()));
+                    let reference = expected.to_rgb8();
+                    for (x, y) in [
+                        (10, 10),
+                        (image.width() - 10, 10),
+                        (10, image.height() - 10),
+                    ] {
+                        for channel in 0..3 {
+                            assert!(
+                                image.get_pixel(x, y)[channel]
+                                    .abs_diff(reference.get_pixel(x, y)[channel])
+                                    < 25,
+                                "wrong first pixels: orientation {orientation}, paired {paired}"
+                            );
+                        }
+                    }
+                }
+                let resolved: i64 = db
+                    .call_read(move |c| {
+                        Ok(
+                            c.query_row("SELECT orientation FROM files WHERE id=?1", [id], |r| {
+                                r.get(0)
+                            })?,
+                        )
+                    })
+                    .unwrap();
+                assert_eq!(resolved, i64::from(orientation));
+                let bytes = produce_cached(
+                    &db,
+                    &store,
+                    dir.path(),
+                    Produce::interactive(
+                        id,
+                        ThumbKind::Preview,
+                        Some(CacheVersion {
+                            mtime,
+                            orientation: 0,
+                        }),
+                    ),
+                )
+                .unwrap();
+                assert_eq!(
+                    image::load_from_memory(&bytes).unwrap().width(),
+                    expected.width()
+                );
+            }
+        }
+    }
+
     fn corpus_raw() -> Option<Vec<u8>> {
         let result = std::fs::read(
             Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1869,7 +2056,7 @@ mod tests {
         let Some(raw) = corpus_raw() else { return };
         let (dir, db) = media_project(&[("shot.orf", &raw)]);
         let store = crate::store::LocalFsStore::new(dir.path());
-        let decoded = decode_for(&store, "shot.orf", 0, 384).unwrap();
+        let decoded = decode_for(&store, "shot.orf", 0, 384, false).unwrap();
         assert!(
             decoded.src_dims.is_none() || decoded.src_dims == Some((5184, 3888)),
             "A reduced Olympus preview is not the sensor size: {:?}",
@@ -2090,6 +2277,7 @@ mod tests {
                 return;
             }
             q.interactive.push_back(Pending {
+                queued_at: crate::photo_profile::start(),
                 key,
                 kind: ThumbKind::Thumb,
                 also_thumb: false,

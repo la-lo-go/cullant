@@ -396,7 +396,7 @@ export function cullantUrl(path: string): string {
  *  Must match `CacheVersion` in the backend — the protocol builds its cache
  *  path straight from these params, so a mismatch means a permanent miss. */
 export function mediaVersion(item: ItemLite): string {
-  return `v=${item.mtime}&o=${item.orientation ?? 1}&p=${encodeURIComponent(mediaProjectRoot)}&q=${settings.previewQuality}&b=${encodeURIComponent(item.sourceVersion ?? "")}&d=${Number(item.decoupled)}&g=${item.groupId}`;
+  return `v=${item.mtime}&o=${item.orientation ?? 0}&p=${encodeURIComponent(mediaProjectRoot)}&q=${settings.previewQuality}&b=${encodeURIComponent(item.sourceVersion ?? "")}&d=${Number(item.decoupled)}&g=${item.groupId}`;
 }
 
 /** Match the backend's EXIF quarter-turn cycles for immediate UI feedback. */
