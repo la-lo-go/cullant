@@ -53,6 +53,18 @@ const NO_REPEAT = new Set<CommandId>([
   "view.fullscreen", "info.toggle", "pair.toggleShown", "pair.toggleCoupling", "edit.rotateLeft", "edit.rotateRight",
 ]);
 
+function backFromView() {
+  if (view.infoTip) {
+    view.infoTip = null;
+  } else if (view.mode === "survey") {
+    if (!session.leaveSurveyDetail()) session.closeSurvey();
+  } else if (view.mode !== "grid") {
+    view.mode = "grid";
+  } else {
+    session.clearSelection();
+  }
+}
+
 function execute(id: CommandId, e?: KeyboardEvent) {
   switch (id) {
     case "undo.rejection":
@@ -142,12 +154,7 @@ function execute(id: CommandId, e?: KeyboardEvent) {
       session.openSurvey();
       return;
     case "view.back":
-      // Esc returns to the grid from loupe/compare; in grid it clears selection.
-      if (view.mode === "survey") {
-        if (!session.leaveSurveyDetail()) session.closeSurvey();
-      }
-      else if (view.mode !== "grid") view.mode = "grid";
-      else session.clearSelection();
+      backFromView();
       return;
     case "view.fullscreen":
       // Full screen is a loupe/compare affordance; a no-op in the grid.

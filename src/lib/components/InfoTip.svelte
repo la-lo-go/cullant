@@ -38,7 +38,7 @@
 
 <!-- data-info-tip marks the button as owning its own click, so the overlay's
      dismiss-on-press leaves toggling (and swapping) explanations alone. -->
-<button class="tip" class:open data-info-tip aria-label="What does {title} do?" onclick={toggle}>
+<button class="tip" class:open data-info-tip aria-label="What does {title} do?" aria-expanded={open} onclick={toggle}>
   <Info {size} />
 </button>
 

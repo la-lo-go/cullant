@@ -46,10 +46,18 @@
   // back inside the window. The sheet spans the full width by construction.
   $effect(() => {
     const tip = view.infoTip;
-    if (narrow || !tip || !popEl) return;
-    popEl.style.left = `${tip.x}px`;
-    popEl.style.top = `${tip.y}px`;
-    return keepClamped(() => popEl);
+    const element = popEl;
+    if (narrow || !tip || !element) return;
+    element.style.left = `${tip.x}px`;
+    element.style.top = `${tip.y}px`;
+    const stop = keepClamped(() => element);
+    return () => {
+      stop();
+      element.style.left = "";
+      element.style.top = "";
+      element.style.transform = "";
+      element.style.maxHeight = "";
+    };
   });
 </script>
 
@@ -115,6 +123,7 @@
     top: auto;
     width: auto;
     max-width: none;
+    max-height: calc(100dvh - var(--dialog-edge-margin) * 2);
     padding: 16px 18px calc(20px + var(--inset-bottom));
     border-width: 1px 0 0;
     border-radius: 14px 14px 0 0;
