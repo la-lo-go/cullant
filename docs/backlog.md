@@ -1,8 +1,10 @@
-# Open items
+# Tasks
 
-This list holds only what is open. Git history holds the record of finished
-work. Run `git log`, or `git show d54fdd6:docs/PLAN.md` to read the original
-plan.
+This list holds open work and the latest task checklist. Git history holds older completed work.
+Run `git log`, or `git show d54fdd6:docs/PLAN.md` to read the original plan.
+
+Known defects from the 2026-09-23 source audit live in
+[`audit/`](audit/README.md). Read the audit before you start a fix.
 
 ## Decoding
 
@@ -15,9 +17,6 @@ plan.
 
 ## Testing
 
-- **The frontend has no test harness.** The backend has 122 tests. One earlier
-  check transpiled `src/lib/bursts.ts` with esbuild and ran it outside the
-  repository. Make that permanent with `vitest`.
 - **The fixture corpus holds no video and no RAW+JPEG pair.** See
   [testing.md](testing.md#what-the-tests-do-not-cover).
 
@@ -30,6 +29,28 @@ plan.
   creation and name matching. The XMP import leaves it out on purpose.
 - **M8 polish.** A dedicated settings pane, a UI for move and copy rules, a UI
   for commit history and undo, and installer signing.
+
+## Task checklist, 2026-10-01
+
+- [x] Add repeatable preview cache and UI E2E checks. See [testing.md](testing.md).
+- [x] Put date filters below Sort and above File name. Put Today and Last 7 days first in the list.
+- [x] Hide folder branch actions when the branch already has that state.
+- [x] Use the theme hover fill without a focus border.
+- [x] Use rounded color squares and cyan input focus for color label names.
+- [x] Clear control focus after touch input in Settings.
+- [x] Bump to 0.11.1 and build the signed Android ARM64 APK.
+- [x] Install 0.11.1 on the connected phone through ADB.
+- [x] Replace Compare text badges with small marks. Show zoom controls only for photos.
+- [x] Remove the Search button from the toolbar. Keep file name search in Sort & Filter.
+- [x] Rename Auto-advance to Auto. Add Auto to the bar layout settings.
+- [x] Show Move / Copy as an icon. Add hover, keyboard, and touch hold help to bar buttons.
+- [x] Check the updated action bar with 8 new E2E cases and 12 Settings and filter cases.
+- [x] Build the updated Android APK.
+- [x] Install the updated Android APK through ADB. Check the toolbar and touch hold help on the phone.
+- [x] Restore the theme hover color. Use existing theme colors in button help.
+- [x] Add theme hover feedback to action bar buttons and view controls, including selected buttons.
+- [x] Use Fit whole photo as the default. Keep saved framing choices.
+- [x] Check hover and framing changes with 25 E2E cases. Build and install the Android APK. Check Fit and touch hold help on the phone.
 
 ## Limitations that are decided, not open
 

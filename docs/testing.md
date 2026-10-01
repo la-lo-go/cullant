@@ -1,6 +1,9 @@
 # Testing Cullant
 
-The backend has 122 tests. The frontend has none.
+Use end-to-end (E2E) tests for app behavior. Use public engine tests when an app test cannot reach a failure safely.
+
+Write the regression before you change source code. List the failure modes before you test a system in isolation.
+Prefer the real app for complex features. Keep a repeatable artifact, such as a result file, screenshot, or disposable project.
 
 This document tells you what each layer of test data proves, what it cannot
 prove, and which checks you must run by hand.
@@ -9,8 +12,8 @@ prove, and which checks you must run by hand.
 
 ```sh
 cd src-tauri
-cargo fmt
-cargo clippy --all-targets -- -D warnings
+cargo fmt --check
+cargo clippy --all-targets -- -W clippy::cognitive_complexity -D warnings
 cargo test
 
 cd ..
@@ -24,8 +27,7 @@ enough. The three decoder gaps in section 3 below all passed CI.
 
 ### 1. Inputs built inside the test
 
-Most of the 122 tests use this. Each one makes a `tempfile::tempdir()`, writes a
-few files with `touch`, and then asserts on the database.
+Backend tests can make a `tempfile::tempdir()`, write files, and check the public engine result and database state.
 
 Use it for:
 
@@ -95,7 +97,7 @@ directions:
 The second rule keeps the list accurate. Nobody can leave a fixed entry on it.
 
 The first eight files found three decoder gaps and one display error.
-`fixtures/README.md` lists them. All four passed the other 121 tests.
+`fixtures/README.md` lists them. The other backend checks did not find these failures.
 
 ## Invariants that tests protect
 
@@ -196,15 +198,74 @@ It saves `results.json` and screenshots in the output folder. It restores the ba
 Touch checks use pointer emulation. Run Android device checks separately.
 Set `CULLANT_CDP_PORT` if the debug app uses a port other than 9222.
 
+## Preview cache recovery
+
+Use Node 24 for the E2E scripts. They use built-in SQLite and WebSocket support.
+Create the disposable project. Then start the debug app with this project.
+
+```powershell
+node scripts/e2e-preview-cache.mjs --prepare
+$env:CULLANT_OPEN_PROJECT = (Resolve-Path .playwright-mcp/preview-cache-project).Path
+npm run tauri:debug
+```
+
+Run the checks in a second terminal at the repository root.
+
+```powershell
+node scripts/e2e-preview-cache.mjs --output=.playwright-mcp/preview-cache
+```
+
+The script uses the real app through port 9222. It changes only the disposable project.
+It checks cached previews, missing cache files, damaged JPEG files, readiness updates, and source access failures.
+It also checks thumbnail spinners and the first image in the loupe.
+It checks old failure records and visible group members in separate mode.
+It saves `results.json` and screenshots in the output folder. It restores app preferences.
+
+These fixtures test cache and UI behavior. They do not test RAW decoding.
+Cache validation checks the JPEG header and end marker. It does not decode every cached pixel.
+
+The same cache code runs on desktop and Android. Run Android device checks separately.
+
+## Date filters and Settings input
+
+Start the debug app with the disposable project from the preview cache checks.
+Run this command in a second terminal at the repository root.
+
+```powershell
+node scripts/e2e-ui-polish.mjs .playwright-mcp/ui-polish
+```
+
+The script checks date presets at UTC day boundaries and folder branch actions.
+It also checks hover colors, label name fields, touch input, and keyboard focus.
+It uses temporary catalog rows in the app. It does not change source files or project rows.
+It saves `results.json` and screenshots. It restores preferences and reloads the app.
+Touch checks use WebView pointer emulation. Run Android device checks separately.
+
+## Action bar and Compare
+
+Start the debug app with the disposable project from the preview cache checks.
+Run this command in a second terminal at the repository root.
+
+```powershell
+node scripts/e2e-action-bar.mjs .playwright-mcp/action-bar
+```
+
+The script checks saved bar layouts, Auto visibility, and the narrow toolbar.
+It checks theme hover feedback for active and inactive bar and view buttons.
+It checks the Fit whole photo default and saved framing choices after reload.
+It checks the current item marker and photo zoom targets in Compare.
+It also checks mouse help, keyboard help, touch holds, short taps, and scrolling.
+Video rows test control visibility. They do not test video playback.
+It saves `results.json` and screenshots. It restores preferences and reloads the app.
+Touch checks use WebView emulation. Run Android device checks separately.
+
 ## What the tests do not cover
 
 This list is explicit, because the gaps matter more than the coverage.
 
-- **The frontend has no tests.** The rune-class stores hold real logic.
-  `session.svelte.ts` alone holds the selection model, the filters and the group
-  view. `vitest` is the obvious answer.
+- **Type checks do not verify frontend behavior.** Use app E2E checks for selection, filters, groups, and keyboard actions.
 - **No machine but this one decodes pixels under test.** You must check the
-  Android and iOS rungs of the HEIF ladder by hand, on that hardware. You must
+  Android rung of the HEIF ladder by hand, on that hardware. You must
   also check WIC on a Windows machine that lacks Microsoft's HEVC extensions.
 - **No video corpus exists.** No real file backs `decode/video.rs`.
 - **The corpus holds no RAW+JPEG pair.** The `ORF`+`ORI` pair covers N-ary
