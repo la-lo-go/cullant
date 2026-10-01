@@ -42,9 +42,10 @@ Make that decision before the first push, not after it.
 
 ## Licences
 
-Every file here is **CC0**, which means public domain. They come from
-[raw.pixls.us][pixls], which accepts only CC0 files. Cullant is
-GPL-3.0-or-later, and CC0 imposes no compliance note on that.
+The manifest's `source` text declares CC0 for samples from [raw.pixls.us][pixls].
+Some file entries have no separate license field.
+The manifest does not retain license evidence for each sample.
+Do not treat a file's checksum as license evidence.
 
 **A licence is the condition of entry.** To add a file:
 
@@ -52,8 +53,7 @@ GPL-3.0-or-later, and CC0 imposes no compliance note on that.
 2. Add an entry to `manifest.json` with the `url`, the `sha256` and a `license`
    field that names the licence.
 
-Your own photographs are acceptable, because you hold the copyright. Write that
-in the entry.
+For a photograph you own, record your copyright ownership and the permission you give for its use.
 
 [pixls]: https://raw.pixls.us/
 
