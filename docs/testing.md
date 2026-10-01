@@ -1,5 +1,54 @@
 # Testing Cullant
 
+For first-import orientation, see the [deterministic regression and app checks](first-image-orientation.md#repeatable-checks).
+
+## Measure photo preparation on a real disk
+
+Use a release build. Keep the source project and generated cache on the disk under test.
+The commands below create a new root project. They preserve existing projects in subfolders.
+Do not use a root that already contains `.cullant` for the first run.
+
+1. Build the frontend with `npm run build`.
+2. Copy the debug Tauri configuration into the local artifact directory.
+3. Set its identifier to `org.cullant.performance` and its CDP port to `9223`.
+4. Set `TAURI_CONFIG` to that configuration's JSON text. Build with `cargo build --release --manifest-path src-tauri/Cargo.toml --bin cullant`.
+5. For this direct Cargo build, serve production assets with `npm run preview -- --host 127.0.0.1 --port 1420 --strictPort`.
+6. Record source hashes with `python scripts/snapshot-photo-project.py D:/ artifacts/performance/2026-10-01-d-drive/before.json`.
+7. Run the following PowerShell commands from the repository root.
+
+```powershell
+./scripts/profile-photos.ps1 -Cache first -Run first-2560
+./scripts/profile-photos.ps1 -Cache warm -Run warm-2560
+./scripts/profile-photos.ps1 -Cache reset -Run repeat-2560-a -QuietNavigation
+./scripts/profile-photos.ps1 -Cache reset -Run repeat-2560-b -QuietNavigation
+./scripts/profile-photos.ps1 -Cache reset -Run size-1600 -Edge 1600 -QuietNavigation
+./scripts/profile-photos.ps1 -Cache reset -Run size-3840 -Edge 3840 -QuietNavigation
+./scripts/profile-photos.ps1 -Cache reset -Run disabled-2560 -Disabled -QuietNavigation
+./scripts/profile-photos.ps1 -Cache reset -Run final-2560 -QuietNavigation
+./scripts/profile-photos.ps1 -Cache warm -Run warm-final-2560 -MeasureNavigation
+./scripts/profile-photos.ps1 -Cache reset -Run navigation-2560 -MeasureNavigation
+```
+
+The runner opens the folder through the real UI. Select D: in the native picker on the first run.
+Later runs click the saved project card. The Tauri IPC function is immutable; do not replace it to intercept the picker.
+The first backend timestamp excludes time spent waiting in the picker. Retain raw timestamps for audit.
+It checks generated cache files and records screenshots, phase events, resource samples, and navigation observations.
+Only `thumbnails` rows and their generated photo cache files are reset. Project state is retained.
+Reset requires an ownership file from the first run and a matching database root.
+Close the measured app before a reset. The runner stops only the application process that it starts.
+
+The separate application identifier isolates test preferences from normal settings.
+Video poster generation is disabled. Video metadata can still contribute to the metadata phase.
+Source hash reads warm the Windows file cache. Label these runs as empty application cache, not cold disk cache.
+
+Run `node scripts/check-photo-profile.mjs <run-profile.jsonl>` for each instrumented generation run.
+Repeat the source snapshot after measurement. Compare source hashes and existing subproject cache metadata.
+Run `python scripts/verify-photo-cache.py D:/ <result.json>` to decode all final cache images and check their orientation keys.
+This verification script requires Pillow. The final cache must use 2560-pixel previews.
+Run `node scripts/analyze-photo-profile.mjs <artifact-directory>` to summarize stage and resource measurements.
+Store raw artifacts locally. Summarize results and limitations in `hardware-acceleration.md`.
+Do not add nested stage durations together. See that report for counter definitions.
+
 Use end-to-end (E2E) tests for app behavior. Use public engine tests when an app test cannot reach a failure safely.
 
 Write the regression before you change source code. List the failure modes before you test a system in isolation.
@@ -329,6 +378,29 @@ node scripts/e2e-video-range.mjs .playwright-mcp/android-video-ranges .playwrigh
 Each result includes byte counts, Content-Range, and SHA-256 hashes.
 Remove WebView debugging before the final APK is built and installed.
 
+## Burst image fit and indicators
+
+Open a real photo project in an isolated debug app with CDP port 9223 and Vite development assets.
+Use a project with portrait and landscape bursts. Run:
+
+```powershell
+node scripts/e2e-burst-fit.mjs artifacts/performance/burst-counter-desktop
+$env:CULLANT_GRID_TEST_WIDTH = '390'
+node scripts/e2e-burst-fit.mjs artifacts/performance/burst-counter-mobile
+Remove-Item Env:CULLANT_GRID_TEST_WIDTH
+```
+
+The script checks fit and fill modes, collapsed and expanded bursts, and three scroll positions.
+It checks image proportions, frame bounds, burst counters, and the front-card border.
+It saves measurements and screenshots, then restores view preferences.
+The D: checks passed at both widths: 12 observations and 102 rear cards per run.
+The border comparison also confirmed that all 354 matched image boxes kept their dimensions.
+Narrow-window emulation does not replace a physical mobile-device check.
+
+Rear cards now use their own image proportions in fit mode.
+Narrow portrait cards wrap the indicators instead of hiding the burst icon and count.
+Front and rear outlines are drawn inside the image bounds.
+
 ## What the tests do not cover
 
 This list is explicit, because the gaps matter more than the coverage.
@@ -338,9 +410,9 @@ This list is explicit, because the gaps matter more than the coverage.
   Android rung of the HEIF ladder by hand, on that hardware. You must
   also check WIC on a Windows machine that lacks Microsoft's HEVC extensions.
 - **No video corpus exists.** No real file backs `decode/video.rs`.
-- **The corpus holds no RAW+JPEG pair.** The `ORF`+`ORI` pair covers N-ary
-  grouping. Mirror mode, which most cameras produce, still runs only against
-  files written with `touch`.
+- **Synthetic pairing tests do not decode real RAW+JPEG pairs.** The `ORF`+`ORI` pair covers N-ary
+  grouping. The local D: performance experiment adds 170 real pairs and checks generated artifacts.
+  Its source photos are not distributed with the repository.
 - **The benchmarks do not compare two builds in one session.** Each release
   build costs about 10 minutes, so the recorded numbers come from separate runs.
   Treat them as indications, not measurements.

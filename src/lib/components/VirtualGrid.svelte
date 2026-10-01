@@ -168,6 +168,22 @@
   // survives this component unmounting (loupe/compare) and remounting, which must
   // not re-skeleton and re-request thumbnails that already exist.
   const loaded = catalog.thumbLoaded;
+  // RAW previews can have a different aspect ratio than the sensor dimensions.
+  const thumbnailDims = new SvelteMap<string, { w: number; h: number }>();
+
+  function onThumbLoad(id: number, image: HTMLImageElement) {
+    thumbnailDims.set(image.currentSrc.replace(/&retry=\d+$/, ""), { w: image.naturalWidth, h: image.naturalHeight });
+    loaded.add(id);
+  }
+
+  function fittedStyle(item: ItemLite): string {
+    if (settings.gridPhotoFit !== "fit") return "";
+    const dims = thumbnailDims.get(thumbUrl(item)) ?? displayDims(item);
+    return dims
+      ? `${dims.h > dims.w ? "width:auto" : "height:auto"}; aspect-ratio:${dims.w}/${dims.h}`
+      : "";
+  }
+
   // Ids whose full loupe preview has been generated. A photo whose thumbnail has
   // painted but whose preview is not here yet — while the preview pass runs —
   // shows a small "generating preview" spinner.
@@ -1277,10 +1293,9 @@
     {#each visible as v (v.item.id)}
       {@const selected = session.selectedIds.has(v.item.id)}
       {@const inset = selected ? SELECTED_INSET : 0}
-      {@const dims = displayDims(v.item)}
       {@const stacked = v.span > 1}
       {@const summary = stacked ? stackSummary(v.first, v.span) : null}
-      {@const wholePhoto = settings.gridPhotoFit === "fit" && dims !== null}
+      {@const rating = summary ? summary.maxRating : v.item.rating}
       {@const burstAt = stacked ? null : session.burstPositionAt(v.first)}
       {@const isFocused =
         session.focusedIndex >= v.first &&
@@ -1302,6 +1317,7 @@
             !v.item.thumbFailed &&
             !(v.item.kind === 2 && posterFailed.has(v.item.id))}
           class:pending={!loaded.has(v.item.id) && !v.item.thumbReady && v.item.kind !== 2}
+          title={stacked ? `Burst of ${v.span} photos` : undefined}
         >
           <!-- Cards peeking out behind a collapsed burst. They sit in the
                padding .frame.stacked opens up, so the deck never leaves the
@@ -1314,10 +1330,14 @@
             <!-- One card per frame it actually hides, capped at two: a 2-shot
                  burst that showed three cards would misreport its own size. -->
             {#if behind[1]}
-              <span class="deck d2"><img src={thumbUrl(behind[1])} alt="" decoding="async" /></span>
+              <span class="deck d2" class:fit={settings.gridPhotoFit === "fit"} style={fittedStyle(behind[1])}>
+                <img src={thumbUrl(behind[1])} alt="" decoding="async" onload={(event) => onThumbLoad(behind[1].id, event.currentTarget as HTMLImageElement)} />
+              </span>
             {/if}
             {#if behind[0]}
-              <span class="deck d1"><img src={thumbUrl(behind[0])} alt="" decoding="async" /></span>
+              <span class="deck d1" class:fit={settings.gridPhotoFit === "fit"} style={fittedStyle(behind[0])}>
+                <img src={thumbUrl(behind[0])} alt="" decoding="async" onload={(event) => onThumbLoad(behind[0].id, event.currentTarget as HTMLImageElement)} />
+              </span>
             {/if}
           {/if}
           <!-- Fitted dimensions keep the badges inside the visible photo. -->
@@ -1326,9 +1346,7 @@
             class:fit={settings.gridPhotoFit === "fit"}
             class:queued={settings.dimQueuedDeletes &&
               (v.item.flag === -1 || session.pendingDeleteIds.has(v.item.id))}
-            style={wholePhoto && dims
-              ? `${dims.h > dims.w ? "width:auto" : "height:auto"}; aspect-ratio:${dims.w}/${dims.h}`
-              : ""}
+            style={fittedStyle(v.item)}
           >
             {#if v.item.kind === 2}
               {#if posterFailed.has(v.item.id)}
@@ -1347,7 +1365,7 @@
                   decoding="async"
                   draggable="false"
                   loading="eager"
-                  onload={() => loaded.add(v.item.id)}
+                  onload={(event) => onThumbLoad(v.item.id, event.currentTarget as HTMLImageElement)}
                   onerror={() => markPosterFailed(v.item.id)}
                 />
               {/if}
@@ -1364,7 +1382,7 @@
                 decoding="async"
                 draggable="false"
                 loading="eager"
-                onload={() => loaded.add(v.item.id)}
+                onload={(event) => onThumbLoad(v.item.id, event.currentTarget as HTMLImageElement)}
                 onerror={() => retryThumb(v.item.id)}
               />
             {/if}
@@ -1405,23 +1423,28 @@
                 <span
                   class="chip pair"
                   class:split={v.item.decoupled}
-                  title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
+                  title={pair ? pair.halves.map(describeHalf).join(" · ") : "RAW+JPG"}
                 >
-                  {#if v.item.decoupled}
-                    <Scissors size={10} /><span>SPLIT</span>
-                  {:else if pair?.diverged}
-                    <!-- Halves shown separately only once they disagree, so the
-                         ordinary pair keeps drawing exactly as it always has. -->
-                    {#each pair.halves as h, hi (h.id)}
-                      {#if hi > 0}<span class="half-sep"></span>{/if}
-                      <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
-                    {/each}
-                  {:else}
-                    RAW+JPG
-                  {/if}
+                  <span class="type-name">
+                    {#if v.item.decoupled}
+                      <Scissors size={10} /><span>SPLIT</span>
+                    {:else if pair?.diverged}
+                      <!-- Halves shown separately only once they disagree, so the
+                           ordinary pair keeps drawing exactly as it always has. -->
+                      <span class="pair-halves">
+                        {#each pair.halves as h, hi (h.id)}
+                          {#if hi > 0}<span class="half-sep"></span>{/if}
+                          <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
+                        {/each}
+                      </span>
+                    {:else}
+                      <span class="type-full">RAW+JPG</span>
+                      <span class="type-short">R+J</span>
+                    {/if}
+                  </span>
                 </span>
               {:else if v.item.kind === 0}
-                <span class="chip raw">RAW</span>
+                <span class="chip raw" title="RAW"><span class="type-name">RAW</span></span>
               {/if}
               {#if summary}
                 {#if summary.picks > 0 || summary.rejects > 0}
@@ -1445,10 +1468,11 @@
               {/if}
             </div>
             <div class="info-bottom">
-              {#if summary && summary.maxRating > 0}
-                <span class="stars" title="Best rating in this burst">{"★".repeat(summary.maxRating)}</span>
-              {:else if !summary && v.item.rating > 0}
-                <span class="stars">{"★".repeat(v.item.rating)}</span>
+              {#if rating > 0}
+                <span class="stars" title={summary ? "Best rating in this burst" : undefined}>
+                  <span class="rating-full">{"★".repeat(rating)}</span>
+                  <span class="rating-compact">★{rating}</span>
+                </span>
               {/if}
               {#if v.item.tagIds.length > 0}
                 <span class="tags">
@@ -1821,6 +1845,7 @@
     justify-content: center;
     overflow: hidden;
     border-radius: inherit;
+    container-type: size;
   }
 
   /* Brightness keeps the front card opaque above the other burst frames. */
@@ -1856,6 +1881,17 @@
     background: var(--bg-stage);
   }
 
+  .frame.stacked .photo::after,
+  .deck::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    box-sizing: border-box;
+    border: 1px solid var(--border-strong);
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
   /* Both deck cards trace the photo's own box (the frame minus that padding)
      and are then nudged out of it. .photo is position: relative, so DOM order
      keeps the photo on top of them. */
@@ -1866,7 +1902,6 @@
     bottom: 0;
     left: 0;
     border-radius: 6px;
-    border: 1px solid var(--border-strong);
     background: var(--surface-2);
     overflow: hidden;
   }
@@ -1890,6 +1925,23 @@
     filter: brightness(0.4);
   }
 
+  .deck.fit {
+    inset: auto;
+    top: calc(50% + 4px);
+    left: calc(50% - 4px);
+    width: calc(100% - 8px);
+    height: calc(100% - 8px);
+    box-sizing: border-box;
+  }
+
+  .deck.fit.d1 {
+    transform: translate(calc(-50% + 4px), calc(-50% - 4px));
+  }
+
+  .deck.fit.d2 {
+    transform: translate(calc(-50% + 8px), calc(-50% - 8px));
+  }
+
   .marquee {
     position: absolute;
     top: 0;
@@ -1907,7 +1959,8 @@
     user-select: none;
   }
 
-  .photo.fit img {
+  .photo.fit img,
+  .deck.fit img {
     object-fit: contain;
   }
 
@@ -2006,6 +2059,19 @@
 
   .chip.pair {
     color: #8fd0ff;
+  }
+
+  .type-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pair-halves {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
   }
 
   /* A pair whose halves disagree. Deliberately the same colour as an ordinary
@@ -2118,7 +2184,7 @@
     left: 4px;
     right: 4px;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 3px;
     pointer-events: none;
@@ -2144,18 +2210,123 @@
   }
 
   .info-top > .chip {
-    order: 2;
+    order: -1;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
   }
 
   .info-top > .badge {
     margin-left: auto;
+    flex-shrink: 0;
   }
 
   .badge.counts,
   .info-bottom > .tags {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+  }
+
+  .info-top > .burst,
+  .info-bottom > .stars,
+  .tagdot {
+    flex-shrink: 0;
+  }
+
+  .info-bottom > .tags {
+    margin-left: auto;
+  }
+
+  .rating-compact,
+  .type-short {
+    display: none;
+  }
+
+  @container (max-width: 120px) {
+    .info-top {
+      flex-wrap: wrap;
+    }
+
+    .info-top > .chip {
+      flex-shrink: 0;
+    }
+
+    .info-top,
+    .info-bottom {
+      gap: 2px;
+    }
+
+    .chip,
+    .burst,
+    .badge.counts {
+      font-size: 9px;
+      padding: 1px 3px;
+      gap: 2px;
+    }
+
+    .rating-full {
+      display: none;
+    }
+
+    .rating-compact {
+      display: inline;
+    }
+
+    .tags {
+      gap: 2px;
+    }
+
+    .tagdot {
+      width: 6px;
+      height: 6px;
+    }
+  }
+
+  @container (max-width: 88px) {
+    .chip {
+      font-size: 8px;
+      padding: 1px 2px;
+    }
+
+    .type-full {
+      display: none;
+    }
+
+    .type-short {
+      display: inline;
+    }
+
+    .counts :global(svg),
+    .tagdot:nth-child(n + 3) {
+      display: none;
+    }
+
+    .badge.counts {
+      gap: 4px;
+    }
+
+    .burst {
+      font-size: 8px;
+      padding: 1px 2px;
+      gap: 1px;
+    }
+  }
+
+  @container (max-width: 48px) {
+    .tagdot:nth-child(n + 2) {
+      display: none;
+    }
+  }
+
+  @container (max-height: 44px) {
+    .info-bottom {
+      display: none;
+    }
+  }
+
+  @container (max-height: 36px) {
+    .info-top {
+      display: none;
+    }
   }
 
   /* "Full preview still generating" hint. Bottom-right is free for photos during
