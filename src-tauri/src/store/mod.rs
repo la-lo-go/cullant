@@ -188,6 +188,10 @@ pub trait ProjectStore: Send + Sync {
         false
     }
 
+    fn video_metadata(&self, _rel: &str) -> Option<crate::decode::video::VideoMetadata> {
+        None
+    }
+
     /// Extract a poster frame from the video at `rel`, scaled so its longest
     /// edge is at most `max_edge` (0 = the frame's native size). Only backends
     /// that report [`extracts_video_posters`](ProjectStore::extracts_video_posters)

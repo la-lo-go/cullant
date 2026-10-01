@@ -130,7 +130,7 @@ pub(crate) struct CopyDocumentPayload {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DeleteDocumentPayload {
+pub(crate) struct DocumentPayload {
     pub tree_uri: String,
     pub document_id: String,
 }
@@ -172,6 +172,21 @@ pub(crate) struct VideoPosterResponse {
     /// from.
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoMetadata {
+    /// Seconds since the Unix epoch.
+    pub capture_time: Option<i64>,
+    /// Stored pixels; the caller applies rotation for display.
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub video_codec: Option<String>,
+    pub video_frame_rate: Option<f64>,
+    /// Playback duration in seconds.
+    pub video_duration: Option<f64>,
+    pub rotation: Option<i32>,
 }
 
 #[derive(Serialize)]

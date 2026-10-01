@@ -38,6 +38,7 @@ use crate::store::ProjectStore;
 const SEEK_SECONDS: &[&str] = &["1", "0"];
 
 thread_local! {
+    #[cfg_attr(target_os = "android", allow(clippy::missing_const_for_thread_local, reason = "Android TLS macro false positive: rust-lang/rust-clippy#13422"))]
     static CANCELLED: std::cell::RefCell<Option<Arc<AtomicBool>>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -207,19 +208,63 @@ fn is_available() -> bool {
     ffmpeg_info().present
 }
 
-/// Read a container date without decoding frames or loading the video in memory.
-/// SAF has no date bridge; missing ffprobe or invalid metadata uses the mtime fallback.
-pub fn capture_time(store: &dyn ProjectStore, rel_path: &str) -> Option<i64> {
-    let path = store.local_path(rel_path)?;
+pub(crate) fn ffprobe() -> Command {
     let mut cmd = Command::new("ffprobe");
     configure(&mut cmd);
+    cmd
+}
+
+pub(crate) fn ffprobe_available() -> bool {
+    static AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *AVAILABLE.get_or_init(|| {
+        let mut cmd = ffprobe();
+        cmd.arg("-version");
+        run_bounded(&mut cmd, 64 * 1024, Duration::from_secs(5))
+            .is_ok_and(|output| output.status.success())
+    })
+}
+
+#[derive(Clone, Default)]
+pub struct VideoMetadata {
+    pub capture_time: Option<i64>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub rotation: Option<i32>,
+    pub video_codec: Option<String>,
+    pub video_frame_rate: Option<f64>,
+    pub video_duration: Option<f64>,
+}
+
+fn positive_number(value: Option<&serde_json::Value>) -> Option<f64> {
+    let value = value?;
+    let number = value.as_f64().or_else(|| value.as_str()?.parse().ok())?;
+    (number.is_finite() && number > 0.0).then_some(number)
+}
+
+fn frame_rate(value: Option<&serde_json::Value>) -> Option<f64> {
+    let (numerator, denominator) = value?.as_str()?.split_once('/')?;
+    let rate = numerator.parse::<f64>().ok()? / denominator.parse::<f64>().ok()?;
+    (rate.is_finite() && rate > 0.0).then_some(rate)
+}
+
+/// Read the video track properties without decoding a frame.
+/// SAF uses the platform; desktop uses FFprobe. Missing metadata stays unknown.
+pub fn metadata(store: &dyn ProjectStore, rel_path: &str) -> Option<VideoMetadata> {
+    if let Some(metadata) = store.video_metadata(rel_path) {
+        return Some(metadata);
+    }
+    let path = store.local_path(rel_path)?;
+    if !ffprobe_available() {
+        return None;
+    }
+    let mut cmd = ffprobe();
     cmd.args([
         "-v",
         "error",
         "-protocol_whitelist",
         "file,pipe",
         "-show_entries",
-        "format_tags=creation_time:stream_tags=creation_time",
+        "format=duration:format_tags=creation_time:stream=codec_type,codec_name,width,height,avg_frame_rate,duration:stream_tags=creation_time,rotate:stream_side_data=rotation",
         "-of",
         "json",
     ])
@@ -236,14 +281,47 @@ pub fn capture_time(store: &dyn ProjectStore, rel_path: &str) -> Option<i64> {
             .into_iter()
             .flatten(),
     );
-    containers
+    let capture_time = containers
         .filter_map(|container| {
             let date = container.get("tags")?.get("creation_time")?.as_str()?;
             time::OffsetDateTime::parse(date, &time::format_description::well_known::Rfc3339)
                 .ok()
                 .map(|date| date.unix_timestamp())
         })
-        .next()
+        .next();
+    let video = metadata.get("streams")?.as_array()?.iter().find(|stream| {
+        stream.get("codec_type").and_then(serde_json::Value::as_str) == Some("video")
+    })?;
+    let rotation = video
+        .get("side_data_list")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .find_map(|data| data.get("rotation")?.as_i64())
+        .or_else(|| video.get("tags")?.get("rotate")?.as_str()?.parse().ok())
+        .and_then(|value| i32::try_from(value).ok());
+    Some(VideoMetadata {
+        capture_time,
+        width: video
+            .get("width")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| *value > 0),
+        height: video
+            .get("height")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| *value > 0),
+        rotation,
+        video_codec: video
+            .get("codec_name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty() && *value != "unknown")
+            .map(str::to_owned),
+        video_frame_rate: frame_rate(video.get("avg_frame_rate")),
+        video_duration: positive_number(video.get("duration"))
+            .or_else(|| positive_number(metadata.get("format")?.get("duration"))),
+    })
 }
 
 /// Run ffmpeg to grab one frame at `seek` seconds, decoded from the PNG it

@@ -213,6 +213,13 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE files ADD COLUMN xmp_source_version TEXT;
     UPDATE files SET capture_time = NULL WHERE kind = 2 AND capture_time = mtime;
     "#,
+    // v12: read video properties in the existing metadata pass.
+    r#"
+    ALTER TABLE files ADD COLUMN video_codec TEXT;
+    ALTER TABLE files ADD COLUMN video_frame_rate REAL;
+    ALTER TABLE files ADD COLUMN video_duration REAL;
+    UPDATE files SET capture_time = NULL WHERE kind = 2;
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> AppResult<()> {

@@ -138,6 +138,9 @@ struct Extracted {
     exposure_time: Option<f32>,
     width: Option<u32>,
     height: Option<u32>,
+    video_codec: Option<String>,
+    video_frame_rate: Option<f64>,
+    video_duration: Option<f64>,
 }
 
 impl Extracted {
@@ -154,6 +157,9 @@ impl Extracted {
             exposure_time: None,
             width: None,
             height: None,
+            video_codec: None,
+            video_frame_rate: None,
+            video_duration: None,
         }
     }
 }
@@ -279,7 +285,9 @@ pub fn run_ingest_inner(
     // The sibling must be a decodable image, not merely `kind = 1`: a RAW that
     // borrowed the HEIF half of a RAW+HEIF shot would get no pixels to read a
     // header from, and the point of the borrow is to read the cheaper file.
-    let rows: Vec<MetaRow> = db.call_read(|conn| {
+    let video_metadata_available =
+        store.extracts_video_posters() || decode::video::ffprobe_available();
+    let rows: Vec<MetaRow> = db.call_read(move |conn| {
         let mut stmt = conn.prepare(&format!(
             "SELECT f.id, f.kind, f.rel_path,
                     (SELECT s.id FROM files s
@@ -290,10 +298,14 @@ pub fn run_ingest_inner(
                         AND s.ext IN ({exts}) AND g.decoupled = 0 LIMIT 1)
              FROM files f
              JOIN groups g ON g.id = f.group_id
-             WHERE f.status = 0 AND f.kind IN (0, 1, 2) AND f.capture_time IS NULL",
+             WHERE f.status = 0 AND f.kind IN (0, 1, 2)
+               AND (f.capture_time IS NULL OR
+                    (?1 AND f.kind = 2 AND f.video_codec IS NULL
+                     AND NOT EXISTS(SELECT 1 FROM thumbnails t
+                       WHERE t.file_id=f.id AND t.failed=1 AND t.source_mtime=f.mtime)))",
             exts = crate::db::sql::image_exts()
         ))?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map([video_metadata_available], |r| {
             Ok(MetaRow {
                 id: r.get(0)?,
                 kind: r.get(1)?,
@@ -611,7 +623,26 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
     // metadata still falls back to mtime in the batched update.
     if work.source_kind == 2 {
         let mut e = Extracted::empty(0);
-        e.capture_time = decode::video::capture_time(store, &work.source_rel);
+        if let Some(metadata) = decode::video::metadata(store, &work.source_rel) {
+            e.capture_time = metadata.capture_time;
+            // Posters and playback already apply the container rotation.
+            let rotated = metadata
+                .rotation
+                .is_some_and(|rotation| rotation.rem_euclid(180) == 90);
+            e.width = if rotated {
+                metadata.height
+            } else {
+                metadata.width
+            };
+            e.height = if rotated {
+                metadata.width
+            } else {
+                metadata.height
+            };
+            e.video_codec = metadata.video_codec;
+            e.video_frame_rate = metadata.video_frame_rate;
+            e.video_duration = metadata.video_duration;
+        }
         return metadata_rows(store, work, &e);
     }
 
@@ -716,6 +747,9 @@ fn write_metadata_batch(db: &Arc<Db>, extracted: Vec<Extracted>) -> AppResult<()
                 e.exposure_time,
                 e.width.map(i64::from),
                 e.height.map(i64::from),
+                e.video_codec.clone(),
+                e.video_frame_rate,
+                e.video_duration,
             )
         })
         .collect();
@@ -735,12 +769,16 @@ fn write_metadata_batch(db: &Arc<Db>, extracted: Vec<Extracted>) -> AppResult<()
                    f_number = COALESCE(?8, f_number),
                    exposure_time = COALESCE(?9, exposure_time),
                    width = COALESCE(?10, width),
-                   height = COALESCE(?11, height)
+                   height = COALESCE(?11, height),
+                   video_codec = ?12,
+                   video_frame_rate = ?13,
+                   video_duration = ?14
                  WHERE id = ?1",
             )?;
             for row in &batch {
                 stmt.execute(rusqlite::params![
-                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10
+                    row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9, row.10,
+                    row.11, row.12, row.13
                 ])?;
             }
         }

@@ -361,7 +361,7 @@
   // the default path is behaviourally unchanged. `itemY` comes out non-decreasing,
   // which lets the visible-window and hit-testing code binary-search it.
   const layout = $derived.by(() => {
-    const group = session.groupBy;
+    const group = session.activeGroupBy;
     const n = cellCount;
     const itemX = new Float64Array(n);
     const itemY = new Float64Array(n);
@@ -658,7 +658,7 @@
   // pinned as an overlay when the sticky option is on. Headers ascend by y, so
   // the last header at each depth at or above scrollTop is the current path.
   const stickyHeader = $derived.by(() => {
-    if (!session.stickyGroupHeader || session.groupBy.length === 0) return null;
+    if (!session.stickyGroupHeader || session.activeGroupBy.length === 0) return null;
     const path: Header[] = [];
     for (const h of layout.headers) {
       if (h.y > scrollTop) break;

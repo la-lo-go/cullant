@@ -242,6 +242,18 @@ impl<R: Runtime> Saf<R> {
         Ok((jpeg, res.width, res.height))
     }
 
+    pub fn video_metadata(&self, tree_uri: &str, document_id: &str) -> Result<VideoMetadata> {
+        self.0
+            .run_mobile_plugin(
+                "videoMetadata",
+                DocumentPayload {
+                    tree_uri: tree_uri.to_string(),
+                    document_id: document_id.to_string(),
+                },
+            )
+            .map_err(Into::into)
+    }
+
     /// Whether this device decodes HEIF. `ImageDecoder` reads it from API 28 and
     /// the app supports 24, so this is a runtime question, not a build one.
     pub fn heif_supported(&self) -> Result<bool> {
@@ -278,7 +290,7 @@ impl<R: Runtime> Saf<R> {
         // Kotlin resolves `{ "ok": true }`; reuse AccessResponse to decode it.
         let res = self.0.run_mobile_plugin::<AccessResponse>(
             "deleteDocument",
-            DeleteDocumentPayload {
+            DocumentPayload {
                 tree_uri: tree_uri.to_string(),
                 document_id: document_id.to_string(),
             },

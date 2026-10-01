@@ -256,7 +256,7 @@ mod tests {
 
         assert!(db.path().exists());
         let version = db.call(|conn| migrations::current_version(conn)).unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
 
         let table_count = db
             .call(|conn| {
@@ -279,7 +279,7 @@ mod tests {
         drop(Db::open(dir.path()).unwrap());
         let db = Db::open(dir.path()).unwrap();
         let version = db.call(|conn| migrations::current_version(conn)).unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, 12);
     }
 
     #[test]

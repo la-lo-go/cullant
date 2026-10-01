@@ -69,6 +69,9 @@ export interface ItemLite {
   fNumber: number | null;
   /** Shutter speed (exposure time) in seconds. */
   exposureTime: number | null;
+  videoCodec?: string | null;
+  videoFrameRate?: number | null;
+  videoDuration?: number | null;
   isPrimary: boolean;
   groupSize: number;
   decoupled: boolean;

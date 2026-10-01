@@ -377,6 +377,21 @@ impl ProjectStore for SafStore {
         true
     }
 
+    fn video_metadata(&self, rel: &str) -> Option<crate::decode::video::VideoMetadata> {
+        let doc = self.resolve(rel).ok()?;
+        super::stats::backend_call();
+        let metadata = self.saf().video_metadata(&self.tree_uri, &doc).ok()?;
+        Some(crate::decode::video::VideoMetadata {
+            capture_time: metadata.capture_time,
+            width: metadata.width,
+            height: metadata.height,
+            rotation: metadata.rotation,
+            video_codec: metadata.video_codec,
+            video_frame_rate: metadata.video_frame_rate,
+            video_duration: metadata.video_duration,
+        })
+    }
+
     fn video_poster(&self, rel: &str, max_edge: u32) -> AppResult<PlatformFrame> {
         let doc = self.resolve(rel)?;
         super::stats::backend_call();

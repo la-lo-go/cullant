@@ -35,6 +35,9 @@ pub struct ItemLite {
     pub focal_length: Option<f64>,
     pub f_number: Option<f64>,
     pub exposure_time: Option<f64>,
+    pub video_codec: Option<String>,
+    pub video_frame_rate: Option<f64>,
+    pub video_duration: Option<f64>,
     pub is_primary: bool,
     pub group_size: i64,
     pub decoupled: bool,
@@ -220,7 +223,8 @@ pub fn query_items(
                     EXISTS(SELECT 1 FROM thumbnails pf
                       WHERE pf.file_id = f.id AND pf.kind = 1
                         AND pf.failed = 1 AND pf.source_mtime = f.mtime) AS preview_failed,
-                    {source_version} AS source_version
+                    {source_version} AS source_version,
+                    f.video_codec, f.video_frame_rate, f.video_duration
              FROM files f
              JOIN groups g ON g.id = f.group_id
              -- A plain join avoids another correlated subquery in this wide row.
@@ -270,6 +274,9 @@ pub fn query_items(
                 focal_length: r.get(22)?,
                 f_number: r.get(23)?,
                 exposure_time: r.get(24)?,
+                video_codec: r.get(29)?,
+                video_frame_rate: r.get(30)?,
+                video_duration: r.get(31)?,
                 is_primary: r.get::<_, Option<bool>>(13)?.unwrap_or(true),
                 group_size: r.get(14)?,
                 decoupled: r.get(15)?,

@@ -9,6 +9,8 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -30,6 +32,10 @@ import app.tauri.plugin.JSArray
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.ByteArrayOutputStream
+import java.text.ParsePosition
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ThreadPoolExecutor
@@ -89,7 +95,7 @@ class CopyDocumentArgs {
 }
 
 @InvokeArg
-class DeleteDocumentArgs {
+class DocumentArgs {
     lateinit var treeUri: String
     lateinit var documentId: String
 }
@@ -472,7 +478,7 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun deleteDocument(invoke: Invoke) = work(invoke) {
-        val args = invoke.parseArgs(DeleteDocumentArgs::class.java)
+        val args = invoke.parseArgs(DocumentArgs::class.java)
         try {
             val ok = DocumentsContract.deleteDocument(
                 resolver, docUri(args.treeUri, args.documentId)
@@ -531,6 +537,87 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         } catch (e: Exception) {
             invoke.reject(e.message ?: "failed to open document")
         }
+    }
+
+    @Command
+    fun videoMetadata(invoke: Invoke) = work(invoke) {
+        val args = invoke.parseArgs(DocumentArgs::class.java)
+        val uri = docUri(args.treeUri, args.documentId)
+        val res = JSObject()
+        runCatching { videoTrack(uri) }.getOrNull()?.let { putVideoTrack(res, it) }
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(activity, uri)
+            putVideoMetadata(res, retriever)
+        } catch (e: Exception) {
+            Logger.warn("Video metadata is unavailable: ${e.message}")
+        } finally {
+            runCatching { retriever.release() }
+        }
+        invoke.resolve(res)
+    }
+
+    private fun videoTrack(uri: Uri): MediaFormat? {
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(activity, uri, null)
+            return (0 until extractor.trackCount).asSequence().map { extractor.getTrackFormat(it) }
+                .firstOrNull { it.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+        } finally {
+            extractor.release()
+        }
+    }
+
+    private fun putVideoTrack(res: JSObject, track: MediaFormat) {
+        val mime = track.getString(MediaFormat.KEY_MIME) ?: return
+        val codec = when (mime) {
+            "video/avc" -> "h264"
+            "video/hevc" -> "hevc"
+            "video/av01" -> "av1"
+            "video/x-vnd.on2.vp8" -> "vp8"
+            "video/x-vnd.on2.vp9" -> "vp9"
+            "video/mp4v-es" -> "mpeg4"
+            "video/mpeg2" -> "mpeg2video"
+            else -> mime.removePrefix("video/")
+        }
+        res.put("videoCodec", codec)
+        val frameRate = runCatching { track.getInteger(MediaFormat.KEY_FRAME_RATE).toDouble() }
+            .recoverCatching { track.getFloat(MediaFormat.KEY_FRAME_RATE).toDouble() }.getOrNull()
+        frameRate?.takeIf { it.isFinite() && it > 0 }?.let { res.put("videoFrameRate", it) }
+    }
+
+    private fun putVideoMetadata(res: JSObject, retriever: MediaMetadataRetriever) {
+        val width = intMeta(retriever, MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+        val height = intMeta(retriever, MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+        val rotation = intMeta(retriever, MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+        if (width > 0 && height > 0) {
+            res.put("width", width)
+            res.put("height", height)
+        }
+        res.put("rotation", rotation)
+        retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0 }?.let { res.put("videoDuration", it / 1000) }
+        if (!res.has("videoFrameRate")) {
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_CAPTURE_FRAMERATE)
+                ?.toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 }
+                ?.let { res.put("videoFrameRate", it) }
+        }
+        recordedTime(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE))
+            ?.let { res.put("captureTime", it) }
+    }
+
+    private fun recordedTime(value: String?): Long? {
+        if (value == null) return null
+        for (pattern in arrayOf("yyyyMMdd'T'HHmmss.SSS'Z'", "yyyyMMdd'T'HHmmss'Z'")) {
+            val parser = SimpleDateFormat(pattern, Locale.ROOT).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+                isLenient = false
+            }
+            val position = ParsePosition(0)
+            val date = parser.parse(value, position)
+            if (date != null && position.index == value.length && date.time > 0) return date.time / 1000
+        }
+        return null
     }
 
     // Extract one frame from a video as a JPEG. This is Cullant's only way to

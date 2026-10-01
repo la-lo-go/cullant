@@ -4,7 +4,6 @@
   import { settings } from "../stores/settings.svelte";
   import { backdropDismiss } from "../backdrop";
   import { keepClamped } from "../popover";
-  import { usefulGroupDims } from "../gridGroups";
   import DragList from "./DragList.svelte";
   import InfoTip from "./InfoTip.svelte";
   import X from "@lucide/svelte/icons/x";
@@ -22,9 +21,7 @@
     { value: "large", label: "Large" },
   ];
 
-  const offered = $derived(
-    usefulGroupDims(session.filtered, session.groupContext, session.groupBy),
-  );
+  const offered = $derived(session.groupDims);
 
   // Dimensions still free to pick at a given level: any not used elsewhere (the
   // level's own current pick stays selectable so the <select> shows it).
@@ -163,6 +160,7 @@
     </section>
   {/if}
 
+  {#if offered.length > 0}
   <section>
     <div class="lbl-row">
       <span class="lbl">Group by</span>
@@ -172,25 +170,25 @@
     </div>
 
 
-    {#if session.groupBy.length > 0}
+    {#if session.activeGroupBy.length > 0}
       <DragList
-        items={session.groupBy}
+        items={session.activeGroupBy}
         keyOf={(k) => k}
-        onMove={(f, t) => session.reorderGroupLevel(f, t)}
+        onMove={(f, t) => session.reorderGroupLevel(session.groupBy.indexOf(session.activeGroupBy[f]), session.groupBy.indexOf(session.activeGroupBy[t]))}
         ariaLabel="Grouping levels"
       >
-        {#snippet row(key, i)}
+        {#snippet row(key)}
           <div class="level">
             <select
               class="dimsel"
               value={key}
-              onchange={(e) => session.setGroupLevel(i, e.currentTarget.value)}
+              onchange={(e) => session.setGroupLevel(session.groupBy.indexOf(key), e.currentTarget.value)}
             >
               {#each available(key) as d (d.key)}
                 <option value={d.key}>{d.label}</option>
               {/each}
             </select>
-            <button class="icon" title="Remove" onclick={() => session.removeGroupLevel(i)}>
+            <button class="icon" title="Remove" onclick={() => session.removeGroupLevel(session.groupBy.indexOf(key))}>
               <X size={14} />
             </button>
           </div>
@@ -214,7 +212,7 @@
       </select>
     {/if}
 
-    {#if session.groupBy.length > 0}
+    {#if session.activeGroupBy.length > 0}
       <button
         class="toggle"
         class:on={session.stickyGroupHeader}
@@ -225,6 +223,7 @@
       </button>
     {/if}
   </section>
+  {/if}
 </div>
 
 <style>

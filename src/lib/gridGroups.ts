@@ -1,13 +1,13 @@
 /**
  * Grouping dimensions for the grid's "Group by" view. Each dimension maps a
- * photo to the bucket (section) it belongs to — the same vocabulary as the Sort
+ * file to the bucket (section) it belongs to — the same vocabulary as the Sort
  * & Filter panel, plus Folder. Numeric photographic settings reuse the step
  * buckets from `metadataFacets` so grouping and filtering agree. Grouping is
  * multi-level: the active dimensions are applied in order (level 0 outermost),
  * and `groupCompare` sorts items so members of the same bucket stay contiguous
  * while the existing catalog sort is preserved within the deepest bucket.
  */
-import type { ItemLite } from "./api";
+import { displayDims, type ItemLite, type MediaTab } from "./api";
 import { NO_BURSTS, type Bursts } from "./bursts";
 import {
   apertureBucket,
@@ -38,6 +38,7 @@ export const EMPTY_GROUP_CONTEXT: GroupContext = { bursts: NO_BURSTS };
 export interface GroupDim {
   key: string;
   label: string;
+  media?: MediaTab;
   of(item: ItemLite, ctx: GroupContext): GroupBucket;
 }
 
@@ -90,6 +91,7 @@ export const GROUP_DIMS: GroupDim[] = [
   {
     key: "burst",
     label: "Burst",
+    media: "photos",
     of: (i, ctx) => {
       const key = ctx.bursts.byFile.get(i.id);
       // Photos outside any burst share the "—" bucket, which sorts last, so a
@@ -118,16 +120,19 @@ export const GROUP_DIMS: GroupDim[] = [
   {
     key: "camera",
     label: "Camera",
+    media: "photos",
     of: (i) => textBucket(i.camera),
   },
   {
     key: "lens",
     label: "Lens",
+    media: "photos",
     of: (i) => textBucket(i.lens),
   },
   {
     key: "iso",
     label: "ISO",
+    media: "photos",
     of: (i) => {
       const b = isoBucket(i.iso);
       return b ? { key: b.key, label: `ISO ${b.label}`, sort: i.iso ?? 0 } : UNKNOWN;
@@ -136,6 +141,7 @@ export const GROUP_DIMS: GroupDim[] = [
   {
     key: "aperture",
     label: "Aperture",
+    media: "photos",
     of: (i) => {
       const b = apertureBucket(i.fNumber);
       return b ? { key: b.key, label: b.label, sort: i.fNumber ?? 0 } : UNKNOWN;
@@ -144,6 +150,7 @@ export const GROUP_DIMS: GroupDim[] = [
   {
     key: "focal",
     label: "Focal length",
+    media: "photos",
     of: (i) => {
       const b = focalBucket(i.focalLength);
       return b ? { key: b.key, label: b.label, sort: i.focalLength ?? 0 } : UNKNOWN;
@@ -152,6 +159,7 @@ export const GROUP_DIMS: GroupDim[] = [
   {
     key: "shutter",
     label: "Shutter speed",
+    media: "photos",
     of: (i) => {
       const b = shutterBucket(i.exposureTime);
       return b ? { key: b.key, label: b.label, sort: i.exposureTime ?? 0 } : UNKNOWN;
@@ -184,6 +192,7 @@ export const GROUP_DIMS: GroupDim[] = [
   {
     key: "type",
     label: "File type",
+    media: "photos",
     of: (i) => {
       const isPair = i.groupSize > 1 && !i.decoupled;
       if (isPair) return { key: "rawjpeg", label: "RAW+JPEG", sort: 0 };
@@ -198,6 +207,48 @@ export const GROUP_DIMS: GroupDim[] = [
     of: (i) => {
       const e = i.ext.toLowerCase();
       return e ? { key: e, label: e.toUpperCase(), sort: e } : UNKNOWN;
+    },
+  },
+  {
+    key: "codec",
+    label: "Video codec",
+    media: "videos",
+    of: (i) => textBucket(i.videoCodec?.toUpperCase()),
+  },
+  {
+    key: "resolution",
+    label: "Resolution",
+    media: "videos",
+    of: (i) => {
+      const dims = displayDims(i);
+      if (!dims || dims.w <= 0 || dims.h <= 0) return UNKNOWN;
+      const key = `${dims.w}x${dims.h}`;
+      return { key, label: `${dims.w} × ${dims.h}`, sort: dims.w * dims.h };
+    },
+  },
+  {
+    key: "frameRate",
+    label: "Frame rate",
+    media: "videos",
+    of: (i) => {
+      const rate = i.videoFrameRate;
+      if (rate == null || !Number.isFinite(rate) || rate <= 0) return UNKNOWN;
+      const rounded = Math.round(rate * 100) / 100;
+      return { key: `${rounded}`, label: `${rounded} fps`, sort: rounded };
+    },
+  },
+  {
+    key: "duration",
+    label: "Duration",
+    media: "videos",
+    of: (i) => {
+      const duration = i.videoDuration;
+      if (duration == null || !Number.isFinite(duration) || duration <= 0) return UNKNOWN;
+      const steps = [10, 30, 60, 300];
+      const labels = ["Under 10 s", "10–30 s", "30–60 s", "1–5 min", "5 min or more"];
+      const index = steps.findIndex(step => duration < step);
+      const bucket = index === -1 ? steps.length : index;
+      return { key: `duration${bucket}`, label: labels[bucket], sort: bucket };
     },
   },
   {
@@ -232,17 +283,20 @@ export function hasGroupValue(
 
 /**
  * Dimensions that can split the current items into at least two sections.
- * Active dimensions remain available so a restored or newly filtered view can
+ * Active photo dimensions remain available so a restored or newly filtered view can
  * still display and remove them even if it temporarily collapses to one value.
+ * Video dimensions must split the current video list, including active ones.
  */
 export function usefulGroupDims(
   items: readonly ItemLite[],
   ctx: GroupContext = EMPTY_GROUP_CONTEXT,
   activeKeys: readonly string[] = [],
+  media: MediaTab = items.length > 0 && items.every(item => item.kind === 2) ? "videos" : "photos",
 ): GroupDim[] {
   const active = new Set(activeKeys);
   return GROUP_DIMS.filter((dim) => {
-    if (active.has(dim.key)) return true;
+    if (dim.media && dim.media !== media) return false;
+    if (media === "photos" && active.has(dim.key)) return true;
     let first: string | undefined;
     for (const item of items) {
       const key = dim.of(item, ctx).key;

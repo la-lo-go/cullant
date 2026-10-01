@@ -316,7 +316,7 @@ function filterBlock(item: ItemLite): MenuNode[] {
       kind: "submenu",
       label: "Group by this…",
       icon: Group,
-      children: usefulGroupDims(session.filtered, session.groupContext, session.groupBy)
+      children: usefulGroupDims(session.filtered, session.groupContext, session.groupBy, catalog.media)
         .filter((d) => hasGroupValue(d, item, session.groupContext))
         .map((d) => ({
           kind: "item" as const,

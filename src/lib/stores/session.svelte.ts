@@ -12,7 +12,7 @@ import {
   type Targets,
 } from "../api";
 import { adaptiveGap, computeBursts } from "../bursts";
-import { dayKey, groupCompare, groupDim, type GroupContext } from "../gridGroups";
+import { dayKey, groupCompare, groupDim, usefulGroupDims, type GroupContext } from "../gridGroups";
 import {
   apertureBucket,
   focalBucket,
@@ -95,6 +95,7 @@ interface SavedSession {
   media?: MediaTab;
   gridDensity?: GridDensity;
   groupBy?: string[];
+  groupByMedia?: Partial<Record<MediaTab, string[]>>;
   stickyGroupHeader?: boolean;
   filters?: {
     flagFilter?: FlagFilter;
@@ -313,7 +314,7 @@ class SessionStore {
     this.clearFilters();
     this.invalidateRejectionUndo();
     this.clearFocus();
-    this.groupBy = [];
+    this.groupByMedia = { photos: [], videos: [] };
     this.gridDensity = "medium";
     this.stickyGroupHeader = false;
     this.shownAlt = {};
@@ -404,7 +405,19 @@ class SessionStore {
   gridDensity = $state<GridDensity>("medium");
   /** Ordered grouping dimensions (keys from `gridGroups`); [] = no grouping
    *  (the default flat grid). Level 0 is the outermost section. */
-  groupBy = $state<string[]>([]);
+  private groupByMedia = $state<Record<MediaTab, string[]>>({ photos: [], videos: [] });
+  get groupBy() {
+    return this.groupByMedia[catalog.media];
+  }
+  set groupBy(keys: string[]) {
+    this.groupByMedia[catalog.media] = keys.filter(key => {
+      const dim = groupDim(key);
+      return dim && (!dim.media || dim.media === catalog.media);
+    });
+  }
+  groupDims = $derived.by(() => usefulGroupDims(this.filtered, this.groupContext, this.groupBy, catalog.media));
+  activeGroupBy = $derived(catalog.media === "photos" ? this.groupBy :
+    this.groupBy.filter(key => this.groupDims.some(dim => dim.key === key)));
   /** Pin the current outermost group's header to the top of the grid while
    *  scrolling (only meaningful when grouping is active). Persisted per project. */
   stickyGroupHeader = $state(false);
@@ -769,7 +782,11 @@ class SessionStore {
     // may still alias catalog.items here (separate mode with no active filter).
     if (this.groupBy.length > 0) {
       const ctx = this.groupContext;
-      out = [...out].sort((a, b) => groupCompare(a, b, this.groupBy, ctx));
+      const useful = catalog.media === "videos" ? usefulGroupDims(out, ctx, [], "videos") : [];
+      const keys = catalog.media === "videos"
+        ? this.groupBy.filter(key => useful.some(dim => dim.key === key))
+        : this.groupBy;
+      out = [...out].sort((a, b) => groupCompare(a, b, keys, ctx));
     }
     return out;
   });
@@ -1304,6 +1321,7 @@ class SessionStore {
       media: catalog.media,
       gridDensity: this.gridDensity,
       groupBy: this.groupBy,
+      groupByMedia: this.groupByMedia,
       stickyGroupHeader: this.stickyGroupHeader,
       filters: {
         flagFilter: this.flagFilter,
@@ -1353,7 +1371,14 @@ class SessionStore {
       }
       if (!s || typeof s !== "object" || Array.isArray(s)) return;
       this.gridDensity = savedChoice(s.gridDensity, ["small", "medium", "large"] as const, "medium");
-      if (Array.isArray(s.groupBy)) this.groupBy = [...new Set(s.groupBy.filter((k) => typeof k === "string" && groupDim(k)))];
+      for (const media of ["photos", "videos"] as const) {
+        const saved = s.groupByMedia?.[media] ?? (media === (s.media ?? "photos") ? s.groupBy : []);
+        if (!Array.isArray(saved)) continue;
+        this.groupByMedia[media] = [...new Set(saved.filter(key => {
+          const dim = typeof key === "string" ? groupDim(key) : undefined;
+          return dim && (!dim.media || dim.media === media);
+        }))];
+      }
       if (typeof s.stickyGroupHeader === "boolean") this.stickyGroupHeader = s.stickyGroupHeader;
       const f = s.filters;
       if (f) {
