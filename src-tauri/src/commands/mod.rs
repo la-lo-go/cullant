@@ -6,5 +6,6 @@ pub mod media;
 pub mod metadata;
 pub mod project;
 pub mod recent;
+pub mod runtime_tools;
 pub mod session;
 pub mod tags;

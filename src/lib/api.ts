@@ -121,6 +121,17 @@ export interface MediaCounts {
   videos: number;
 }
 
+export interface RuntimeToolStatus {
+  platform: string;
+  ffmpegPresent: boolean;
+  ffmpegMajor: number | null;
+  ffprobePresent: boolean;
+  heifAvailable: boolean;
+  hasHeif: boolean;
+  hasVideos: boolean;
+  hasHevc: boolean;
+}
+
 /** Which member of a pair speaks for the whole group when settling it.
  *  "latest" picks the most recently classified member. */
 export type SyncFrom = "raw" | "jpeg" | "latest" | "none";
@@ -269,6 +280,7 @@ export interface CullState {
 }
 
 export const api = {
+  runtimeTools: () => invoke<RuntimeToolStatus>("runtime_tools"),
   openProject: (path: string) => invoke<ProjectInfo>("open_project", { path }),
   // Android SAF folder picker; returns a content:// tree URI (or null if
   // cancelled) suitable to pass to openProject. No-op returning null on desktop.

@@ -9,6 +9,7 @@
   import { session, flushSessionSave } from "$lib/stores/session.svelte";
   import { settings } from "$lib/stores/settings.svelte";
   import { recent } from "$lib/stores/recent.svelte";
+  import { runtimeTools } from "$lib/stores/runtimeTools.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
@@ -38,6 +39,7 @@
   import ProjectGallery from "$lib/components/ProjectGallery.svelte";
   import SearchOverlay from "$lib/components/SearchOverlay.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
+  import RuntimeToolsDialog from "$lib/components/RuntimeToolsDialog.svelte";
   import { modalFocus } from "$lib/modal";
   import { tooltips } from "$lib/tooltips";
   import TitleBar from "$lib/components/TitleBar.svelte";
@@ -206,6 +208,10 @@
    *      dialog hits rule 1.
    */
   function goBack() {
+    if (runtimeTools.pending.length > 0) {
+      runtimeTools.dismiss(false);
+      return;
+    }
     // Top-most first, matching the visual stacking order of the dialogs below.
     // The read-only shortcuts cheat-sheet sits above everything else.
     if (view.shortcutsOpen) {
@@ -832,6 +838,7 @@
   <!-- Mounted once for the whole app: any InfoTip, in any dialog or panel,
        raises its explanation here. -->
   <InfoOverlay />
+  <RuntimeToolsDialog />
 
   {#if session.searchOpen}
     <SearchOverlay />
