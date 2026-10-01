@@ -351,6 +351,8 @@
               {#if settings.filmstripShowLabel && v.item.label}
                 <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
               {/if}
+            </div>
+            <div class="info-top">
               {#if burst}
                 <span class="burst" title="Shot {burst.position} of a burst of {burst.total}">
                   <Layers size={8} />{burst.position}/{burst.total}
@@ -362,7 +364,6 @@
                   <span
                     class="chip"
                     class:split={v.item.decoupled}
-                    class:below-burst={burst}
                     title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
                   >
                     {#if v.item.decoupled}
@@ -377,7 +378,7 @@
                     {/if}
                   </span>
                 {:else if v.item.kind === 0}
-                  <span class="chip" class:below-burst={burst}>RAW</span>
+                  <span class="chip">RAW</span>
                 {/if}
               {/if}
               {#if settings.filmstripShowFlag && v.item.flag !== 0}
@@ -385,6 +386,8 @@
                   {#if v.item.flag === 1}<Check size={11} />{:else}<X size={11} />{/if}
                 </span>
               {/if}
+            </div>
+            <div class="info-bottom">
               {#if settings.filmstripShowRating && v.item.rating > 0}
                 <span class="stars">{"★".repeat(v.item.rating)}</span>
               {/if}
@@ -606,12 +609,8 @@
     user-select: none;
   }
 
-  /* Marked for deletion (reject flag or queued delete): dim the image itself,
-     not .photo — opacity on the wrapper would wash out the flag badge and
-     chips overlaid on the photo. Same treatment as VirtualGrid.svelte. */
   .photo.queued img {
-    opacity: 0.4;
-    filter: grayscale(35%);
+    filter: brightness(0.4) grayscale(35%);
   }
 
   /* Video with no generated poster (no extractor / undecodable clip): a dark
@@ -696,12 +695,6 @@
     color: #ffb86b;
   }
 
-  /* Second row of the top-left stack: the burst badge owns the corner, same
-     order as the grid cell. */
-  .chip.below-burst {
-    top: 17px;
-  }
-
   /* Burst badge: the grid's pill, sized down for a filmstrip cell. */
   .burst {
     position: absolute;
@@ -738,6 +731,55 @@
 
   .flagbadge.reject {
     color: #ff6b6b;
+  }
+
+  /* Cell-width rows stay readable when a portrait photo is narrower than its badges. */
+  .info-top,
+  .info-bottom {
+    position: absolute;
+    left: 3px;
+    right: 3px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    pointer-events: none;
+  }
+
+  .info-top {
+    top: 8px;
+  }
+
+  .info-bottom {
+    bottom: 8px;
+    justify-content: space-between;
+  }
+
+  .info-top > .burst,
+  .info-top > .chip,
+  .info-top > .flagbadge,
+  .info-bottom > .stars,
+  .info-bottom > .tags {
+    position: static;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .info-top > .chip {
+    order: 2;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .info-top > .flagbadge {
+    margin-left: auto;
+    padding: 1px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.55);
+  }
+
+  .info-bottom > .tags {
+    flex-wrap: wrap;
   }
 
   .stars {
