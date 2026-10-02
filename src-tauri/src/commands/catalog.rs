@@ -45,6 +45,12 @@ pub struct ItemLite {
     /// True when the grid thumbnail could not be decoded (unsupported/corrupt
     /// source), so the UI shows a placeholder instead of requesting an image.
     pub thumb_failed: bool,
+    /// Pixel size of the generated grid thumbnail, which is the DISPLAYED image
+    /// (orientation already applied). None until it exists. A RAW's own
+    /// `width`/`height` stay empty until a full-size decode, so this is how the
+    /// grid knows the aspect ratio of most photos before any of them paints.
+    pub thumb_w: Option<i64>,
+    pub thumb_h: Option<i64>,
     /// 16-char hex of the thumbnail's 64-bit difference hash, or None until the
     /// thumbnail has been generated. Used to tell apart consecutive frames of a
     /// burst from unrelated shots taken moments apart.
@@ -224,7 +230,13 @@ pub fn query_items(
                       WHERE pf.file_id = f.id AND pf.kind = 1
                         AND pf.failed = 1 AND pf.source_mtime = f.mtime) AS preview_failed,
                     {source_version} AS source_version,
-                    f.video_codec, f.video_frame_rate, f.video_duration
+                    f.video_codec, f.video_frame_rate, f.video_duration,
+                    (SELECT tw.width FROM thumbnails tw
+                      WHERE tw.file_id = f.id AND tw.kind = 0
+                        AND tw.failed = 0 AND tw.source_mtime = f.mtime) AS thumb_w,
+                    (SELECT tw.height FROM thumbnails tw
+                      WHERE tw.file_id = f.id AND tw.kind = 0
+                        AND tw.failed = 0 AND tw.source_mtime = f.mtime) AS thumb_h
              FROM files f
              JOIN groups g ON g.id = f.group_id
              -- A plain join avoids another correlated subquery in this wide row.
@@ -285,6 +297,8 @@ pub fn query_items(
                     .map(|csv| csv.split(',').filter_map(|s| s.parse().ok()).collect())
                     .unwrap_or_default(),
                 thumb_failed: r.get::<_, i64>(17)? != 0,
+                thumb_w: r.get(32)?,
+                thumb_h: r.get(33)?,
                 // Hex rather than a number: a u64 does not survive the trip
                 // through a JavaScript number intact.
                 phash: r

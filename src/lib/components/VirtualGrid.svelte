@@ -10,7 +10,7 @@
 
 <script lang="ts">
   import { onDestroy, tick, untrack } from "svelte";
-  import { api, previewUrl, thumbUrl, displayDims, type ItemLite } from "../api";
+  import { api, previewUrl, thumbUrl, knownDims, type ItemLite } from "../api";
   import { SvelteMap } from "svelte/reactivity";
   import { catalog } from "../stores/catalog.svelte";
   import { describeHalf, session } from "../stores/session.svelte";
@@ -178,7 +178,7 @@
 
   function fittedStyle(item: ItemLite): string {
     if (settings.gridPhotoFit !== "fit") return "";
-    const dims = thumbnailDims.get(thumbUrl(item)) ?? displayDims(item);
+    const dims = thumbnailDims.get(thumbUrl(item)) ?? knownDims(item);
     return dims
       ? `${dims.h > dims.w ? "width:auto" : "height:auto"}; aspect-ratio:${dims.w}/${dims.h}`
       : "";
@@ -231,7 +231,12 @@
   // Never collapse below two columns: on very narrow viewports keep 2 columns
   // and shrink the cells to fit instead.
   const MIN_COLS = 2;
-  const cols = $derived(width > 0 ? Math.max(MIN_COLS, Math.floor(width / BASE_CELL)) : 1);
+  // Grouping changes the margins. Each level below the first pushes the photos in
+  // by INDENT, and a header's arrow sits on the same vertical line as the photos
+  // under it. The ungrouped grid is not touched by any of this.
+  const INDENT = 14;
+  const grouped = $derived(session.activeGroupBy.length > 0);
+  const indent = $derived(grouped ? (session.activeGroupBy.length - 1) * INDENT : 0);
   // Touch, and any narrow viewport: the row is justified — all but a hair of side
   // margin is given back to the cells, and the base pitch's leftover is spread
   // across the columns so they tile the width EXACTLY at every thumbnail size.
@@ -239,16 +244,26 @@
   // foldable, phone in landscape) on the desktop path, where a bigger thumbnail
   // size means a bigger leftover and so wider dead margins. Desktop keeps the
   // base pitch and centres the block, splitting the leftover as equal margins.
+  // Grouped desktop is justified too, with a small margin, and rounds the column
+  // count to the nearest so the cells stay close to the size the density asks for.
   const fillWidth = $derived(isTouch || isNarrow);
-  const EDGE = $derived(fillWidth ? 2 : 0);
+  const EDGE = $derived(fillWidth ? 2 : grouped ? 8 : 0);
+  const usable = $derived(width - EDGE * 2 - indent);
+  const cols = $derived(
+    width > 0
+      ? Math.max(MIN_COLS, grouped && !fillWidth ? Math.round(usable / BASE_CELL) : Math.floor(width / BASE_CELL))
+      : 1,
+  );
   const CELL = $derived(
-    fillWidth
-      ? Math.max(1, (width - EDGE * 2) / cols)
+    fillWidth || grouped
+      ? Math.max(1, usable / cols)
       : cols * BASE_CELL <= width
         ? BASE_CELL
         : Math.max(1, Math.floor(width / cols)),
   );
-  const padX = $derived(EDGE + Math.max(0, (width - EDGE * 2 - cols * CELL) / 2));
+  const padX = $derived(EDGE + Math.max(0, (width - EDGE * 2 - indent - cols * CELL) / 2));
+  /** Where the first column starts. */
+  const gridX0 = $derived(padX + indent);
 
   /** Whether cells may animate their move. A geometry change moves every cell
    *  at once, which reads as the grid shuffling itself: opening a project runs
@@ -260,6 +275,9 @@
   $effect(() => {
     void cols;
     void CELL;
+    // A new layout moves cells too, for instance when the row heights follow the
+    // photos. That must never animate.
+    void layout;
     animateCells = false;
     // Two frames: one for the new geometry to be applied, one for it to paint.
     // Re-enabling any earlier animates the very move being suppressed.
@@ -371,6 +389,31 @@
     session.focusedIndex = -1;
   }
 
+  // Cell chrome, in px: the cell's own padding, the gap to the name, and the name's
+  // line. The photo frame gets whatever is left of a row, so a row only needs as
+  // much frame as its tallest photo.
+  const CELL_PAD = 12;
+  const NAME_GAP = 4;
+  const NAME_H = 14;
+  const STACK_PAD = 8;
+  const chromeV = $derived(CELL_PAD + (session.showNames ? NAME_GAP + NAME_H : 0));
+
+  /** The frame height this cell needs, in px. A landscape photo needs only its
+   *  height at the cell's width. A portrait one, an unknown aspect and "fill" mode
+   *  need the whole frame, which is the old fixed row. */
+  function frameNeed(i: number): number {
+    const full = CELL - GAP - chromeV;
+    if (settings.gridPhotoFit !== "fit") return full;
+    const dims = knownDims(cellItem(i));
+    if (!dims || dims.w <= 0 || dims.h <= 0 || dims.h > dims.w) return full;
+    // A collapsed burst gives up a strip along its top and right for the cards behind.
+    const pad = cellSpan(i) > 1 ? STACK_PAD : 0;
+    const wide = ((CELL - GAP - CELL_PAD - pad) * dims.h) / dims.w;
+    return Math.min(full - pad, wide) + pad;
+  }
+
+  const rowPitch = (need: number) => Math.max(24, need) + chromeV + GAP;
+
   // One pass over `items` places every cell and injects a section header wherever
   // an active grouping level's bucket changes. With no grouping active this
   // degenerates to the old uniform grid (no headers; cells flow row by row), so
@@ -382,6 +425,8 @@
     const itemX = new Float64Array(n);
     const itemY = new Float64Array(n);
     const hidden = new Uint8Array(n);
+    // Row pitch of each cell. Every cell of a row gets the same value.
+    const itemH = new Float64Array(n).fill(CELL);
     const headers: Header[] = [];
 
     // Per-cell bucket paths + prefix counts (for the header "· N" tallies). A
@@ -409,6 +454,19 @@
 
     let y = MARGIN_TOP;
     let col = 0;
+    let rowItems: number[] = [];
+    let rowNeed = 0;
+    // A row ends at the last column, at a section boundary and at the end. Its
+    // height is the one its tallest photo needs.
+    const closeRow = () => {
+      if (rowItems.length === 0) return;
+      const pitch = rowPitch(rowNeed);
+      for (const j of rowItems) itemH[j] = pitch;
+      y += pitch;
+      rowItems = [];
+      rowNeed = 0;
+      col = 0;
+    };
     let prev: string[] | null = null;
     // Headers currently open at each depth, so a later boundary can close them
     // (set their `end`) without a second pass over `items`.
@@ -436,10 +494,7 @@
           }
           if (collapsedDepth >= boundary) collapsedDepth = -1;
           if (collapsedDepth === -1) {
-            if (col > 0) {
-              y += CELL;
-              col = 0;
-            }
+            closeRow();
             let acc = "";
             for (let L = 0; L < group.length; L++) {
               acc += `\u0000${paths[i][L]}`;
@@ -479,17 +534,16 @@
         continue;
       }
 
-      itemX[i] = padX + col * CELL;
+      itemX[i] = gridX0 + col * CELL;
       itemY[i] = y;
+      rowItems.push(i);
+      rowNeed = Math.max(rowNeed, frameNeed(i));
       col++;
-      if (col >= cols) {
-        col = 0;
-        y += CELL;
-      }
+      if (col >= cols) closeRow();
     }
-    if (col > 0) y += CELL;
+    closeRow();
     for (const hdr of openStack) if (hdr) hdr.end = n;
-    return { itemX, itemY, hidden, headers, contentHeight: y + MARGIN_Y };
+    return { itemX, itemY, itemH, hidden, headers, contentHeight: y + MARGIN_Y };
   });
 
   const contentHeight = $derived(layout.contentHeight);
@@ -510,9 +564,10 @@
    *  laid-out y, so it stays correct with headers between groups. */
   function followFocus() {
     if (!viewport || session.focusedIndex === -1) return;
-    const top = layout.itemY[session.gridCellAt(session.focusedIndex)];
+    const cell = session.gridCellAt(session.focusedIndex);
+    const top = layout.itemY[cell];
     if (top === undefined) return;
-    const bottom = top + CELL;
+    const bottom = top + layout.itemH[cell];
     if (top < viewport.scrollTop) viewport.scrollTo({ top });
     else if (bottom > viewport.scrollTop + height) viewport.scrollTo({ top: bottom - height });
   }
@@ -546,12 +601,11 @@
     const saved =
       savedScroll && savedScroll.root === catalog.project?.rootPath ? savedScroll.top : 0;
     viewport.scrollTop = saved;
-    const top =
-      session.focusedIndex === -1
-        ? undefined
-        : layout.itemY[session.gridCellAt(session.focusedIndex)];
-    if (top !== undefined && (top < saved || top + CELL > saved + height)) {
-      viewport.scrollTop = Math.max(0, top - (height - CELL) / 2);
+    const cell = session.focusedIndex === -1 ? -1 : session.gridCellAt(session.focusedIndex);
+    const top = cell === -1 ? undefined : layout.itemY[cell];
+    const cellH = cell === -1 ? CELL : layout.itemH[cell];
+    if (top !== undefined && (top < saved || top + cellH > saved + height)) {
+      viewport.scrollTop = Math.max(0, top - (height - cellH) / 2);
     }
     scrollTop = viewport.scrollTop;
   }
@@ -580,7 +634,7 @@
   // id so each thumbnail owns a stable <img>: scrolling adds/removes cells
   // instead of reassigning `src` on reused nodes.
   const visible = $derived.by(() => {
-    const { itemX, itemY, hidden } = layout;
+    const { itemX, itemY, itemH, hidden } = layout;
     const n = cellCount;
     const top = scrollTop - OVERSCAN_ROWS * CELL;
     const bot = scrollTop + height + OVERSCAN_ROWS * CELL;
@@ -594,6 +648,8 @@
       span: number;
       x: number;
       y: number;
+      /** Row pitch, gap included. */
+      h: number;
     }[] = [];
     for (let i = start; i < n; i++) {
       if (itemY[i] > bot) break;
@@ -605,6 +661,7 @@
         span: cellSpan(i),
         x: itemX[i],
         y: itemY[i],
+        h: itemH[i],
       });
     }
     return out;
@@ -785,8 +842,9 @@
     const inset = GAP / 2 + (session.selectedIds.has(cellItem(index).id) ? SELECTED_INSET : 0);
     const left = layout.itemX[index] + inset;
     const top = layout.itemY[index] + inset;
-    const size = CELL - inset * 2;
-    return x >= left && x < left + size && y >= top && y < top + size;
+    const w = CELL - inset * 2;
+    const h = layout.itemH[index] - inset * 2;
+    return x >= left && x < left + w && y >= top && y < top + h;
   }
 
   /** Geometry hit-test against the laid-out cell positions (which may include
@@ -801,7 +859,7 @@
     const y = viewY + viewport.scrollTop;
     if (layout.headers.some((header) => y >= header.y && y < header.y + header.h)) return null;
     if (stickyHeader && viewY < 30) return null;
-    const { itemX, itemY, hidden } = layout;
+    const { itemX, itemY, itemH, hidden } = layout;
     const n = cellCount;
     if (n === 0) return { x, y, index: 0, onCell: false };
     // Greatest index with itemY <= y: the row at or above the point.
@@ -809,9 +867,9 @@
     if (k < 0) return { x, y, index: 0, onCell: false };
     // A collapsed section's parked items share the header's y — landing there
     // is a dead zone (visually the header/blank space), never a real cell.
-    if (hidden[k] || y >= itemY[k] + CELL) return { x, y, index: k, onCell: false }; // header / gutter
-    const rowStart = k - Math.round((itemX[k] - padX) / CELL);
-    const targetCol = Math.floor((x - padX) / CELL);
+    if (hidden[k] || y >= itemY[k] + itemH[k]) return { x, y, index: k, onCell: false }; // header / gutter
+    const rowStart = k - Math.round((itemX[k] - gridX0) / CELL);
+    const targetCol = Math.floor((x - gridX0) / CELL);
     if (targetCol < 0 || targetCol >= cols) return { x, y, index: k, onCell: false };
     const idx = rowStart + targetCol;
     const onCell = idx >= 0 && idx < n && itemY[idx] === itemY[k] && cellContains(idx, x, y);
@@ -984,13 +1042,13 @@
     // Rectangle-intersect the laid-out cell boxes. itemY ascends, so start at the
     // first cell whose bottom reaches y0 and stop once a cell's top passes y1.
     // Touching a collapsed burst takes every frame stacked under it.
-    const { itemX, itemY } = layout;
+    const { itemX, itemY, itemH } = layout;
     const n = cellCount;
     const next = new Set(drag.base);
     for (let i = lowerBound(itemY, y0 - CELL); i < n; i++) {
       if (itemY[i] + GAP / 2 > y1) break;
       const ix = itemX[i] + GAP / 2;
-      if (ix + CELL - GAP > x0 && ix < x1 && itemY[i] + CELL - GAP / 2 > y0) {
+      if (ix + CELL - GAP > x0 && ix < x1 && itemY[i] + itemH[i] - GAP / 2 > y0) {
         const from = cellFirst(i);
         for (let k = from; k < from + cellSpan(i); k++) next.add(items[k].id);
       }
@@ -1258,7 +1316,7 @@
       <div
         class="group-header"
         class:sub={h.depth > 0}
-        style="transform: translateY({h.y}px); height:{h.h}px; padding-left:{padX + h.depth * 14}px"
+        style="transform: translateY({h.y}px); height:{h.h}px; padding-left:{padX + 6 + h.depth * INDENT}px; padding-right:{padX + 9}px"
       >
         <button
           class="gh-collapse"
@@ -1305,7 +1363,7 @@
         class="cell"
         class:focused={isFocused}
         class:selected
-        style="transform: translate({v.x + GAP / 2 + inset}px, {v.y + GAP / 2 + inset}px); width:{CELL - GAP - inset * 2}px; height:{CELL - GAP - inset * 2}px"
+        style="transform: translate({v.x + GAP / 2 + inset}px, {v.y + GAP / 2 + inset}px); width:{CELL - GAP - inset * 2}px; height:{v.h - GAP - inset * 2}px"
         {...isFocused ? { id: ACTIVE_CELL_ID } : {}}
         role="button"
         tabindex="-1"
@@ -1330,12 +1388,12 @@
             <!-- One card per frame it actually hides, capped at two: a 2-shot
                  burst that showed three cards would misreport its own size. -->
             {#if behind[1]}
-              <span class="deck d2" class:fit={settings.gridPhotoFit === "fit"} style={fittedStyle(behind[1])}>
+              <span class="deck d2" class:fit={settings.gridPhotoFit === "fit"} style={fittedStyle(v.item)}>
                 <img src={thumbUrl(behind[1])} alt="" decoding="async" onload={(event) => onThumbLoad(behind[1].id, event.currentTarget as HTMLImageElement)} />
               </span>
             {/if}
             {#if behind[0]}
-              <span class="deck d1" class:fit={settings.gridPhotoFit === "fit"} style={fittedStyle(behind[0])}>
+              <span class="deck d1" class:fit={settings.gridPhotoFit === "fit"} style={fittedStyle(v.item)}>
                 <img src={thumbUrl(behind[0])} alt="" decoding="async" onload={(event) => onThumbLoad(behind[0].id, event.currentTarget as HTMLImageElement)} />
               </span>
             {/if}
@@ -1959,9 +2017,14 @@
     user-select: none;
   }
 
-  .photo.fit img,
-  .deck.fit img {
+  .photo.fit img {
     object-fit: contain;
+  }
+
+  /* A card behind a burst has the front photo's box, whatever its own aspect, so it
+     rises from the front and never hangs out of it. Its picture fills that box. */
+  .deck.fit img {
+    object-fit: cover;
   }
 
   /* Subtle shimmer while a cell's thumbnail is still being generated/decoded.
@@ -2367,6 +2430,7 @@
 
   .name {
     font-size: 11px;
+    line-height: 14px;
     opacity: 0.65;
     white-space: nowrap;
     overflow: hidden;

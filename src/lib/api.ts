@@ -78,6 +78,11 @@ export interface ItemLite {
   tagIds: number[];
   /** Grid thumbnail could not be decoded (unsupported/corrupt source). */
   thumbFailed: boolean;
+  /** Pixel size of the generated grid thumbnail, which is the displayed image
+   *  (orientation applied), or null before it exists. A RAW has no `width` or
+   *  `height` until a full-size decode, so the grid reads its aspect from here. */
+  thumbW: number | null;
+  thumbH: number | null;
   /** A usable grid thumbnail already exists on disk, so the cell is waiting on
    *  a fetch rather than on generation. */
   thumbReady: boolean;
@@ -96,6 +101,15 @@ export function displayDims(item: ItemLite): { w: number; h: number } | null {
   if (item.width == null || item.height == null) return null;
   const rotated = item.orientation != null && item.orientation >= 5 && item.orientation <= 8;
   return rotated ? { w: item.height, h: item.width } : { w: item.width, h: item.height };
+}
+
+/** The aspect the grid can use before a thumbnail paints: the generated
+ *  thumbnail's own size, else the file's displayed size, else unknown. */
+export function knownDims(item: ItemLite): { w: number; h: number } | null {
+  if (item.thumbW != null && item.thumbH != null && item.thumbW > 0 && item.thumbH > 0) {
+    return { w: item.thumbW, h: item.thumbH };
+  }
+  return displayDims(item);
 }
 
 /** The rendered size of a `dims`-ratio image `object-fit: contain`-ed into a
