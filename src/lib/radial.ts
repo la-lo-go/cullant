@@ -2,7 +2,7 @@
  * The radial menu's contents, as data.
  *
  * A slot is one sector of the ring. It holds either a single command, or a
- * GROUP whose members the ring descends into while the finger keeps moving —
+ * GROUP whose members fan out past the rim while the finger keeps moving —
  * ratings and colour labels have six and five values each, and spending six
  * sectors on stars would leave no room for anything else.
  *
@@ -346,4 +346,65 @@ export function healSlots(raw: unknown): RadialSlot[] {
     if (!slots.some((s) => slotKey(s) === slotKey(fill))) slots.push(fill);
   }
   return slots;
+}
+
+/** The fan a group opens into, past the rim of the ring. */
+export const FAN_R = RING_OUTER * 1.09 + 26;
+/** Every fan member sits on a plate this wide, whatever it shows, so equal
+ *  steps between centres are equal gaps between plates. A plate sized to its
+ *  content made five stars crowd four while one star stood apart. */
+export const FAN_CHIP = 34;
+/** Arc distance between fan members' centres: a plate plus a clear gap. */
+export const FAN_GAP = FAN_CHIP + 8;
+/** At most this many members; past it, the last place opens the full list. */
+export const FAN_MAX = 7;
+/** Room kept between a fan member's centre and the window edge. */
+export const FAN_MARGIN = 22;
+
+/** SVG angle (0 to the right, clockwise) of the centre of sector `i` of `n`. */
+export function sectorAngle(i: number, n: number, rot = 0): number {
+  return i * ((Math.PI * 2) / n) - Math.PI / 2 + rot;
+}
+
+/**
+ * Angles for a fan of `count` items on a circle of radius `r`, centred on angle
+ * `centre` (SVG convention: 0 is to the right, growing clockwise) and `gap`
+ * pixels apart along the arc.
+ *
+ * `fits` says whether an item at a given angle is fully on screen. A fan that
+ * does not fit where it wants to be slides along the circle towards the side
+ * with room and tightens its spacing, and only if neither is enough goes as
+ * far as the far side of the ring — in a corner that is the only side left.
+ * Null only when no angle and no spacing fits at all.
+ */
+export function fanAngles(
+  count: number,
+  r: number,
+  centre: number,
+  gap: number,
+  fits: (angle: number) => boolean,
+): number[] | null {
+  if (count <= 0) return [];
+  const SLIDE_STEP = 0.03;
+  // Cheapest fix first: a short slide, then tighter spacing, and only then
+  // the long way round.
+  // Tightening stops short of the plates touching (see FAN_GAP).
+  const passes: [squeeze: number, maxSlide: number][] = [
+    [1, Math.PI / 3],
+    [0.9, Math.PI / 3],
+    [1, Math.PI],
+    [0.9, Math.PI],
+  ];
+  for (const [squeeze, maxSlide] of passes) {
+    const spread = ((count - 1) * gap * squeeze) / r;
+    const at = (c: number) =>
+      Array.from({ length: count }, (_, j) => c + (count === 1 ? 0 : (j / (count - 1) - 0.5) * spread));
+    for (let d = 0; d <= maxSlide; d += SLIDE_STEP) {
+      for (const c of d === 0 ? [centre] : [centre + d, centre - d]) {
+        const angles = at(c);
+        if (angles.every(fits)) return angles;
+      }
+    }
+  }
+  return null;
 }

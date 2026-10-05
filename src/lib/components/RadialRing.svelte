@@ -4,15 +4,28 @@
   /** One sector as the ring draws it. */
   export interface RingItem extends SlotFace {
     label: string;
-    /** Opens a ring of its own when the finger keeps moving outwards. */
+    /** Opens into a fan of its members when the finger keeps moving outwards. */
     group?: boolean;
+  }
+
+  /** A group's members fanned out past the rim. */
+  export interface RingFan {
+    /** SVG angle of each place, the "+N" place last when there is one. */
+    angles: number[];
+    /** 0 to 1: how far it has come in. */
+    t: number;
+    items: RingItem[];
+    /** Members left out; drawn as a "+N" place. */
+    overflow: number;
+    /** Place the finger points at, or -1. */
+    armed: number;
   }
 </script>
 
 <script lang="ts">
   /**
-   * The ring itself: wedges, faces and the group marks, with no gesture
-   * logic. The live menu feeds it a pointer; the settings panel feeds
+   * The ring itself: wedges, faces, the group marks and the fan, with no
+   * gesture logic. The live menu feeds it a pointer; the settings panel feeds
    * it a highlighted row. Both draw THIS, so the preview can never drift from
    * what the finger will actually see.
    *
@@ -20,6 +33,8 @@
    * preview keeps the exact proportions instead of a hand-tuned copy of them.
    */
   import {
+    FAN_CHIP,
+    FAN_R,
     RING_BOX,
     RING_ICON,
     RING_INNER,
@@ -45,11 +60,12 @@
     pull?: number;
     /** Pointer direction, clockwise from straight up, and how sure it is (0–1). */
     aim?: { angle: number; strength: number } | null;
-    /** Inside a group: the hub is the way back out. */
+    /** The hub is the way back out of an open group. */
     climbable?: boolean;
     climbArmed?: boolean;
     /** Changes when the ring is replaced, so the new one animates in. */
     level?: string;
+    fan?: RingFan | null;
     onhighlight?: (index: number) => void;
   }
 
@@ -64,6 +80,7 @@
     climbable = false,
     climbArmed = false,
     level = "",
+    fan = null,
     onhighlight,
   }: Props = $props();
 
@@ -84,7 +101,7 @@
   const step = $derived((Math.PI * 2) / Math.max(1, n));
 
   /** The preview crops to the ring plus the room a highlighted group mark
-   *  needs; the live box keeps room for the armed wedge to grow. */
+   *  needs; the live box keeps room for the fan as well. */
   const crop = $derived(preview ? 2 * (RING_OUTER + 18) : RING_BOX);
   const k = $derived(size / crop);
   const offset = $derived(((crop - RING_BOX) / 2) * k);
@@ -122,6 +139,21 @@
     return `M ${p0.x} ${p0.y} A ${r} ${r} 0 0 1 ${p1.x} ${p1.y}`;
   });
 
+  const fanName = $derived.by(() => {
+    if (!fan || fan.armed < 0) return null;
+    const member = fan.items[fan.armed];
+    return member ? member.label : `${fan.overflow} more…`;
+  });
+
+  /** Slides out from the rim as it fades in, rather than popping into place. */
+  const fanPoints = $derived(
+    fan ? fan.angles.map((a) => polar(a, FAN_R - (1 - fan.t) * 14)) : [],
+  );
+
+  /** A pinned fan is where the choice happens now; the ring is only the way
+   *  back, and the group it came from only needs to stay recognisable. */
+  const pinned = $derived(fan !== null && fan.t >= 1 && climbable);
+
   function starRows(count: number): number[] {
     if (count <= 3) return [count];
     return count === 4 ? [2, 2] : [3, 2];
@@ -150,6 +182,7 @@
 <div class="ring" style="width:{size}px; height:{size}px">
   <div
     class="box"
+    class:pinned
     style="width:{RING_BOX}px; height:{RING_BOX}px; left:{offset}px; top:{offset}px; transform:scale({k})"
   >
     {#key level}
@@ -171,18 +204,21 @@
               </path>
 
               {#if item.group}
-                {#if p > 0}
+                {#if p > 0 && !pinned}
                   <path
                     class="fill"
                     d={wedgePath(i, n, innerOf(i), RING_INNER + p * (RING_OUTER - RING_INNER), RING_BOX, rot)}
                   />
                 {/if}
                 <!-- A second rim just outside the first: there is a layer
-                     behind this sector. -->
+                     behind this sector. As the fan comes in it drifts out
+                     towards it and fades, so the layer reads as having BECOME
+                     the fan rather than vanishing from under it. -->
+                {@const handover = on && fan ? fan.t : 0}
                 <path
                   class="group-mark"
                   d={arcPath(i, n, RING_OUTER + 5, RING_BOX, rot, groupMarkSpan)}
-                  style="opacity:{0.45 + p * 0.55}"
+                  style="opacity:{(0.45 + p * 0.55) * (1 - handover)}; transform:scale({1 + handover * 0.14})"
                 />
               {/if}
             </g>
@@ -192,7 +228,7 @@
             <path class="aim" d={aimPath} style="opacity:{aim.strength}" />
           {/if}
 
-          {#if climbable}
+          {#if climbable && !fanName}
             <!-- The way out, drawn where it is: without a mark the hub is a hole,
                  and the only clue that going back in closes the group was
                  knowing. -->
@@ -224,6 +260,29 @@
           </span>
         {/each}
 
+        {#if fanName}
+          <!-- In the hub, not beside the chip: beside it the name covered the
+               next member or ran off the edge, and the hub is the one place
+               that is always on screen, since the finger went down there. -->
+          <span class="hub-name">{fanName}</span>
+        {/if}
+
+        {#if fan}
+          {#each fanPoints as q, j (j)}
+            {@const member = fan.items[j]}
+            <span
+              class="chip"
+              class:armed={fan.armed === j}
+              style="left:{q.x}px; top:{q.y}px; width:{FAN_CHIP}px; height:{FAN_CHIP}px; opacity:{fan.t}; --s:{0.7 + fan.t * 0.3}"
+            >
+              {#if member}
+                {@render face(member, 15)}
+              {:else}
+                <span class="more">+{fan.overflow}</span>
+              {/if}
+            </span>
+          {/each}
+        {/if}
       </div>
     {/key}
   </div>
@@ -286,7 +345,9 @@
   .slice {
     transform-box: view-box;
     transform-origin: 50% 50%;
-    transition: transform 90ms ease-out;
+    transition:
+      transform 90ms ease-out,
+      opacity 120ms ease-out;
   }
 
   .slice.armed {
@@ -306,12 +367,27 @@
     fill: var(--accent-fill);
   }
 
+  .box.pinned .slice.armed .sector {
+    fill: color-mix(in srgb, var(--accent-fill) 55%, var(--surface));
+  }
+
+  /* With a fan open, everything but the group it came from steps back. */
+  .box.pinned .slice:not(.armed) {
+    opacity: 0.45;
+  }
+
   .group-mark {
     fill: none;
     stroke: var(--accent);
     stroke-width: 2.5;
     stroke-linecap: round;
-    transition: opacity 120ms ease-out;
+    transform-box: view-box;
+    transform-origin: 50% 50%;
+    /* Smooths the steps between pointer events, and eases the mark back in
+       when the finger climbs out of the fan. */
+    transition:
+      opacity 120ms ease-out,
+      transform 120ms ease-out;
   }
 
   .fill {
@@ -372,6 +448,10 @@
     opacity: 0.6;
   }
 
+  .box.pinned .ico.dim {
+    opacity: 0.3;
+  }
+
   .stars {
     display: flex;
     flex-direction: column;
@@ -405,5 +485,52 @@
     letter-spacing: 0.01em;
     white-space: nowrap;
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  }
+
+  .hub-name {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    max-width: 66px;
+    overflow: hidden;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  /* Every member on the same round plate, so equal steps are equal gaps. A
+     plate behind it at all because the fan sits past the ring, on the photo
+     itself, and stars on a bright frame vanish without one. */
+  .chip {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    color: #e6eaea;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+    transform: translate(-50%, -50%) scale(var(--s));
+    transition:
+      background 90ms ease-out,
+      color 90ms ease-out;
+  }
+
+  /* Colour alone marks it; raised so a neighbour can never sit on top. */
+  .chip.armed {
+    z-index: 1;
+    background: var(--accent-fill);
+    color: #fff;
+  }
+
+  .more {
+    font-size: 11px;
+    font-weight: 700;
   }
 </style>
