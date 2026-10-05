@@ -166,10 +166,11 @@ export function slotIcon(slot: RadialSlot): typeof Star {
   return COMMAND_ICONS[slot.id] ?? Circle;
 }
 
-/** How a sector is drawn: an icon, a short glyph, or a colour swatch. */
+/** How a sector is drawn: an icon, a star count, or a colour swatch. */
 export interface SlotFace {
   icon?: typeof Star;
-  glyph?: string;
+  /** Drawn as that many stars, so a rating reads as a rating. */
+  stars?: number;
   swatch?: string;
 }
 
@@ -198,12 +199,26 @@ const LABEL_OF_COMMAND: Partial<Record<CommandId, string>> = {
 export function slotFace(slot: RadialSlot): SlotFace {
   if (slot.kind === "command") {
     const stars = RATE_STARS[slot.id];
-    if (stars) return { glyph: "★".repeat(stars) };
+    if (stars) return { stars };
     const label = LABEL_OF_COMMAND[slot.id];
     if (label) return { swatch: LABEL_COLORS[label] };
   }
   return { icon: slotIcon(slot) };
 }
+
+/**
+ * The ring's geometry, in the units of a `RING_BOX`-wide square. The live menu
+ * draws it at that size and the settings preview scales the same box down, so
+ * the two can never disagree about proportions.
+ */
+export const RING_BOX = 250;
+export const RING_INNER = 40;
+export const RING_OUTER = 108;
+export const RING_ICON = (RING_INNER + RING_OUTER) / 2;
+/** Past this distance from the centre a group sector opens into its members.
+ *  Deliberately well inside the drawn ring: having to travel past the edge of
+ *  what you can see is not something anyone discovers. */
+export const RING_DESCEND = 76;
 
 /**
  * Sector `i` of `n` as an SVG wedge, centred on straight up and running
@@ -241,19 +256,27 @@ export function wedgePath(
 }
 
 /**
- * The arc across sector `i` at radius `r` — the line the finger has to reach to
- * open a group. Drawn so the pull a group needs is something you can see coming
- * rather than something you have to already know about.
+ * An arc across sector `i` at radius `r`, centred in the sector. `span` is the
+ * fraction of the sector's usable width it covers, so the same arc can be drawn
+ * as a short tab or grown into a full-width bar.
  */
-export function arcPath(i: number, n: number, r: number, box: number, rot = 0): string {
+export function arcPath(
+  i: number,
+  n: number,
+  r: number,
+  box: number,
+  rot = 0,
+  span = 1,
+): string {
   const step = (Math.PI * 2) / n;
   // Kept just inside the sector's own edges so neighbouring arcs never touch.
   const inset = Math.min(step * 0.12, 0.12);
-  const a0 = i * step - step / 2 - Math.PI / 2 + inset + rot;
-  const a1 = a0 + step - inset * 2;
+  const width = Math.max(0.001, (step - inset * 2) * span);
+  const a0 = i * step - Math.PI / 2 + rot - width / 2;
+  const a1 = a0 + width;
   const c = box / 2;
   const p = (a: number) => `${c + r * Math.cos(a)} ${c + r * Math.sin(a)}`;
-  const large = step > Math.PI ? 1 : 0;
+  const large = width > Math.PI ? 1 : 0;
   return `M ${p(a0)} A ${r} ${r} 0 ${large} 1 ${p(a1)}`;
 }
 

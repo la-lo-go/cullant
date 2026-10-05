@@ -26,28 +26,21 @@
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
   import {
-    arcPath,
-    sectorPoint,
+    RING_DESCEND,
     slotFace,
     slotShortLabel,
-    wedgePath,
     type RadialSlot,
+    type SlotFace,
   } from "../radial";
   import { LABELS, LABEL_COLORS } from "../labels";
   import { formatColorLabel } from "../colorLabels";
   import type { CommandId } from "../keyboard/keymap";
-  import Star from "@lucide/svelte/icons/star";
+  import RadialRing, { type RingItem } from "./RadialRing.svelte";
   import Circle from "@lucide/svelte/icons/circle";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import StarOff from "@lucide/svelte/icons/star-off";
 
-  export interface RadialAction {
+  export interface RadialAction extends SlotFace {
     label: string;
-    /** Drawn in the sector. A `glyph` wins when both are present. */
-    icon?: typeof Star;
-    /** Short text drawn instead of an icon (star counts read better as stars). */
-    glyph?: string;
-    /** A colour swatch instead of an icon (labels, tags). */
-    swatch?: string;
     /** Present for a leaf; absent on a group, which descends instead. */
     run?: () => void;
     /** Members to descend into. */
@@ -83,24 +76,11 @@
 
   /** Inside this radius nothing is armed, so a release cancels. */
   const DEAD_ZONE = 34;
-  /** Past this a group sector opens into its members. Deliberately well inside
-   *  the drawn ring: having to travel past the edge of what you can see is not
-   *  something anyone discovers. */
-  const DESCEND_R = 76;
-  /** And well inside the dead zone to climb back OUT of one. Sharing the cancel
-   *  radius made a group fall open and shut again on the way past, since the
-   *  same few pixels meant both "nothing armed" and "leave this group". */
+  /** And well inside the dead zone to climb back OUT of a group. Sharing the
+   *  cancel radius made a group fall open and shut again on the way past, since
+   *  the same few pixels meant both "nothing armed" and "leave this group". */
   const CLIMB_R = 15;
   const CLIMB_DWELL_MS = 160;
-  const R_INNER = 40;
-  const R_OUTER = 108;
-  /** The box leaves room for the armed sector to grow past R_OUTER. */
-  const BOX = 250;
-  const ICON_R = (R_INNER + R_OUTER) / 2;
-  /** The armed sector's icon travels out with the wedge that grew under it, so
-   *  the sector reads as one moving thing rather than a shape and a label that
-   *  happen to share an angle. */
-  const ICON_R_ARMED = ICON_R + 9;
 
   /** The whole ring turned, so the first sector can sit where a given hand
    *  actually reaches rather than always straight up. */
@@ -143,15 +123,14 @@
    *  ring shows this: a group that needs a firmer pull than a plain command
    *  should say so while the finger is still on the way. */
   const pull = $derived(
-    Math.max(0, Math.min(1, (dist - DEAD_ZONE) / Math.max(1, DESCEND_R - DEAD_ZONE))),
+    Math.max(0, Math.min(1, (dist - DEAD_ZONE) / Math.max(1, RING_DESCEND - DEAD_ZONE))),
   );
 
   // Descending happens on the way out, so it is part of the same motion rather
-  // than a second gesture.
+  // than a second gesture. An empty group has nothing to descend into.
   $effect(() => {
-    if (descended === null) {
-      const hit = armed >= 0 ? rootActions[armed] : undefined;
-      if (hit?.children && dist > DESCEND_R) descended = hit;
+    if (descended === null && pulling?.children?.length && dist > RING_DESCEND) {
+      descended = pulling;
     }
   });
 
@@ -174,6 +153,21 @@
     else oncancel();
   });
 
+  const ringItems = $derived<RingItem[]>(
+    actions.map((a) => ({
+      label: a.label,
+      icon: a.icon,
+      stars: a.stars,
+      swatch: a.swatch,
+      group: a.children !== undefined,
+    })),
+  );
+
+  /** Which way the finger is heading, for the hub's direction cue. */
+  const aim = $derived(
+    dist > 6 ? { angle: Math.atan2(dx, -dy), strength: Math.min(1, (dist - 6) / 28) } : null,
+  );
+
   function buildRoot(slots: RadialSlot[]): RadialAction[] {
     return slots.map((slot) => {
       const base = { label: slotShortLabel(slot), ...slotFace(slot) };
@@ -186,8 +180,8 @@
   function groupChildren(id: "stars" | "labels" | "tags"): RadialAction[] {
     if (id === "stars") {
       return [0, 1, 2, 3, 4, 5].map((r) => ({
-        label: r === 0 ? "None" : `${r}`,
-        glyph: r === 0 ? "—" : "★".repeat(r),
+        label: r === 0 ? "No stars" : `${r}`,
+        ...(r === 0 ? { icon: StarOff } : { stars: r }),
         run: () => handlers.rate(r),
       }));
     }
@@ -213,210 +207,23 @@
 </script>
 
 <div class="radial" style="left:{x}px; top:{y}px" aria-hidden="true">
-  <svg class="wedges" width={BOX} height={BOX} viewBox="0 0 {BOX} {BOX}">
-    {#each actions as _, i (i)}
-      <path
-        class="sector"
-        class:armed={armed === i}
-        d={wedgePath(i, actions.length, R_INNER, R_OUTER, BOX, rot)}
-      />
-    {/each}
-
-    {#if descended}
-      <!-- The way out, drawn where it is: without a mark the hub is a hole, and
-           the only clue that going back in closes the group was knowing. -->
-      <circle
-        class="climb"
-        class:armed={dist <= CLIMB_R}
-        cx={BOX / 2}
-        cy={BOX / 2}
-        r={CLIMB_R + 6}
-      />
-      <path
-        class="climb-x"
-        class:armed={dist <= CLIMB_R}
-        d="M {BOX / 2 - 5} {BOX / 2 - 5} L {BOX / 2 + 5} {BOX / 2 + 5}
-           M {BOX / 2 + 5} {BOX / 2 - 5} L {BOX / 2 - 5} {BOX / 2 + 5}"
-      />
-    {/if}
-
-    {#if pulling}
-      <!-- The line the finger has to cross to open this group. It brightens and
-           thickens as the pull gets there, so the extra travel a group asks for
-           is visible while it is being made instead of only once it works. -->
-      <path
-        class="gate"
-        d={arcPath(armed, actions.length, DESCEND_R, BOX, rot)}
-        style="opacity:{0.22 + pull * 0.78}; stroke-width:{1.5 + pull * 3}"
-      />
-    {/if}
-  </svg>
-
-  {#each actions as action, i (i)}
-    {@const on = armed === i}
-    {@const p = sectorPoint(i, actions.length, on ? ICON_R_ARMED : ICON_R, BOX, rot)}
-    <span class="ico" class:armed={on} style="left:{p.x}px; top:{p.y}px">
-      {#if action.glyph}
-        <span class="glyph">{action.glyph}</span>
-      {:else if action.swatch}
-        <span class="swatch" style="background:{action.swatch}"></span>
-      {:else if action.icon}
-        {@const Icon = action.icon}
-        <Icon size={19} strokeWidth={2} />
-      {/if}
-      {#if action.children}
-        <span class="submenu-mark" class:armed={on} title="Pull outward to open">
-          <ChevronRight size={10} strokeWidth={3} />
-        </span>
-      {/if}
-      {#if on && !action.glyph}
-        <!-- Named only while armed, and directly under its own icon so the eye
-             never has to travel to find out what it is about to do. A glyph
-             sector says it already: "★★★" with "3 stars" under it is the same
-             word twice. -->
-        <span class="name">{action.label}{action.children ? " · pull out" : ""}</span>
-      {/if}
-    </span>
-  {/each}
+  <RadialRing
+    items={ringItems}
+    {armed}
+    {rot}
+    pull={pulling ? pull : 0}
+    {aim}
+    climbable={descended !== null}
+    climbArmed={descended !== null && dist <= CLIMB_R}
+    level={descended?.label ?? ""}
+  />
 </div>
 
 <style>
   .radial {
     position: fixed;
     z-index: 70;
-    width: 250px;
-    height: 250px;
     transform: translate(-50%, -50%);
     pointer-events: none;
   }
-
-  .wedges {
-    position: absolute;
-    inset: 0;
-  }
-
-  /* No outline: the gaps between wedges already separate them, and a stroke on
-     every sector turns the ring into a diagram. */
-  .sector {
-    fill: color-mix(in srgb, var(--surface) 88%, transparent);
-    /* Not an outline: a stroke in the background colour is the gap between the
-       wedges, so they separate without the ring turning into a diagram. */
-    stroke: var(--bg-stage);
-    stroke-width: 2;
-    /* Grown from the ring's centre, so the armed wedge reaches outwards under
-       the finger instead of merely changing colour. Short enough to feel like
-       feedback rather than an animation. */
-    transform-box: view-box;
-    transform-origin: 50% 50%;
-    transition:
-      transform 90ms ease-out,
-      fill 90ms ease-out;
-  }
-
-  .sector.armed {
-    fill: var(--accent-fill);
-    transform: scale(1.09);
-  }
-
-  .ico {
-    position: absolute;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    transform: translate(-50%, -50%);
-    color: #cfd4d4;
-    transition:
-      color 90ms ease-out,
-      left 90ms ease-out,
-      top 90ms ease-out,
-      transform 90ms ease-out;
-  }
-
-  .ico.armed {
-    color: #fff;
-    transform: translate(-50%, -50%) scale(1.12);
-  }
-
-  .submenu-mark {
-    position: absolute;
-    left: calc(100% + 1px);
-    top: 2px;
-    display: inline-flex;
-    color: var(--accent);
-    opacity: 0.8;
-    transition:
-      opacity 90ms ease-out,
-      transform 90ms ease-out;
-  }
-
-  .submenu-mark.armed {
-    opacity: 1;
-    transform: translateX(3px);
-  }
-
-  .glyph {
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: -1px;
-    white-space: nowrap;
-  }
-
-  .swatch {
-    width: 15px;
-    height: 15px;
-    border-radius: 50%;
-  }
-
-  /* Under the icon, and only for the armed sector. No plate behind it: the
-     sector it sits on is already the background, and a pill floating over the
-     ring read as a tooltip that had landed in the wrong place. Absolutely
-     placed so adding it never nudges the icon it belongs to. */
-  .name {
-    position: absolute;
-    top: 100%;
-    margin-top: 2px;
-    max-width: 84px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
-  }
-
-  .gate {
-    fill: none;
-    stroke: var(--accent);
-    stroke-linecap: round;
-  }
-
-  .climb {
-    fill: rgba(18, 22, 23, 0.85);
-    stroke: var(--border-strong);
-    stroke-width: 1;
-    transition:
-      fill 90ms ease-out,
-      stroke 90ms ease-out;
-  }
-
-  .climb.armed {
-    fill: var(--accent-fill);
-    stroke: var(--accent);
-  }
-
-  .climb-x {
-    fill: none;
-    stroke: #9aa0a0;
-    stroke-width: 2;
-    stroke-linecap: round;
-    transition: stroke 90ms ease-out;
-  }
-
-  .climb-x.armed {
-    stroke: #fff;
-  }
-
 </style>

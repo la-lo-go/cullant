@@ -1155,7 +1155,7 @@
         ...at,
         items: action.children.map((c) => ({
           kind: "item" as const,
-          label: c.glyph ? `${c.glyph}  ${c.label}` : c.label,
+          label: c.stars ? `${"★".repeat(c.stars)}  ${c.label}` : c.label,
           run: () => c.run?.(),
         })),
       };
