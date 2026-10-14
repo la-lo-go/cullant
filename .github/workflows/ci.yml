@@ -1,8 +1,12 @@
 name: CI
 
-# Manual only: press "Run workflow" in the Actions tab. The release workflow
-# runs the same checks on its own before it builds anything.
+# Runs on every push to main and on pull requests. You can also start it by hand
+# from the Actions tab. The release workflow repeats the same checks before it
+# builds anything, but by then the tag and the Release already exist.
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 env:
