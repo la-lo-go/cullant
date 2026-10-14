@@ -94,6 +94,7 @@ Use it for UX/discoverability passes; it is not a substitute for `cargo test`.
 
 ## Gotchas
 
+- **Rust is pinned in `rust-toolchain.toml`.** Local builds, CI and the release workflow use the same compiler. A newer `stable` adds clippy lints, and `-D warnings` turns each one into an error. Raise the version on purpose, in its own commit, after `cargo clippy --all-targets -- -D warnings` is clean.
 - Requires the MSVC toolchain (VS 2022 Build Tools, "Desktop development with C++") — without `link.exe` nothing compiles on Windows.
 - `walkdir` filter must not skip the depth-0 root (temp dirs start with `.` and were being filtered).
 - `rawler`'s API is not SemVer-stable — keep it pinned and wrapped in `decode/`.
