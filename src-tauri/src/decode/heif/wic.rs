@@ -151,7 +151,7 @@ pub(super) fn decode(path: &Path, min_long_edge: u32) -> AppResult<(DynamicImage
         .map_err(|e| AppError::Decode(format!("{}: WIC copy: {e}", path.display())))?;
 
     // WIC gives BGR; `image` wants RGB.
-    for px in buf.chunks_exact_mut(3) {
+    for px in buf.as_chunks_mut::<3>().0 {
         px.swap(0, 2);
     }
     let img = RgbImage::from_raw(w, h, buf)

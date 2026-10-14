@@ -47,7 +47,7 @@ struct ProbeSlot(Arc<AtomicUsize>);
 impl ProbeSlot {
     fn take(slots: &Arc<AtomicUsize>) -> Option<Self> {
         slots
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count < MAX_PROBES).then_some(count + 1)
             })
             .ok()

@@ -786,7 +786,7 @@ fn cache_jpeg_components(payload: &[u8]) -> Option<Vec<(u8, u8)>> {
         return None;
     }
     let mut components = Vec::with_capacity(count);
-    for component in payload[6..].chunks_exact(3) {
+    for component in payload[6..].as_chunks::<3>().0 {
         if component[2] > 3 || components.iter().any(|&(id, _)| id == component[0]) {
             return None;
         }
@@ -796,8 +796,8 @@ fn cache_jpeg_components(payload: &[u8]) -> Option<Vec<(u8, u8)>> {
 }
 
 fn cache_jpeg_quantization(payload: &[u8]) -> Option<u8> {
-    let tables = payload.chunks_exact(65);
-    if payload.is_empty() || !tables.remainder().is_empty() {
+    let (tables, remainder) = payload.as_chunks::<65>();
+    if payload.is_empty() || !remainder.is_empty() {
         return None;
     }
     let mut mask = 0;
@@ -870,7 +870,7 @@ fn cache_jpeg_scan(
         return None;
     }
     let mut seen = Vec::with_capacity(count);
-    for scan in payload[1..1 + 2 * count].chunks_exact(2) {
+    for scan in payload[1..1 + 2 * count].as_chunks::<2>().0 {
         let &(_, quantization_id) = components.iter().find(|&&(id, _)| id == scan[0])?;
         let dc = scan[1] >> 4;
         let ac = scan[1] & 0x0f;
