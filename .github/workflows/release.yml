@@ -271,3 +271,22 @@ jobs:
           name="cullant-$VERSION-arm64.apk"
           cp "$apk" "$name"
           gh release upload "$TAG" "$name" --clobber
+
+  # The Release is published before any file is attached, so the website must
+  # not rebuild on the publish event. This job waits for every bundle and the
+  # APK, then asks Cloudflare to rebuild the site, which reads the newest
+  # complete release. If one platform fails, the site keeps its old version.
+  site:
+    name: Rebuild the website
+    needs: [desktop, android]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call the deploy hook
+        env:
+          HOOK: ${{ secrets.SITE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::warning::SITE_DEPLOY_HOOK is empty, the website keeps its old version"
+            exit 0
+          fi
+          curl --fail --silent --show-error --request POST "$HOOK"
