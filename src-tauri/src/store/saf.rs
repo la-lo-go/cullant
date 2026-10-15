@@ -98,6 +98,35 @@ impl SafStore {
         })
     }
 
+    /// Drop every cached id the completed walk did not see. A deleted or renamed
+    /// file otherwise kept its entry forever, and `exists` answered true for it
+    /// from the cache. Dropping too much is harmless: a miss walks again.
+    fn cache_retain(&self, seen: std::collections::HashSet<String>) -> AppResult<()> {
+        let cached: Vec<String> = self.db.call_read(|conn| {
+            let mut stmt = conn.prepare("SELECT rel_path FROM saf_documents")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            Ok(rows.collect::<Result<Vec<_>, _>>()?)
+        })?;
+        let stale: Vec<String> = cached
+            .into_iter()
+            .filter(|rel| !seen.contains(rel))
+            .collect();
+        if stale.is_empty() {
+            return Ok(());
+        }
+        self.db.call(move |conn| {
+            let tx = conn.transaction()?;
+            {
+                let mut delete = tx.prepare("DELETE FROM saf_documents WHERE rel_path = ?1")?;
+                for rel in &stale {
+                    delete.execute(params![rel])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
     fn cache_forget(&self, rel: &str) -> AppResult<()> {
         let rel = rel.to_string();
         let prefix = format!("{rel}/%");
@@ -183,6 +212,7 @@ impl ProjectStore for SafStore {
         cancelled: &dyn Fn() -> bool,
     ) -> AppResult<Vec<StoreEntry>> {
         let mut files = Vec::new();
+        let mut seen = std::collections::HashSet::new();
         let mut stack: Vec<(String, String)> = vec![(String::new(), self.root_document_id.clone())];
 
         while let Some((prefix, parent_doc)) = stack.pop() {
@@ -202,6 +232,7 @@ impl ProjectStore for SafStore {
                 } else {
                     format!("{prefix}/{}", e.name)
                 };
+                seen.insert(rel.clone());
                 cache_batch.push((rel.clone(), e.document_id.clone(), e.is_dir));
                 if e.is_dir {
                     let skip = skip_dirs.contains(&e.name.as_str()) || e.name.starts_with('.');
@@ -222,6 +253,7 @@ impl ProjectStore for SafStore {
             }
             self.cache_put_many(cache_batch)?;
         }
+        self.cache_retain(seen)?;
         Ok(files)
     }
 
