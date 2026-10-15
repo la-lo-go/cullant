@@ -169,6 +169,12 @@ fn run_scan(
             return;
         }
     };
+    // After the walk, not before it: the cache of a file the previous scan
+    // marked missing is kept when the file has come back. Off the open path too,
+    // so a large cache no longer delays the grid.
+    if let Err(error) = crate::thumbs::prune_cache(&db, &root) {
+        tracing::warn!("could not prune the thumbnail cache: {error}");
+    }
     if done.file_count == 0 {
         if let Some(id) = initial_open_id {
             let result = rollback_fresh_empty(&app, db, store, root, thumbs);
@@ -348,7 +354,6 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
     })?;
 
     close_project_inner(state);
-    crate::thumbs::prune_cache(&db, &root)?;
     let thumbs = Arc::new(ThumbPool::start(db.clone(), store.clone(), root.clone()));
     {
         // Replacing an already-open project must stop its background generation
@@ -450,7 +455,6 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
     })?;
 
     close_project_inner(state);
-    crate::thumbs::prune_cache(&db, &base)?;
     let thumbs = Arc::new(ThumbPool::start(db.clone(), store.clone(), base.clone()));
     {
         // Stop a previously-open project's background generation before replacing.

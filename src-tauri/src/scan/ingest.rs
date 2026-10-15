@@ -1047,6 +1047,29 @@ mod tests {
     }
 
     #[test]
+    fn a_deleted_cache_is_rebuilt_on_the_next_open() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db = project_with_jpegs(root, 3);
+        run_all(&db, root);
+        assert_eq!(thumb_count(&db, 0), 3);
+
+        std::fs::remove_dir_all(root.join(".cullant/thumbs")).unwrap();
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        assert_eq!(
+            thumb_count(&db, 0),
+            0,
+            "rows of vanished artifacts are dropped"
+        );
+        assert_eq!(thumb_count(&db, 1), 0);
+
+        let (_, thumbs, previews) = run_all(&db, root);
+        assert_eq!((thumbs, previews), (3, 3));
+        assert_eq!(thumb_count(&db, 0), 3);
+    }
+
+    #[test]
     fn a_closed_project_stops_its_ingest_silently() {
         let _guard = ingest_guard();
         let dir = tempfile::tempdir().unwrap();

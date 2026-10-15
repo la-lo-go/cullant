@@ -635,6 +635,10 @@ pub(crate) fn prune_cache(db: &Arc<Db>, root: &Path) -> AppResult<usize> {
         let paths = statement.query_map([], |row| row.get(0))?;
         Ok(paths.collect::<Result<_, _>>()?)
     })?;
+    // A worker can write a new artifact (file first, row second) while this
+    // runs. Anything younger than the referenced snapshot is left for the next
+    // prune rather than deleted out from under the row about to name it.
+    let started = SystemTime::now() - std::time::Duration::from_secs(2);
     let directory = root.join(".cullant/thumbs");
     for path in [root.join(".cullant"), directory.clone()] {
         match std::fs::symlink_metadata(path) {
@@ -676,7 +680,11 @@ pub(crate) fn prune_cache(db: &Arc<Db>, root: &Path) -> AppResult<usize> {
                 continue;
             }
             let relative = format!("{name}/{}", entry.file_name().to_string_lossy());
-            if !referenced.contains(&relative) {
+            let recent = entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .is_ok_and(|modified| modified >= started);
+            if !referenced.contains(&relative) && !recent {
                 std::fs::remove_file(path)?;
                 removed += 1;
             }
@@ -685,6 +693,14 @@ pub(crate) fn prune_cache(db: &Arc<Db>, root: &Path) -> AppResult<usize> {
     Ok(removed)
 }
 
+/// Drop every `thumbnails` row that no longer describes a usable artifact: one
+/// for an older version of its source, or one whose JPEG is gone.
+///
+/// Runs on every scan and so on every open. It used to open and parse each
+/// cached JPEG on the writer thread -- tens of thousands of files for a large
+/// project, with every write in the app queued behind them. One directory
+/// listing answers "is it there" for all of them; a file that is there but
+/// damaged is still caught where it is served, by `read_cached_jpeg`.
 pub(crate) fn invalidate_cache_rows(db: &Arc<Db>) -> AppResult<()> {
     let root = db
         .path()
@@ -692,25 +708,86 @@ pub(crate) fn invalidate_cache_rows(db: &Arc<Db>) -> AppResult<()> {
         .and_then(Path::parent)
         .ok_or_else(|| AppError::Other("project database has no data directory".into()))?
         .to_path_buf();
-    db.call(move |conn| {
+    db.call(|conn| {
         conn.execute("UPDATE files SET width=NULL, height=NULL WHERE kind=0 AND EXISTS(SELECT 1 FROM thumbnails t WHERE t.file_id=files.id AND t.failed=0 AND t.cache_path NOT LIKE '%_r2_%' AND t.cache_path NOT LIKE '%_r2s%')", [])?;
+        Ok(())
+    })?;
+    // Rows first, listing second. A worker writes the file before its row, so a
+    // row read here always names a file the listing below can already see.
+    let entries = db.call_read(|conn| {
         let sql = format!("SELECT t.file_id, t.kind, t.cache_path, f.mtime, COALESCE(f.orientation,1), {}, t.failed, t.source_mtime, t.long_edge FROM thumbnails t JOIN files f ON f.id=t.file_id JOIN groups g ON g.id=f.group_id WHERE f.status=0", source_version_sql());
         let mut statement = conn.prepare(&sql)?;
         let entries = statement.query_map([], |row| Ok((row.get::<_,i64>(0)?, row.get::<_,i64>(1)?, row.get::<_,String>(2)?, row.get::<_,i64>(3)?, row.get::<_,i64>(4)?, row.get::<_,String>(5)?, row.get::<_,bool>(6)?, row.get::<_,i64>(7)?, row.get::<_,u32>(8)?)))?.collect::<Result<Vec<_>,_>>()?;
-        drop(statement);
-        for (id, kind, path, mtime, orientation, source, failed, source_mtime, long_edge) in entries {
-            let kind = match kind { 0 => ThumbKind::Thumb, 1 => ThumbKind::Preview, 3 => ThumbKind::Full, _ => continue };
-            let source = if kind == ThumbKind::Full { 0 } else { source_version(&source) };
-            let current = path == source_cache_rel_path(id, CacheVersion { mtime, orientation }, kind, source)
-                && source_mtime == mtime
-                && (kind != ThumbKind::Preview || long_edge == 0 || long_edge == preview_long_edge());
-            // A decode tombstone has no JPEG. It must survive a valid cache check.
-            if !current || (!failed && !cached_artifact_ready(&root, &path)) {
-                conn.execute("DELETE FROM thumbnails WHERE file_id=?1 AND kind=?2", params![id, kind as i64])?;
+        Ok(entries)
+    })?;
+    let listing = cache_listing(&root);
+    let mut stale = Vec::new();
+    for (id, kind_i, path, mtime, orientation, source, failed, source_mtime, long_edge) in entries {
+        let kind = match kind_i {
+            0 => ThumbKind::Thumb,
+            1 => ThumbKind::Preview,
+            3 => ThumbKind::Full,
+            _ => continue,
+        };
+        let source = if kind == ThumbKind::Full {
+            0
+        } else {
+            source_version(&source)
+        };
+        let current = path
+            == source_cache_rel_path(id, CacheVersion { mtime, orientation }, kind, source)
+            && source_mtime == mtime
+            && (kind != ThumbKind::Preview || long_edge == 0 || long_edge == preview_long_edge());
+        // A decode tombstone has no JPEG. It must survive a valid cache check.
+        if !current || (!failed && !listing.contains(&path)) {
+            stale.push((id, kind_i, path));
+        }
+    }
+    if stale.is_empty() {
+        return Ok(());
+    }
+    db.call(move |conn| {
+        let tx = conn.transaction()?;
+        {
+            // Keyed on the path too: a row a worker rewrote since the read above
+            // describes a new artifact and is not this stale one.
+            let mut delete = tx
+                .prepare("DELETE FROM thumbnails WHERE file_id=?1 AND kind=?2 AND cache_path=?3")?;
+            for (id, kind, path) in &stale {
+                delete.execute(params![id, kind, path])?;
             }
         }
+        tx.commit()?;
         Ok(())
     })
+}
+
+/// Every non-empty cached JPEG, as the `bucket/name.jpg` paths rows store.
+fn cache_listing(root: &Path) -> std::collections::HashSet<String> {
+    let mut listing = std::collections::HashSet::new();
+    let Ok(buckets) = std::fs::read_dir(root.join(".cullant/thumbs")) else {
+        return listing;
+    };
+    for bucket in buckets.flatten() {
+        let name = bucket.file_name().to_string_lossy().into_owned();
+        if name.len() != 2 || !name.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(bucket.path()) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let file = entry.file_name().to_string_lossy().into_owned();
+            if file.ends_with(".jpg")
+                && entry
+                    .metadata()
+                    .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+            {
+                listing.insert(format!("{name}/{file}"));
+            }
+        }
+    }
+    listing
 }
 
 pub(crate) fn cached_artifact_path(root: &Path, relative: &str) -> Option<PathBuf> {
