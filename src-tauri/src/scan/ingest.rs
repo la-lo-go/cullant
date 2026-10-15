@@ -704,7 +704,7 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
     // metadata nearly always sits at the front: a JPEG's EXIF must fit in its
     // first 64 KiB segment, and a RAW's IFDs precede the sensor data. So read a
     // prefix first, and the whole file only when the prefix did not answer.
-    if store.local_path(&work.source_rel).is_none() {
+    if store.local_path(&work.source_rel).is_none() && prefix_can_answer(&work.source_rel) {
         if let Some(e) = metadata_from_prefix(store, work) {
             return metadata_rows(store, work, &e);
         }
@@ -719,6 +719,16 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
     };
     let e = parse_metadata(&source, work);
     metadata_rows(store, work, &e)
+}
+
+/// RAW containers whose metadata lies past any useful prefix: a Fujifilm RAF
+/// points into its embedded JPEG and sensor block, and an Olympus ORF/ORI keeps
+/// it in a MakerNote near the end. For them a prefix read only costs a failed
+/// parse -- which rawler also logs as an error with a full backtrace.
+const WHOLE_FILE_METADATA_EXTS: &[&str] = &["raf", "orf", "ori"];
+
+fn prefix_can_answer(rel: &str) -> bool {
+    decode::ext_of(rel).is_none_or(|ext| !WHOLE_FILE_METADATA_EXTS.contains(&ext.as_str()))
 }
 
 /// Bytes read for the first metadata attempt on a store that cannot map files.
