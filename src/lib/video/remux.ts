@@ -92,6 +92,45 @@ async function readRange(url: string, start: number, end: number): Promise<Uint8
   return out;
 }
 
+/**
+ * Seconds of already-played video kept when the buffer has to make room, so a
+ * short step back still plays from memory.
+ */
+const KEEP_BEHIND_S = 2;
+
+/** Run one SourceBuffer operation and wait for it to finish. */
+function bufferUpdate(buffer: SourceBuffer, run: () => void): Promise<void> {
+  return new Promise<void>((ok, fail) => {
+    const settle = () => {
+      buffer.removeEventListener("updateend", ended);
+      buffer.removeEventListener("error", errored);
+    };
+    const ended = () => {
+      settle();
+      ok();
+    };
+    const errored = () => {
+      settle();
+      fail(new Error("append failed"));
+    };
+    buffer.addEventListener("updateend", ended);
+    buffer.addEventListener("error", errored);
+    try {
+      run();
+    } catch (error) {
+      settle();
+      fail(error);
+    }
+  });
+}
+
+/** Resolve once playback has moved past `time`, or the remux is cancelled. */
+async function playbackPast(media: HTMLMediaElement, time: number, canceled: () => boolean) {
+  while (!canceled() && media.currentTime < time && !media.ended) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
 export type Remux = {
   src: string;
   done: Promise<void>;
@@ -145,6 +184,7 @@ export async function needsPlaybackFallback(item: ItemLite, canPlay: (mime: stri
 export async function remuxForPlayback(
   item: ItemLite,
   onProgress?: (fraction: number) => void,
+  media?: () => HTMLMediaElement | null,
 ): Promise<Remux> {
   if (typeof MediaSource === "undefined") {
     throw new UnplayableError("MediaSource is unavailable");
@@ -205,10 +245,49 @@ export async function remuxForPlayback(
             const buffer = mediaSource.addSourceBuffer(mime);
             let written = 0;
             let appends = 0;
+            // Fragmented output carries no duration until it ends, which left the
+            // seek bar without a length for the whole remux.
+            try {
+              const duration = await input.computeDuration();
+              if (Number.isFinite(duration) && duration > 0 && mediaSource.readyState === "open") {
+                mediaSource.duration = duration;
+              }
+            } catch {
+              // The element learns the duration at endOfStream instead.
+            }
+
+            // The SourceBuffer holds only so much: on Android about 200 MB, which
+            // is four or five seconds of 4K HEVC from a stills camera. Appending
+            // a whole long clip failed with QuotaExceededError a few seconds in.
+            // So when it is full, drop what has already played, or wait for
+            // playback to move on, and append again. Output waits on this write,
+            // so the conversion pauses instead of losing data.
+            const appendWithRoom = async (data: Uint8Array) => {
+              for (;;) {
+                try {
+                  await bufferUpdate(buffer, () => buffer.appendBuffer(data));
+                  return;
+                } catch (error) {
+                  const element = media?.();
+                  if ((error as Error).name !== "QuotaExceededError" || canceled || !element) throw error;
+                  const playhead = element.currentTime;
+                  const start = buffer.buffered.length ? buffer.buffered.start(0) : playhead;
+                  const evictTo = playhead - KEEP_BEHIND_S;
+                  if (evictTo > start + 0.1) {
+                    videoTrace("remux.evict", { from: start, to: evictTo, playhead });
+                    await bufferUpdate(buffer, () => buffer.remove(start, evictTo));
+                  } else {
+                    videoTrace("remux.wait", { playhead, buffered: bufferedRanges(buffer) });
+                    await playbackPast(element, playhead + 1, () => canceled);
+                  }
+                  if (canceled) return;
+                }
+              }
+            };
 
             const writable = new WritableStream<StreamTargetChunk>({
-              write(chunk) {
-                if (canceled) return Promise.resolve();
+              async write(chunk) {
+                if (canceled) return;
                 // Fragmented output is documented to be written in order, and
                 // appending to a SourceBuffer is the one thing that cannot cope
                 // with a seek. Fail loudly rather than produce a corrupt stream.
@@ -219,35 +298,29 @@ export async function remuxForPlayback(
                 }
                 written += chunk.data.byteLength;
                 appends++;
-                const media = document.querySelector<HTMLVideoElement>("video.player");
+                const element = media?.();
                 videoTrace("remux.append", {
                   n: appends,
                   bytes: chunk.data.byteLength,
                   written,
                   buffered: bufferedRanges(buffer),
-                  playhead: media ? Math.round(media.currentTime * 10) / 10 : null,
+                  playhead: element ? Math.round(element.currentTime * 10) / 10 : null,
                 });
                 // Resolving on updateend is also what applies backpressure:
                 // appendBuffer takes one write at a time, and Output honours a
                 // slow target rather than racing ahead of it.
-                return new Promise<void>((ok, fail) => {
-                  buffer.addEventListener("updateend", () => ok(), { once: true });
-                  buffer.addEventListener("error", () => fail(new Error("append failed")), {
-                    once: true,
+                try {
+                  await appendWithRoom(chunk.data);
+                } catch (error) {
+                  videoTrace("remux.append.error", {
+                    n: appends,
+                    written,
+                    name: (error as Error).name,
+                    message: (error as Error).message,
+                    buffered: bufferedRanges(buffer),
                   });
-                  try {
-                    buffer.appendBuffer(chunk.data);
-                  } catch (error) {
-                    videoTrace("remux.append.error", {
-                      n: appends,
-                      written,
-                      name: (error as Error).name,
-                      message: (error as Error).message,
-                      buffered: bufferedRanges(buffer),
-                    });
-                    throw error;
-                  }
-                });
+                  throw error;
+                }
               },
             });
 

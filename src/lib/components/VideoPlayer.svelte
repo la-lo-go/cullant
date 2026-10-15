@@ -142,12 +142,16 @@
     recovering = true;
     remuxProgress = 0;
     try {
-      const handle = await remuxForPlayback(item, (f) => {
-        if (generation === remuxGeneration && !failed) {
-          remuxing = true;
-          remuxProgress = f;
-        }
-      });
+      const handle = await remuxForPlayback(
+        item,
+        (f) => {
+          if (generation === remuxGeneration && !failed) {
+            remuxing = true;
+            remuxProgress = f;
+          }
+        },
+        () => video ?? null,
+      );
       if (failed || !isCurrent(generation, failedItemId)) {
         handle.cancel();
         return;
