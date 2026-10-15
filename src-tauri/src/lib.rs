@@ -314,7 +314,13 @@ pub fn run() {
         .plugin(tauri_plugin_saf::init())
         .manage(AppState::default())
         .register_asynchronous_uri_scheme_protocol("cullant", |ctx, request, responder| {
-            protocol::handle(ctx.app_handle(), request, responder);
+            // WebView2 calls this on the UI thread, and every cell costs a
+            // database read and a file read before it can answer -- a whole 8 MB
+            // read for a video range. Answer from a blocking pool instead.
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                protocol::handle(&app, request, responder);
+            });
         })
         .setup(|app| {
             // The main window ships with `decorations: false` so Windows gets a
