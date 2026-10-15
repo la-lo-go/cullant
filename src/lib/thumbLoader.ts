@@ -22,7 +22,7 @@ import { IS_MOBILE } from "./platform";
 const BUDGET_BYTES = (IS_MOBILE ? 64 : 192) * 1024 * 1024;
 const MAX_FAILURES = 4;
 const BACKOFF_MS = [500, 1000, 2000, 4000, 8000];
-const PENDING_RETRY_MS = 15000;
+const PENDING_RETRY_MS = 4000;
 
 class ThumbError extends Error {
   constructor(readonly status: number) {
@@ -35,8 +35,15 @@ interface Entry {
   bytes: number;
 }
 
+interface Inflight {
+  promise: Promise<string>;
+  controller: AbortController;
+  /** Cells still waiting on it. At zero the request is aborted. */
+  waiters: number;
+}
+
 const entries = new Map<string, Entry>();
-const inflight = new Map<string, Promise<string>>();
+const inflight = new Map<string, Inflight>();
 let totalBytes = 0;
 let epoch = 0;
 
@@ -62,20 +69,45 @@ function store(url: string, blob: Blob): string {
   return objectUrl;
 }
 
-function fetchThumb(url: string): Promise<string> {
-  const running = inflight.get(url);
-  if (running) return running;
-  const started = epoch;
-  const request = fetch(url)
-    .then(async (response) => {
-      if (!response.ok) throw new ThumbError(response.status);
-      const blob = await response.blob();
-      if (started !== epoch) throw new ThumbError(410);
-      return store(url, blob);
-    })
-    .finally(() => inflight.delete(url));
-  inflight.set(url, request);
-  return request;
+/**
+ * Fetch a thumbnail, shared between every cell that asks for the same URL. The
+ * returned `release` withdraws one waiter; when the last one goes, the request
+ * is aborted. On Android that matters: the WebView serves this scheme on two
+ * threads from a FIFO queue, and the requests of cells already scrolled away
+ * would otherwise be served before the ones on screen.
+ */
+function fetchThumb(url: string): { promise: Promise<string>; release: () => void } {
+  let running = inflight.get(url);
+  if (!running) {
+    const started = epoch;
+    const controller = new AbortController();
+    const promise = fetch(url, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new ThumbError(response.status);
+        const blob = await response.blob();
+        if (started !== epoch) throw new ThumbError(410);
+        return store(url, blob);
+      })
+      .finally(() => {
+        if (inflight.get(url) === running) inflight.delete(url);
+      });
+    running = { promise, controller, waiters: 0 };
+    inflight.set(url, running);
+  }
+  const own = running;
+  own.waiters++;
+  let released = false;
+  return {
+    promise: own.promise,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (--own.waiters === 0 && inflight.get(url) === own) {
+        inflight.delete(url);
+        own.controller.abort();
+      }
+    },
+  };
 }
 
 /** Forget every held thumbnail. File ids are only unique within one project. */
@@ -83,6 +115,7 @@ export function clearThumbCache() {
   epoch++;
   for (const entry of entries.values()) URL.revokeObjectURL(entry.objectUrl);
   entries.clear();
+  for (const request of inflight.values()) request.controller.abort();
   inflight.clear();
   totalBytes = 0;
 }
@@ -129,6 +162,7 @@ export function gridThumb(image: HTMLImageElement, initial: GridThumbParams) {
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let unsubscribe: (() => void) | undefined;
+  let release: (() => void) | undefined;
   let failures = 0;
 
   const setState = (state: ThumbState) => {
@@ -140,6 +174,8 @@ export function gridThumb(image: HTMLImageElement, initial: GridThumbParams) {
     timer = undefined;
     unsubscribe?.();
     unsubscribe = undefined;
+    release?.();
+    release = undefined;
   };
 
   image.onload = () => {
@@ -167,12 +203,16 @@ export function gridThumb(image: HTMLImageElement, initial: GridThumbParams) {
       return;
     }
     setState(params.exists ? "loading" : "pending");
+    const request = fetchThumb(params.url);
+    release = request.release;
     try {
-      const objectUrl = await fetchThumb(params.url);
+      const objectUrl = await request.promise;
       if (mine !== generation) return;
+      release = undefined;
       image.src = objectUrl;
     } catch (error) {
       if (mine !== generation) return;
+      release = undefined;
       const status = error instanceof ThumbError ? error.status : 0;
       if (status === 410) {
         setState("failed");

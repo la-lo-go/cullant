@@ -283,20 +283,19 @@ fn respond_thumb<R: Runtime>(
 /// How long a grid-thumbnail miss may hold the request open, if bounded.
 ///
 /// Android WebView cannot answer a custom-scheme request asynchronously: wry
-/// parks one of the WebView's few loader threads until the response comes, and
-/// gives up after 30 s. A miss waits for a decode, which during an import waits
-/// for a worker busy with a multi-second preview. A handful of those occupy
-/// every loader thread, and the thumbnails that are already cached -- the ones
-/// the user scrolls back to -- queue behind them and show as empty cells. So a
-/// miss is answered "not yet" quickly, and the decode reports through
-/// `thumbs:ready` when it lands.
+/// parks the loader thread until the response comes, and the WebView runs only
+/// two of them. Traced on a Galaxy Tab S10+ during an import, a miss held its
+/// thread ~330 ms for the decode while a cache hit took ~2 ms -- and requests
+/// waited a median 3.5 s (worst 40 s) in Chromium's queue before reaching Rust
+/// at all, the cached thumbnails the user scrolled back to among them. So a miss
+/// is answered "not yet" at once, the decode stays queued, and `thumbs:ready`
+/// reports it when it lands.
 ///
 /// Previews and full renders are requested one at a time by a view the user is
 /// looking at, so they keep the plain wait. Desktop webviews answer
 /// asynchronously and never hold a thread for it.
 fn miss_wait_limit(kind: ThumbKind) -> Option<std::time::Duration> {
-    (cfg!(target_os = "android") && kind == ThumbKind::Thumb)
-        .then(|| std::time::Duration::from_millis(1500))
+    (cfg!(target_os = "android") && kind == ThumbKind::Thumb).then_some(std::time::Duration::ZERO)
 }
 
 /// Coalesces grid thumbnails that finished after their request was answered
