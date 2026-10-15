@@ -4,6 +4,7 @@
   import { needsPlaybackFallback, remuxForPlayback, UnplayableError, type Remux } from "../video/remux";
   import { bufferedRanges, videoTrace } from "../video/trace";
   import { unplayableVideos, playbackFailureKey } from "../video/failures";
+  import { tooltips } from "../tooltips";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
   import Volume2 from "@lucide/svelte/icons/volume-2";
@@ -45,6 +46,8 @@
   // — so this drives an unobtrusive indicator, not a blocking spinner.
   let remuxing = $state(false);
   let remuxProgress = $state(0);
+  /** Audio codec the remux had to leave out; the clip then plays silent. */
+  let droppedAudio = $state<string | null>(null);
   let remux: Remux | null = null;
   let triedRemux = false;
   let remuxGeneration = 0;
@@ -158,6 +161,7 @@
       }
       remux = handle;
       remuxSrc = handle.src;
+      droppedAudio = handle.droppedAudio;
       videoTrace("player.remux-source", { id: item.id });
       void handle.done.then(
         () => {
@@ -350,6 +354,7 @@
     remux = null;
     remuxSrc = null;
     remuxing = false;
+    droppedAudio = null;
     recovering = false;
     triedRemux = false;
     if (video && !untrack(() => rememberedFailure)) checkCompatibility(video, item, remuxGeneration);
@@ -496,13 +501,24 @@
     ></button>
   {/if}
 
-  {#if remuxing && !failed}
-    <!-- The WebView refused the container and the in-app remuxer took over.
+  {#if remuxSrc && !failed}
+    <!-- The WebView refused the file and the in-app remuxer took over.
          Playback usually starts while this is still counting up, so it sits in
-         a corner rather than over the frame. -->
-    <div class="remuxing">
-      <Film size={13} />
-      <span>Preparing video… {Math.round(remuxProgress * 100)}%</span>
+         a corner rather than over the frame. It stays, dimmed, once the remux
+         is done: the clip still plays through it, with its limits. -->
+    <div class="remuxing" class:settled={!remuxing} use:tooltips>
+      <span
+        role="img"
+        class="remux-badge"
+        title="This device cannot open the file directly. Cullant repackages it in the app as it plays, without re-encoding the picture."
+      >
+        <Film size={13} />
+        {#if remuxing}
+          <span>Preparing video… {Math.round(remuxProgress * 100)}%</span>
+        {:else}
+          <span>In-app conversion</span>
+        {/if}
+      </span>
     </div>
   {/if}
 
@@ -519,6 +535,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="controls"
+    use:tooltips
     class:hidden={!uiVisible}
     onpointerenter={() => { hovering = true; uiVisible = true; }}
     onpointerleave={() => { hovering = false; }}
@@ -564,9 +581,23 @@
           />
         </div>
       {/if}
-      <button class="ctl" disabled={failed} title="Volume" aria-label="Volume" onclick={(e) => { volOpen = !volOpen; refocus(e); }}>
-        {#if muted || volume === 0}<VolumeX size={16} />{:else}<Volume2 size={16} />{/if}
-      </button>
+      {#if droppedAudio}
+        <!-- Not `disabled`: a disabled button gets no hover or press, and the
+             reason is the whole point of showing it. -->
+        <button
+          class="ctl unavailable"
+          aria-disabled="true"
+          title={`No sound: this device cannot play the ${droppedAudio.toUpperCase()} audio of this clip in the app. Open it in an external player to hear it.`}
+          aria-label="Sound unavailable"
+          onclick={refocus}
+        >
+          <VolumeX size={16} />
+        </button>
+      {:else}
+        <button class="ctl" disabled={failed} title="Volume" aria-label="Volume" onclick={(e) => { volOpen = !volOpen; refocus(e); }}>
+          {#if muted || volume === 0}<VolumeX size={16} />{:else}<Volume2 size={16} />{/if}
+        </button>
+      {/if}
     </div>
 
     <button class="ctl" disabled={failed} title="Open in external player" onclick={(e) => { openExternally(); refocus(e); }}>
@@ -642,6 +673,19 @@
     font-variant-numeric: tabular-nums;
     user-select: none;
     pointer-events: none;
+    transition: opacity 0.3s;
+  }
+
+  /* Done converting: still true, no longer news. */
+  .remuxing.settled {
+    opacity: 0.55;
+  }
+
+  .remux-badge {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
   }
 
   .open-ext {
@@ -726,9 +770,15 @@
   }
 
   .ctl:disabled,
+  .ctl.unavailable,
   .seek:disabled {
     opacity: 0.45;
     cursor: default;
+  }
+
+  .ctl.unavailable:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .time {

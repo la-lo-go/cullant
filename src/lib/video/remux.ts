@@ -133,6 +133,10 @@ async function playbackPast(media: HTMLMediaElement, time: number, canceled: () 
 
 export type Remux = {
   src: string;
+  /** The audio codec left out because this device cannot play it through
+   *  Media Source Extensions, or null when the clip keeps its sound (or has
+   *  none). The video then plays silent. */
+  droppedAudio: string | null;
   done: Promise<void>;
   cancel: () => void;
 };
@@ -197,6 +201,7 @@ export async function remuxForPlayback(
   // input rather than leaking it and its open requests.
   let mime: string;
   let dropAudio = false;
+  let audioName: string | null = null;
   try {
     const video = await input.getPrimaryVideoTrack();
     if (!video) throw new UnplayableError("no video track");
@@ -204,6 +209,7 @@ export async function remuxForPlayback(
     if (!videoCodec) throw new UnplayableError("unrecognised video codec");
 
     const audio = await input.getPrimaryAudioTrack();
+    audioName = audio ? (audio.codec ?? "unknown") : null;
     const audioCodec = (await audio?.getCodecParameterString()) ?? null;
     dropAudio = !!audio && !audioCodec;
 
@@ -378,6 +384,7 @@ export async function remuxForPlayback(
 
   return {
     src,
+    droppedAudio: dropAudio ? audioName : null,
     done,
     cancel: () => {
       canceled = true;
