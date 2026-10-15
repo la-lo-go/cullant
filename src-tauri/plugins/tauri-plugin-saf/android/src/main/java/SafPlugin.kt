@@ -126,8 +126,12 @@ class HeifStillArgs {
 @TauriPlugin
 class SafPlugin(private val activity: Activity) : Plugin(activity) {
     private val resolver get() = activity.contentResolver
+    // Every file the import opens comes through here, next to video posters and
+    // HEIF decodes that hold a thread for seconds. With two threads one slow
+    // decode halved the throughput of every thumbnail read behind it. The Rust
+    // side bounds its own concurrency, so the queue only has to absorb bursts.
     private val workers = ThreadPoolExecutor(
-        2, 2, 30L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(64)
+        4, 4, 30L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(256)
     ).apply { allowCoreThreadTimeOut(true) }
 
     override fun onDestroy(activity: AppCompatActivity) {
