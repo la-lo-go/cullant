@@ -463,19 +463,36 @@ fn worker_loop(queue: Arc<Queue>, db: Arc<Db>, store: Arc<dyn ProjectStore>, roo
             pending.queued_at,
         );
         let profile_work = crate::photo_profile::span("worker");
-        let result = produce_cached(
-            &db,
-            store.as_ref(),
-            &root,
-            Produce {
-                file_id: pending.key.0,
-                kind: pending.kind,
-                known: pending.known_version,
-                record_hit: pending.needs_row,
-                also_thumb: pending.also_thumb,
-                cache_checked: pending.cache_checked,
-            },
-        );
+        let request = Produce {
+            file_id: pending.key.0,
+            kind: pending.kind,
+            known: pending.known_version,
+            record_hit: pending.needs_row,
+            also_thumb: pending.also_thumb,
+            cache_checked: pending.cache_checked,
+        };
+        // A decoder that panics on one malformed file must not take the worker
+        // with it. A dead worker never clears its `in_flight` key, so every
+        // later request for that artifact would wait forever, the pool would
+        // shrink by one for the rest of the session, and the ingest pass would
+        // never reach its final count.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            produce_cached(&db, store.as_ref(), &root, request)
+        }))
+        .unwrap_or_else(|payload| {
+            let message = crate::panic_message(payload.as_ref());
+            tracing::error!(
+                "decoder panicked on file {} ({:?}): {message}",
+                request.file_id,
+                request.kind
+            );
+            // The same bytes panic the same way, so the file is tombstoned like
+            // any other undecodable source until its mtime changes.
+            if let Some(version) = pending.key.2 {
+                let _ = record_decode_failure(&db, request.file_id, version.mtime, request.kind);
+            }
+            Err(AppError::Decode(format!("decoder crashed: {message}")))
+        });
 
         drop(profile_work);
         let mut responders = pending.responders;
@@ -2693,5 +2710,102 @@ mod tests {
             })
             .unwrap();
         assert_eq!((w, h), (None, None));
+    }
+
+    /// A store whose every read panics, the way a decoder does on a malformed
+    /// file: the shape of failure the pool has to survive.
+    struct PanickingStore(crate::store::LocalFsStore);
+
+    impl ProjectStore for PanickingStore {
+        fn list_recursive(
+            &self,
+            skip_dirs: &[&str],
+            progress: &mut dyn FnMut(usize),
+        ) -> AppResult<Vec<crate::store::StoreEntry>> {
+            self.0.list_recursive(skip_dirs, progress)
+        }
+        fn open_read(&self, _rel: &str) -> AppResult<std::fs::File> {
+            panic!("simulated decoder panic")
+        }
+        fn open_write(&self, rel: &str, mime_type: &str) -> AppResult<std::fs::File> {
+            self.0.open_write(rel, mime_type)
+        }
+        fn create_dir_all(&self, rel: &str) -> AppResult<()> {
+            self.0.create_dir_all(rel)
+        }
+        fn rename_in_place(&self, rel: &str, new_name: &str) -> AppResult<String> {
+            self.0.rename_in_place(rel, new_name)
+        }
+        fn move_to(&self, rel: &str, new_parent_rel: &str) -> AppResult<String> {
+            self.0.move_to(rel, new_parent_rel)
+        }
+        fn copy(&self, from_rel: &str, to_rel: &str) -> AppResult<()> {
+            self.0.copy(from_rel, to_rel)
+        }
+        fn remove_file(&self, rel: &str) -> AppResult<()> {
+            self.0.remove_file(rel)
+        }
+        fn exists(&self, rel: &str) -> AppResult<bool> {
+            self.0.exists(rel)
+        }
+    }
+
+    #[test]
+    fn a_panicking_decoder_answers_and_leaves_the_pool_working() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        image::RgbImage::from_pixel(64, 48, image::Rgb([10, 20, 30]))
+            .save(root.join("photo.jpg"))
+            .unwrap();
+        let db = Arc::new(Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let id: i64 = db
+            .call(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
+            .unwrap();
+        let store: Arc<dyn ProjectStore> =
+            Arc::new(PanickingStore(crate::store::LocalFsStore::new(root)));
+        let pool = ThumbPool::start(db.clone(), store, root.to_path_buf());
+
+        // More requests than workers: a worker that died on the first panic
+        // would leave the later ones unanswered.
+        let (tx, rx) = std::sync::mpsc::channel();
+        for kind in [
+            ThumbKind::Thumb,
+            ThumbKind::Preview,
+            ThumbKind::Thumb,
+            ThumbKind::Preview,
+        ]
+        .into_iter()
+        .cycle()
+        .take(16)
+        {
+            let tx = tx.clone();
+            pool.enqueue(ThumbRequest {
+                file_id: id,
+                kind,
+                known_version: None,
+                also_thumb: false,
+                cache_checked: false,
+                respond: Box::new(move |result| {
+                    let _ = tx.send(result.is_err());
+                }),
+            });
+        }
+        drop(tx);
+        let answers: Vec<bool> = rx.iter().take(16).collect();
+        assert_eq!(answers.len(), 16, "every request is answered");
+        assert!(answers.iter().all(|failed| *failed));
+
+        let tombstones: i64 = db
+            .call(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM thumbnails WHERE failed = 1",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(tombstones, 2, "the panicking source is tombstoned per kind");
+        pool.shutdown();
     }
 }

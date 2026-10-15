@@ -129,7 +129,23 @@ fn spawn_scan(
         .name("scanner".into())
         .spawn(move || {
             let _active = active;
-            run_scan(app, db, store, root, thumbs, initial_open_id);
+            let project_root = db.project_root();
+            let error_app = app.clone();
+            // Last line of defence: whatever panics in the walk or the ingest,
+            // the frontend hears `scan:error` and drops its progress bars instead
+            // of showing a phase that will never finish.
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_scan(app, db, store, root, thumbs, initial_open_id)
+            }));
+            if let Err(payload) = outcome {
+                let message = crate::panic_message(payload.as_ref());
+                tracing::error!("scanner panicked: {message}");
+                emit_scan_error(
+                    &error_app,
+                    &project_root,
+                    format!("internal error: {message}"),
+                );
+            }
         })
         .map_err(|error| AppError::Other(format!("could not start scanner: {error}")))?;
     Ok(())

@@ -388,7 +388,7 @@ pub fn run_ingest_inner(
         let extracted: Vec<Extracted> = chunk
             .par_iter()
             .flat_map(|p| {
-                let e = extract_metadata(store, p);
+                let e = extract_metadata_guarded(store, p);
                 // Advance the shared counter and emit — throttled so a fast parse
                 // can't flood IPC, but the last file always reports so the bar
                 // reaches `total / total`.
@@ -617,6 +617,16 @@ fn generate_pass(
             since_emit.clear();
         }
     }
+    // Every responder answers, so `done` normally reaches `total` inside the
+    // loop. If one is ever dropped unanswered, the frontend would wait on a bar
+    // stuck short of its end; close the pass explicitly instead.
+    if done < total {
+        tracing::warn!(
+            "{kind:?} pass ended with {} artifacts unanswered",
+            total - done
+        );
+        progress(total, total, &since_emit);
+    }
     tracing::info!(
         "ingest {total} artifacts in {:.1?} [{}]",
         started.elapsed(),
@@ -700,6 +710,30 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
     }
 
     metadata_rows(store, work, &e)
+}
+
+/// [`extract_metadata`], but a parser that panics on one malformed file costs
+/// that file its metadata instead of the whole pass. Without this the panic
+/// unwinds through rayon into the scanner thread: `metadata:done` never fires
+/// and no thumbnail is pregenerated for the project.
+fn extract_metadata_guarded(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        extract_metadata(store, work)
+    }))
+    .unwrap_or_else(|payload| {
+        tracing::error!(
+            "metadata parser panicked on {}: {}",
+            work.source_rel,
+            crate::panic_message(payload.as_ref())
+        );
+        // Every row still gets written, so the mtime fallback applies and
+        // the file is not retried on every open.
+        work.source_id
+            .into_iter()
+            .chain(work.borrowers.iter().map(|(id, _)| *id))
+            .map(Extracted::empty)
+            .collect()
+    })
 }
 
 fn metadata_rows(

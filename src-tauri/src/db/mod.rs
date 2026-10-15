@@ -147,7 +147,18 @@ impl Db {
             .name("db-writer".into())
             .spawn(move || {
                 while let Ok(job) = rx.recv() {
-                    job(&mut conn);
+                    // One panicking job must not kill the only writer: every
+                    // later write would fail with "database thread is gone"
+                    // until the project is reopened. The panicking caller gets
+                    // "dropped the job"; an open transaction rolls back on unwind.
+                    if let Err(payload) =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job(&mut conn)))
+                    {
+                        tracing::error!(
+                            "database job panicked: {}",
+                            crate::panic_message(payload.as_ref())
+                        );
+                    }
                 }
             })?;
 
