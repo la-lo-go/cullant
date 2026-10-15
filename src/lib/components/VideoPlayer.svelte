@@ -80,11 +80,17 @@
     });
   }
 
+  /** The action a tap on the picture just took, shown briefly in its centre.
+   *  `n` remounts the icon, so a second tap replays the animation. */
+  let surfaceFlash = $state<{ playing: boolean; n: number } | null>(null);
+
   function onSurfaceClick(e: MouseEvent) {
     // A grid pointerup mounts this video before Android sends its click.
     const pressed = surfacePressed;
     surfacePressed = false;
-    if (pressed || e.detail === 0) togglePlay();
+    if (!(pressed || e.detail === 0) || !video || failed) return;
+    togglePlay();
+    surfaceFlash = { playing: playRequested, n: (surfaceFlash?.n ?? 0) + 1 };
   }
 
   function isCurrent(generation: number, itemId: number) {
@@ -532,10 +538,17 @@
     </div>
   {/if}
 
+  {#key surfaceFlash?.n}
+    {#if surfaceFlash}
+      <div class="surface-flash" aria-hidden="true">
+        {#if surfaceFlash.playing}<Play size={30} />{:else}<Pause size={30} />{/if}
+      </div>
+    {/if}
+  {/key}
+
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     class="controls"
-    use:tooltips
     class:hidden={!uiVisible}
     onpointerenter={() => { hovering = true; uiVisible = true; }}
     onpointerleave={() => { hovering = false; }}
@@ -674,6 +687,42 @@
     user-select: none;
     pointer-events: none;
     transition: opacity 0.3s;
+  }
+
+  /* What a tap on the picture just did. It sits over the frame, under the
+     controls, and is gone before it can hide anything. */
+  .surface-flash {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 3;
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.45);
+    color: rgba(255, 255, 255, 0.92);
+    pointer-events: none;
+    animation: surface-flash 0.6s ease-out forwards;
+  }
+
+  @keyframes surface-flash {
+    from {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(0.85);
+    }
+    to {
+      opacity: 0;
+      transform: translate(-50%, -50%) scale(1.25);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .surface-flash {
+      animation-duration: 0.01s;
+    }
   }
 
   /* Done converting: still true, no longer news. */
