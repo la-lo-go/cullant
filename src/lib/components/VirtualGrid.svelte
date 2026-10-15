@@ -22,6 +22,7 @@
   import ContextMenu from "./ContextMenu.svelte";
   import { buildGridMenu } from "../gridMenu";
   import { IS_TOUCH } from "../platform";
+  import { gridThumb } from "../thumbLoader";
   import type { MenuNode } from "../menu";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
@@ -133,26 +134,6 @@
     Purple: "#9a66d6",
   };
 
-  // A thumbnail request the backend refused -- almost always because the pool
-  // evicted it to keep a fast scroll from banking minutes of decoding. The cell
-  // is still on screen, so ask again rather than leaving a skeleton there
-  // forever. Capped, so a genuinely broken file cannot spin.
-  const MAX_THUMB_RETRIES = 3;
-  const RETRY_DELAY_MS = 400;
-  const thumbRetry = new SvelteMap<number, number>();
-
-  function retryThumb(id: number) {
-    const n = thumbRetry.get(id) ?? 0;
-    if (n >= MAX_THUMB_RETRIES) return;
-    setTimeout(() => thumbRetry.set(id, n + 1), RETRY_DELAY_MS);
-  }
-
-  /** Thumbnail URL, re-minted on each retry so the browser refetches it. */
-  function thumbSrc(item: ItemLite): string {
-    const n = thumbRetry.get(item.id);
-    return n ? `${thumbUrl(item)}&retry=${n}` : thumbUrl(item);
-  }
-
   // Video ids whose pregenerated poster couldn't be served (no frame extractor
   // on this platform, or the clip was undecodable → 404). Those cells fall back
   // to a live <video>.
@@ -171,9 +152,19 @@
   // RAW previews can have a different aspect ratio than the sensor dimensions.
   const thumbnailDims = new SvelteMap<string, { w: number; h: number }>();
 
-  function onThumbLoad(id: number, image: HTMLImageElement) {
-    thumbnailDims.set(image.currentSrc.replace(/&retry=\d+$/, ""), { w: image.naturalWidth, h: image.naturalHeight });
-    loaded.add(id);
+  function onThumbLoad(item: ItemLite, w: number, h: number) {
+    thumbnailDims.set(thumbUrl(item), { w, h });
+    loaded.add(item.id);
+  }
+
+  /** Loader parameters for a cell's thumbnail (see `gridThumb`). */
+  function thumbParams(item: ItemLite) {
+    return {
+      url: thumbUrl(item),
+      id: item.id,
+      exists: !!item.thumbReady,
+      onload: (w: number, h: number) => onThumbLoad(item, w, h),
+    };
   }
 
   function fittedStyle(item: ItemLite): string {
@@ -1371,10 +1362,6 @@
         <div
           class="frame"
           class:stacked
-          class:loading={!loaded.has(v.item.id) &&
-            !v.item.thumbFailed &&
-            !(v.item.kind === 2 && posterFailed.has(v.item.id))}
-          class:pending={!loaded.has(v.item.id) && !v.item.thumbReady && v.item.kind !== 2}
           title={stacked ? `Burst of ${v.span} photos` : undefined}
         >
           <!-- Cards peeking out behind a collapsed burst. They sit in the
@@ -1389,12 +1376,12 @@
                  burst that showed three cards would misreport its own size. -->
             {#if behind[1]}
               <span class="deck d2" class:fit={settings.gridPhotoFit === "fit"} style={fittedStyle(v.item)}>
-                <img src={thumbUrl(behind[1])} alt="" decoding="async" onload={(event) => onThumbLoad(behind[1].id, event.currentTarget as HTMLImageElement)} />
+                <img alt="" decoding="async" use:gridThumb={thumbParams(behind[1])} />
               </span>
             {/if}
             {#if behind[0]}
               <span class="deck d1" class:fit={settings.gridPhotoFit === "fit"} style={fittedStyle(v.item)}>
-                <img src={thumbUrl(behind[0])} alt="" decoding="async" onload={(event) => onThumbLoad(behind[0].id, event.currentTarget as HTMLImageElement)} />
+                <img alt="" decoding="async" use:gridThumb={thumbParams(behind[0])} />
               </span>
             {/if}
           {/if}
@@ -1418,13 +1405,16 @@
                 </div>
               {:else}
                 <img
-                  src={thumbUrl(v.item)}
                   alt=""
                   decoding="async"
                   draggable="false"
-                  loading="eager"
-                  onload={(event) => onThumbLoad(v.item.id, event.currentTarget as HTMLImageElement)}
-                  onerror={() => markPosterFailed(v.item.id)}
+                  use:gridThumb={{
+                    ...thumbParams(v.item),
+                    // No poster is a fact about the platform, not a hiccup:
+                    // fall back to the placeholder on the first refusal.
+                    retries: 0,
+                    onfail: () => markPosterFailed(v.item.id),
+                  }}
                 />
               {/if}
               <span class="chip video"><Play size={10} /></span>
@@ -1435,13 +1425,10 @@
               </div>
             {:else}
               <img
-                src={thumbSrc(v.item)}
                 alt=""
                 decoding="async"
                 draggable="false"
-                loading="eager"
-                onload={(event) => onThumbLoad(v.item.id, event.currentTarget as HTMLImageElement)}
-                onerror={() => retryThumb(v.item.id)}
+                use:gridThumb={thumbParams(v.item)}
               />
             {/if}
             <!-- A completed pass shows a retry control for missing previews. -->
@@ -2027,19 +2014,22 @@
     object-fit: cover;
   }
 
-  /* Subtle shimmer while a cell's thumbnail is still being generated/decoded.
-     It's the frame's own background (behind .photo and its chips), so chips
-     stay on top and a finished portrait cell shows the grid's dark background
-     through its letterbox gutters, not a gray box. */
+  /* The placeholder belongs to the photo, not to the frame: in a collapsed
+     burst the frame only shows as the strip the deck peeks out of, and the
+     front photo's own stage background covered a shimmer drawn behind it.
+     `data-thumb` is written by the `gridThumb` loader; a finished portrait cell
+     loses it and shows the grid's background through its letterbox gutters. */
   /* No image yet. A flat placeholder, because for a thumbnail that already
      exists this lasts a frame or two and a shimmer would just be a flicker. */
-  .frame.loading {
+  .frame .photo:global([data-thumb="loading"]),
+  .frame .photo:global([data-thumb="failed"]) {
     background: var(--surface-2);
   }
 
-  /* No image AND none generated yet: this one really is waiting on work, so it
-     says so for as long as that lasts. */
-  .frame.loading.pending {
+  /* None generated yet: this one really is waiting on work, so it says so for
+     as long as that lasts. The cards behind a burst stay flat; only the front
+     photo reports progress. */
+  .frame .photo:global([data-thumb="pending"]) {
     background: linear-gradient(
       100deg,
       var(--surface-2) 30%,

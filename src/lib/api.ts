@@ -3,6 +3,9 @@ import { IS_ANDROID, IS_WINDOWS } from "./platform";
 import { settings } from "./stores/settings.svelte";
 
 let mediaProjectRoot = "";
+export function currentMediaProjectRoot(): string {
+  return mediaProjectRoot;
+}
 export function setMediaProjectRoot(root: string | null) {
   mediaProjectRoot = root ?? "";
 }

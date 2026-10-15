@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use tauri::http::{header, Request, Response, StatusCode};
 use tauri::{AppHandle, Manager, Runtime, UriSchemeResponder};
 
@@ -221,6 +223,13 @@ fn respond_thumb<R: Runtime>(
         }
     }
 
+    // The responder is shared with the wait below: whichever side takes it
+    // first answers the request. When the wait gives up first, the decode still
+    // finishes, and `thumbs:ready` tells the grid to ask again.
+    let slot = Arc::new(Mutex::new(Some(responder)));
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let ready_app = app.clone();
+    let worker_slot = slot.clone();
     thumbs.enqueue(ThumbRequest {
         file_id,
         kind,
@@ -229,22 +238,112 @@ fn respond_thumb<R: Runtime>(
         also_thumb: false,
         // The fast path above already tried this exact cache entry.
         cache_checked: known.is_some(),
-        respond: Box::new(move |result: AppResult<Vec<u8>>| match result {
-            Ok(bytes) => {
-                let mut response = jpeg_ok(bytes);
-                if known.is_none_or(|v| v.orientation == 0) {
-                    response
-                        .headers_mut()
-                        .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+        respond: Box::new(move |result: AppResult<Vec<u8>>| {
+            let responder = worker_slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+            let Some(responder) = responder else {
+                if result.is_ok() {
+                    ready::push(&ready_app, file_id);
                 }
-                responder.respond(response);
+                return;
+            };
+            match result {
+                Ok(bytes) => {
+                    let mut response = jpeg_ok(bytes);
+                    if known.is_none_or(|v| v.orientation == 0) {
+                        response
+                            .headers_mut()
+                            .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+                    }
+                    responder.respond(response);
+                }
+                Err(e) => {
+                    tracing::debug!("thumb {file_id} failed: {e}");
+                    responder.respond(plain(StatusCode::NOT_FOUND, e.to_string()))
+                }
             }
-            Err(e) => {
-                tracing::debug!("thumb {file_id} failed: {e}");
-                responder.respond(plain(StatusCode::NOT_FOUND, e.to_string()))
-            }
+            let _ = done_tx.send(());
         }),
     });
+
+    let Some(limit) = miss_wait_limit(kind) else {
+        return;
+    };
+    if done_rx.recv_timeout(limit).is_ok() {
+        return;
+    }
+    let responder = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(responder) = responder {
+        responder.respond(plain(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "thumbnail is still being generated".into(),
+        ));
+    }
+}
+
+/// How long a grid-thumbnail miss may hold the request open, if bounded.
+///
+/// Android WebView cannot answer a custom-scheme request asynchronously: wry
+/// parks one of the WebView's few loader threads until the response comes, and
+/// gives up after 30 s. A miss waits for a decode, which during an import waits
+/// for a worker busy with a multi-second preview. A handful of those occupy
+/// every loader thread, and the thumbnails that are already cached -- the ones
+/// the user scrolls back to -- queue behind them and show as empty cells. So a
+/// miss is answered "not yet" quickly, and the decode reports through
+/// `thumbs:ready` when it lands.
+///
+/// Previews and full renders are requested one at a time by a view the user is
+/// looking at, so they keep the plain wait. Desktop webviews answer
+/// asynchronously and never hold a thread for it.
+fn miss_wait_limit(kind: ThumbKind) -> Option<std::time::Duration> {
+    (cfg!(target_os = "android") && kind == ThumbKind::Thumb)
+        .then(|| std::time::Duration::from_millis(1500))
+}
+
+/// Coalesces grid thumbnails that finished after their request was answered
+/// "not yet" into one `thumbs:ready` event every few hundred milliseconds. On
+/// Android every event is a job on the main looper, so one per thumbnail would
+/// compete with the very work it reports.
+mod ready {
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    use tauri::{AppHandle, Emitter, Manager, Runtime};
+
+    use crate::AppState;
+
+    static PENDING: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+    const FLUSH_AFTER: Duration = Duration::from_millis(250);
+
+    pub fn push<R: Runtime>(app: &AppHandle<R>, file_id: i64) {
+        let first = {
+            let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+            pending.push(file_id);
+            pending.len() == 1
+        };
+        if !first {
+            return;
+        }
+        let app = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(FLUSH_AFTER);
+            let ids = std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()));
+            let root = app
+                .state::<AppState>()
+                .project
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|project| project.db.clone());
+            // File ids belong to one project's database; the event names it so
+            // the frontend can drop a batch that outlived the project.
+            if let Some(db) = root {
+                let _ = app.emit(
+                    "thumbs:ready",
+                    serde_json::json!({ "projectRoot": db.project_root(), "ids": ids }),
+                );
+            }
+        });
+    }
 }
 
 /// A cached-image OK response. URLs carry `?v={mtime}`, so aggressive immutable

@@ -16,6 +16,7 @@ import { tags } from "./tags.svelte";
 import { view } from "./view.svelte";
 import { folders } from "./folders.svelte";
 import { settings } from "./settings.svelte";
+import { clearThumbCache } from "../thumbLoader";
 
 class CatalogStore {
   generation = 0;
@@ -92,6 +93,7 @@ class CatalogStore {
     this.videoProgress = { done: 0, total: 0 };
     this.mediaCounts = { photos: 0, videos: 0 };
     this.thumbLoaded.clear();
+    clearThumbCache();
     this.invalidatePreviewReady();
     session.resetForNewProject();
     folders.reset();
