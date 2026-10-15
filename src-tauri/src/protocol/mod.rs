@@ -585,7 +585,7 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
     }
 }
 
-fn video_range(range: Option<&str>, len: u64, window: u64) -> Option<(u64, u64)> {
+pub(crate) fn video_range(range: Option<&str>, len: u64, window: u64) -> Option<(u64, u64)> {
     if len == 0 {
         return None;
     }

@@ -438,8 +438,26 @@ export function previewUrl(item: ItemLite): string {
   return cullantUrl(`preview/${item.id}?${mediaVersion(item)}`);
 }
 
+/** Base URL of the loopback video server on Android, once it has answered.
+ *  Until then (and on every desktop) videos use the custom scheme. */
+let videoServerBase: string | null = null;
+if (IS_ANDROID) {
+  void invoke<string | null>("video_base_url")
+    .then((base) => (videoServerBase = base))
+    .catch(() => {});
+}
+
+/** Whether `url` is served by the loopback video server. Its responses honour
+ *  a Range header, which the custom scheme on Android does not. */
+export function isLoopbackVideo(url: string): boolean {
+  return videoServerBase !== null && url.startsWith(videoServerBase);
+}
+
 export function videoUrl(item: ItemLite): string {
-  return cullantUrl(`video/${item.id}?v=${item.mtime}&p=${encodeURIComponent(mediaProjectRoot)}`);
+  const query = `v=${item.mtime}&p=${encodeURIComponent(mediaProjectRoot)}`;
+  return videoServerBase
+    ? `${videoServerBase}/${item.id}?${query}`
+    : cullantUrl(`video/${item.id}?${query}`);
 }
 
 /** Preview thumbnail for a homepage recent-project card (0-based list index +

@@ -20,7 +20,7 @@
 // chunk — mediabunny itself is imported dynamically below.
 import type { StreamTargetChunk } from "mediabunny";
 
-import { videoUrl, type ItemLite } from "../api";
+import { isLoopbackVideo, videoUrl, type ItemLite } from "../api";
 import { IS_ANDROID } from "../platform";
 import { bufferedRanges, videoTrace } from "./trace";
 
@@ -43,7 +43,7 @@ async function range(url: string, start: number, endInclusive: number): Promise<
   const requested = `bytes=${start}-${endInclusive}`;
   const started = performance.now();
   // WebView seeks twice when Range accompanies an intercepted partial body.
-  const request = IS_ANDROID
+  const request = IS_ANDROID && !isLoopbackVideo(url)
     ? fetch(`${url}&range=${encodeURIComponent(requested)}`)
     : fetch(url, { headers: { Range: requested } });
   const res = await request.catch((error) => {
@@ -156,9 +156,11 @@ async function openInput(item: ItemLite) {
 
 /** Inspect the codec without playing or preparing the video. */
 export async function needsPlaybackFallback(item: ItemLite, canPlay: (mime: string) => boolean): Promise<boolean> {
-  // Large native clips need nonzero Range reads, which Android's intercepted
-  // stream cannot serve correctly. Remux uses the explicit query above.
-  const size = IS_ANDROID ? await totalSize(videoUrl(item)) : null;
+  // Over the custom scheme, a large clip needs nonzero Range reads that
+  // Android's intercepted stream cannot serve. The loopback server serves
+  // them, so there the element plays it natively.
+  const url = videoUrl(item);
+  const size = IS_ANDROID && !isLoopbackVideo(url) ? await totalSize(url) : null;
   if (size !== null && size > WINDOW) {
     videoTrace("fallback.check", { id: item.id, ext: item.ext, size, reason: "android-large" });
     return true;

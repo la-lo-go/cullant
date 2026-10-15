@@ -9,6 +9,7 @@ mod scan;
 mod storage;
 mod store;
 mod thumbs;
+mod video_server;
 
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -351,6 +352,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            video_server::video_base_url,
             commands::project::open_project,
             commands::project::folder_project_path,
             commands::project::pick_saf_tree,
