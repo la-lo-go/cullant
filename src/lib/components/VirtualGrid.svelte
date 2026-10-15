@@ -2008,6 +2008,12 @@
     object-fit: contain;
   }
 
+  /* An image the loader has not given a source yet. Android WebView draws its
+     broken-image glyph for a sized <img> without one, over the placeholder. */
+  img:not([src]) {
+    visibility: hidden;
+  }
+
   /* A card behind a burst has the front photo's box, whatever its own aspect, so it
      rises from the front and never hangs out of it. Its picture fills that box. */
   .deck.fit img {
