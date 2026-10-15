@@ -304,7 +304,7 @@ pub fn scan_with_store(
                         new_files += 1;
                     }
                     Some((id, size, mtime, status)) => {
-                        if size != f.size || mtime != f.mtime {
+                        if size != f.size || !same_instant(mtime, f.mtime) {
                             update_file.execute(params![id, f.size, f.mtime])?;
                         } else if status != 0 {
                             revive_file.execute(params![id])?;
@@ -407,6 +407,23 @@ pub fn scan_with_store(
         missing_files,
         xmp_imported,
     })
+}
+
+/// Whether two modification times can name the same, untouched file.
+///
+/// FAT and exFAT volumes without an offset field store local time. Windows reads
+/// them through the current daylight-saving bias, and a vfat mount through its
+/// mount-time zone, so after a clock change every file on a camera card reports
+/// an mtime shifted by a whole hour (or half hour). Taken at face value, that
+/// re-reads every file's metadata and regenerates every thumbnail and preview.
+/// A size match plus a shift of exactly a multiple of 30 minutes, at most 14
+/// hours, is that and nothing else: an edit does not move a timestamp by an exact
+/// half hour and keep the byte count.
+///
+/// The stored mtime is kept, so the cache paths built from it stay valid.
+fn same_instant(stored: i64, found: i64) -> bool {
+    let shift = (stored - found).abs();
+    shift == 0 || (shift % 1800 == 0 && shift <= 14 * 3600)
 }
 
 /// A photo whose sidecar has not been read at its current mtime.
@@ -695,6 +712,55 @@ mod tests {
 
     fn scan(db: &Arc<Db>, root: &Path) -> ScanDone {
         scan_project_inner(db, root, &mut |_| {}).unwrap()
+    }
+
+    #[test]
+    fn a_daylight_saving_shift_on_a_fat_card_is_not_a_change() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), "card/IMG_0001.JPG");
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        scan(&db, dir.path());
+        db.call(|c| {
+            c.execute("UPDATE files SET capture_time = 42", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let stored: i64 = db
+            .call_read(|c| Ok(c.query_row("SELECT mtime FROM files", [], |r| r.get(0))?))
+            .unwrap();
+
+        let shifted =
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs((stored + 3600) as u64);
+        fs::File::options()
+            .write(true)
+            .open(dir.path().join("card/IMG_0001.JPG"))
+            .unwrap()
+            .set_modified(shifted)
+            .unwrap();
+        scan(&db, dir.path());
+        let (mtime, capture): (i64, Option<i64>) = db
+            .call_read(|c| {
+                Ok(
+                    c.query_row("SELECT mtime, capture_time FROM files", [], |r| {
+                        Ok((r.get(0)?, r.get(1)?))
+                    })?,
+                )
+            })
+            .unwrap();
+        assert_eq!((mtime, capture), (stored, Some(42)), "nothing is re-read");
+
+        let edited = std::time::UNIX_EPOCH + std::time::Duration::from_secs((stored + 61) as u64);
+        fs::File::options()
+            .write(true)
+            .open(dir.path().join("card/IMG_0001.JPG"))
+            .unwrap()
+            .set_modified(edited)
+            .unwrap();
+        scan(&db, dir.path());
+        let capture: Option<i64> = db
+            .call_read(|c| Ok(c.query_row("SELECT capture_time FROM files", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(capture, None, "any other change is still a change");
     }
 
     #[test]
