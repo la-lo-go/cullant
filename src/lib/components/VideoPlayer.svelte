@@ -516,7 +516,10 @@
       <span
         role="img"
         class="remux-badge"
-        title="This device cannot open the file directly. Cullant repackages it in the app as it plays, without re-encoding the picture."
+        title={"This device cannot open the file directly. Cullant repackages it in the app as it plays, without re-encoding the picture." +
+          (droppedAudio
+            ? ` The ${droppedAudio.toUpperCase()} audio cannot play this way, so the clip is silent: open it in an external player to hear it.`
+            : "")}
       >
         <Film size={13} />
         {#if remuxing}
@@ -595,15 +598,9 @@
         </div>
       {/if}
       {#if droppedAudio}
-        <!-- Not `disabled`: a disabled button gets no hover or press, and the
-             reason is the whole point of showing it. -->
-        <button
-          class="ctl unavailable"
-          aria-disabled="true"
-          title={`No sound: this device cannot play the ${droppedAudio.toUpperCase()} audio of this clip in the app. Open it in an external player to hear it.`}
-          aria-label="Sound unavailable"
-          onclick={refocus}
-        >
+        <!-- The reason is in the conversion badge's tooltip; the button only
+             shows that there is no sound. -->
+        <button class="ctl" disabled aria-label="Sound unavailable">
           <VolumeX size={16} />
         </button>
       {:else}
@@ -819,15 +816,9 @@
   }
 
   .ctl:disabled,
-  .ctl.unavailable,
   .seek:disabled {
     opacity: 0.45;
     cursor: default;
-  }
-
-  .ctl.unavailable:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.85);
   }
 
   .time {
