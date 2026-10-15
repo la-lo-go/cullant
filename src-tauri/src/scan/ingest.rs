@@ -188,7 +188,9 @@ pub fn run_ingest_pass(
         // Metadata progress is reported per file from inside the parallel burst,
         // so it must be Sync; `app.emit` already is.
         &|done, total| {
-            let _ = app.emit(
+            emit_live(
+                app,
+                thumbs,
                 "metadata:progress",
                 Progress {
                     project_root: project_root.clone(),
@@ -199,7 +201,9 @@ pub fn run_ingest_pass(
             );
         },
         &mut |updated| {
-            let _ = app.emit(
+            emit_live(
+                app,
+                thumbs,
                 "metadata:done",
                 MetadataDone {
                     project_root: project_root.clone(),
@@ -213,7 +217,9 @@ pub fn run_ingest_pass(
         &mut {
             let mut announced = false;
             move |done, total, _ids: &[i64]| {
-                let _ = app.emit(
+                emit_live(
+                    app,
+                    thumbs,
                     "thumbs:progress",
                     Progress {
                         project_root: thumb_project_root.clone(),
@@ -224,7 +230,9 @@ pub fn run_ingest_pass(
                 );
                 if done >= total && !announced {
                     announced = true;
-                    let _ = app.emit(
+                    emit_live(
+                        app,
+                        thumbs,
                         "thumbs:done",
                         ThumbsDone {
                             project_root: thumb_project_root.clone(),
@@ -235,7 +243,9 @@ pub fn run_ingest_pass(
             }
         },
         &mut |done, total, ids: &[i64]| {
-            let _ = app.emit(
+            emit_live(
+                app,
+                thumbs,
                 "previews:progress",
                 Progress {
                     project_root: project_root.clone(),
@@ -246,7 +256,9 @@ pub fn run_ingest_pass(
             );
         },
         &mut |done, total, _ids| {
-            let _ = app.emit(
+            emit_live(
+                app,
+                thumbs,
                 "videos:progress",
                 Progress {
                     project_root: project_root.clone(),
@@ -258,6 +270,14 @@ pub fn run_ingest_pass(
         },
         generate_videos,
     )
+}
+
+/// A pass of a project that was closed still runs to its next checkpoint; until
+/// then it must not report into the project that replaced it.
+fn emit_live<S: Serialize + Clone>(app: &AppHandle, thumbs: &ThumbPool, event: &str, payload: S) {
+    if !thumbs.is_shut_down() {
+        let _ = app.emit(event, payload);
+    }
 }
 
 /// Testable core: closures instead of an AppHandle.
@@ -385,6 +405,11 @@ pub fn run_ingest_inner(
     let done = AtomicUsize::new(0);
     let last_emit_ms = AtomicU64::new(0);
     for chunk in pending.chunks(CHUNK) {
+        // The project was closed or replaced: every further read is wasted, and
+        // on SAF it competes with the project the user is looking at now.
+        if thumbs.is_shut_down() {
+            return Ok(());
+        }
         let extracted: Vec<Extracted> = chunk
             .par_iter()
             .flat_map(|p| {
@@ -541,6 +566,9 @@ fn generate_pass(
     select_sql: &str,
     progress: &mut dyn FnMut(usize, usize, &[i64]),
 ) -> AppResult<()> {
+    if thumbs.is_shut_down() {
+        return Ok(());
+    }
     let select = select_sql.to_string();
     let pending: Vec<(i64, CacheVersion)> = db.call(move |conn| {
         let mut stmt = conn.prepare(&select)?;
@@ -1016,6 +1044,42 @@ mod tests {
         .unwrap();
         // Metadata written for all three; no grid thumbnail exists yet.
         assert_eq!(gate, Some((3, 0)));
+    }
+
+    #[test]
+    fn a_closed_project_stops_its_ingest_silently() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db = project_with_jpegs(root, 3);
+        let (store, pool) = store_and_pool(&db, root);
+        pool.shutdown();
+
+        let mut metadata_done = false;
+        let (mut thumbs, mut previews, mut videos) = (false, false, false);
+        run_ingest_inner(
+            &db,
+            store.as_ref(),
+            &pool,
+            &|_, _| {},
+            &mut |_| metadata_done = true,
+            &mut |_, _, _| thumbs = true,
+            &mut |_, _, _| previews = true,
+            &mut |_, _, _| videos = true,
+            true,
+        )
+        .unwrap();
+        assert!(!metadata_done && !thumbs && !previews && !videos);
+        let read: i64 = db
+            .call_read(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM files WHERE capture_time IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(read, 0, "no file of a closed project is read");
     }
 
     #[test]

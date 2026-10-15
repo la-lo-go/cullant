@@ -11,6 +11,9 @@ pub enum AppError {
     NoProject,
     #[error("decode error: {0}")]
     Decode(String),
+    /// The project this work belonged to was closed or replaced.
+    #[error("cancelled")]
+    Cancelled,
     #[error("{0}")]
     Other(String),
 }

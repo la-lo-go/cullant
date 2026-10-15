@@ -386,6 +386,12 @@ impl ThumbPool {
     /// Stop accepting work and unblock all workers (they exit). Draining calls
     /// every pending request's `respond` with an error, so a caller blocked on a
     /// completion channel (ingest Phase B) is always released.
+    /// True once the project that owns this pool was closed or replaced. The
+    /// scanner thread polls it to stop work nobody is waiting for.
+    pub fn is_shut_down(&self) -> bool {
+        self.queue.cancelled.load(Ordering::Relaxed)
+    }
+
     pub fn shutdown(&self) {
         self.stop_queue();
         self.db.lock().unwrap().take();
@@ -2721,8 +2727,9 @@ mod tests {
             &self,
             skip_dirs: &[&str],
             progress: &mut dyn FnMut(usize),
+            cancelled: &dyn Fn() -> bool,
         ) -> AppResult<Vec<crate::store::StoreEntry>> {
-            self.0.list_recursive(skip_dirs, progress)
+            self.0.list_recursive(skip_dirs, progress, cancelled)
         }
         fn open_read(&self, _rel: &str) -> AppResult<std::fs::File> {
             panic!("simulated decoder panic")

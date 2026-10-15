@@ -159,8 +159,11 @@ fn run_scan(
     thumbs: Arc<ThumbPool>,
     initial_open_id: Option<String>,
 ) {
-    let done = match scan::scan_project(&app, &db, store.as_ref()) {
+    let cancelled = || thumbs.is_shut_down();
+    let done = match scan::scan_project(&app, &db, store.as_ref(), &cancelled) {
         Ok(done) => done,
+        Err(AppError::Cancelled) => return,
+        Err(_) if cancelled() => return,
         Err(error) => {
             emit_scan_error(&app, &db.project_root(), error.to_string());
             return;
@@ -181,7 +184,9 @@ fn run_scan(
         }
     }
     if let Err(error) = scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &thumbs) {
-        emit_scan_error(&app, &db.project_root(), error.to_string());
+        if !thumbs.is_shut_down() {
+            emit_scan_error(&app, &db.project_root(), error.to_string());
+        }
     }
 }
 

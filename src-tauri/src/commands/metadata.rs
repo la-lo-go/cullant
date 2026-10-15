@@ -211,6 +211,7 @@ mod tests {
             &self,
             _: &[&str],
             _: &mut dyn FnMut(usize),
+            _: &dyn Fn() -> bool,
         ) -> AppResult<Vec<crate::store::StoreEntry>> {
             unreachable!()
         }

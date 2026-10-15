@@ -68,6 +68,7 @@ impl ProjectStore for LocalFsStore {
         &self,
         skip_dirs: &[&str],
         progress: &mut dyn FnMut(usize),
+        cancelled: &dyn Fn() -> bool,
     ) -> AppResult<Vec<StoreEntry>> {
         let mut out = Vec::new();
         let walker = WalkDir::new(&self.root)
@@ -98,6 +99,9 @@ impl ProjectStore for LocalFsStore {
                 mtime: meta.modified().map(unix_secs).unwrap_or(0),
             });
             if out.len() % WALK_PROGRESS_EVERY == 0 {
+                if cancelled() {
+                    return Err(AppError::Cancelled);
+                }
                 progress(out.len());
             }
         }
@@ -248,7 +252,7 @@ mod tests {
 
         let store = LocalFsStore::new(root);
         let mut rels: Vec<String> = store
-            .list_recursive(&["_trash"], &mut |_| {})
+            .list_recursive(&["_trash"], &mut |_| {}, &|| false)
             .unwrap()
             .into_iter()
             .map(|e| e.rel_path)

@@ -180,11 +180,15 @@ impl ProjectStore for SafStore {
         &self,
         skip_dirs: &[&str],
         progress: &mut dyn FnMut(usize),
+        cancelled: &dyn Fn() -> bool,
     ) -> AppResult<Vec<StoreEntry>> {
         let mut files = Vec::new();
         let mut stack: Vec<(String, String)> = vec![(String::new(), self.root_document_id.clone())];
 
         while let Some((prefix, parent_doc)) = stack.pop() {
+            if cancelled() {
+                return Err(AppError::Cancelled);
+            }
             super::stats::backend_call();
             let entries: Vec<SafEntry> = self
                 .saf()

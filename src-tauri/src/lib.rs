@@ -90,7 +90,7 @@ pub mod bench {
 
     /// Walk + reconcile; returns the number of present files.
     pub fn scan(db: &Arc<Db>, store: &dyn ProjectStore) -> i64 {
-        crate::scan::scan_with_store(db, store, &mut |_| {})
+        crate::scan::scan_with_store(db, store, &mut |_| {}, &|| false)
             .expect("scan failed")
             .file_count
     }

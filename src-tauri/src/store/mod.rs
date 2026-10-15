@@ -64,10 +64,15 @@ pub trait ProjectStore: Send + Sync {
     /// The walk is the longest silent stretch of opening a project — on SAF it
     /// is one binder round-trip per directory — so it has to report from inside
     /// rather than only once it returns.
+    ///
+    /// `cancelled` is polled as the walk goes. When it turns true the walk stops
+    /// with [`AppError::Cancelled`]: a project that was closed must not keep a
+    /// SAF tree busy for minutes after the user left it.
     fn list_recursive(
         &self,
         skip_dirs: &[&str],
         progress: &mut dyn FnMut(usize),
+        cancelled: &dyn Fn() -> bool,
     ) -> AppResult<Vec<StoreEntry>>;
 
     /// Open a file for reading. Returns a real `std::fs::File` on every backend

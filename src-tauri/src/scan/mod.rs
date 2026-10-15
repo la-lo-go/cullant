@@ -100,22 +100,37 @@ fn collect_found(entries: Vec<StoreEntry>) -> Vec<FoundFile> {
 /// mark vanished ones missing, then group the photo files that share
 /// dir+basename. A latecomer joins the group its shot already has; a decoupled
 /// group is never rebuilt.
+///
+/// `cancelled` turning true stops the walk and silences every event: a scan of a
+/// project the user already left must not report into the one they opened next.
 pub fn scan_project(
     app: &AppHandle,
     db: &Arc<Db>,
     store: &dyn ProjectStore,
+    cancelled: &dyn Fn() -> bool,
 ) -> AppResult<ScanDone> {
     let app_progress = app.clone();
     let project_root = db.project_root();
-    let done = scan_with_store(db, store, &mut move |found| {
-        let _ = app_progress.emit(
-            "scan:progress",
-            ScanProgress {
-                found,
-                project_root: project_root.clone(),
-            },
-        );
-    })?;
+    let done = scan_with_store(
+        db,
+        store,
+        &mut move |found| {
+            if cancelled() {
+                return;
+            }
+            let _ = app_progress.emit(
+                "scan:progress",
+                ScanProgress {
+                    found,
+                    project_root: project_root.clone(),
+                },
+            );
+        },
+        cancelled,
+    )?;
+    if cancelled() {
+        return Err(crate::error::AppError::Cancelled);
+    }
     let _ = app.emit("scan:done", done.clone());
     Ok(done)
 }
@@ -128,7 +143,7 @@ pub fn scan_project_inner(
     progress: &mut dyn FnMut(usize),
 ) -> AppResult<ScanDone> {
     let store = crate::store::LocalFsStore::new(root);
-    scan_with_store(db, &store, progress)
+    scan_with_store(db, &store, progress, &|| false)
 }
 
 /// One live photo file in a dir+basename bucket, as the pairing pass sees it.
@@ -219,12 +234,13 @@ pub fn scan_with_store(
     db: &Arc<Db>,
     store: &dyn ProjectStore,
     progress: &mut dyn FnMut(usize),
+    cancelled: &dyn Fn() -> bool,
 ) -> AppResult<ScanDone> {
     let started = std::time::Instant::now();
     // Reported from inside the walk, not after it: classifying the listing is
     // pure in-memory work, so the walk is the only part worth a progress count.
     let _profile = crate::photo_profile::span("scan");
-    let entries = store.list_recursive(SKIP_DIRS, progress)?;
+    let entries = store.list_recursive(SKIP_DIRS, progress, cancelled)?;
     let found = collect_found(entries);
     let total_found = found.len();
     progress(total_found);
@@ -679,6 +695,22 @@ mod tests {
 
     fn scan(db: &Arc<Db>, root: &Path) -> ScanDone {
         scan_project_inner(db, root, &mut |_| {}).unwrap()
+    }
+
+    #[test]
+    fn a_cancelled_walk_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..(crate::store::WALK_PROGRESS_EVERY + 10) {
+            touch(dir.path(), &format!("p{i}.jpg"));
+        }
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        let store = crate::store::LocalFsStore::new(dir.path());
+        let result = scan_with_store(&db, &store, &mut |_| {}, &|| true);
+        assert!(matches!(result, Err(crate::error::AppError::Cancelled)));
+        let files: i64 = db
+            .call_read(|c| Ok(c.query_row("SELECT COUNT(*) FROM files", [], |r| r.get(0))?))
+            .unwrap();
+        assert_eq!(files, 0, "a partial listing must never reconcile");
     }
 
     /// A Lightroom-style sidecar with a rating and a pick flag.

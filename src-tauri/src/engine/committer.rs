@@ -1628,8 +1628,9 @@ mod tests {
             &self,
             skip: &[&str],
             progress: &mut dyn FnMut(usize),
+            cancelled: &dyn Fn() -> bool,
         ) -> AppResult<Vec<crate::store::StoreEntry>> {
-            self.0.list_recursive(skip, progress)
+            self.0.list_recursive(skip, progress, cancelled)
         }
         fn open_read(&self, rel: &str) -> AppResult<std::fs::File> {
             self.0.open_read(rel)
