@@ -1041,6 +1041,13 @@ fn file_row(db: &Arc<Db>, file_id: i64) -> AppResult<(String, i64, i64, Option<i
     })
 }
 
+/// The cache version a file has now, or `None` while its orientation is still
+/// unresolved (before the metadata pass or a first decode has read it).
+pub(crate) fn resolved_version(db: &Arc<Db>, file_id: i64) -> AppResult<Option<CacheVersion>> {
+    let (_, _, mtime, orientation) = file_row(db, file_id)?;
+    Ok(orientation.map(|orientation| CacheVersion { mtime, orientation }))
+}
+
 /// The JPEG half of a live RAW+JPEG pair, when `file_id` is the RAW.
 ///
 /// Cullant's RAW fast path already renders the embedded JPEG rather than

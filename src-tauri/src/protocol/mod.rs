@@ -193,7 +193,32 @@ fn respond_thumb<R: Runtime>(
     // second to appear. A cache miss falls through to the pool, which generates
     // and caches exactly as before. (temp-file+rename writes make the read
     // race-safe — a cache file is never partially written.)
-    if let Some(version) = known.filter(|v| v.orientation != 0) {
+    // A URL minted before the metadata pass resolved the orientation carries
+    // `o=0`. Once the database knows it, the artifact is in the cache like any
+    // other; without this lookup every such request went to a worker, which on
+    // Android answered "not yet" and woke the cell to ask again with the same
+    // URL -- a loop that kept the whole first screen blank until the catalogue
+    // refreshed. The answer is not immutable under that URL, so it is not cached.
+    let (lookup, provisional) = match known {
+        Some(version) if version.orientation == 0 => (
+            crate::thumbs::resolved_version(&db, file_id)
+                .ok()
+                .flatten()
+                .filter(|current| current.mtime == version.mtime),
+            true,
+        ),
+        other => (other, false),
+    };
+    let cached = |bytes: Vec<u8>| {
+        let mut response = jpeg_ok(bytes);
+        if provisional {
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
+        }
+        response
+    };
+    if let Some(version) = lookup {
         let cache_rel = match resolved_cache_rel_path(&db, file_id, version, kind) {
             Ok(path) => path,
             Err(error) => {
@@ -208,7 +233,7 @@ fn respond_thumb<R: Runtime>(
         // and back asks again from scratch -- and during an import that wait is
         // long enough to leave a hole where a painted thumbnail used to be.
         if let Some(bytes) = memcache::get(&memory_key) {
-            responder.respond(jpeg_ok(bytes.as_ref().clone()));
+            responder.respond(cached(bytes.as_ref().clone()));
             return;
         }
         if let Some(bytes) = read_cached_jpeg(&cache_abs) {
@@ -218,7 +243,7 @@ fn respond_thumb<R: Runtime>(
             if kind == ThumbKind::Thumb {
                 memcache::put(&memory_key, std::sync::Arc::new(bytes.clone()));
             }
-            responder.respond(jpeg_ok(bytes));
+            responder.respond(cached(bytes));
             return;
         }
     }
