@@ -110,6 +110,14 @@ function fetchThumb(url: string): { promise: Promise<string>; release: () => voi
   };
 }
 
+/**
+ * A thumbnail already held in the page, as an object URL, or undefined. Never
+ * starts a request: for a stand-in image that must not itself show a gap.
+ */
+export function heldThumb(url: string): string | undefined {
+  return touch(url);
+}
+
 /** Forget every held thumbnail. File ids are only unique within one project. */
 export function clearThumbCache() {
   epoch++;

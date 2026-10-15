@@ -12,6 +12,7 @@
   import { session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { catalog } from "../stores/catalog.svelte";
+  import { heldThumb } from "../thumbLoader";
   import Loader from "@lucide/svelte/icons/loader";
   import RadialMenu, { type RadialAction, type RadialHandlers } from "./RadialMenu.svelte";
   import ContextMenu from "./ContextMenu.svelte";
@@ -234,12 +235,13 @@
   // preview has loaded, so rapid arrowing never flashes a blank pane.
   //
   // A cached preview starts sharp. The thumbnail covers only a missing preview.
-  const progressiveStart = untrack(
-    () => settings.progressiveLoupe && !catalog.previewReady.has(item.id),
+  const startThumb = untrack(() =>
+    settings.progressiveLoupe && !catalog.previewReady.has(item.id)
+      ? heldThumb(thumbUrl(item))
+      : undefined,
   );
-  let displayedSrc = $state(
-    untrack(() => (progressiveStart ? thumbUrl(item) : previewUrl(item))),
-  );
+  const progressiveStart = startThumb !== undefined;
+  let displayedSrc = $state(untrack(() => startThumb ?? previewUrl(item)));
   let displayedAlt = $state(untrack(() => item.name));
   let displayedItemId = $state(untrack(() => item.id));
   let displayedOrientation = $state(untrack(() => item.orientation));
@@ -267,8 +269,13 @@
       // On an in-place rotation the previous preview is still the right photo.
       // Keep it and rotate it immediately instead of dropping to a soft thumb.
       if (!progressive || sameItem) return;
+      // Only a thumbnail the page already holds. Requesting one here raced the
+      // preview for the same decode and, on Android, could be answered "not
+      // yet" -- leaving a broken image where the stand-in was meant to be.
+      const soft = heldThumb(thumb);
+      if (!soft) return;
       softPreview = true;
-      displayedSrc = thumb;
+      displayedSrc = soft;
       displayedAlt = alt;
       displayedItemId = targetItemId;
       displayedOrientation = targetOrientation;

@@ -4,6 +4,7 @@
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
+  import { gridThumb } from "../thumbLoader";
   import Scissors from "@lucide/svelte/icons/scissors";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
@@ -337,16 +338,28 @@
                   </div>
                 {:else}
                   <img
-                    src={thumbUrl(v.item)}
                     alt=""
                     decoding="async"
                     draggable="false"
-                    onerror={() => markPosterFailed(v.item.id)}
+                    use:gridThumb={{
+                      url: thumbUrl(v.item),
+                      id: v.item.id,
+                      exists: !!v.item.thumbReady,
+                      retries: 0,
+                      onfail: () => markPosterFailed(v.item.id),
+                    }}
                   />
                 {/if}
                 <span class="videobadge"><Play size={9} /></span>
               {:else}
-                <img src={thumbUrl(v.item)} alt="" decoding="async" draggable="false" />
+                <!-- The grid's loader: the frame keeps a placeholder until its
+                     thumbnail exists, never Chromium's broken-image glyph. -->
+                <img
+                  alt=""
+                  decoding="async"
+                  draggable="false"
+                  use:gridThumb={{ url: thumbUrl(v.item), id: v.item.id, exists: !!v.item.thumbReady }}
+                />
               {/if}
               {#if settings.filmstripShowLabel && v.item.label}
                 <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
@@ -611,6 +624,33 @@
 
   .photo.queued img {
     filter: brightness(0.4) grayscale(35%);
+  }
+
+  /* `data-thumb` is written by the `gridThumb` loader, as in the grid. */
+  .photo:global([data-thumb="loading"]),
+  .photo:global([data-thumb="failed"]) {
+    background: var(--surface-2);
+  }
+
+  .photo:global([data-thumb="pending"]) {
+    background: linear-gradient(100deg, var(--surface-2) 30%, var(--hover) 50%, var(--surface-2) 70%);
+    background-size: 200% 100%;
+    animation: frame-shimmer 2.4s ease-in-out infinite;
+  }
+
+  @keyframes frame-shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+
+  /* Android WebView draws its broken-image glyph for a sized <img> without a
+     source; the placeholder behind it says the same thing better. */
+  img:not([src]) {
+    visibility: hidden;
   }
 
   /* Video with no generated poster (no extractor / undecodable clip): a dark
