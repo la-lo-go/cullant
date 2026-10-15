@@ -194,6 +194,9 @@ fn rollback_fresh_empty(
     thumbs: Arc<ThumbPool>,
 ) -> AppResult<bool> {
     let state = app.state::<AppState>();
+    // An open of this same folder must not run between the generation check
+    // and the removal of the `.cullant` directory it would be using.
+    let _lifecycle = lifecycle_lock(&state);
     let previous = {
         let mut guard = state.project.lock().unwrap();
         if guard
@@ -224,13 +227,24 @@ fn emit_scan_error(app: &AppHandle, project_root: &str, error: String) {
     );
 }
 
-#[tauri::command]
+/// Runs off the main thread (`async`): opening shuts down the previous
+/// project's workers, which waits for the decode each one is in, and opens a
+/// database. On the main thread that froze the window on desktop and blocked the
+/// looper every SAF call and event goes through on Android.
+#[tauri::command(async)]
 pub fn open_project(
     path: String,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<ProjectInfo> {
+    let _lifecycle = lifecycle_lock(&state);
     do_open_project(&path, &app, &state)
+}
+
+fn lifecycle_lock(state: &AppState) -> std::sync::MutexGuard<'_, ()> {
+    // A panic while holding it leaves nothing half-done that the next caller
+    // cannot handle: every step re-reads `project` under its own lock.
+    state.lifecycle.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[tauri::command(async)]
@@ -554,8 +568,9 @@ pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<(
 /// XMP sidecars survive on disk, so a project exported to them comes back with
 /// its ratings, flags and labels — the rescan reads them in like any other
 /// library arriving from elsewhere.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reimport_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<ProjectInfo> {
+    let _lifecycle = lifecycle_lock(&state);
     if state.scan_active.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(AppError::Other(
             "Cullant is still reading this project. Wait for it to finish, then try again.".into(),
@@ -638,9 +653,11 @@ fn close_project_inner(state: &AppState) {
         .store(false, std::sync::atomic::Ordering::Release);
 }
 
-#[tauri::command]
-pub fn close_project(state: State<'_, AppState>) {
+#[tauri::command(async)]
+pub fn close_project(state: State<'_, AppState>) -> AppResult<()> {
+    let _lifecycle = lifecycle_lock(&state);
     close_project_inner(&state);
+    Ok(())
 }
 
 /// Set the preview-quality preference without discarding existing previews.
@@ -664,7 +681,7 @@ pub fn preview_quality_choices() -> Vec<u32> {
 ///
 /// The following rescan regenerates previews at the new size. Refuses while a
 /// scan is running rather than deleting rows the ingest pass is writing.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn discard_previews(state: State<'_, AppState>) -> AppResult<usize> {
     if state.scan_active.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(AppError::Other(

@@ -44,6 +44,11 @@ pub struct AppState {
     /// race that pass -- discarding the very rows it is writing -- refuse rather
     /// than interleave with it.
     pub scan_active: AtomicBool,
+    /// Held for the whole of an open, close or reimport. These commands run off
+    /// the main thread, so two of them (a double tap on a recent project, a
+    /// close racing an open) could otherwise interleave their teardown and
+    /// setup of `project`.
+    pub lifecycle: Mutex<()>,
 }
 
 impl Default for AppState {
@@ -52,6 +57,7 @@ impl Default for AppState {
             project: Mutex::new(None),
             generate_video_thumbs: AtomicBool::new(true),
             scan_active: AtomicBool::new(false),
+            lifecycle: Mutex::new(()),
         }
     }
 }
@@ -330,6 +336,7 @@ pub fn run() {
             if let Ok(path) = std::env::var("CULLANT_OPEN_PROJECT") {
                 use tauri::Manager;
                 let state = app.state::<AppState>();
+                let _lifecycle = state.lifecycle.lock().unwrap_or_else(|e| e.into_inner());
                 match commands::project::do_open_project(&path, app.handle(), &state) {
                     Ok(info) => tracing::info!("auto-opened project {}", info.root_path),
                     Err(e) => tracing::error!("CULLANT_OPEN_PROJECT failed: {e}"),
