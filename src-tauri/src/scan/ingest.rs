@@ -699,6 +699,17 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
         return metadata_rows(store, work, &e);
     }
 
+    // Where a file cannot be memory-mapped (every file on Android SAF), the
+    // whole of it used to be read here, then read again for its thumbnail. The
+    // metadata nearly always sits at the front: a JPEG's EXIF must fit in its
+    // first 64 KiB segment, and a RAW's IFDs precede the sensor data. So read a
+    // prefix first, and the whole file only when the prefix did not answer.
+    if store.local_path(&work.source_rel).is_none() {
+        if let Some(e) = metadata_from_prefix(store, work) {
+            return metadata_rows(store, work, &e);
+        }
+    }
+
     let source = match decode::open_source(store, &work.source_rel) {
         Ok(s) => s,
         Err(err) => {
@@ -706,10 +717,43 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
             return blank(); // mtime fallback still applies
         }
     };
+    let e = parse_metadata(&source, work);
+    metadata_rows(store, work, &e)
+}
 
+/// Bytes read for the first metadata attempt on a store that cannot map files.
+const METADATA_PREFIX: u64 = 1024 * 1024;
+
+/// Metadata parsed from the first [`METADATA_PREFIX`] bytes, or `None` when the
+/// caller must read the whole file: the read failed, or the prefix was cut
+/// short of a capture time the full file may still hold.
+fn metadata_from_prefix(store: &dyn ProjectStore, work: &MetaWork) -> Option<Extracted> {
+    use std::io::Read;
+    let mut prefix = Vec::new();
+    store
+        .open_read(&work.source_rel)
+        .ok()?
+        .take(METADATA_PREFIX)
+        .read_to_end(&mut prefix)
+        .ok()?;
+    let complete = (prefix.len() as u64) < METADATA_PREFIX;
+    let source = decode::source_from_bytes(prefix, &work.source_rel);
+    // A parser handed a truncated container may panic where the full file would
+    // not; that is a reason to read the whole file, not to lose its metadata.
+    let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        parse_metadata(&source, work)
+    }))
+    .ok();
+    match parsed {
+        Some(e) if complete || e.capture_time.is_some() => Some(e),
+        _ => None,
+    }
+}
+
+fn parse_metadata(source: &decode::Source, work: &MetaWork) -> Extracted {
     let mut e = Extracted::empty(0);
     if work.source_kind == 0 {
-        match decode::raw::RawSession::open(&source) {
+        match decode::raw::RawSession::open(source) {
             Ok(session) => {
                 if let Ok(meta) = session.metadata(&work.source_rel) {
                     e.capture_time = meta.capture_time;
@@ -736,8 +780,7 @@ fn extract_metadata(store: &dyn ProjectStore, work: &MetaWork) -> Vec<Extracted>
         e.width = meta.width;
         e.height = meta.height;
     }
-
-    metadata_rows(store, work, &e)
+    e
 }
 
 /// [`extract_metadata`], but a parser that panics on one malformed file costs
@@ -1044,6 +1087,133 @@ mod tests {
         .unwrap();
         // Metadata written for all three; no grid thumbnail exists yet.
         assert_eq!(gate, Some((3, 0)));
+    }
+
+    /// A store with no real paths, as on Android SAF: every read is a read.
+    struct UnmappedStore(LocalFsStore);
+
+    impl ProjectStore for UnmappedStore {
+        fn list_recursive(
+            &self,
+            skip_dirs: &[&str],
+            progress: &mut dyn FnMut(usize),
+            cancelled: &dyn Fn() -> bool,
+        ) -> AppResult<Vec<crate::store::StoreEntry>> {
+            self.0.list_recursive(skip_dirs, progress, cancelled)
+        }
+        fn open_read(&self, rel: &str) -> AppResult<std::fs::File> {
+            self.0.open_read(rel)
+        }
+        fn open_write(&self, rel: &str, mime_type: &str) -> AppResult<std::fs::File> {
+            self.0.open_write(rel, mime_type)
+        }
+        fn create_dir_all(&self, rel: &str) -> AppResult<()> {
+            self.0.create_dir_all(rel)
+        }
+        fn rename_in_place(&self, rel: &str, new_name: &str) -> AppResult<String> {
+            self.0.rename_in_place(rel, new_name)
+        }
+        fn move_to(&self, rel: &str, new_parent_rel: &str) -> AppResult<String> {
+            self.0.move_to(rel, new_parent_rel)
+        }
+        fn copy(&self, from_rel: &str, to_rel: &str) -> AppResult<()> {
+            self.0.copy(from_rel, to_rel)
+        }
+        fn remove_file(&self, rel: &str) -> AppResult<()> {
+            self.0.remove_file(rel)
+        }
+        fn exists(&self, rel: &str) -> AppResult<bool> {
+            self.0.exists(rel)
+        }
+    }
+
+    #[test]
+    fn an_unmapped_store_reads_metadata_from_the_front_of_a_large_file() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // Noise does not compress, so this JPEG is well past the prefix.
+        let mut seed = 7u32;
+        let image = image::RgbImage::from_fn(1400, 1400, |_, _| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let [a, b, c, _] = seed.to_le_bytes();
+            image::Rgb([a, b, c])
+        });
+        let exif = crate::bench::SyntheticExif {
+            date_time_original: "2024:06:15 14:30:05",
+            orientation: 6,
+            make: "Test",
+            model: "Camera",
+            iso: 400,
+        };
+        let jpeg = crate::bench::jpeg_with_exif(&image, &exif);
+        assert!(jpeg.len() as u64 > METADATA_PREFIX);
+        std::fs::write(root.join("big.jpg"), &jpeg).unwrap();
+
+        let db = Arc::new(Db::open(root).unwrap());
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        let store = UnmappedStore(LocalFsStore::new(root));
+        let id: i64 = db
+            .call_read(|c| Ok(c.query_row("SELECT id FROM files", [], |r| r.get(0))?))
+            .unwrap();
+        let work = MetaWork {
+            source_rel: "big.jpg".into(),
+            source_kind: 1,
+            source_id: Some(id),
+            borrowers: Vec::new(),
+        };
+        let from_prefix = metadata_from_prefix(&store, &work).expect("the prefix answers");
+        assert_eq!(from_prefix.orientation, Some(6));
+        assert_eq!(from_prefix.iso, Some(400));
+        assert_eq!(
+            (from_prefix.width, from_prefix.height),
+            (Some(1400), Some(1400))
+        );
+        assert!(from_prefix.capture_time.is_some());
+    }
+
+    /// The prefix read must agree with the full read on real camera files, or
+    /// say nothing. Skipped where the fixture corpus is not installed.
+    #[test]
+    fn prefix_metadata_matches_the_full_read_on_the_corpus() {
+        let corpus = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/media");
+        let Ok(entries) = std::fs::read_dir(&corpus) else {
+            eprintln!("skipped: local RAW corpus is not installed");
+            return;
+        };
+        let store = UnmappedStore(LocalFsStore::new(&corpus));
+        let (mut answered, mut deferred) = (0, 0);
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(kind) = decode::ext_of(&name).and_then(|ext| decode::classify(&ext)) else {
+                continue;
+            };
+            if !matches!(kind, decode::FileKind::Raw | decode::FileKind::Image) {
+                continue;
+            }
+            let work = MetaWork {
+                source_rel: name.clone(),
+                source_kind: kind as i64,
+                source_id: Some(1),
+                borrowers: Vec::new(),
+            };
+            let full = parse_metadata(&decode::open_source(&store, &name).unwrap(), &work);
+            match metadata_from_prefix(&store, &work) {
+                Some(prefix) => {
+                    answered += 1;
+                    assert_eq!(prefix.capture_time, full.capture_time, "{name}");
+                    assert_eq!(prefix.orientation, full.orientation, "{name}");
+                    assert_eq!(prefix.camera, full.camera, "{name}");
+                    assert_eq!(prefix.iso, full.iso, "{name}");
+                    assert_eq!(prefix.exposure_time, full.exposure_time, "{name}");
+                    assert_eq!(prefix.lens, full.lens, "{name}");
+                    assert_eq!(prefix.focal_length, full.focal_length, "{name}");
+                    assert_eq!(prefix.f_number, full.f_number, "{name}");
+                }
+                None => deferred += 1,
+            }
+        }
+        eprintln!("prefix answered {answered}, deferred {deferred} to a full read");
     }
 
     #[test]

@@ -8,6 +8,9 @@ use std::sync::Arc;
 
 use rawler::rawsource::RawSource;
 
+/// The bytes of one media file, mapped or read; see [`open_source`].
+pub type Source = RawSource;
+
 use crate::error::AppResult;
 use crate::store::{read_all, ProjectStore};
 
@@ -38,6 +41,12 @@ fn open_source_inner(store: &dyn ProjectStore, rel: &str) -> AppResult<RawSource
         // mmap can fail on exotic filesystems; fall through to a plain read.
     }
     Ok(RawSource::new_from_shared_vec(Arc::new(read_all(store, rel)?)).with_path(rel))
+}
+
+/// A source over bytes already in memory -- a prefix of the file, for a read
+/// that stops early. `rel` names it in decoder errors.
+pub fn source_from_bytes(bytes: Vec<u8>, rel: &str) -> RawSource {
+    RawSource::new_from_shared_vec(Arc::new(bytes)).with_path(rel)
 }
 
 /// File classification by extension. Mirrors `files.kind` in the database.
