@@ -22,6 +22,7 @@ import type { StreamTargetChunk } from "mediabunny";
 
 import { videoUrl, type ItemLite } from "../api";
 import { IS_ANDROID } from "../platform";
+import { bufferedRanges, videoTrace } from "./trace";
 
 /** Raised when the fallback cannot help, so the caller offers an external app. */
 export class UnplayableError extends Error {
@@ -40,12 +41,21 @@ const MAX_METADATA_RANGE = 64 * 1024 * 1024;
 
 async function range(url: string, start: number, endInclusive: number): Promise<Response> {
   const requested = `bytes=${start}-${endInclusive}`;
+  const started = performance.now();
   // WebView seeks twice when Range accompanies an intercepted partial body.
   const request = IS_ANDROID
     ? fetch(`${url}&range=${encodeURIComponent(requested)}`)
     : fetch(url, { headers: { Range: requested } });
-  const res = await request.catch(() => {
+  const res = await request.catch((error) => {
+    videoTrace("range.error", { start, end: endInclusive, error: String(error) });
     throw new UnplayableError("video storage could not be read", true);
+  });
+  videoTrace("range", {
+    start,
+    length: endInclusive - start + 1,
+    status: res.status,
+    contentRange: res.headers.get("Content-Range"),
+    ms: Math.round(performance.now() - started),
   });
   if (!res.ok) throw new UnplayableError(`video range request failed: ${res.status}`, true);
   return res;
@@ -105,12 +115,18 @@ async function openInput(item: ItemLite) {
 export async function needsPlaybackFallback(item: ItemLite, canPlay: (mime: string) => boolean): Promise<boolean> {
   // Large native clips need nonzero Range reads, which Android's intercepted
   // stream cannot serve correctly. Remux uses the explicit query above.
-  if (IS_ANDROID && await totalSize(videoUrl(item)) > WINDOW) return true;
+  const size = IS_ANDROID ? await totalSize(videoUrl(item)) : null;
+  if (size !== null && size > WINDOW) {
+    videoTrace("fallback.check", { id: item.id, ext: item.ext, size, reason: "android-large" });
+    return true;
+  }
   const input = await openInput(item);
   try {
     const track = await input.getPrimaryVideoTrack();
     const codec = await track?.getCodecParameterString();
-    return !!codec && !canPlay(`video/mp4; codecs="${codec}"`);
+    const playable = !codec || canPlay(`video/mp4; codecs="${codec}"`);
+    videoTrace("fallback.check", { id: item.id, ext: item.ext, size, codec, playable });
+    return !playable;
   } finally {
     input.dispose();
   }
@@ -164,9 +180,11 @@ export async function remuxForPlayback(
       }
     }
   } catch (e) {
+    videoTrace("remux.reject", { id: item.id, error: String(e) });
     input.dispose();
     throw e;
   }
+  videoTrace("remux.start", { id: item.id, ext: item.ext, mime, dropAudio });
 
   const mediaSource = new MediaSource();
   const src = URL.createObjectURL(mediaSource);
@@ -186,6 +204,7 @@ export async function remuxForPlayback(
           try {
             const buffer = mediaSource.addSourceBuffer(mime);
             let written = 0;
+            let appends = 0;
 
             const writable = new WritableStream<StreamTargetChunk>({
               write(chunk) {
@@ -199,6 +218,15 @@ export async function remuxForPlayback(
                   );
                 }
                 written += chunk.data.byteLength;
+                appends++;
+                const media = document.querySelector<HTMLVideoElement>("video.player");
+                videoTrace("remux.append", {
+                  n: appends,
+                  bytes: chunk.data.byteLength,
+                  written,
+                  buffered: bufferedRanges(buffer),
+                  playhead: media ? Math.round(media.currentTime * 10) / 10 : null,
+                });
                 // Resolving on updateend is also what applies backpressure:
                 // appendBuffer takes one write at a time, and Output honours a
                 // slow target rather than racing ahead of it.
@@ -207,7 +235,18 @@ export async function remuxForPlayback(
                   buffer.addEventListener("error", () => fail(new Error("append failed")), {
                     once: true,
                   });
-                  buffer.appendBuffer(chunk.data);
+                  try {
+                    buffer.appendBuffer(chunk.data);
+                  } catch (error) {
+                    videoTrace("remux.append.error", {
+                      n: appends,
+                      written,
+                      name: (error as Error).name,
+                      message: (error as Error).message,
+                      buffered: bufferedRanges(buffer),
+                    });
+                    throw error;
+                  }
                 });
               },
             });
@@ -231,17 +270,28 @@ export async function remuxForPlayback(
                 conversion.discardedTracks.map((t) => t.reason).join(", ") || "nothing to convert",
               );
             }
-            if (onProgress) {
-              conversion.onProgress = onProgress;
-              onProgress(0);
-            }
+            let lastStep = -1;
+            conversion.onProgress = (fraction) => {
+              const step = Math.floor(fraction * 20);
+              if (step !== lastStep) {
+                lastStep = step;
+                videoTrace("remux.progress", { fraction: Math.round(fraction * 100) / 100, written });
+              }
+              onProgress?.(fraction);
+            };
+            onProgress?.(0);
 
             await conversion.execute();
+            videoTrace("remux.done", { written, appends });
             if (!canceled && mediaSource.readyState === "open") mediaSource.endOfStream();
             resolve();
           } catch (e) {
             // Cancelling is the caller moving to another clip, not a failure —
             // reporting it as one would flash "can't be played" on the way out.
+            videoTrace(canceled ? "remux.canceled" : "remux.error", {
+              name: (e as Error)?.name,
+              message: String((e as Error)?.message ?? e),
+            });
             if (canceled) resolve();
             else reject(e);
           } finally {

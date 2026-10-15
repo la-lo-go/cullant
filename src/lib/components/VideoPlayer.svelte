@@ -2,6 +2,7 @@
   import { api, previewUrl, thumbUrl, videoUrl, type ItemLite } from "../api";
   import { untrack } from "svelte";
   import { needsPlaybackFallback, remuxForPlayback, UnplayableError, type Remux } from "../video/remux";
+  import { bufferedRanges, videoTrace } from "../video/trace";
   import { unplayableVideos, playbackFailureKey } from "../video/failures";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
@@ -88,6 +89,12 @@
   }
 
   function failPlayback(error?: unknown) {
+    videoTrace("player.fail", {
+      id: item.id,
+      error: error === undefined ? null : String(error),
+      code: video?.error?.code ?? null,
+      at: video ? Math.round(video.currentTime * 10) / 10 : null,
+    });
     cancelPosterFrame();
     currentFailure = true;
     if (!(error instanceof UnplayableError && error.retryable) && video?.error?.code !== 1) {
@@ -116,6 +123,15 @@
     showPoster = true;
     const error = video?.error;
     console.error("video playback failed", error?.code, error?.message);
+    videoTrace("player.error", {
+      id: item.id,
+      ext: item.ext,
+      code: error?.code ?? null,
+      message: error?.message ?? null,
+      remuxing: !!remuxSrc,
+      at: video ? Math.round(video.currentTime * 10) / 10 : null,
+      buffered: bufferedRanges(video),
+    });
     // A second failure is the remuxed source failing too; nothing left to try.
     if (triedRemux) {
       // The native source can still fail while a proactive remux is pending.
@@ -138,6 +154,7 @@
       }
       remux = handle;
       remuxSrc = handle.src;
+      videoTrace("player.remux-source", { id: item.id });
       void handle.done.then(
         () => {
           if (generation === remuxGeneration) {
@@ -156,6 +173,20 @@
       console.error("in-app remux unavailable", e);
       failPlayback(e);
     }
+  }
+
+  /** Element events worth a line in the video trace, with where playback stood. */
+  function traceEvent(event: Event) {
+    const element = event.currentTarget as HTMLVideoElement;
+    videoTrace(`element.${event.type}`, {
+      id: item.id,
+      at: Math.round(element.currentTime * 10) / 10,
+      duration: Number.isFinite(element.duration) ? Math.round(element.duration * 10) / 10 : null,
+      readyState: element.readyState,
+      networkState: element.networkState,
+      buffered: bufferedRanges(element),
+      source: remuxSrc ? "remux" : "native",
+    });
   }
 
   function checkCompatibility(element: HTMLVideoElement, currentItem: ItemLite, generation: number) {
@@ -419,10 +450,15 @@
       onpointerdown={() => { surfacePressed = true; }}
       onpointercancel={() => { surfacePressed = false; }}
       onclick={onSurfaceClick}
-      onplaying={onPlaying}
-      onloadedmetadata={resumeRequestedPlayback}
-      onended={() => { playRequested = false; }}
-      onerror={onVideoError}
+      onplaying={(event) => { traceEvent(event); onPlaying(); }}
+      onloadedmetadata={(event) => { traceEvent(event); resumeRequestedPlayback(); }}
+      onended={(event) => { traceEvent(event); playRequested = false; }}
+      onerror={(event) => { traceEvent(event); void onVideoError(); }}
+      onwaiting={traceEvent}
+      onstalled={traceEvent}
+      onsuspend={traceEvent}
+      onabort={traceEvent}
+      onemptied={traceEvent}
     ></video>
   {/key}
 
