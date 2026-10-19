@@ -142,18 +142,27 @@ pub trait ProjectStore: Send + Sync {
             let _ = self.remove_file(&temporary);
             return Err(error);
         }
-        let backup = if self.exists(rel)? {
-            let backup = temporary_sibling(self, rel)?;
-            self.move_file(rel, &backup)?;
-            Some(backup)
-        } else {
-            None
+        let backup = (|| {
+            if self.exists(rel)? {
+                let backup = temporary_sibling(self, rel)?;
+                self.move_file(rel, &backup)?;
+                Ok(Some(backup))
+            } else {
+                Ok(None)
+            }
+        })();
+        let backup = match backup {
+            Ok(backup) => backup,
+            Err(error) => {
+                let _ = self.remove_file(&temporary);
+                return Err(error);
+            }
         };
         if let Err(error) = self.move_file(&temporary, rel) {
             if let Some(backup) = backup {
                 if let Err(restore) = self.move_file(&backup, rel) {
                     return Err(AppError::Other(format!(
-                        "{error}; original sidecar is at {backup}: {restore}"
+                        "{error}; original file is at {backup}: {restore}"
                     )));
                 }
             }
@@ -163,7 +172,7 @@ pub trait ProjectStore: Send + Sync {
         if let Some(backup) = backup {
             self.remove_file(&backup).map_err(|error| {
                 AppError::Other(format!(
-                    "sidecar was written; old content remains at {backup}: {error}"
+                    "file was written; old content remains at {backup}: {error}"
                 ))
             })?;
         }

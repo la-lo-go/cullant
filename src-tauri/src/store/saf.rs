@@ -178,6 +178,23 @@ impl SafStore {
         Ok(parent_doc)
     }
 
+    /// The children of the directory at `rel`, or `None` when it is absent.
+    fn list_dir(&self, rel: &str) -> AppResult<Option<Vec<SafEntry>>> {
+        let doc = match self.resolve(rel) {
+            Ok(doc) => doc,
+            Err(AppError::Other(error)) if error.starts_with("saf: path not found:") => {
+                return Ok(None)
+            }
+            Err(error) => return Err(error),
+        };
+        super::stats::backend_call();
+        let entries = self
+            .saf()
+            .list_children(&self.tree_uri, &doc)
+            .map_err(Self::err)?;
+        Ok(Some(entries))
+    }
+
     fn open_mode(&self, rel: &str, mode: &str) -> AppResult<std::fs::File> {
         let doc = self.resolve(rel)?;
         super::stats::backend_call();
@@ -491,22 +508,20 @@ impl ProjectStore for SafStore {
     fn stat(&self, rel: &str) -> AppResult<Option<(i64, i64)>> {
         super::validate_relative(rel)?;
         let (parent, name) = super::split_parent(rel);
-        let parent_doc = match self.resolve(parent) {
-            Ok(doc) => doc,
-            Err(AppError::Other(error)) if error.starts_with("saf: path not found:") => {
-                return Ok(None)
+        let listed = match self.list_dir(parent) {
+            Ok(entries) => entries,
+            // A cached id of a directory that was deleted outside the app.
+            Err(_) => {
+                self.cache_forget(parent)?;
+                self.list_dir(parent)?
             }
-            Err(error) => return Err(error),
         };
-        super::stats::backend_call();
-        let entries = self
-            .saf()
-            .list_children(&self.tree_uri, &parent_doc)
-            .map_err(Self::err)?;
-        Ok(entries
-            .into_iter()
-            .find(|e| e.name == name)
-            .map(|e| (e.size as i64, e.mtime / 1000)))
+        let found = listed.and_then(|entries| entries.into_iter().find(|e| e.name == name));
+        if found.is_none() {
+            // The cache must not claim a file that is gone.
+            self.cache_forget(rel)?;
+        }
+        Ok(found.map(|e| (e.size as i64, e.mtime / 1000)))
     }
 
     fn exists(&self, rel: &str) -> AppResult<bool> {

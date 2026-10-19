@@ -45,11 +45,18 @@ pub fn export_folder_copy(
     if EXPORTING.swap(true, Ordering::Acquire) {
         return Ok(ExportOutcome::Skipped);
     }
-    let snapshot = base.join(SNAPSHOT);
-    let result = export(db, store, base, &snapshot);
-    let _ = std::fs::remove_file(&snapshot);
-    EXPORTING.store(false, Ordering::Release);
-    result
+    let guard = ExportGuard(base.join(SNAPSHOT));
+    export(db, store, base, &guard.0)
+}
+
+/// Clears the running flag and the snapshot on every exit, a panic included.
+struct ExportGuard(std::path::PathBuf);
+
+impl Drop for ExportGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+        EXPORTING.store(false, Ordering::Release);
+    }
 }
 
 fn export(
@@ -121,6 +128,38 @@ mod tests {
             move_to(rel: &str, parent: &str) -> AppResult<String>;
             move_file(from: &str, to: &str) -> AppResult<()>;
             write_replacing(rel: &str, bytes: &[u8], mime: &str) -> AppResult<()>;
+            copy(from: &str, to: &str) -> AppResult<()>;
+            remove_file(rel: &str) -> AppResult<()>;
+            exists(rel: &str) -> AppResult<bool>;
+            stat(rel: &str) -> AppResult<Option<(i64, i64)>>;
+        }
+        fn mirrors_metadata(&self) -> bool {
+            true
+        }
+    }
+
+    /// A mirroring store whose writes always fail.
+    struct Failing(Mirroring);
+
+    impl ProjectStore for Failing {
+        fn write_replacing(&self, _rel: &str, _bytes: &[u8], _mime: &str) -> AppResult<()> {
+            Err(AppError::Other("write failed".into()))
+        }
+        fn list_recursive(
+            &self,
+            skip_dirs: &[&str],
+            progress: &mut dyn FnMut(usize),
+            cancelled: &dyn Fn() -> bool,
+        ) -> AppResult<Vec<crate::store::StoreEntry>> {
+            self.0.list_recursive(skip_dirs, progress, cancelled)
+        }
+        forward! {
+            open_read(rel: &str) -> AppResult<std::fs::File>;
+            open_write(rel: &str, mime: &str) -> AppResult<std::fs::File>;
+            create_dir_all(rel: &str) -> AppResult<()>;
+            rename_in_place(rel: &str, new_name: &str) -> AppResult<String>;
+            move_to(rel: &str, parent: &str) -> AppResult<String>;
+            move_file(from: &str, to: &str) -> AppResult<()>;
             copy(from: &str, to: &str) -> AppResult<()>;
             remove_file(rel: &str) -> AppResult<()>;
             exists(rel: &str) -> AppResult<bool>;
@@ -224,5 +263,18 @@ mod tests {
         let outcome = run(&base, &db, &store);
         EXPORTING.store(false, Ordering::SeqCst);
         assert_eq!(outcome, ExportOutcome::Skipped);
+    }
+
+    #[test]
+    fn a_failed_write_leaves_no_snapshot_and_no_stuck_flag() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, _tree, db, store) = setup();
+        let failing = Failing(store);
+        assert!(export_folder_copy(&db, &failing, base.path()).is_err());
+        assert!(!base.path().join(SNAPSHOT).exists());
+        assert_ne!(
+            export_folder_copy(&db, &failing.0, base.path()).unwrap(),
+            ExportOutcome::Skipped
+        );
     }
 }

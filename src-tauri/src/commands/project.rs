@@ -743,6 +743,21 @@ pub fn set_generate_video_thumbs(on: bool, state: State<'_, AppState>) {
         .store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Copy the live database into the project folder when the store cannot keep
+/// it there. Reports `written`, `unchanged` or `skipped`.
+#[tauri::command(async)]
+pub fn export_folder_copy(
+    state: State<'_, AppState>,
+) -> AppResult<crate::engine::mirror::ExportOutcome> {
+    let _lifecycle = lifecycle_lock(&state);
+    let (db, store, base) = {
+        let guard = state.project.lock().unwrap();
+        let p = guard.as_ref().ok_or(AppError::NoProject)?;
+        (p.db.clone(), p.store.clone(), p.root.clone())
+    };
+    crate::engine::mirror::export_folder_copy(&db, store.as_ref(), &base)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{percent_decode, project_display_name};
@@ -793,22 +808,4 @@ mod tests {
         );
         assert_eq!(percent_decode("%ZZbad"), "%ZZbad");
     }
-}
-
-/// Copy the live database into the project folder when the store cannot keep
-/// it there. Reports `written`, `unchanged` or `skipped`.
-#[tauri::command]
-pub async fn export_folder_copy(
-    state: State<'_, AppState>,
-) -> AppResult<crate::engine::mirror::ExportOutcome> {
-    let (db, store, base) = {
-        let guard = state.project.lock().unwrap();
-        let p = guard.as_ref().ok_or(AppError::NoProject)?;
-        (p.db.clone(), p.store.clone(), p.root.clone())
-    };
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::engine::mirror::export_folder_copy(&db, store.as_ref(), &base)
-    })
-    .await
-    .map_err(|e| AppError::Other(e.to_string()))?
 }
