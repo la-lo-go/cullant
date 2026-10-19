@@ -121,8 +121,11 @@ fn export(
     }
     // The copy of a device with other file ids replaces this one. A cache of
     // such a device holds keys that would match other files.
-    if previous.as_ref().is_some_and(|p| p.hash == 0) && store.exists(THUMBS_REL)? {
-        store.remove_dir_all(THUMBS_REL)?;
+    // The write is complete without it, and a cached SAF entry can be stale.
+    if previous.as_ref().is_some_and(|p| p.hash == 0) && store.exists(THUMBS_REL).unwrap_or(false) {
+        if let Err(error) = store.remove_dir_all(THUMBS_REL) {
+            tracing::warn!("could not remove the thumbnail cache of the folder: {error}");
+        }
     }
     store.create_dir_all(".cullant")?;
     // A desktop leaves these next to its database. Next to the new main file
@@ -156,7 +159,9 @@ fn read_record(base: &Path) -> Option<Record> {
 fn write_record(base: &Path, record: &Record) -> AppResult<()> {
     // A torn record would make this device's own copy look foreign.
     let temporary = base.join(format!("{RECORD}.tmp"));
-    std::fs::write(&temporary, serde_json::to_vec(record).unwrap())?;
+    let mut file = std::fs::File::create(&temporary)?;
+    std::io::Write::write_all(&mut file, &serde_json::to_vec(record).unwrap())?;
+    file.sync_all()?;
     std::fs::rename(&temporary, base.join(RECORD))?;
     Ok(())
 }
