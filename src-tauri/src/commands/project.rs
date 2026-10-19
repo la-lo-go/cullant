@@ -780,8 +780,6 @@ pub struct FolderCopyInfo {
 pub struct FolderCopyStat {
     #[serde(flatten)]
     fingerprint: crate::engine::mirror::Fingerprint,
-    /// Read only for a copy from another device.
-    schema_version: Option<i64>,
 }
 
 fn not_mirrored() -> AppError {
@@ -932,27 +930,8 @@ mod saf_copy {
         };
         let fingerprint = fingerprint(&entry, found.wal.as_ref());
         let is_own = mirror::is_own(&base, fingerprint);
-        // Reading the whole file through SAF is worth it only for a foreign copy.
-        let schema_version = if is_own {
-            None
-        } else {
-            let staging = base.join("inspect.tmp");
-            let _ = std::fs::remove_dir_all(&staging);
-            std::fs::create_dir_all(&staging)?;
-            let copy = staging.join("cullant.db");
-            let version = stage(app, tree, &entry, found.wal.as_ref(), &staging)
-                .map(|()| mirror::schema_version_of(&copy))
-                .unwrap_or(None);
-            let _ = std::fs::remove_dir_all(&staging);
-            // A project that was never opened has no data directory to keep.
-            let _ = std::fs::remove_dir(&base);
-            version
-        };
         Ok(FolderCopyInfo {
-            folder_copy: Some(FolderCopyStat {
-                fingerprint,
-                schema_version,
-            }),
+            folder_copy: Some(FolderCopyStat { fingerprint }),
             has_local,
             is_own,
         })

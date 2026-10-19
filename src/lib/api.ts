@@ -15,7 +15,6 @@ export interface FolderCopyStat {
   mtime: number;
   // Size and mtime of a non-empty WAL next to the copy.
   wal: [number, number] | null;
-  schemaVersion: number | null;
 }
 
 export interface FolderCopyInfo {

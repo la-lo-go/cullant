@@ -168,15 +168,6 @@ pub fn accept(base: &Path, fp: Fingerprint) -> AppResult<()> {
     write_record(base, &Record::new(0, fp))
 }
 
-/// `schema_meta.version` of a database file, or `None` when it cannot be read.
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub fn schema_version_of(path: &Path) -> Option<i64> {
-    let conn =
-        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .ok()?;
-    crate::db::migrations::current_version(&conn).ok()
-}
-
 /// Replace the live database with a copy taken from the folder. The copy sits
 /// in a private directory as `cullant.db`; a `cullant.db-wal` next to it is
 /// applied. Nothing in `base` changes unless the copy is sound.
@@ -558,7 +549,6 @@ mod tests {
             .unwrap()
             .execute("UPDATE schema_meta SET version = ?1", [newer])
             .unwrap();
-        assert_eq!(schema_version_of(&copy), Some(newer));
         let error = import_files(base.path(), &copy, fp(1, 1)).unwrap_err();
         assert!(error.to_string().contains("newer Cullant"));
         assert_eq!(count(&live(&base), "files"), 1);
