@@ -47,6 +47,8 @@ const RADIAL_ROTATION_KEY = "cullant.radial.rotation";
 const COLOR_LABEL_NAMES_KEY = "cullant.colorLabelNames";
 const GRID_PHOTO_FIT_KEY = "cullant.gridPhotoFit";
 const FOCAL_EXACT_KEY = "cullant.focalExact";
+const COPY_METADATA_ON_LEAVE_KEY = "cullant.copyMetadataOnLeave";
+const COPY_METADATA_MINUTES_KEY = "cullant.copyMetadataMinutes";
 
 export const COLOR_LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
 export type ColorLabel = (typeof COLOR_LABELS)[number];
@@ -59,6 +61,9 @@ export const BURST_GAP_CHOICES = [1, 2, 3, 5, 10] as const;
 /** Allowed auto-rescan intervals in minutes; 0 means off. Kept as a whitelist
  *  so a stale/garbled stored value can never yield a pathological interval. */
 export const AUTO_RESCAN_CHOICES = [0, 1, 5, 15] as const;
+
+/** Allowed periodic folder-copy intervals in minutes; 0 means off. */
+export const COPY_METADATA_CHOICES = [0, 5, 15, 30] as const;
 
 /** Loupe preview long edge in pixels. Mirrors PREVIEW_LONG_EDGE_CHOICES in the
  *  backend, which rejects anything else. Beyond sharpness this is a memory
@@ -100,6 +105,8 @@ export const DEFAULTS: {
   collapseBursts: boolean;
   burstMode: BurstMode;
   burstGapSeconds: number;
+  copyMetadataOnLeave: boolean;
+  copyMetadataMinutes: number;
 } = {
   progressiveLoupe: true,
   rememberSession: true,
@@ -120,6 +127,8 @@ export const DEFAULTS: {
   collapseBursts: true,
   burstMode: "fixed",
   burstGapSeconds: 2,
+  copyMetadataOnLeave: true,
+  copyMetadataMinutes: 0,
 };
 
 function loadBool(key: string, fallback: boolean): boolean {
@@ -340,6 +349,25 @@ class SettingsStore {
     localStorage.getItem(BURST_MODE_KEY) === '"adaptive"' ? "adaptive" : DEFAULTS.burstMode,
   );
   burstGapSeconds = $state<number>(loadChoice(BURST_GAP_KEY, BURST_GAP_CHOICES, DEFAULTS.burstGapSeconds));
+
+  /** Copy the project data into the project folder when leaving the project or
+   *  the app. Only meaningful where the live database is private (Android). */
+  copyMetadataOnLeave = $state<boolean>(
+    loadBool(COPY_METADATA_ON_LEAVE_KEY, DEFAULTS.copyMetadataOnLeave),
+  );
+  copyMetadataMinutes = $state<number>(
+    loadChoice(COPY_METADATA_MINUTES_KEY, COPY_METADATA_CHOICES, DEFAULTS.copyMetadataMinutes),
+  );
+
+  setCopyMetadataOnLeave(on: boolean) {
+    this.copyMetadataOnLeave = on;
+    save(COPY_METADATA_ON_LEAVE_KEY, on);
+  }
+
+  setCopyMetadataMinutes(minutes: number) {
+    this.copyMetadataMinutes = minutes;
+    save(COPY_METADATA_MINUTES_KEY, minutes);
+  }
 
   setBurstMode(mode: BurstMode) {
     this.burstMode = mode;

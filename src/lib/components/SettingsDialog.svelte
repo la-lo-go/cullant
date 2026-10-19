@@ -186,7 +186,7 @@
     return SETTINGS.filter((s) => s.kind !== "panel" && s.group === group && matches(s, query));
   }
 
-  const visibleGroups = $derived(GROUPS.filter((g) => rows(g.id).length > 0));
+  const visibleGroups = $derived(GROUPS.filter((g) => (g.when?.() ?? true) && rows(g.id).length > 0));
 
   /** The panels, gathered out of their groups. Each is a door onto a screenful
    *  of its own, so they belong with the other doors at the foot of the dialog
@@ -314,6 +314,21 @@
     } finally {
       if (catalog.project) await catalog.refreshPreviewReady();
       previewBusy = false;
+    }
+  }
+
+  let copyMsg = $state("");
+  let copyBusy = $state(false);
+
+  async function copyNow() {
+    copyBusy = true;
+    try {
+      const result = await api.exportFolderCopy();
+      copyMsg = result === "written" ? "Copied" : result === "unchanged" ? "No changes" : "Copy already running";
+    } catch (err) {
+      copyMsg = String(err);
+    } finally {
+      copyBusy = false;
     }
   }
 
@@ -464,6 +479,8 @@
             <option value={choice}>{choice} px · {PREVIEW_QUALITY_LABELS[choice]}</option>
           {/each}
         </select>
+      {:else if s.slot === "copyNow"}
+        <button class="wide" disabled={copyBusy} onclick={releasing(copyNow)}>Copy now</button>
       {/if}
     </svelte:element>
   {/if}
@@ -490,6 +507,9 @@
     {/each}
     {#if g.id === "quality" && previewMsg}
       <p class="hint">{previewMsg}</p>
+    {/if}
+    {#if g.id === "folderCopy" && copyMsg}
+      <p class="hint" role="status">{copyMsg}</p>
     {/if}
   </section>
 {/snippet}

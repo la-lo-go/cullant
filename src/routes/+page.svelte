@@ -500,6 +500,26 @@
     return () => clearInterval(id);
   });
 
+  // Copy the project data into the folder on a timer, and when the app goes to
+  // the background. Both do nothing unless the project mirrors its metadata.
+  $effect(() => {
+    const minutes = settings.copyMetadataMinutes;
+    if (!catalog.project?.mirrorsMetadata || minutes <= 0) return;
+    const id = setInterval(
+      () => void api.exportFolderCopy().catch((e) => console.error("folder copy failed", e)),
+      minutes * 60 * 1000,
+    );
+    return () => clearInterval(id);
+  });
+
+  $effect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") void catalog.copyToFolderOnLeave();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    return () => document.removeEventListener("visibilitychange", onHide);
+  });
+
   async function pickProject() {
     // Android has no filesystem folder dialog, so use the SAF tree picker, which
     // returns a content:// URI. Desktop uses the native directory dialog.

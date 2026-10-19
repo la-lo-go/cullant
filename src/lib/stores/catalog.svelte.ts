@@ -353,8 +353,21 @@ class CatalogStore {
     return this.transition(() => this.closeNow());
   }
 
+  /// Copy the project data into the project folder. Does nothing where the
+  /// live database already is the folder's. A failed copy is logged, never
+  /// thrown: leaving a project must not depend on it.
+  async copyToFolderOnLeave() {
+    if (!this.project?.mirrorsMetadata || !settings.copyMetadataOnLeave) return;
+    try {
+      await api.exportFolderCopy();
+    } catch (error) {
+      console.error("folder copy failed", error);
+    }
+  }
+
   private async closeNow() {
     await flushSessionSave();
+    await this.copyToFolderOnLeave();
     const generation = ++this.generation;
     this.eventRoot = null;
     try {

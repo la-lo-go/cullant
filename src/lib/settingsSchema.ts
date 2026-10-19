@@ -14,9 +14,10 @@
  */
 
 import { BOTTOM_BAR_ITEMS, DEFAULTS, settings } from "./stores/settings.svelte";
+import { catalog } from "./stores/catalog.svelte";
 import { DEFAULT_RADIAL_SLOTS, slotKey } from "./radial";
 import type { BurstMode } from "./bursts";
-import { AUTO_RESCAN_CHOICES, BURST_GAP_CHOICES } from "./stores/settings.svelte";
+import { AUTO_RESCAN_CHOICES, BURST_GAP_CHOICES, COPY_METADATA_CHOICES } from "./stores/settings.svelte";
 import Zap from "@lucide/svelte/icons/zap";
 import Eye from "@lucide/svelte/icons/eye";
 import Gauge from "@lucide/svelte/icons/gauge";
@@ -26,17 +27,20 @@ import Film from "@lucide/svelte/icons/film";
 import PanelBottom from "@lucide/svelte/icons/panel-bottom";
 import CircleDot from "@lucide/svelte/icons/circle-dot";
 import Palette from "@lucide/svelte/icons/palette";
+import FolderSync from "@lucide/svelte/icons/folder-sync";
 
-export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project";
+export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project" | "folderCopy";
 
 export type SubPanelId = "filmstripBadges" | "touchBar" | "radial" | "colorLabelNames";
 
-export type CustomSlot = "previewQuality";
+export type CustomSlot = "previewQuality" | "copyNow";
 
 export interface SettingGroup {
   id: GroupId;
   label: string;
   icon: typeof Zap;
+  /** Hide the whole group while this is false. */
+  when?: () => boolean;
 }
 
 /** Declaration order is display order, and it also decides which column each
@@ -48,6 +52,12 @@ export const GROUPS: SettingGroup[] = [
   { id: "quality", label: "Quality & performance", icon: Gauge },
   { id: "bursts", label: "Bursts", icon: Layers },
   { id: "project", label: "Project & files", icon: FolderOpen },
+  {
+    id: "folderCopy",
+    label: "Folder copy",
+    icon: FolderSync,
+    when: () => catalog.project?.mirrorsMetadata === true,
+  },
 ];
 
 interface SettingBase {
@@ -385,6 +395,39 @@ export const SETTINGS: Setting[] = [
     set: (v) => settings.setRememberSession(v),
     def: DEFAULTS.rememberSession,
   }),
+
+  toggle({
+    id: "copyMetadataOnLeave",
+    group: "folderCopy",
+    label: "Copy when I leave",
+    info: "Cullant keeps this project's data on this device. Copy it to the .cullant folder in the project when you close the project or leave the app, so other devices can read it.",
+    keywords: "metadata database sync backup mirror close background",
+    get: () => settings.copyMetadataOnLeave,
+    set: (v) => settings.setCopyMetadataOnLeave(v),
+    def: DEFAULTS.copyMetadataOnLeave,
+  }),
+  numberChoice({
+    id: "copyMetadataMinutes",
+    group: "folderCopy",
+    label: "Copy every",
+    info: "Also copy the project data on a timer while the project is open. Nothing is written when the data did not change.",
+    keywords: "metadata database sync backup mirror interval minutes off",
+    get: () => settings.copyMetadataMinutes,
+    set: (v) => settings.setCopyMetadataMinutes(v),
+    def: DEFAULTS.copyMetadataMinutes,
+    options: COPY_METADATA_CHOICES.map((m) => ({ value: m, label: m === 0 ? "Off" : `${m} min` })),
+  }),
+  {
+    kind: "custom",
+    slot: "copyNow",
+    id: "copyNow",
+    group: "folderCopy",
+    label: "Copy to folder",
+    info: "Copy the project data to the .cullant folder in the project now.",
+    keywords: "metadata database sync backup mirror export",
+    modified: () => false,
+    reset: () => {},
+  },
 ];
 
 /** Case-insensitive match over label, info and keywords, so searching a concept
