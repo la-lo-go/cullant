@@ -323,8 +323,9 @@ function filterBlock(item: ItemLite): MenuNode[] {
         .map((d) => ({
           kind: "item" as const,
           label: d.label,
-          // The header's own text, so the row names the section it creates.
-          value: d.of(item, session.groupContext).label,
+          // The header's own text, minus a leading type word ("ISO 400", "Burst · 3
+          // shots") that the row already shows as its label.
+          value: d.of(item, session.groupContext).label.replace(new RegExp(`^${d.label}[ ·]+`), ""),
           checked: session.groupBy.length === 1 && session.groupBy[0] === d.key,
           run: () =>
             (session.groupBy =
