@@ -121,6 +121,7 @@ interface SavedSession {
 }
 
 const SHOW_NAMES_KEY = "cullant.showNames";
+const SHOW_EXTENSIONS_KEY = "cullant.showExtensions";
 const SHOW_FILMSTRIP_KEY = "cullant.showFilmstrip";
 const FOLDER_TREE_WIDTH_KEY = "cullant.folderTreeWidth";
 const FILMSTRIP_HEIGHT_KEY = "cullant.filmstripHeight";
@@ -478,6 +479,18 @@ class SessionStore {
     this.showNames = !this.showNames;
     try {
       localStorage.setItem(SHOW_NAMES_KEY, JSON.stringify(this.showNames));
+    } catch {
+      // persistence is best-effort
+    }
+  }
+
+  /** Keep the extension in the grid file names (persisted). Only used while `showNames` is on. */
+  showExtensions = $state<boolean>(loadBoolPref(SHOW_EXTENSIONS_KEY, true));
+
+  toggleShowExtensions() {
+    this.showExtensions = !this.showExtensions;
+    try {
+      localStorage.setItem(SHOW_EXTENSIONS_KEY, JSON.stringify(this.showExtensions));
     } catch {
       // persistence is best-effort
     }

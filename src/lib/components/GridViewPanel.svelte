@@ -108,6 +108,15 @@
       <span>Show file names</span>
       <span class="pill"></span>
     </button>
+    <button
+      class="toggle"
+      class:on={session.showExtensions}
+      disabled={!session.showNames}
+      onclick={() => session.toggleShowExtensions()}
+    >
+      <span>Show file extensions</span>
+      <span class="pill"></span>
+    </button>
   </section>
 
   {#if hasRaws}
@@ -385,6 +394,11 @@
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
+  }
+
+  .toggle:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 
   .pill {

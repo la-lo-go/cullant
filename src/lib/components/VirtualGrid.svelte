@@ -1534,7 +1534,7 @@
           </div>
         </div>
         {#if session.showNames}
-          <span class="name">{v.item.name}.{v.item.ext}</span>
+          <span class="name" title="{v.item.name}.{v.item.ext}">{v.item.name}{session.showExtensions ? `.${v.item.ext}` : ""}</span>
         {/if}
       </div>
     {/each}
