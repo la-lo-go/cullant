@@ -156,7 +156,7 @@ impl ProjectStore for LocalFsStore {
         Ok(())
     }
 
-    fn write_sidecar(&self, rel: &str, bytes: &[u8]) -> AppResult<()> {
+    fn write_replacing(&self, rel: &str, bytes: &[u8], _mime_type: &str) -> AppResult<()> {
         use std::io::Write;
         let destination = self.abs(rel)?;
         let temporary = super::temporary_sibling(self, rel)?;
@@ -201,6 +201,17 @@ impl ProjectStore for LocalFsStore {
 
     fn exists(&self, rel: &str) -> AppResult<bool> {
         Ok(self.abs(rel)?.try_exists()?)
+    }
+
+    fn stat(&self, rel: &str) -> AppResult<Option<(i64, i64)>> {
+        match std::fs::metadata(self.abs(rel)?) {
+            Ok(meta) => Ok(Some((
+                meta.len() as i64,
+                meta.modified().map(unix_secs).unwrap_or(0),
+            ))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     fn local_path(&self, rel: &str) -> Option<PathBuf> {

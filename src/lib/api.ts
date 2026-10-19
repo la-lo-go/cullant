@@ -18,6 +18,8 @@ export interface ProjectInfo {
   dbPath: string;
   schemaVersion: number;
   fileCount: number;
+  /** True when the live database is private and a copy goes into the folder. */
+  mirrorsMetadata: boolean;
 }
 
 /** Whether a remembered project's folder is reachable, and if not, why. */
@@ -313,6 +315,9 @@ export const api = {
   // Discard everything stored about the open project and read the folder again
   // from nothing. Never touches the photos — only Cullant's own data directory.
   reimportProject: () => invoke<ProjectInfo>("reimport_project"),
+  // Android: copy the live database into the project folder.
+  exportFolderCopy: () =>
+    invoke<"written" | "unchanged" | "skipped">("export_folder_copy"),
   // Push the "pregenerate video thumbnails" preference to the backend; the
   // ingest pass reads it before its final (slow) video-poster tier.
   setGenerateVideoThumbs: (on: boolean) => invoke("set_generate_video_thumbs", { on }),

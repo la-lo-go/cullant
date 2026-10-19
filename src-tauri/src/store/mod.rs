@@ -124,10 +124,16 @@ pub trait ProjectStore: Send + Sync {
     }
 
     fn write_sidecar(&self, rel: &str, bytes: &[u8]) -> AppResult<()> {
+        self.write_replacing(rel, bytes, "application/xml")
+    }
+
+    /// Write `bytes` to `rel` through a temporary file, so a reader never sees
+    /// a half-written file and a failure keeps the old content.
+    fn write_replacing(&self, rel: &str, bytes: &[u8], mime_type: &str) -> AppResult<()> {
         use std::io::Write;
         let temporary = temporary_sibling(self, rel)?;
         let staged = (|| {
-            let mut file = self.open_write(&temporary, "application/xml")?;
+            let mut file = self.open_write(&temporary, mime_type)?;
             file.write_all(bytes)?;
             file.sync_all()?;
             Ok(())
@@ -170,6 +176,20 @@ pub trait ProjectStore: Send + Sync {
     fn remove_file(&self, rel: &str) -> AppResult<()>;
 
     fn exists(&self, rel: &str) -> AppResult<bool>;
+
+    /// Size in bytes and mtime in whole seconds of the file at `rel`, or `None`
+    /// when it is absent.
+    fn stat(&self, _rel: &str) -> AppResult<Option<(i64, i64)>> {
+        Err(AppError::Other(
+            "stat is not supported by this store".into(),
+        ))
+    }
+
+    /// True when the live database cannot live in the project folder, so the app
+    /// keeps a copy of it there.
+    fn mirrors_metadata(&self) -> bool {
+        false
+    }
 
     /// The real OS path for `rel`, if this backend has one. `Some` only for the
     /// local filesystem; `None` for SAF. Used by the few operations that must

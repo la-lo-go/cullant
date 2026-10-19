@@ -22,6 +22,9 @@ pub struct ProjectInfo {
     pub db_path: String,
     pub schema_version: i64,
     pub file_count: i64,
+    /// True when the live database is private and the app copies it into the
+    /// project folder (Android).
+    pub mirrors_metadata: bool,
 }
 
 /// Decode a percent-encoded string (`%20` -> space, `%3A` -> `:`), tolerating
@@ -387,6 +390,7 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
         db_path,
         schema_version,
         file_count,
+        mirrors_metadata: false,
     })
 }
 
@@ -487,16 +491,17 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
         db_path,
         schema_version,
         file_count,
+        mirrors_metadata: true,
     })
 }
 
 #[tauri::command]
 pub fn current_project(state: State<'_, AppState>) -> AppResult<Option<ProjectInfo>> {
-    let db = {
+    let (db, mirrors_metadata) = {
         let guard = state.project.lock().unwrap();
         match guard.as_ref() {
             None => return Ok(None),
-            Some(p) => p.db.clone(),
+            Some(p) => (p.db.clone(), p.store.mirrors_metadata()),
         }
     };
     let db_path = db.path().to_string_lossy().into_owned();
@@ -516,6 +521,7 @@ pub fn current_project(state: State<'_, AppState>) -> AppResult<Option<ProjectIn
         db_path,
         schema_version,
         file_count,
+        mirrors_metadata,
     }))
 }
 
@@ -787,4 +793,22 @@ mod tests {
         );
         assert_eq!(percent_decode("%ZZbad"), "%ZZbad");
     }
+}
+
+/// Copy the live database into the project folder when the store cannot keep
+/// it there. Reports `written`, `unchanged` or `skipped`.
+#[tauri::command]
+pub async fn export_folder_copy(
+    state: State<'_, AppState>,
+) -> AppResult<crate::engine::mirror::ExportOutcome> {
+    let (db, store, base) = {
+        let guard = state.project.lock().unwrap();
+        let p = guard.as_ref().ok_or(AppError::NoProject)?;
+        (p.db.clone(), p.store.clone(), p.root.clone())
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::engine::mirror::export_folder_copy(&db, store.as_ref(), &base)
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?
 }

@@ -484,6 +484,31 @@ impl ProjectStore for SafStore {
         Ok(())
     }
 
+    fn mirrors_metadata(&self) -> bool {
+        true
+    }
+
+    fn stat(&self, rel: &str) -> AppResult<Option<(i64, i64)>> {
+        super::validate_relative(rel)?;
+        let (parent, name) = super::split_parent(rel);
+        let parent_doc = match self.resolve(parent) {
+            Ok(doc) => doc,
+            Err(AppError::Other(error)) if error.starts_with("saf: path not found:") => {
+                return Ok(None)
+            }
+            Err(error) => return Err(error),
+        };
+        super::stats::backend_call();
+        let entries = self
+            .saf()
+            .list_children(&self.tree_uri, &parent_doc)
+            .map_err(Self::err)?;
+        Ok(entries
+            .into_iter()
+            .find(|e| e.name == name)
+            .map(|e| (e.size as i64, e.mtime / 1000)))
+    }
+
     fn exists(&self, rel: &str) -> AppResult<bool> {
         super::validate_relative(rel)?;
         if rel.is_empty() {
