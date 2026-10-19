@@ -1,3 +1,49 @@
+<script lang="ts" module>
+  import { SvelteMap } from "svelte/reactivity";
+
+  // The gallery unmounts while a project is open, and the webview caches no
+  // cullant:// response, so each return home fetched every thumbnail again and
+  // the cards flashed blank. Each loaded thumbnail is kept as a bitmap and drawn
+  // on a canvas, which paints in the card's first frame. When a slot's URL
+  // changes (the project was opened), the card keeps the old bitmap until the
+  // new one is decoded. One entry per card slot.
+  const copies = new SvelteMap<string, { src: string; bitmap: ImageBitmap }>();
+  const pending = new Set<string>();
+
+  async function copyThumb(key: string, src: string, loaded?: HTMLImageElement) {
+    if (copies.get(key)?.src === src || pending.has(key)) return;
+    pending.add(key);
+    try {
+      let img = loaded;
+      if (!img) {
+        img = new Image();
+        img.src = src;
+        await img.decode();
+      }
+      const bitmap = await createImageBitmap(img);
+      copies.get(key)?.bitmap.close();
+      copies.set(key, { src, bitmap });
+    } catch {
+      // The slot has no thumbnail any more: drop the copy, so the card shows
+      // what the server has.
+      copies.get(key)?.bitmap.close();
+      copies.delete(key);
+    } finally {
+      pending.delete(key);
+    }
+  }
+
+  function paint(canvas: HTMLCanvasElement, bitmap: ImageBitmap) {
+    const draw = (b: ImageBitmap) => {
+      canvas.width = b.width;
+      canvas.height = b.height;
+      canvas.getContext("2d")?.drawImage(b, 0, 0);
+    };
+    draw(bitmap);
+    return { update: draw };
+  }
+</script>
+
 <script lang="ts">
   import { recentThumbUrl, type RecentProject, type StorageKind } from "../api";
   import { flip } from "svelte/animate";
@@ -14,6 +60,18 @@
   let { onopen }: { onopen: (path: string) => void } = $props();
 
   const PREVIEW_SLOTS = [0, 1, 2];
+
+  // A slot whose URL changed still shows its old copy; fetch the new one.
+  $effect(() => {
+    for (const project of recent.list) {
+      for (const slot of PREVIEW_SLOTS) {
+        const key = `${project.path}#${slot}`;
+        const url = recentThumbUrl(project.path, slot, project.lastOpened);
+        const copy = copies.get(key);
+        if (copy && copy.src !== url) void copyThumb(key, url);
+      }
+    }
+  });
 
   // The list may reorder after the first paint (the refresh on mount), so cards
   // glide to their new place instead of jumping.
@@ -166,6 +224,9 @@
             <div class="preview">
               {#if st.state === "ok"}
                 {#each PREVIEW_SLOTS as slot, i}
+                  {@const key = `${project.path}#${slot}`}
+                  {@const url = recentThumbUrl(project.path, slot, project.lastOpened)}
+                  {@const copy = copies.get(key)}
                   <!-- The placeholder sits under its thumbnail and the opaque
                        thumbnail covers it. Hiding a thumbnail that never arrives
                        therefore reveals a coloured card instead of a hole — for a
@@ -191,12 +252,17 @@
                     </svg>
                   </span>
                   <span class="peek peek-{i} thumbnail">
-                    <img
-                      src={recentThumbUrl(project.path, slot, project.lastOpened)}
-                      alt=""
-                      loading="lazy"
-                      onerror={(e) => { if (e.currentTarget.parentElement) e.currentTarget.parentElement.style.display = "none"; }}
-                    />
+                    {#if copy}
+                      <canvas use:paint={copy.bitmap}></canvas>
+                    {:else}
+                      <img
+                        src={url}
+                        alt=""
+                        loading="lazy"
+                        onload={(e) => copyThumb(key, url, e.currentTarget as HTMLImageElement)}
+                        onerror={(e) => { if (e.currentTarget.parentElement) e.currentTarget.parentElement.style.display = "none"; }}
+                      />
+                    {/if}
                   </span>
                 {/each}
               {:else if st.state === "disconnected"}
@@ -350,8 +416,8 @@
   }
 
   /* Dim the back photos so their corners recede behind the front one. */
-  .peek-0 img,
-  .peek-2 img {
+  .peek-0 :is(img, canvas),
+  .peek-2 :is(img, canvas) {
     filter: brightness(0.62);
     transition: filter 180ms ease-out;
   }
@@ -368,8 +434,8 @@
     transform: translateX(28px) translateY(-3px) rotate(8deg);
   }
 
-  .card:hover .peek-0 img,
-  .card:hover .peek-2 img {
+  .card:hover .peek-0 :is(img, canvas),
+  .card:hover .peek-2 :is(img, canvas) {
     filter: brightness(0.9);
   }
 
@@ -408,7 +474,9 @@
     pointer-events: none;
   }
 
-  .thumbnail img {
+  .thumbnail img,
+  .thumbnail canvas {
+    display: block;
     width: 100%;
     height: 100%;
     object-fit: cover;
