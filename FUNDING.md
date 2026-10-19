@@ -15,11 +15,6 @@ These are worth more than they sound.
   find it.
 - **Report bugs and ideas.** A precise report with the camera model, the file
   and what you expected saves hours of guessing.
-- **Send RAW files from your cameras.** This is the single most useful thing
-  right now. Every camera body writes RAW slightly differently, and the decoding
-  path cannot be tested properly against bodies nobody has files from. Open an
-  issue with the `raw-samples` label and a couple of frames straight off the
-  card.
 - **Tell another photographer.** Word of mouth is the only distribution this has.
 
 ## Ways with money

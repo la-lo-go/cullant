@@ -14,7 +14,6 @@
 
 import Star from "@lucide/svelte/icons/star";
 import Bug from "@lucide/svelte/icons/bug";
-import Aperture from "@lucide/svelte/icons/aperture";
 import Heart from "@lucide/svelte/icons/heart";
 import Coffee from "@lucide/svelte/icons/coffee";
 import CreditCard from "@lucide/svelte/icons/credit-card";
@@ -46,13 +45,6 @@ export const FREE_WAYS: SupportChannel[] = [
     note: "A precise report is worth more than an afternoon of guessing",
     url: `${REPO_URL}/issues/new`,
     icon: Bug,
-  },
-  {
-    id: "raws",
-    label: "Send RAWs from your camera",
-    note: "Every body decodes differently, and testing needs files I do not own",
-    url: `${REPO_URL}/issues/new?labels=raw-samples`,
-    icon: Aperture,
   },
 ];
 
