@@ -165,8 +165,9 @@ try {
         return Number(getComputedStyle(warning.parentElement).zIndex) > Number(getComputedStyle(shortcuts.parentElement).zIndex) && warning.contains(document.activeElement);
       }), "The warning is hidden behind shortcut help or has no modal focus");
       await evaluate(() => { mg.view.shortcutsOpen = false; });
-      assert(await evaluate(() => mg.runtimeTools.pending.map(issue => issue.id).sort().join() === "ffmpeg,ffprobe,heif,hevc"), "Missing desktop media tools are not reported");
-      assert(await evaluate(() => document.querySelector('[aria-label="Missing media tools"]')?.textContent.includes("does not report HEVC playback support")), "The HEVC warning overstates package detection");
+      assert(await evaluate(() => mg.runtimeTools.pending.map(issue => issue.id).sort().join() === "ffmpeg,windows"), "Missing tools are not grouped by installation");
+      assert(await evaluate(() => mg.runtimeTools.pending.every(issue => issue.effects.length === 2)), "A group does not list each affected feature");
+      assert(await evaluate(() => document.querySelectorAll('[aria-label="Missing media tools"] li').length === 4), "The dialog does not list the affected features");
       const shot = await send("Page.captureScreenshot", { format: "png" });
       await writeFile(join(output, "missing-media-tools.png"), Buffer.from(shot.data, "base64"));
       await evaluate(async () => { mg.probeStatus = { ...mg.probeStatus, platform: "android" }; await mg.runtimeTools.check(); });
@@ -192,13 +193,13 @@ try {
     }
   });
   await check("Missing tools can be acknowledged and suppressed per tool", async () => {
-    await evaluate(() => { mg.session.viewPanelOpen = false; mg.runtimeTools.offer([{ id: "ffmpeg", name: "FFmpeg", detail: "Video thumbnails need FFmpeg on PATH.", url: "https://ffmpeg.org/download.html" }]); });
+    await evaluate(() => { mg.session.viewPanelOpen = false; mg.runtimeTools.offer({ platform: "linux", ffmpegPresent: false, ffmpegMajor: null, ffprobePresent: true, heifAvailable: true, hasHeif: false, hasVideos: true, hasHevc: false }); });
     await settle();
     assert(await evaluate(() => !!document.querySelector('[aria-label="Missing media tools"]')), "The tool warning is missing");
     await evaluate(() => document.querySelector('[aria-label="Missing media tools"] button[data-action="ok"]').click());
     await settle();
     assert(await evaluate(() => !document.querySelector('[aria-label="Missing media tools"]')), "OK does not close the warning");
-    await evaluate(() => { mg.runtimeTools.offer([{ id: "ffprobe", name: "FFprobe", detail: "Video properties need FFprobe.", url: "https://ffmpeg.org/download.html" }]); });
+    await evaluate(() => { mg.runtimeTools.offer({ platform: "linux", ffmpegPresent: true, ffmpegMajor: 7, ffprobePresent: false, heifAvailable: true, hasHeif: false, hasVideos: true, hasHevc: false }); });
     await settle();
     await evaluate(() => document.querySelector('[aria-label="Missing media tools"] button[data-action="suppress"]').click());
     assert(await evaluate(() => JSON.parse(localStorage.getItem("cullant.hiddenRuntimeTools")).includes("ffprobe")), "Suppression is not saved");

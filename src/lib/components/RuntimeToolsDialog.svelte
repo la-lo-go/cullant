@@ -37,11 +37,14 @@
         {#each runtimeTools.pending as issue (issue.id)}
           <section>
             <h3>{issue.name}</h3>
+            <p class="lead">Without it, these do not work:</p>
+            <ul>
+              {#each issue.effects as effect (effect)}<li>{effect}</li>{/each}
+            </ul>
             <p>{issue.detail}</p>
-            <button class="link" onclick={() => void openUrl(issue.url)}><ExternalLink size={14} />Installation page</button>
-            {#if issue.extraLink}
-              <button class="link" onclick={() => void openUrl(issue.extraLink!.url)}><ExternalLink size={14} />{issue.extraLink.name}</button>
-            {/if}
+            {#each issue.links as link (link.url)}
+              <button class="link" onclick={() => void openUrl(link.url)}><ExternalLink size={14} />{link.name}</button>
+            {/each}
           </section>
         {/each}
       </div>
@@ -62,7 +65,10 @@
   h3 { margin: 0 0 6px; font-size: 13px; }
   .body { overflow-y: auto; padding: 16px; }
   section + section { margin-top: 20px; }
-  p { color: #bbb; font-size: 12px; line-height: 1.5; margin: 0 0 8px; }
+  p, li { color: #bbb; font-size: 12px; line-height: 1.5; margin: 0 0 8px; }
+  .lead { margin-bottom: 4px; }
+  ul { margin: 0 0 8px; padding-left: 18px; }
+  li { margin: 0 0 2px; }
   button { font: inherit; cursor: pointer; border: 1px solid var(--border); background: var(--control); color: inherit; padding: 7px 12px; border-radius: 6px; font-size: 12px; }
   .close, .link { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; }
   .close { padding: 5px; }
