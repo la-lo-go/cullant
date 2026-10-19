@@ -73,10 +73,7 @@ fn export(
     })?;
     let bytes = std::fs::read(snapshot)?;
     let hash = xxhash_rust::xxh3::xxh3_64(&bytes);
-    let record_path = base.join(RECORD);
-    let previous: Option<Record> = std::fs::read(&record_path)
-        .ok()
-        .and_then(|raw| serde_json::from_slice(&raw).ok());
+    let previous = read_record(base);
     // Always asked: on SAF it also drops cached entries of a copy or folder that
     // was deleted outside the app, so the write below cannot trust them.
     let on_disk = store.stat(COPY_REL)?;
@@ -91,9 +88,109 @@ fn export(
     let (size, mtime) = store
         .stat(COPY_REL)?
         .ok_or_else(|| AppError::Other("the folder copy is missing after the write".into()))?;
-    let record = Record { hash, size, mtime };
-    std::fs::write(&record_path, serde_json::to_vec(&record).unwrap())?;
+    write_record(base, &Record { hash, size, mtime })?;
     Ok(ExportOutcome::Written)
+}
+
+fn read_record(base: &Path) -> Option<Record> {
+    let raw = std::fs::read(base.join(RECORD)).ok()?;
+    serde_json::from_slice(&raw).ok()
+}
+
+fn write_record(base: &Path, record: &Record) -> AppResult<()> {
+    std::fs::write(base.join(RECORD), serde_json::to_vec(record).unwrap())?;
+    Ok(())
+}
+
+/// True when this device wrote the folder copy it sees now.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn is_own(base: &Path, size: i64, mtime: i64) -> bool {
+    read_record(base).is_some_and(|r| r.size == size && r.mtime == mtime)
+}
+
+/// The user kept this device's data. Remember the folder copy so it does not
+/// ask again. The hash is 0, so the next export writes over the copy.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn accept(base: &Path, size: i64, mtime: i64) -> AppResult<()> {
+    write_record(
+        base,
+        &Record {
+            hash: 0,
+            size,
+            mtime,
+        },
+    )
+}
+
+/// `schema_meta.version` of a database file, or `None` when it cannot be read.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn schema_version_of(path: &Path) -> Option<i64> {
+    let conn =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
+    crate::db::migrations::current_version(&conn).ok()
+}
+
+/// Replace the live database with a copy taken from the folder. The copy sits
+/// in a private directory as `cullant.db`; a `cullant.db-wal` next to it is
+/// applied. Nothing in `base` changes unless the copy is sound.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub fn import_files(
+    base: &Path,
+    copied_db: &Path,
+    folder_size: i64,
+    folder_mtime: i64,
+) -> AppResult<()> {
+    let hash = xxhash_rust::xxh3::xxh3_64(&std::fs::read(copied_db)?);
+    prepare_copy(copied_db)?;
+    let live = base.join(".cullant");
+    std::fs::create_dir_all(&live)?;
+    for name in ["cullant.db", "cullant.db-wal", "cullant.db-shm"] {
+        ignore_missing(std::fs::remove_file(live.join(name)))?;
+    }
+    // The cache keys hold file ids of the old database.
+    ignore_missing(std::fs::remove_dir_all(live.join("thumbs")))?;
+    std::fs::rename(copied_db, live.join("cullant.db"))?;
+    write_record(
+        base,
+        &Record {
+            hash,
+            size: folder_size,
+            mtime: folder_mtime,
+        },
+    )
+}
+
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn ignore_missing(result: std::io::Result<()>) -> AppResult<()> {
+    match result {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
+    }
+}
+
+/// Check the copy, then make it one plain file for this device.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+fn prepare_copy(path: &Path) -> AppResult<()> {
+    let conn = rusqlite::Connection::open(path)?;
+    let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+    if check != "ok" {
+        return Err(AppError::Other(
+            "The data in this folder is damaged.".into(),
+        ));
+    }
+    let version = crate::db::migrations::current_version(&conn)?;
+    if version > crate::db::migrations::latest_version() {
+        return Err(AppError::Other(
+            "This folder data needs a newer Cullant.".into(),
+        ));
+    }
+    // The cached ids belong to the device that wrote the copy.
+    if version >= 2 {
+        conn.execute("DELETE FROM saf_documents", [])?;
+    }
+    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -282,5 +379,140 @@ mod tests {
             export_folder_copy(&db, &failing.0, base.path()).unwrap(),
             ExportOutcome::Skipped
         );
+    }
+
+    /// A database file with `rows` files and one `saf_documents` row, in its own dir.
+    fn copy_with_rows(rows: i64) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(dir.path()).unwrap();
+        db.call(move |conn| {
+            conn.execute("INSERT INTO groups (created_at) VALUES (0)", [])?;
+            for i in 0..rows {
+                conn.execute(
+                    "INSERT INTO files (rel_path, basename, dir, ext, kind, size, mtime, group_id)
+                     VALUES (?1, 'a', '', 'jpg', 1, 1, 1, 1)",
+                    [format!("{i}.jpg")],
+                )?;
+            }
+            conn.execute(
+                "INSERT INTO saf_documents (rel_path, document_id, is_dir) VALUES ('a', 'x', 0)",
+                [],
+            )?;
+            conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")?;
+            Ok(())
+        })
+        .unwrap();
+        drop(db);
+        let path = dir.path().join("cullant.db");
+        std::fs::copy(dir.path().join(".cullant").join("cullant.db"), &path).unwrap();
+        (dir, path)
+    }
+
+    fn count(path: &Path, table: &str) -> i64 {
+        rusqlite::Connection::open(path)
+            .unwrap()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn live(base: &tempfile::TempDir) -> std::path::PathBuf {
+        base.path().join(".cullant").join("cullant.db")
+    }
+
+    #[test]
+    fn a_copy_is_own_only_with_the_recorded_size_and_mtime() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, _tree, db, store) = setup();
+        assert!(!is_own(base.path(), 1, 1));
+        run(&base, &db, &store);
+        let r = read_record(base.path()).unwrap();
+        assert!(is_own(base.path(), r.size, r.mtime));
+        assert!(!is_own(base.path(), r.size + 1, r.mtime));
+        assert!(!is_own(base.path(), r.size, r.mtime + 1));
+    }
+
+    #[test]
+    fn an_accepted_copy_is_own_and_the_next_export_writes() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, _tree, db, store) = setup();
+        run(&base, &db, &store);
+        let r = read_record(base.path()).unwrap();
+        std::fs::remove_file(base.path().join(RECORD)).unwrap();
+        accept(base.path(), r.size, r.mtime).unwrap();
+        assert!(is_own(base.path(), r.size, r.mtime));
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+    }
+
+    #[test]
+    fn an_import_replaces_the_live_database_and_resets_caches() {
+        let (base, _tree, db, _store) = setup();
+        drop(db);
+        let thumbs = base.path().join(".cullant").join("thumbs");
+        std::fs::create_dir_all(&thumbs).unwrap();
+        std::fs::write(thumbs.join("t.jpg"), b"x").unwrap();
+        let (_dir, copy) = copy_with_rows(3);
+        import_files(base.path(), &copy, 77, 88).unwrap();
+        assert_eq!(count(&live(&base), "files"), 3);
+        assert_eq!(count(&live(&base), "saf_documents"), 0);
+        assert!(!thumbs.exists());
+        assert!(!copy.exists());
+        assert!(is_own(base.path(), 77, 88));
+    }
+
+    #[test]
+    fn rows_that_exist_only_in_the_wal_are_imported() {
+        let (base, _tree, db, _store) = setup();
+        drop(db);
+        let src = tempfile::tempdir().unwrap();
+        let (_dir, seed) = copy_with_rows(0);
+        let origin = src.path().join("cullant.db");
+        std::fs::copy(seed, &origin).unwrap();
+        let conn = rusqlite::Connection::open(&origin).unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        conn.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        conn.execute(
+            "INSERT INTO files (rel_path, basename, dir, ext, kind, size, mtime, group_id)
+             VALUES ('w.jpg', 'w', '', 'jpg', 1, 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        let staged = tempfile::tempdir().unwrap();
+        let copy = staged.path().join("cullant.db");
+        std::fs::copy(&origin, &copy).unwrap();
+        std::fs::copy(
+            src.path().join("cullant.db-wal"),
+            staged.path().join("cullant.db-wal"),
+        )
+        .unwrap();
+        drop(conn);
+        import_files(base.path(), &copy, 1, 1).unwrap();
+        assert_eq!(count(&live(&base), "files"), 1);
+    }
+
+    #[test]
+    fn a_newer_schema_is_refused_and_the_live_database_stays() {
+        let (base, _tree, db, _store) = setup();
+        drop(db);
+        let (_dir, copy) = copy_with_rows(2);
+        let newer = crate::db::migrations::latest_version() + 1;
+        rusqlite::Connection::open(&copy)
+            .unwrap()
+            .execute("UPDATE schema_meta SET version = ?1", [newer])
+            .unwrap();
+        assert_eq!(schema_version_of(&copy), Some(newer));
+        let error = import_files(base.path(), &copy, 1, 1).unwrap_err();
+        assert!(error.to_string().contains("newer Cullant"));
+        assert_eq!(count(&live(&base), "files"), 1);
+    }
+
+    #[test]
+    fn a_damaged_file_is_refused_and_the_live_database_stays() {
+        let (base, _tree, db, _store) = setup();
+        drop(db);
+        let junk = tempfile::tempdir().unwrap();
+        let copy = junk.path().join("cullant.db");
+        std::fs::write(&copy, vec![7u8; 4096]).unwrap();
+        assert!(import_files(base.path(), &copy, 1, 1).is_err());
+        assert_eq!(count(&live(&base), "files"), 1);
     }
 }

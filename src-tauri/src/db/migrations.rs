@@ -222,6 +222,12 @@ const MIGRATIONS: &[&str] = &[
     "#,
 ];
 
+/// The schema version this build writes. A database with a higher version
+/// comes from a newer Cullant.
+pub fn latest_version() -> i64 {
+    MIGRATIONS.len() as i64
+}
+
 pub fn run(conn: &mut Connection) -> AppResult<()> {
     let current: i64 = conn
         .query_row("SELECT version FROM schema_meta", [], |row| row.get(0))

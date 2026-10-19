@@ -758,6 +758,209 @@ pub fn export_folder_copy(
     crate::engine::mirror::export_folder_copy(&db, store.as_ref(), &base)
 }
 
+/// What the project folder holds in `.cullant/cullant.db`, for a store that
+/// mirrors the database into the folder.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub struct FolderCopyInfo {
+    folder_copy: Option<FolderCopyStat>,
+    /// This device already has a live database for the folder.
+    has_local: bool,
+    /// This device wrote the copy. The user has nothing to decide.
+    is_own: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub struct FolderCopyStat {
+    size: i64,
+    mtime: i64,
+    /// Read only for a copy from another device.
+    schema_version: Option<i64>,
+}
+
+fn not_mirrored() -> AppError {
+    AppError::Other("this project keeps its database in the folder".into())
+}
+
+/// Before an open: does the folder hold a database this device did not write?
+/// `None` for a path that is not a mirroring store. It never opens the project.
+#[tauri::command(async)]
+pub fn inspect_folder_copy(path: String, app: AppHandle) -> AppResult<Option<FolderCopyInfo>> {
+    #[cfg(target_os = "android")]
+    if path.starts_with("content://") {
+        return saf_copy::inspect(&path, &app).map(Some);
+    }
+    let _ = (path, app);
+    Ok(None)
+}
+
+/// The user kept this device's data. The folder copy stops asking.
+#[tauri::command(async)]
+pub fn accept_local_data(path: String, app: AppHandle) -> AppResult<()> {
+    #[cfg(target_os = "android")]
+    if path.starts_with("content://") {
+        return saf_copy::accept(&path, &app);
+    }
+    let _ = (path, app);
+    Err(not_mirrored())
+}
+
+/// Replace this device's data with the folder copy. The caller opens the
+/// project next.
+#[tauri::command(async)]
+pub fn import_folder_copy(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let _lifecycle = lifecycle_lock(&state);
+    #[cfg(target_os = "android")]
+    if path.starts_with("content://") {
+        return saf_copy::import(&path, &app, &state);
+    }
+    let _ = (path, app);
+    Err(not_mirrored())
+}
+
+/// The SAF reads behind the three commands above. They run before the project
+/// is open, so they cannot use `SafStore`, which needs the live database.
+#[cfg(target_os = "android")]
+mod saf_copy {
+    use std::path::Path;
+
+    use tauri_plugin_saf::{SafEntry, SafExt};
+
+    use super::*;
+    use crate::engine::mirror;
+
+    struct Found {
+        db: Option<SafEntry>,
+        wal: Option<SafEntry>,
+    }
+
+    fn saf_err(e: tauri_plugin_saf::Error) -> AppError {
+        AppError::Other(format!("saf: {e}"))
+    }
+
+    fn find(app: &AppHandle, tree: &str) -> AppResult<Found> {
+        let saf = app.saf();
+        let root = saf.root_document_id(tree).map_err(saf_err)?;
+        let top = saf.list_children(tree, &root).map_err(saf_err)?;
+        let Some(dir) = top.into_iter().find(|e| e.is_dir && e.name == ".cullant") else {
+            return Ok(Found {
+                db: None,
+                wal: None,
+            });
+        };
+        let mut files = saf.list_children(tree, &dir.document_id).map_err(saf_err)?;
+        let mut take = |name: &str| {
+            let at = files.iter().position(|e| !e.is_dir && e.name == name)?;
+            Some(files.swap_remove(at))
+        };
+        Ok(Found {
+            db: take("cullant.db"),
+            wal: take("cullant.db-wal"),
+        })
+    }
+
+    fn copy_out(app: &AppHandle, tree: &str, entry: &SafEntry, dest: &Path) -> AppResult<()> {
+        let mut source = app
+            .saf()
+            .open_file(tree, &entry.document_id, "r")
+            .map_err(saf_err)?;
+        std::io::copy(&mut source, &mut std::fs::File::create(dest)?)?;
+        Ok(())
+    }
+
+    fn fingerprint(entry: &SafEntry) -> (i64, i64) {
+        // Seconds, as `ProjectStore::stat` reports them.
+        (entry.size as i64, entry.mtime / 1000)
+    }
+
+    pub fn inspect(tree: &str, app: &AppHandle) -> AppResult<FolderCopyInfo> {
+        let base = project_data_base(app, tree)?;
+        let has_local = base.join(".cullant").join("cullant.db").exists();
+        let Some(entry) = find(app, tree)?.db else {
+            return Ok(FolderCopyInfo {
+                folder_copy: None,
+                has_local,
+                is_own: false,
+            });
+        };
+        let (size, mtime) = fingerprint(&entry);
+        let is_own = mirror::is_own(&base, size, mtime);
+        // Reading the whole file through SAF is worth it only for a foreign copy.
+        let schema_version = if is_own {
+            None
+        } else {
+            let staging = base.join("inspect.tmp");
+            let _ = std::fs::remove_dir_all(&staging);
+            std::fs::create_dir_all(&staging)?;
+            let copy = staging.join("cullant.db");
+            let version = copy_out(app, tree, &entry, &copy)
+                .map(|()| mirror::schema_version_of(&copy))
+                .unwrap_or(None);
+            let _ = std::fs::remove_dir_all(&staging);
+            // A project that was never opened has no data directory to keep.
+            let _ = std::fs::remove_dir(&base);
+            version
+        };
+        Ok(FolderCopyInfo {
+            folder_copy: Some(FolderCopyStat {
+                size,
+                mtime,
+                schema_version,
+            }),
+            has_local,
+            is_own,
+        })
+    }
+
+    pub fn accept(tree: &str, app: &AppHandle) -> AppResult<()> {
+        let Some(entry) = find(app, tree)?.db else {
+            return Ok(());
+        };
+        let base = project_data_base(app, tree)?;
+        std::fs::create_dir_all(&base)?;
+        let (size, mtime) = fingerprint(&entry);
+        mirror::accept(&base, size, mtime)
+    }
+
+    pub fn import(tree: &str, app: &AppHandle, state: &AppState) -> AppResult<()> {
+        let base = project_data_base(app, tree)?;
+        let found = find(app, tree)?;
+        let entry = found
+            .db
+            .ok_or_else(|| AppError::Other("This folder has no Cullant data.".into()))?;
+        let is_open = state
+            .project
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|p| p.root == base);
+        if is_open {
+            close_project_inner(state);
+        }
+        let staging = base.join("import.tmp");
+        let _ = std::fs::remove_dir_all(&staging);
+        std::fs::create_dir_all(&staging)?;
+        let copy = staging.join("cullant.db");
+        let result = (|| {
+            copy_out(app, tree, &entry, &copy)?;
+            if let Some(wal) = &found.wal {
+                copy_out(app, tree, wal, &staging.join("cullant.db-wal"))?;
+            }
+            let (size, mtime) = fingerprint(&entry);
+            mirror::import_files(&base, &copy, size, mtime)
+        })();
+        let _ = std::fs::remove_dir_all(&staging);
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{percent_decode, project_display_name};

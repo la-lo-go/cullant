@@ -10,6 +10,12 @@ export function setMediaProjectRoot(root: string | null) {
   mediaProjectRoot = root ?? "";
 }
 
+export interface FolderCopyInfo {
+  folderCopy: { size: number; mtime: number; schemaVersion: number | null } | null;
+  hasLocal: boolean;
+  isOwn: boolean;
+}
+
 export interface ProjectInfo {
   rootPath: string;
   /** Friendly, human-readable project name derived from `rootPath` (leaf
@@ -318,6 +324,14 @@ export const api = {
   // Android: copy the live database into the project folder.
   exportFolderCopy: () =>
     invoke<"written" | "unchanged" | "skipped">("export_folder_copy"),
+  // Android, before open: what the folder's `.cullant/cullant.db` holds. Null
+  // for a project whose database already lives in the folder.
+  inspectFolderCopy: (path: string) =>
+    invoke<FolderCopyInfo | null>("inspect_folder_copy", { path }),
+  // The user kept this phone's data: the folder copy stops asking.
+  acceptLocalData: (path: string) => invoke<void>("accept_local_data", { path }),
+  // Replace this phone's data with the folder copy. Call openProject next.
+  importFolderCopy: (path: string) => invoke<void>("import_folder_copy", { path }),
   // Push the "pregenerate video thumbnails" preference to the backend; the
   // ingest pass reads it before its final (slow) video-poster tier.
   setGenerateVideoThumbs: (on: boolean) => invoke("set_generate_video_thumbs", { on }),
