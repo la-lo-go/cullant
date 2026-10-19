@@ -10,8 +10,16 @@ export function setMediaProjectRoot(root: string | null) {
   mediaProjectRoot = root ?? "";
 }
 
+export interface FolderCopyStat {
+  size: number;
+  mtime: number;
+  // Size and mtime of a non-empty WAL next to the copy.
+  wal: [number, number] | null;
+  schemaVersion: number | null;
+}
+
 export interface FolderCopyInfo {
-  folderCopy: { size: number; mtime: number; schemaVersion: number | null } | null;
+  folderCopy: FolderCopyStat | null;
   hasLocal: boolean;
   isOwn: boolean;
 }
@@ -328,8 +336,12 @@ export const api = {
   // for a project whose database already lives in the folder.
   inspectFolderCopy: (path: string) =>
     invoke<FolderCopyInfo | null>("inspect_folder_copy", { path }),
-  // The user kept this phone's data: the folder copy stops asking.
-  acceptLocalData: (path: string) => invoke<void>("accept_local_data", { path }),
+  // The user kept this phone's data: the folder copy that inspect showed stops asking.
+  acceptLocalData: (path: string, copy: FolderCopyStat) =>
+    invoke<void>("accept_local_data", {
+      path,
+      fingerprint: { size: copy.size, mtime: copy.mtime, wal: copy.wal },
+    }),
   // Replace this phone's data with the folder copy. Call openProject next.
   importFolderCopy: (path: string) => invoke<void>("import_folder_copy", { path }),
   // Push the "pregenerate video thumbnails" preference to the backend; the

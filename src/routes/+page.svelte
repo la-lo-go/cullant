@@ -44,7 +44,7 @@
   import { modalFocus } from "$lib/modal";
   import { tooltips } from "$lib/tooltips";
   import TitleBar from "$lib/components/TitleBar.svelte";
-  import { api } from "$lib/api";
+  import { api, type FolderCopyStat } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Eye from "@lucide/svelte/icons/eye";
@@ -543,7 +543,9 @@
     if (path) await openProject(path);
   }
 
-  let folderChoice = $state<{ path: string; hasLocal: boolean; mtime: number } | null>(null);
+  let folderChoice = $state<{ path: string; hasLocal: boolean; copy: FolderCopyStat } | null>(
+    null,
+  );
   let inspecting = false;
 
   /** Open a project folder. Thumbnails fill in progressively, so this returns to
@@ -564,7 +566,7 @@
     try {
       const info = await api.inspectFolderCopy(path);
       if (info?.folderCopy && !info.isOwn) {
-        folderChoice = { path, hasLocal: info.hasLocal, mtime: info.folderCopy.mtime };
+        folderChoice = { path, hasLocal: info.hasLocal, copy: info.folderCopy };
         return;
       }
     } catch (e) {
@@ -584,7 +586,7 @@
       // close first, or the catalog would keep pointing at a closed project.
       if (useFolder && catalog.project?.rootPath === choice.path) await catalog.close(false);
       if (useFolder) await api.importFolderCopy(choice.path);
-      else await api.acceptLocalData(choice.path);
+      else await api.acceptLocalData(choice.path, choice.copy);
     } catch (e) {
       catalog.error = String(e);
       return;
@@ -975,8 +977,8 @@
     <ConfirmDialog
       title={folderChoice.hasLocal ? "Data from another device" : "Cullant data in this folder"}
       message={folderChoice.hasLocal
-        ? `This folder has Cullant data from another device, changed on ${new Date(folderChoice.mtime * 1000).toLocaleString()}. Use the folder data, or keep the data on this device?`
-        : `This folder has Cullant data, changed on ${new Date(folderChoice.mtime * 1000).toLocaleString()}. Import it, or start fresh?`}
+        ? `This folder has Cullant data from another device, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Use the folder data, or keep the data on this device?`
+        : `This folder has Cullant data, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Import it, or start fresh?`}
       confirmLabel={folderChoice.hasLocal ? "Use folder data" : "Import"}
       altLabel={folderChoice.hasLocal ? "Keep this device's data" : "Start fresh"}
       enterConfirms={false}

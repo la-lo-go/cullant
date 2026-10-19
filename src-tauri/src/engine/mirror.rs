@@ -11,6 +11,7 @@ use crate::error::{AppError, AppResult};
 use crate::store::ProjectStore;
 
 const COPY_REL: &str = ".cullant/cullant.db";
+const WAL_REL: &str = ".cullant/cullant.db-wal";
 const SNAPSHOT: &str = "mirror.tmp.db";
 const RECORD: &str = "mirror.json";
 
@@ -26,12 +27,42 @@ pub enum ExportOutcome {
     Conflict,
 }
 
-/// What this device last wrote to the folder.
+/// Size and mtime in seconds of the folder copy and of its WAL. A desktop
+/// that has the folder open keeps its latest edits in the WAL only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Fingerprint {
+    pub size: i64,
+    pub mtime: i64,
+    /// `None` also for an empty WAL, which holds no data.
+    pub wal: Option<(i64, i64)>,
+}
+
+/// What this device last wrote to the folder, imported or accepted.
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 struct Record {
     hash: u64,
     size: i64,
     mtime: i64,
+    // Files from before the WAL check have no such field.
+    #[serde(default)]
+    wal: Option<(i64, i64)>,
+}
+
+impl Record {
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    fn new(hash: u64, fp: Fingerprint) -> Self {
+        Record {
+            hash,
+            size: fp.size,
+            mtime: fp.mtime,
+            wal: fp.wal,
+        }
+    }
+}
+
+/// An empty WAL holds no data, so it counts as absent.
+pub fn wal_fingerprint(stat: Option<(i64, i64)>) -> Option<(i64, i64)> {
+    stat.filter(|&(size, _)| size > 0)
 }
 
 pub fn export_folder_copy(
@@ -79,22 +110,25 @@ fn export(
     // Always asked: on SAF it also drops cached entries of a copy or folder that
     // was deleted outside the app, so the write below cannot trust them.
     let on_disk = store.stat(COPY_REL)?;
-    // A copy this device neither wrote nor accepted is another device's work.
-    if let Some(found) = on_disk {
-        if previous.as_ref().map(|p| (p.size, p.mtime)) != Some(found) {
-            return Ok(ExportOutcome::Conflict);
-        }
+    let wal = wal_fingerprint(store.stat(WAL_REL)?);
+    // A copy or a WAL this device neither wrote nor accepted is another
+    // device's work.
+    let recorded = previous.as_ref().map(|p| (p.size, p.mtime));
+    let recorded_wal = previous.as_ref().and_then(|p| p.wal);
+    if on_disk.is_some_and(|f| recorded != Some(f)) || wal.is_some_and(|w| recorded_wal != Some(w))
+    {
+        return Ok(ExportOutcome::Conflict);
     }
     if let Some(prev) = previous {
         // The size and mtime check catches a copy that was deleted or replaced.
-        if prev.hash == hash && on_disk == Some((prev.size, prev.mtime)) {
+        if prev.hash == hash && on_disk == recorded && wal.is_none() {
             return Ok(ExportOutcome::Unchanged);
         }
     }
     store.create_dir_all(".cullant")?;
     // A desktop leaves these next to its database. Next to the new main file
     // they would be applied to it.
-    for rel in [".cullant/cullant.db-wal", ".cullant/cullant.db-shm"] {
+    for rel in [WAL_REL, ".cullant/cullant.db-shm"] {
         if store.exists(rel)? {
             store.remove_file(rel)?;
         }
@@ -103,7 +137,15 @@ fn export(
     let (size, mtime) = store
         .stat(COPY_REL)?
         .ok_or_else(|| AppError::Other("the folder copy is missing after the write".into()))?;
-    write_record(base, &Record { hash, size, mtime })?;
+    write_record(
+        base,
+        &Record {
+            hash,
+            size,
+            mtime,
+            wal: None,
+        },
+    )?;
     Ok(ExportOutcome::Written)
 }
 
@@ -119,22 +161,15 @@ fn write_record(base: &Path, record: &Record) -> AppResult<()> {
 
 /// True when this device wrote the folder copy it sees now.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub fn is_own(base: &Path, size: i64, mtime: i64) -> bool {
-    read_record(base).is_some_and(|r| r.size == size && r.mtime == mtime)
+pub fn is_own(base: &Path, fp: Fingerprint) -> bool {
+    read_record(base).is_some_and(|r| (r.size, r.mtime, r.wal) == (fp.size, fp.mtime, fp.wal))
 }
 
 /// The user kept this device's data. Remember the folder copy so it does not
 /// ask again. The hash is 0, so the next export writes over the copy.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub fn accept(base: &Path, size: i64, mtime: i64) -> AppResult<()> {
-    write_record(
-        base,
-        &Record {
-            hash: 0,
-            size,
-            mtime,
-        },
-    )
+pub fn accept(base: &Path, fp: Fingerprint) -> AppResult<()> {
+    write_record(base, &Record::new(0, fp))
 }
 
 /// `schema_meta.version` of a database file, or `None` when it cannot be read.
@@ -150,12 +185,7 @@ pub fn schema_version_of(path: &Path) -> Option<i64> {
 /// in a private directory as `cullant.db`; a `cullant.db-wal` next to it is
 /// applied. Nothing in `base` changes unless the copy is sound.
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub fn import_files(
-    base: &Path,
-    copied_db: &Path,
-    folder_size: i64,
-    folder_mtime: i64,
-) -> AppResult<()> {
+pub fn import_files(base: &Path, copied_db: &Path, folder: Fingerprint) -> AppResult<()> {
     let hash = xxhash_rust::xxh3::xxh3_64(&std::fs::read(copied_db)?);
     prepare_copy(copied_db)?;
     let live = base.join(".cullant");
@@ -167,14 +197,7 @@ pub fn import_files(
         ignore_missing(std::fs::remove_file(live.join(name)))?;
     }
     std::fs::rename(copied_db, live.join("cullant.db"))?;
-    write_record(
-        base,
-        &Record {
-            hash,
-            size: folder_size,
-            mtime: folder_mtime,
-        },
-    )?;
+    write_record(base, &Record::new(hash, folder))?;
     // The cache keys hold file ids of the old database. Last, because the
     // import is complete without it: a leftover cache only wastes space.
     if let Err(error) = ignore_missing(std::fs::remove_dir_all(live.join("thumbs"))) {
@@ -441,16 +464,39 @@ mod tests {
         base.path().join(".cullant").join("cullant.db")
     }
 
+    fn fp(size: i64, mtime: i64) -> Fingerprint {
+        Fingerprint {
+            size,
+            mtime,
+            wal: None,
+        }
+    }
+
+    /// The fingerprint of the folder copy and its WAL, as the store sees them.
+    fn on_disk(store: &Mirroring) -> Fingerprint {
+        let (size, mtime) = store.stat(COPY_REL).unwrap().unwrap();
+        Fingerprint {
+            size,
+            mtime,
+            wal: wal_fingerprint(store.stat(WAL_REL).unwrap()),
+        }
+    }
+
     #[test]
     fn a_copy_is_own_only_with_the_recorded_size_and_mtime() {
         let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, _tree, db, store) = setup();
-        assert!(!is_own(base.path(), 1, 1));
+        assert!(!is_own(base.path(), fp(1, 1)));
         run(&base, &db, &store);
         let r = read_record(base.path()).unwrap();
-        assert!(is_own(base.path(), r.size, r.mtime));
-        assert!(!is_own(base.path(), r.size + 1, r.mtime));
-        assert!(!is_own(base.path(), r.size, r.mtime + 1));
+        assert!(is_own(base.path(), fp(r.size, r.mtime)));
+        assert!(!is_own(base.path(), fp(r.size + 1, r.mtime)));
+        assert!(!is_own(base.path(), fp(r.size, r.mtime + 1)));
+        let with_wal = Fingerprint {
+            wal: Some((8, 1)),
+            ..fp(r.size, r.mtime)
+        };
+        assert!(!is_own(base.path(), with_wal));
     }
 
     #[test]
@@ -463,8 +509,7 @@ mod tests {
         assert_eq!(run(&base, &db, &store), ExportOutcome::Conflict);
         assert_eq!(std::fs::read(&copy).unwrap(), b"foreign");
         assert!(!base.path().join(RECORD).exists());
-        let (size, mtime) = store.stat(COPY_REL).unwrap().unwrap();
-        accept(base.path(), size, mtime).unwrap();
+        accept(base.path(), on_disk(&store)).unwrap();
         assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
     }
 
@@ -484,8 +529,8 @@ mod tests {
         run(&base, &db, &store);
         let r = read_record(base.path()).unwrap();
         std::fs::remove_file(base.path().join(RECORD)).unwrap();
-        accept(base.path(), r.size, r.mtime).unwrap();
-        assert!(is_own(base.path(), r.size, r.mtime));
+        accept(base.path(), fp(r.size, r.mtime)).unwrap();
+        assert!(is_own(base.path(), fp(r.size, r.mtime)));
         assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
     }
 
@@ -497,12 +542,12 @@ mod tests {
         std::fs::create_dir_all(&thumbs).unwrap();
         std::fs::write(thumbs.join("t.jpg"), b"x").unwrap();
         let (_dir, copy) = copy_with_rows(3);
-        import_files(base.path(), &copy, 77, 88).unwrap();
+        import_files(base.path(), &copy, fp(77, 88)).unwrap();
         assert_eq!(count(&live(&base), "files"), 3);
         assert_eq!(count(&live(&base), "saf_documents"), 0);
         assert!(!thumbs.exists());
         assert!(!copy.exists());
-        assert!(is_own(base.path(), 77, 88));
+        assert!(is_own(base.path(), fp(77, 88)));
     }
 
     #[test]
@@ -531,7 +576,7 @@ mod tests {
         )
         .unwrap();
         drop(conn);
-        import_files(base.path(), &copy, 1, 1).unwrap();
+        import_files(base.path(), &copy, fp(1, 1)).unwrap();
         assert_eq!(count(&live(&base), "files"), 1);
     }
 
@@ -546,23 +591,138 @@ mod tests {
             .execute("UPDATE schema_meta SET version = ?1", [newer])
             .unwrap();
         assert_eq!(schema_version_of(&copy), Some(newer));
-        let error = import_files(base.path(), &copy, 1, 1).unwrap_err();
+        let error = import_files(base.path(), &copy, fp(1, 1)).unwrap_err();
         assert!(error.to_string().contains("newer Cullant"));
         assert_eq!(count(&live(&base), "files"), 1);
     }
 
     #[test]
-    fn an_export_removes_the_stale_wal_and_shm_of_a_desktop() {
+    fn an_export_removes_an_empty_wal_and_the_shm_of_a_desktop() {
         let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         let dir = tree.path().join(".cullant");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("cullant.db-wal"), b"stale").unwrap();
+        std::fs::write(dir.join("cullant.db-wal"), b"").unwrap();
         std::fs::write(dir.join("cullant.db-shm"), b"stale").unwrap();
         assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
         assert!(!dir.join("cullant.db-wal").exists());
         assert!(!dir.join("cullant.db-shm").exists());
         assert_eq!(count(&dir.join("cullant.db"), "files"), 1);
+    }
+
+    #[test]
+    fn a_foreign_wal_next_to_our_copy_is_a_conflict_and_nothing_changes() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, tree, db, store) = setup();
+        run(&base, &db, &store);
+        let copy = tree.path().join(COPY_REL);
+        let main = std::fs::read(&copy).unwrap();
+        let wal = tree.path().join(WAL_REL);
+        std::fs::write(&wal, b"desktop edits").unwrap();
+        let mine = read_record(base.path()).unwrap();
+        assert!(!is_own(base.path(), on_disk(&store)));
+        assert!(is_own(base.path(), fp(mine.size, mine.mtime)));
+        db.call(|conn| {
+            conn.execute("UPDATE files SET rating = 4", [])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Conflict);
+        assert_eq!(std::fs::read(&wal).unwrap(), b"desktop edits");
+        assert_eq!(std::fs::read(&copy).unwrap(), main);
+    }
+
+    /// A folder copy with the WAL of a desktop that has the folder open.
+    fn folder_copy_with_wal(tree: &tempfile::TempDir) {
+        let dir = tree.path().join(".cullant");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (_seed_dir, seed) = copy_with_rows(0);
+        std::fs::copy(seed, dir.join("cullant.db")).unwrap();
+        let conn = rusqlite::Connection::open(dir.join("cullant.db")).unwrap();
+        conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+        conn.pragma_update(None, "wal_autocheckpoint", 0).unwrap();
+        conn.execute(
+            "INSERT INTO files (rel_path, basename, dir, ext, kind, size, mtime, group_id)
+             VALUES ('w.jpg', 'w', '', 'jpg', 1, 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+        // The close checkpoints the WAL, so keep the files as they are now.
+        let held = tempfile::tempdir().unwrap();
+        for name in ["cullant.db", "cullant.db-wal"] {
+            std::fs::copy(dir.join(name), held.path().join(name)).unwrap();
+        }
+        drop(conn);
+        for name in ["cullant.db", "cullant.db-wal"] {
+            std::fs::copy(held.path().join(name), dir.join(name)).unwrap();
+        }
+        let _ = std::fs::remove_file(dir.join("cullant.db-shm"));
+    }
+
+    /// Import the folder copy as the SAF import does: stage the files, then
+    /// import with the fingerprint of the folder files.
+    fn import_from(base: &tempfile::TempDir, tree: &tempfile::TempDir, store: &Mirroring) {
+        let staged = tempfile::tempdir().unwrap();
+        for name in ["cullant.db", "cullant.db-wal"] {
+            let from = tree.path().join(".cullant").join(name);
+            if from.exists() {
+                std::fs::copy(from, staged.path().join(name)).unwrap();
+            }
+        }
+        import_files(
+            base.path(),
+            &staged.path().join("cullant.db"),
+            on_disk(store),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_imported_copy_is_own_and_the_next_export_writes() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, tree, db, store) = setup();
+        drop(db);
+        let (_dir, seed) = copy_with_rows(2);
+        std::fs::create_dir_all(tree.path().join(".cullant")).unwrap();
+        std::fs::copy(seed, tree.path().join(COPY_REL)).unwrap();
+        import_from(&base, &tree, &store);
+        assert!(is_own(base.path(), on_disk(&store)));
+        let db = Db::open(base.path()).unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+    }
+
+    #[test]
+    fn an_imported_wal_is_removed_by_the_next_export() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, tree, db, store) = setup();
+        drop(db);
+        folder_copy_with_wal(&tree);
+        assert!(on_disk(&store).wal.is_some());
+        import_from(&base, &tree, &store);
+        assert!(is_own(base.path(), on_disk(&store)));
+        let db = Db::open(base.path()).unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+        assert!(!tree.path().join(WAL_REL).exists());
+        assert_eq!(count(&tree.path().join(COPY_REL), "files"), 1);
+    }
+
+    #[test]
+    fn an_accepted_wal_is_removed_by_the_next_export() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, tree, db, store) = setup();
+        folder_copy_with_wal(&tree);
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Conflict);
+        accept(base.path(), on_disk(&store)).unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+        assert!(!tree.path().join(WAL_REL).exists());
+    }
+
+    #[test]
+    fn a_record_without_a_wal_field_is_read() {
+        let base = tempfile::tempdir().unwrap();
+        let old = br#"{"hash":1,"size":2,"mtime":3}"#;
+        std::fs::write(base.path().join(RECORD), old).unwrap();
+        assert!(is_own(base.path(), fp(2, 3)));
     }
 
     #[test]
@@ -572,7 +732,7 @@ mod tests {
         // A file, not a directory: remove_dir_all fails on it.
         std::fs::write(base.path().join(".cullant").join("thumbs"), b"x").unwrap();
         let (_dir, copy) = copy_with_rows(3);
-        import_files(base.path(), &copy, 1, 1).unwrap();
+        import_files(base.path(), &copy, fp(1, 1)).unwrap();
         assert_eq!(count(&live(&base), "files"), 3);
     }
 
@@ -583,7 +743,7 @@ mod tests {
         let junk = tempfile::tempdir().unwrap();
         let copy = junk.path().join("cullant.db");
         std::fs::write(&copy, vec![7u8; 4096]).unwrap();
-        assert!(import_files(base.path(), &copy, 1, 1).is_err());
+        assert!(import_files(base.path(), &copy, fp(1, 1)).is_err());
         assert_eq!(count(&live(&base), "files"), 1);
     }
 }

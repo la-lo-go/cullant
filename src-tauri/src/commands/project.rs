@@ -747,7 +747,7 @@ pub fn set_generate_video_thumbs(on: bool, state: State<'_, AppState>) {
 }
 
 /// Copy the live database into the project folder when the store cannot keep
-/// it there. Reports `written`, `unchanged` or `skipped`.
+/// it there. Reports `written`, `unchanged`, `skipped` or `conflict`.
 #[tauri::command(async)]
 pub fn export_folder_copy(
     state: State<'_, AppState>,
@@ -778,8 +778,8 @@ pub struct FolderCopyInfo {
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 pub struct FolderCopyStat {
-    size: i64,
-    mtime: i64,
+    #[serde(flatten)]
+    fingerprint: crate::engine::mirror::Fingerprint,
     /// Read only for a copy from another device.
     schema_version: Option<i64>,
 }
@@ -805,19 +805,21 @@ pub fn inspect_folder_copy(
     Ok(None)
 }
 
-/// The user kept this device's data. The folder copy stops asking.
+/// The user kept this device's data. The folder copy with `fingerprint`, as
+/// inspect showed it, stops asking. A copy changed since then still asks.
 #[tauri::command(async)]
 pub fn accept_local_data(
     path: String,
+    fingerprint: crate::engine::mirror::Fingerprint,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<()> {
     let _lifecycle = lifecycle_lock(&state);
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
-        return saf_copy::accept(&path, &app);
+        return saf_copy::accept(&path, fingerprint, &app);
     }
-    let _ = (path, app);
+    let _ = (path, fingerprint, app);
     Err(not_mirrored())
 }
 
@@ -903,9 +905,18 @@ mod saf_copy {
         Ok(())
     }
 
-    fn fingerprint(entry: &SafEntry) -> (i64, i64) {
+    fn stat(entry: &SafEntry) -> (i64, i64) {
         // Seconds, as `ProjectStore::stat` reports them.
         (entry.size as i64, entry.mtime / 1000)
+    }
+
+    fn fingerprint(db: &SafEntry, wal: Option<&SafEntry>) -> mirror::Fingerprint {
+        let (size, mtime) = stat(db);
+        mirror::Fingerprint {
+            size,
+            mtime,
+            wal: mirror::wal_fingerprint(wal.map(stat)),
+        }
     }
 
     pub fn inspect(tree: &str, app: &AppHandle) -> AppResult<FolderCopyInfo> {
@@ -919,8 +930,8 @@ mod saf_copy {
                 is_own: false,
             });
         };
-        let (size, mtime) = fingerprint(&entry);
-        let is_own = mirror::is_own(&base, size, mtime);
+        let fingerprint = fingerprint(&entry, found.wal.as_ref());
+        let is_own = mirror::is_own(&base, fingerprint);
         // Reading the whole file through SAF is worth it only for a foreign copy.
         let schema_version = if is_own {
             None
@@ -939,8 +950,7 @@ mod saf_copy {
         };
         Ok(FolderCopyInfo {
             folder_copy: Some(FolderCopyStat {
-                size,
-                mtime,
+                fingerprint,
                 schema_version,
             }),
             has_local,
@@ -948,14 +958,10 @@ mod saf_copy {
         })
     }
 
-    pub fn accept(tree: &str, app: &AppHandle) -> AppResult<()> {
-        let Some(entry) = find(app, tree)?.db else {
-            return Ok(());
-        };
+    pub fn accept(tree: &str, fingerprint: mirror::Fingerprint, app: &AppHandle) -> AppResult<()> {
         let base = project_data_base(app, tree)?;
         std::fs::create_dir_all(&base)?;
-        let (size, mtime) = fingerprint(&entry);
-        mirror::accept(&base, size, mtime)
+        mirror::accept(&base, fingerprint)
     }
 
     pub fn import(tree: &str, app: &AppHandle, state: &AppState) -> AppResult<()> {
@@ -987,8 +993,7 @@ mod saf_copy {
         let copy = staging.join("cullant.db");
         let result = (|| {
             stage(app, tree, &entry, found.wal.as_ref(), &staging)?;
-            let (size, mtime) = fingerprint(&entry);
-            mirror::import_files(&base, &copy, size, mtime)
+            mirror::import_files(&base, &copy, fingerprint(&entry, found.wal.as_ref()))
         })();
         let _ = std::fs::remove_dir_all(&staging);
         result
