@@ -213,14 +213,12 @@ fn prepare_copy(path: &Path) -> AppResult<()> {
     let conn = rusqlite::Connection::open(path)?;
     let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0))?;
     if check != "ok" {
-        return Err(AppError::Other(
-            "The data in this folder is damaged.".into(),
-        ));
+        return Err(AppError::Other("The folder copy is damaged.".into()));
     }
     let version = crate::db::migrations::current_version(&conn)?;
     if version > crate::db::migrations::latest_version() {
         return Err(AppError::Other(
-            "This folder data needs a newer Cullant.".into(),
+            "The folder copy needs a newer Cullant.".into(),
         ));
     }
     // The cached ids belong to the device that wrote the copy.

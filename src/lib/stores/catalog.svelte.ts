@@ -350,24 +350,23 @@ class CatalogStore {
     await this.refresh();
   }
 
-  /// `copyFirst` false skips the on-leave copy, for a close that is followed
-  /// by an import over this project's data.
+  /** `copyFirst` false skips the on-leave copy, for a close that is followed
+   *  by an import over this project's data. */
   close(copyFirst = true) {
     return this.transition(() => this.closeNow(copyFirst));
   }
 
-  /// Copy the project data into the project folder and say what happened.
-  /// Never throws: a failed copy is logged and returned as text, so leaving a
-  /// project does not depend on it. Does nothing where the live database
-  /// already is the folder's.
+  /** Write the folder copy and say what happened. Never throws: a failed
+   *  copy is logged and returned as text, so leaving a project does not depend
+   *  on it. Does nothing where the live database already is the folder's. */
   async copyToFolder(): Promise<string> {
     if (!this.project?.mirrorsMetadata) return "";
     try {
       const result = await api.exportFolderCopy();
       if (result === "conflict") {
-        return "The folder has data from another device. Reopen the project to choose.";
+        return "The folder has a folder copy from another device. Reopen the project to choose.";
       }
-      return result === "written" ? "Copied" : "No changes";
+      return result === "written" ? "Folder copy written" : "Folder copy is up to date";
     } catch (error) {
       console.error("folder copy failed", error);
       return String(error);

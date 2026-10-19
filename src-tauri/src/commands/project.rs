@@ -948,7 +948,7 @@ mod saf_copy {
         let found = find(app, tree)?;
         let entry = found
             .db
-            .ok_or_else(|| AppError::Other("This folder has no Cullant data.".into()))?;
+            .ok_or_else(|| AppError::Other("This folder has no folder copy.".into()))?;
         let is_open = state
             .project
             .lock()

@@ -412,7 +412,7 @@ The SAF code compiles only for Android, so do this check on a phone:
 2. Run `adb shell ls <folder path>/.cullant` and make sure `cullant.db` is there.
 3. Open the folder on a PC. Make sure the ratings are there. Change one rating. Close the project.
 4. Open the folder on the phone again. Make sure Cullant asks which data to use.
-   Choose "Use folder data". Make sure the changed rating is there.
+   Choose "Use folder copy". Make sure the changed rating is there.
 5. Open the folder again. Make sure Cullant does not ask.
 
 A copy that this device did not write is never overwritten.

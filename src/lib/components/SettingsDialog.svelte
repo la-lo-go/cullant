@@ -482,7 +482,7 @@
           {/each}
         </select>
       {:else if s.slot === "copyNow"}
-        <button class="wide" disabled={copyBusy} onclick={releasing(copyNow)}>Copy now</button>
+        <button class="wide" disabled={copyBusy} onclick={releasing(copyNow)}>Write folder copy</button>
       {/if}
     </svelte:element>
   {/if}

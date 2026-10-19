@@ -975,11 +975,11 @@
 
   {#if folderChoice}
     <ConfirmDialog
-      title={folderChoice.hasLocal ? "Data from another device" : "Cullant data in this folder"}
+      title={folderChoice.hasLocal ? "Folder copy from another device" : "Folder copy in this folder"}
       message={folderChoice.hasLocal
-        ? `This folder has Cullant data from another device, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Use the folder data, or keep the data on this device?`
-        : `This folder has Cullant data, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Import it, or start fresh?`}
-      confirmLabel={folderChoice.hasLocal ? "Use folder data" : "Import"}
+        ? `This folder has a folder copy from another device, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Use the folder copy, or keep the data on this device? The next folder copy replaces the data in the folder.`
+        : `This folder has a folder copy, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Import it, or start fresh? The next folder copy replaces the data in the folder.`}
+      confirmLabel={folderChoice.hasLocal ? "Use folder copy" : "Import"}
       altLabel={folderChoice.hasLocal ? "Keep this device's data" : "Start fresh"}
       enterConfirms={false}
       initialFocus=".alt"
