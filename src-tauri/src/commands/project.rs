@@ -788,7 +788,12 @@ fn not_mirrored() -> AppError {
 /// Before an open: does the folder hold a database this device did not write?
 /// `None` for a path that is not a mirroring store. It never opens the project.
 #[tauri::command(async)]
-pub fn inspect_folder_copy(path: String, app: AppHandle) -> AppResult<Option<FolderCopyInfo>> {
+pub fn inspect_folder_copy(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<Option<FolderCopyInfo>> {
+    let _lifecycle = lifecycle_lock(&state);
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
         return saf_copy::inspect(&path, &app).map(Some);
@@ -799,7 +804,12 @@ pub fn inspect_folder_copy(path: String, app: AppHandle) -> AppResult<Option<Fol
 
 /// The user kept this device's data. The folder copy stops asking.
 #[tauri::command(async)]
-pub fn accept_local_data(path: String, app: AppHandle) -> AppResult<()> {
+pub fn accept_local_data(
+    path: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let _lifecycle = lifecycle_lock(&state);
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
         return saf_copy::accept(&path, &app);
@@ -875,6 +885,21 @@ mod saf_copy {
         Ok(())
     }
 
+    /// The copy and its WAL, as `cullant.db` and `cullant.db-wal` in `staging`.
+    fn stage(
+        app: &AppHandle,
+        tree: &str,
+        db: &SafEntry,
+        wal: Option<&SafEntry>,
+        staging: &Path,
+    ) -> AppResult<()> {
+        copy_out(app, tree, db, &staging.join("cullant.db"))?;
+        if let Some(wal) = wal {
+            copy_out(app, tree, wal, &staging.join("cullant.db-wal"))?;
+        }
+        Ok(())
+    }
+
     fn fingerprint(entry: &SafEntry) -> (i64, i64) {
         // Seconds, as `ProjectStore::stat` reports them.
         (entry.size as i64, entry.mtime / 1000)
@@ -883,7 +908,8 @@ mod saf_copy {
     pub fn inspect(tree: &str, app: &AppHandle) -> AppResult<FolderCopyInfo> {
         let base = project_data_base(app, tree)?;
         let has_local = base.join(".cullant").join("cullant.db").exists();
-        let Some(entry) = find(app, tree)?.db else {
+        let found = find(app, tree)?;
+        let Some(entry) = found.db else {
             return Ok(FolderCopyInfo {
                 folder_copy: None,
                 has_local,
@@ -900,7 +926,7 @@ mod saf_copy {
             let _ = std::fs::remove_dir_all(&staging);
             std::fs::create_dir_all(&staging)?;
             let copy = staging.join("cullant.db");
-            let version = copy_out(app, tree, &entry, &copy)
+            let version = stage(app, tree, &entry, found.wal.as_ref(), &staging)
                 .map(|()| mirror::schema_version_of(&copy))
                 .unwrap_or(None);
             let _ = std::fs::remove_dir_all(&staging);
@@ -942,6 +968,15 @@ mod saf_copy {
             .as_ref()
             .is_some_and(|p| p.root == base);
         if is_open {
+            // A running scan still holds the database, and its files must not
+            // be replaced under it.
+            if state.scan_active.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(AppError::Other(
+                    "Cullant is still reading this project. Wait for it to finish, then try again."
+                        .into(),
+                ));
+            }
+            // Dropping the last handle waits for the database to close.
             close_project_inner(state);
         }
         let staging = base.join("import.tmp");
@@ -949,10 +984,7 @@ mod saf_copy {
         std::fs::create_dir_all(&staging)?;
         let copy = staging.join("cullant.db");
         let result = (|| {
-            copy_out(app, tree, &entry, &copy)?;
-            if let Some(wal) = &found.wal {
-                copy_out(app, tree, wal, &staging.join("cullant.db-wal"))?;
-            }
+            stage(app, tree, &entry, found.wal.as_ref(), &staging)?;
             let (size, mtime) = fingerprint(&entry);
             mirror::import_files(&base, &copy, size, mtime)
         })();

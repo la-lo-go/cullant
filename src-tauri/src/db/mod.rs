@@ -34,6 +34,24 @@ pub struct Db {
     readers: ReaderPool,
     path: PathBuf,
     generation: u64,
+    writer: Option<thread::JoinHandle<()>>,
+}
+
+/// Waits until every connection is closed, so a caller may replace the files
+/// right after the last handle goes. Without it the writer closes late and its
+/// checkpoint can unlink a `-wal` that already belongs to a newer database.
+impl Drop for Db {
+    fn drop(&mut self) {
+        let Some(writer) = self.writer.take() else {
+            return;
+        };
+        // Ends the writer loop. A drop on the writer thread itself cannot wait.
+        self.tx = mpsc::channel().0;
+        if writer.thread().id() != thread::current().id() {
+            let _ = writer.join();
+        }
+        self.readers.conns.lock().unwrap().clear();
+    }
 }
 
 /// A bounded set of read-only connections handed out to whatever thread needs a
@@ -143,7 +161,7 @@ impl Db {
         };
 
         let (tx, rx) = mpsc::channel::<Job>();
-        thread::Builder::new()
+        let writer = thread::Builder::new()
             .name("db-writer".into())
             .spawn(move || {
                 while let Ok(job) = rx.recv() {
@@ -167,6 +185,7 @@ impl Db {
             readers,
             path,
             generation: NEXT_GENERATION.fetch_add(1, Ordering::Relaxed),
+            writer: Some(writer),
         })
     }
 

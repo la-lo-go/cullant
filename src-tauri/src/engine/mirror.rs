@@ -84,6 +84,13 @@ fn export(
         }
     }
     store.create_dir_all(".cullant")?;
+    // A desktop leaves these next to its database. Next to the new main file
+    // they would be applied to it.
+    for rel in [".cullant/cullant.db-wal", ".cullant/cullant.db-shm"] {
+        if store.exists(rel)? {
+            store.remove_file(rel)?;
+        }
+    }
     store.write_replacing(COPY_REL, &bytes, "application/octet-stream")?;
     let (size, mtime) = store
         .stat(COPY_REL)?
@@ -145,11 +152,12 @@ pub fn import_files(
     prepare_copy(copied_db)?;
     let live = base.join(".cullant");
     std::fs::create_dir_all(&live)?;
-    for name in ["cullant.db", "cullant.db-wal", "cullant.db-shm"] {
+    // The old companions must go first: next to the new main file they would
+    // be applied to it. The rename then replaces the main file in one step, so
+    // a failure or a kill never leaves the project without a database.
+    for name in ["cullant.db-wal", "cullant.db-shm"] {
         ignore_missing(std::fs::remove_file(live.join(name)))?;
     }
-    // The cache keys hold file ids of the old database.
-    ignore_missing(std::fs::remove_dir_all(live.join("thumbs")))?;
     std::fs::rename(copied_db, live.join("cullant.db"))?;
     write_record(
         base,
@@ -158,7 +166,13 @@ pub fn import_files(
             size: folder_size,
             mtime: folder_mtime,
         },
-    )
+    )?;
+    // The cache keys hold file ids of the old database. Last, because the
+    // import is complete without it: a leftover cache only wastes space.
+    if let Err(error) = ignore_missing(std::fs::remove_dir_all(live.join("thumbs"))) {
+        tracing::warn!("could not remove the old thumbnail cache: {error}");
+    }
+    Ok(())
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -503,6 +517,31 @@ mod tests {
         let error = import_files(base.path(), &copy, 1, 1).unwrap_err();
         assert!(error.to_string().contains("newer Cullant"));
         assert_eq!(count(&live(&base), "files"), 1);
+    }
+
+    #[test]
+    fn an_export_removes_the_stale_wal_and_shm_of_a_desktop() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, tree, db, store) = setup();
+        let dir = tree.path().join(".cullant");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cullant.db-wal"), b"stale").unwrap();
+        std::fs::write(dir.join("cullant.db-shm"), b"stale").unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+        assert!(!dir.join("cullant.db-wal").exists());
+        assert!(!dir.join("cullant.db-shm").exists());
+        assert_eq!(count(&dir.join("cullant.db"), "files"), 1);
+    }
+
+    #[test]
+    fn a_thumbnail_cache_that_cannot_be_removed_does_not_fail_the_import() {
+        let (base, _tree, db, _store) = setup();
+        drop(db);
+        // A file, not a directory: remove_dir_all fails on it.
+        std::fs::write(base.path().join(".cullant").join("thumbs"), b"x").unwrap();
+        let (_dir, copy) = copy_with_rows(3);
+        import_files(base.path(), &copy, 1, 1).unwrap();
+        assert_eq!(count(&live(&base), "files"), 3);
     }
 
     #[test]
