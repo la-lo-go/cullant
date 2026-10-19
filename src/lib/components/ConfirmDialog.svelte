@@ -6,12 +6,17 @@
     title,
     message,
     confirmLabel = "Confirm",
+    altLabel,
+    onalt,
     onconfirm,
     oncancel,
   }: {
     title: string;
     message: string;
     confirmLabel?: string;
+    /** A second way forward, next to Cancel and the confirm button. */
+    altLabel?: string;
+    onalt?: () => void;
     onconfirm: () => void;
     oncancel: () => void;
   } = $props();
@@ -45,6 +50,9 @@
     <p>{message}</p>
     <div class="actions">
       <button onclick={oncancel}>Cancel</button>
+      {#if altLabel && onalt}
+        <button onclick={onalt}>{altLabel}</button>
+      {/if}
       <button class="confirm" onclick={onconfirm}>{confirmLabel}</button>
     </div>
   </div>

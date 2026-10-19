@@ -545,6 +545,8 @@
 
   /** Open a project folder. Thumbnails fill in progressively, so this returns to
    *  the grid as soon as the folder's photo metadata has been read. */
+  let folderChoice = $state<{ path: string; hasLocal: boolean; mtime: number } | null>(null);
+
   async function openProject(path: string) {
     // Reject Cullant's own sidecar dir up front (the backend guards it too, so
     // the CULLANT_OPEN_PROJECT auto-open hook is covered regardless).
@@ -554,7 +556,32 @@
         "Pick the folder that contains your photos or videos instead.";
       return;
     }
+    // A copy of the project data in the folder, written by another device,
+    // needs a choice. A failed check never blocks opening.
+    try {
+      const info = await api.inspectFolderCopy(path);
+      if (info?.folderCopy && !info.isOwn) {
+        folderChoice = { path, hasLocal: info.hasLocal, mtime: info.folderCopy.mtime };
+        return;
+      }
+    } catch (e) {
+      console.error("folder copy check failed", e);
+    }
     await catalog.open(path);
+  }
+
+  async function resolveFolderChoice(useFolder: boolean) {
+    const choice = folderChoice;
+    folderChoice = null;
+    if (!choice) return;
+    try {
+      if (useFolder) await api.importFolderCopy(choice.path);
+      else await api.acceptLocalData(choice.path);
+    } catch (e) {
+      catalog.error = String(e);
+      return;
+    }
+    await catalog.open(choice.path);
   }
 
   /**
@@ -933,6 +960,20 @@
         void catalog.reimport();
       }}
       oncancel={() => (showReimportConfirm = false)}
+    />
+  {/if}
+
+  {#if folderChoice}
+    <ConfirmDialog
+      title={folderChoice.hasLocal ? "Data from another device" : "Cullant data in this folder"}
+      message={folderChoice.hasLocal
+        ? `This folder has Cullant data from another device, changed on ${new Date(folderChoice.mtime * 1000).toLocaleString()}. Use the folder data, or keep the data on this device?`
+        : `This folder has Cullant data, changed on ${new Date(folderChoice.mtime * 1000).toLocaleString()}. Import it, or start fresh?`}
+      confirmLabel={folderChoice.hasLocal ? "Use folder data" : "Import"}
+      altLabel={folderChoice.hasLocal ? "Keep this device's data" : "Start fresh"}
+      onconfirm={() => void resolveFolderChoice(true)}
+      onalt={() => void resolveFolderChoice(false)}
+      oncancel={() => (folderChoice = null)}
     />
   {/if}
 
