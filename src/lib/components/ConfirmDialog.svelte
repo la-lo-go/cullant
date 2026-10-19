@@ -8,6 +8,8 @@
     confirmLabel = "Confirm",
     altLabel,
     onalt,
+    enterConfirms = true,
+    initialFocus,
     onconfirm,
     oncancel,
   }: {
@@ -17,6 +19,10 @@
     /** A second way forward, next to Cancel and the confirm button. */
     altLabel?: string;
     onalt?: () => void;
+    /** False makes the confirm button click-only, for an action that replaces data. */
+    enterConfirms?: boolean;
+    /** Selector of the button that gets focus first. */
+    initialFocus?: string;
     onconfirm: () => void;
     oncancel: () => void;
   } = $props();
@@ -28,7 +34,7 @@
     if (e.key === "Escape") oncancel();
     // Enter confirms the default action — unless a specific button has focus,
     // in which case let its own activation handle it (e.g. Cancel).
-    else if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) onconfirm();
+    else if (e.key === "Enter" && enterConfirms && !(e.target instanceof HTMLButtonElement)) onconfirm();
   }
 </script>
 
@@ -40,7 +46,7 @@
 >
   <div
     class="dialog"
-    use:modalFocus
+    use:modalFocus={{ initialFocus }}
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
@@ -51,7 +57,7 @@
     <div class="actions">
       <button onclick={oncancel}>Cancel</button>
       {#if altLabel && onalt}
-        <button onclick={onalt}>{altLabel}</button>
+        <button class="alt" onclick={onalt}>{altLabel}</button>
       {/if}
       <button class="confirm" onclick={onconfirm}>{confirmLabel}</button>
     </div>

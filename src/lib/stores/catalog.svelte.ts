@@ -167,6 +167,7 @@ class CatalogStore {
     // change is still sitting in the OLD project's persist debounce — flush it
     // to that project's DB before its connection goes away underneath it.
     await flushSessionSave();
+    await this.copyToFolderOnLeave();
     const generation = ++this.generation;
     this.eventRoot = path;
     session.restoring = true;
@@ -353,16 +354,23 @@ class CatalogStore {
     return this.transition(() => this.closeNow());
   }
 
-  /// Copy the project data into the project folder. Does nothing where the
-  /// live database already is the folder's. A failed copy is logged, never
-  /// thrown: leaving a project must not depend on it.
-  async copyToFolderOnLeave() {
-    if (!this.project?.mirrorsMetadata || !settings.copyMetadataOnLeave) return;
+  /// Copy the project data into the project folder and say what happened.
+  /// Never throws: a failed copy is logged and returned as text, so leaving a
+  /// project does not depend on it. Does nothing where the live database
+  /// already is the folder's.
+  async copyToFolder(): Promise<string> {
+    if (!this.project?.mirrorsMetadata) return "";
     try {
-      await api.exportFolderCopy();
+      const result = await api.exportFolderCopy();
+      return result === "written" ? "Copied" : result === "unchanged" ? "No changes" : "Copy already running";
     } catch (error) {
       console.error("folder copy failed", error);
+      return String(error);
     }
+  }
+
+  async copyToFolderOnLeave() {
+    if (settings.copyMetadataOnLeave) await this.copyToFolder();
   }
 
   private async closeNow() {

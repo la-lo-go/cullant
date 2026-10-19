@@ -506,7 +506,7 @@
     const minutes = settings.copyMetadataMinutes;
     if (!catalog.project?.mirrorsMetadata || minutes <= 0) return;
     const id = setInterval(
-      () => void api.exportFolderCopy().catch((e) => console.error("folder copy failed", e)),
+      () => void catalog.copyToFolder(),
       minutes * 60 * 1000,
     );
     return () => clearInterval(id);
@@ -543,11 +543,13 @@
     if (path) await openProject(path);
   }
 
+  let folderChoice = $state<{ path: string; hasLocal: boolean; mtime: number } | null>(null);
+  let inspecting = false;
+
   /** Open a project folder. Thumbnails fill in progressively, so this returns to
    *  the grid as soon as the folder's photo metadata has been read. */
-  let folderChoice = $state<{ path: string; hasLocal: boolean; mtime: number } | null>(null);
-
   async function openProject(path: string) {
+    if (inspecting || folderChoice) return;
     // Reject Cullant's own sidecar dir up front (the backend guards it too, so
     // the CULLANT_OPEN_PROJECT auto-open hook is covered regardless).
     if (/(^|[\\/])\.cullant([\\/]|$)/i.test(path)) {
@@ -558,6 +560,7 @@
     }
     // A copy of the project data in the folder, written by another device,
     // needs a choice. A failed check never blocks opening.
+    inspecting = true;
     try {
       const info = await api.inspectFolderCopy(path);
       if (info?.folderCopy && !info.isOwn) {
@@ -566,6 +569,8 @@
       }
     } catch (e) {
       console.error("folder copy check failed", e);
+    } finally {
+      inspecting = false;
     }
     await catalog.open(path);
   }
@@ -575,6 +580,9 @@
     folderChoice = null;
     if (!choice) return;
     try {
+      // The import replaces the live database, so an open project on it must
+      // close first, or the catalog would keep pointing at a closed project.
+      if (useFolder && catalog.project?.rootPath === choice.path) await catalog.close();
       if (useFolder) await api.importFolderCopy(choice.path);
       else await api.acceptLocalData(choice.path);
     } catch (e) {
@@ -971,6 +979,8 @@
         : `This folder has Cullant data, changed on ${new Date(folderChoice.mtime * 1000).toLocaleString()}. Import it, or start fresh?`}
       confirmLabel={folderChoice.hasLocal ? "Use folder data" : "Import"}
       altLabel={folderChoice.hasLocal ? "Keep this device's data" : "Start fresh"}
+      enterConfirms={false}
+      initialFocus=".alt"
       onconfirm={() => void resolveFolderChoice(true)}
       onalt={() => void resolveFolderChoice(false)}
       oncancel={() => (folderChoice = null)}

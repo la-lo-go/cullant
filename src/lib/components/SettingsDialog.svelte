@@ -320,13 +320,15 @@
   let copyMsg = $state("");
   let copyBusy = $state(false);
 
+  $effect(() => {
+    void catalog.project?.rootPath;
+    copyMsg = "";
+  });
+
   async function copyNow() {
     copyBusy = true;
     try {
-      const result = await api.exportFolderCopy();
-      copyMsg = result === "written" ? "Copied" : result === "unchanged" ? "No changes" : "Copy already running";
-    } catch (err) {
-      copyMsg = String(err);
+      copyMsg = await catalog.copyToFolder();
     } finally {
       copyBusy = false;
     }
