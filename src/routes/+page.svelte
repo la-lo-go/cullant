@@ -977,8 +977,8 @@
     <ConfirmDialog
       title={folderChoice.hasLocal ? "Folder copy from another device" : "Folder copy in this folder"}
       message={folderChoice.hasLocal
-        ? `This folder has a folder copy from another device, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Use the folder copy, or keep the data on this device? The next folder copy replaces the data in the folder.`
-        : `This folder has a folder copy, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Import it, or start fresh? The next folder copy replaces the data in the folder.`}
+        ? `This folder has a folder copy from another device, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Use the folder copy, or keep the data on this device? If you keep the data on this device, the next folder copy replaces the one from the other device.`
+        : `This folder has a folder copy, changed on ${new Date(folderChoice.copy.mtime * 1000).toLocaleString()}. Import it, or start fresh? If you start fresh, the next folder copy replaces the one in the folder.`}
       confirmLabel={folderChoice.hasLocal ? "Use folder copy" : "Import"}
       altLabel={folderChoice.hasLocal ? "Keep this device's data" : "Start fresh"}
       enterConfirms={false}
