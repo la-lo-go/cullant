@@ -58,9 +58,9 @@ export function codecReason(codec: string): PlaybackReason {
       "Restart Cullant.",
     ],
     links: [
-      { name: "Get HEVC Video Extensions", url: HEVC_FREE_URL },
+      { name: "Free version", url: HEVC_FREE_URL },
       { name: "Paid version", url: HEVC_PAID_URL },
     ],
-    install: { name: "Get HEVC Video Extensions", url: HEVC_FREE_URL },
+    install: { name: "Install HEVC", url: HEVC_FREE_URL },
   };
 }
