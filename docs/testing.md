@@ -401,6 +401,24 @@ Rear cards now use their own image proportions in fit mode.
 Narrow portrait cards wrap the indicators instead of hiding the burst icon and count.
 Front and rear outlines are drawn inside the image bounds.
 
+## Android folder copy
+
+On Android the live project database is in private app storage.
+Cullant copies it to `<folder>/.cullant/cullant.db`, so a desktop can open the same work.
+`cargo test mirror` covers the export, import, conflict and WAL rules on a local folder.
+The SAF code compiles only for Android, so do this check on a phone:
+
+1. Open a folder on the phone. Rate some photos. Send the app to the background.
+2. Run `adb shell ls <folder path>/.cullant` and make sure `cullant.db` is there.
+3. Open the folder on a PC. Make sure the ratings are there. Change one rating. Close the project.
+4. Open the folder on the phone again. Make sure Cullant asks which data to use.
+   Choose "Use folder data". Make sure the changed rating is there.
+5. Open the folder again. Make sure Cullant does not ask.
+
+A copy that this device did not write is never overwritten.
+The export returns `conflict` until the user chooses on the next open.
+A non-empty `cullant.db-wal` from a desktop counts as data from another device.
+
 ## What the tests do not cover
 
 This list is explicit, because the gaps matter more than the coverage.
