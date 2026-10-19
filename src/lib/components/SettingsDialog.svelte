@@ -294,24 +294,21 @@
     const next = pendingQuality;
     pendingQuality = null;
     if (next === null) return;
-    if (catalog.ingesting) {
-      previewMsg = "Wait for photo preparation to finish, then change the preview size.";
-      return;
-    }
     previewBusy = true;
     previewMsg = "";
     try {
       settings.setPreviewQuality(next);
       catalog.invalidatePreviewReady();
-      await api.setPreviewQuality(next);
+      const scanRunning = await api.setPreviewQuality(next);
       if (!catalog.project) {
         previewMsg = "Saved. Previews are rebuilt the next time you open a project.";
-        return;
+      } else if (scanRunning) {
+        // The running scan itself restages the earlier previews before it ends.
+        previewMsg = "Saved. The import uses the new size and rebuilds the earlier previews before it finishes.";
+      } else {
+        await api.rescanProject();
+        previewMsg = "Rebuilding previews at the new size…";
       }
-      // Discard cached previews only after the active import has finished.
-      await api.discardPreviews();
-      await api.rescanProject();
-      previewMsg = "Rebuilding previews at the new size…";
     } catch (err) {
       previewMsg = String(err);
     } finally {
@@ -814,7 +811,7 @@
   <ConfirmDialog
     title="Rebuild every preview?"
     message={catalog.project
-      ? `Previews change to ${pendingQuality} px. The ones already generated are discarded and rebuilt in the background.`
+      ? `Previews change to ${pendingQuality} px. The ones already generated are rebuilt in the background.`
       : `Previews change to ${pendingQuality} px, and are rebuilt the next time you open a project.`}
     confirmLabel="Change and rebuild"
     onconfirm={() => void applyPreviewQuality()}

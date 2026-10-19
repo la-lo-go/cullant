@@ -494,25 +494,32 @@ pub fn run_ingest_inner(
     //    for a different long edge than the one now configured; `long_edge = 0`
     //    means "generated before the column existed" and counts as matching, so
     //    upgrading never regrinds a library that is perfectly fine.
-    generate_pass(
-        db,
-        thumbs,
-        ThumbKind::Preview,
-        true,
-        &format!(
-            "SELECT f.id, f.mtime, f.orientation
-             FROM files f
-             JOIN groups g ON g.id = f.group_id
-             LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
-             WHERE f.status = 0 AND f.kind IN (0, 1) AND {decodable}
-           AND (g.primary_file_id = f.id OR g.decoupled = 1)
-               AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime
-                    OR (tp.long_edge <> 0 AND tp.long_edge <> {}))
-             ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
-            crate::thumbs::preview_long_edge()
-        ),
-        preview_progress,
-    )?;
+    // The edge can change while the scan runs (Settings) and the query captures
+    // it once, so the pass reports the edge it used. The end of the scan runs it
+    // again until the edge holds still.
+    let mut preview_pass = || {
+        let edge = crate::thumbs::preview_long_edge();
+        generate_pass(
+            db,
+            thumbs,
+            ThumbKind::Preview,
+            true,
+            &format!(
+                "SELECT f.id, f.mtime, f.orientation
+                 FROM files f
+                 JOIN groups g ON g.id = f.group_id
+                 LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
+                 WHERE f.status = 0 AND f.kind IN (0, 1) AND {decodable}
+               AND (g.primary_file_id = f.id OR g.decoupled = 1)
+                   AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime
+                        OR (tp.long_edge <> 0 AND tp.long_edge <> {edge}))
+                 ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC"
+            ),
+            preview_progress,
+        )
+        .map(|()| edge)
+    };
+    let mut preview_edge = preview_pass()?;
 
     generate_pass(
         db,
@@ -542,6 +549,10 @@ pub fn run_ingest_inner(
              ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
             video_progress,
         )?;
+    }
+
+    while preview_edge != crate::thumbs::preview_long_edge() && !thumbs.is_shut_down() {
+        preview_edge = preview_pass()?;
     }
 
     crate::photo_profile::report("ingest_complete");

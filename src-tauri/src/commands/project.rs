@@ -670,11 +670,12 @@ pub fn close_project(state: State<'_, AppState>) -> AppResult<()> {
 }
 
 /// Set the preview-quality preference without discarding existing previews.
-/// Returns the effective value, which remains unchanged for an unsupported
-/// `long_edge`.
+/// Returns whether a scan is running. That scan restages the old previews
+/// before it ends, so the caller must not start a second one.
 #[tauri::command]
-pub fn set_preview_quality(long_edge: u32) -> u32 {
-    crate::thumbs::set_preview_long_edge(long_edge)
+pub fn set_preview_quality(state: State<'_, AppState>, long_edge: u32) -> bool {
+    crate::thumbs::set_preview_long_edge(long_edge);
+    state.scan_active.load(std::sync::atomic::Ordering::Acquire)
 }
 
 /// The sizes Settings may offer, so the UI never invents one the backend
@@ -688,8 +689,8 @@ pub fn preview_quality_choices() -> Vec<u32> {
 /// JPEGs first, then the rows pointing at them. Grid thumbnails, video posters
 /// and `Full` renders are untouched, and no user file is ever involved.
 ///
-/// The following rescan regenerates previews at the new size. Refuses while a
-/// scan is running rather than deleting rows the ingest pass is writing.
+/// Test hook: the E2E scripts use it to force a cold preview cache. Refuses
+/// while a scan is running rather than deleting rows the ingest pass is writing.
 #[tauri::command(async)]
 pub fn discard_previews(state: State<'_, AppState>) -> AppResult<usize> {
     if state.scan_active.load(std::sync::atomic::Ordering::Relaxed) {

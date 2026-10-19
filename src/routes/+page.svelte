@@ -175,8 +175,7 @@
   });
 
   // Same for the preview size. Pushing it is idempotent and never deletes
-  // anything, so running on mount (and on every change) is safe — Settings owns
-  // the destructive half, after the user has confirmed it.
+  // anything, so running on mount (and on every change) is safe.
   $effect(() => {
     void api.setPreviewQuality(settings.previewQuality);
   });

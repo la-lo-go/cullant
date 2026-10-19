@@ -317,11 +317,11 @@ export const api = {
   // ingest pass reads it before its final (slow) video-poster tier.
   setGenerateVideoThumbs: (on: boolean) => invoke("set_generate_video_thumbs", { on }),
   // Push the loupe-preview long edge. Non-destructive and idempotent, so the
-  // startup push is free; returns the value actually in force.
-  setPreviewQuality: (longEdge: number) => invoke<number>("set_preview_quality", { longEdge }),
+  // startup push is free; returns whether a scan is running (it then restages).
+  setPreviewQuality: (longEdge: number) => invoke<boolean>("set_preview_quality", { longEdge }),
   // Delete every generated loupe preview for the open project (cached JPEGs and
-  // their rows). Only called after the user confirms a quality change; the
-  // rescan that follows regenerates them. Never touches a user file.
+  // their rows). Test hook: the E2E scripts use it to force a cold preview
+  // cache. Never touches a user file.
   discardPreviews: () => invoke<number>("discard_previews"),
   listRecentProjects: () => invoke<RecentProject[]>("list_recent_projects"),
   // Probe the storage backing a project id (used to watch the open project's
