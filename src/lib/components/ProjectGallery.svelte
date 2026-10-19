@@ -335,7 +335,7 @@
   }
 
   .peek-0 {
-    transform: translateX(-8px) rotate(-8deg);
+    transform: translateX(-10px) rotate(-4deg);
     z-index: 1;
   }
 
@@ -345,12 +345,19 @@
   }
 
   .peek-2 {
-    transform: translateX(8px) rotate(9deg);
+    transform: translateX(10px) rotate(4deg);
     z-index: 2;
   }
 
+  /* Dim the back photos so their corners recede behind the front one. */
+  .peek-0 img,
+  .peek-2 img {
+    filter: brightness(0.62);
+    transition: filter 180ms ease-out;
+  }
+
   .card:hover .peek-0 {
-    transform: translateX(-32px) translateY(-4px) rotate(-14deg);
+    transform: translateX(-28px) translateY(-3px) rotate(-8deg);
   }
 
   .card:hover .peek-1 {
@@ -358,7 +365,12 @@
   }
 
   .card:hover .peek-2 {
-    transform: translateX(32px) translateY(-4px) rotate(14deg);
+    transform: translateX(28px) translateY(-3px) rotate(8deg);
+  }
+
+  .card:hover .peek-0 img,
+  .card:hover .peek-2 img {
+    filter: brightness(0.9);
   }
 
   .name {
@@ -385,8 +397,12 @@
     content: "";
     position: absolute;
     inset: 0;
-    border: 2px solid rgba(255, 255, 255, 0.16);
-    box-shadow: inset 0 0 4px 2px rgba(255, 255, 255, 0.16);
+    /* Light from above: a top highlight and a bottom shade. A full light rim
+       glows on dark photos. */
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+      inset 0 -8px 12px -8px rgba(0, 0, 0, 0.35);
     border-radius: inherit;
     box-sizing: border-box;
     pointer-events: none;
