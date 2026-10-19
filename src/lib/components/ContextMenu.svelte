@@ -123,8 +123,29 @@
     return path.join("/");
   }
 
+  /** Arm a row for its click. A press on a row that does not own the submenu
+   *  open at its level only closes that submenu, so a stray tap never runs the
+   *  item. A mouse has already closed it by hovering, so it needs one click. */
   function armRow(path: number[]) {
-    pressedRow = pathKey(path);
+    const level = path.length - 1;
+    const owner = nodeAt(activePath.slice(0, level + 1));
+    const open =
+      activePath.length > level &&
+      activePath[level] !== path[level] &&
+      owner?.kind === "submenu" &&
+      !owner.disabled;
+    if (!open) {
+      pressedRow = pathKey(path);
+      return;
+    }
+    pressedRow = null;
+    activePath = activePath.slice(0, level);
+  }
+
+  /** Touch and pen have no reliable hover: their pointerenter comes right
+   *  before the press and would close the submenu before `armRow` sees it. */
+  function hoverRow(e: PointerEvent, path: number[]) {
+    if (e.pointerType === "mouse") activePath = path;
   }
 
   function clickRow(e: MouseEvent, path: number[]) {
@@ -213,7 +234,7 @@
             class:active
             class:checked={node.kind === "item" && node.checked}
             disabled={node.disabled}
-            onpointerenter={() => (activePath = [...path, i])}
+            onpointerenter={(e) => hoverRow(e, [...path, i])}
             onpointerdown={() => armRow([...path, i])}
             onclick={(e) => clickRow(e, [...path, i])}
           >
