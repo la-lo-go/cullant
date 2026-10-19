@@ -98,6 +98,20 @@ fn export(
     base: &Path,
     snapshot: &Path,
 ) -> AppResult<ExportOutcome> {
+    let previous = read_record(base);
+    // Always asked: on SAF it also drops cached entries of a copy or folder that
+    // was deleted outside the app, so the write below cannot trust them.
+    let on_disk = store.stat(COPY_REL)?;
+    let wal = wal_fingerprint(store.stat(WAL_REL)?);
+    // A copy or a WAL this device neither wrote nor accepted is another
+    // device's work. Checked before the snapshot, so a folder in conflict
+    // costs nothing on every timer tick.
+    let recorded = previous.as_ref().map(|p| (p.size, p.mtime));
+    let recorded_wal = previous.as_ref().and_then(|p| p.wal);
+    if on_disk.is_some_and(|f| recorded != Some(f)) || wal.is_some_and(|w| recorded_wal != Some(w))
+    {
+        return Ok(ExportOutcome::Conflict);
+    }
     let _ = std::fs::remove_file(snapshot);
     let target = snapshot.to_string_lossy().replace('\'', "''");
     db.call(move |conn| {
@@ -106,21 +120,8 @@ fn export(
     })?;
     let bytes = std::fs::read(snapshot)?;
     let hash = xxhash_rust::xxh3::xxh3_64(&bytes);
-    let previous = read_record(base);
-    // Always asked: on SAF it also drops cached entries of a copy or folder that
-    // was deleted outside the app, so the write below cannot trust them.
-    let on_disk = store.stat(COPY_REL)?;
-    let wal = wal_fingerprint(store.stat(WAL_REL)?);
-    // A copy or a WAL this device neither wrote nor accepted is another
-    // device's work.
-    let recorded = previous.as_ref().map(|p| (p.size, p.mtime));
-    let recorded_wal = previous.as_ref().and_then(|p| p.wal);
-    if on_disk.is_some_and(|f| recorded != Some(f)) || wal.is_some_and(|w| recorded_wal != Some(w))
-    {
-        return Ok(ExportOutcome::Conflict);
-    }
     if let Some(prev) = previous {
-        // The size and mtime check catches a copy that was deleted or replaced.
+        // The size and mtime check catches a deleted copy.
         if prev.hash == hash && on_disk == recorded && wal.is_none() {
             return Ok(ExportOutcome::Unchanged);
         }
@@ -155,7 +156,10 @@ fn read_record(base: &Path) -> Option<Record> {
 }
 
 fn write_record(base: &Path, record: &Record) -> AppResult<()> {
-    std::fs::write(base.join(RECORD), serde_json::to_vec(record).unwrap())?;
+    // A torn record would make this device's own copy look foreign.
+    let temporary = base.join(format!("{RECORD}.tmp"));
+    std::fs::write(&temporary, serde_json::to_vec(record).unwrap())?;
+    std::fs::rename(&temporary, base.join(RECORD))?;
     Ok(())
 }
 
