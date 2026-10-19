@@ -16,6 +16,7 @@ import { tags } from "./tags.svelte";
 import { view } from "./view.svelte";
 import { folders } from "./folders.svelte";
 import { settings } from "./settings.svelte";
+import { recent } from "./recent.svelte";
 import { clearThumbCache } from "../thumbLoader";
 
 class CatalogStore {
@@ -311,6 +312,9 @@ class CatalogStore {
     // defaults set here can never overwrite the saved blob before it loads.
     session.restoring = true;
     session.resetForNewProject();
+    // The open moved this project to the front of the recent list. Fetch that
+    // now, so the home gallery paints in its final order when the user returns.
+    recent.refresh().catch((e) => console.error("recent refresh failed", e));
     view.mode = "grid";
     this.media = "photos";
     await folders.restore();

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { recentThumbUrl, type RecentProject, type StorageKind } from "../api";
+  import { flip } from "svelte/animate";
   import { recent } from "../stores/recent.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import ImageOff from "@lucide/svelte/icons/image-off";
@@ -13,6 +14,10 @@
   let { onopen }: { onopen: (path: string) => void } = $props();
 
   const PREVIEW_SLOTS = [0, 1, 2];
+
+  // The list may reorder after the first paint (the refresh on mount), so cards
+  // glide to their new place instead of jumping.
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   /** Placeholder colours for a card with no cached thumbnails. Pastels, so they
    *  read as "photo not here yet" rather than as an error state. */
@@ -138,13 +143,13 @@
 {#if recent.loaded && recent.list.length > 0}
   <div class="gallery">
     <div class="grid">
-      {#each recent.list as project, index (project.path)}
+      {#each recent.list as project (project.path)}
         {@const st = project.storage}
         {@const KindIcon = kindIcon[st.kind]}
         <!-- The delete control is a sibling of the card button, not a child:
              nesting an interactive element inside a <button> is invalid HTML and
              leaves it keyboard-unreachable. -->
-        <div class="card-wrap">
+        <div class="card-wrap" animate:flip={{ duration: reduceMotion ? 0 : 200 }}>
           <button
             class="card"
             class:unavailable={st.state !== "ok"}
@@ -187,7 +192,7 @@
                   </span>
                   <span class="peek peek-{i} thumbnail">
                     <img
-                      src={recentThumbUrl(index, slot, project.path)}
+                      src={recentThumbUrl(project.path, slot, project.lastOpened)}
                       alt=""
                       loading="lazy"
                       onerror={(e) => { if (e.currentTarget.parentElement) e.currentTarget.parentElement.style.display = "none"; }}

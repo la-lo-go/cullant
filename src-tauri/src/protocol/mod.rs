@@ -12,7 +12,7 @@ use crate::AppState;
 
 /// Handler for the `cullant://` scheme (served as `http://cullant.localhost/…`
 /// on Windows). Routes: /thumb/{id}, /preview/{id} (async via the thumb pool),
-/// /recent-thumb/{index}/{slot} (homepage preview, reads a closed project's
+/// /recent-thumb/{slot}?p={project path} (homepage preview, reads a closed project's
 /// own thumb cache directly), /test (static smoke check). Pixels never cross
 /// base64 IPC.
 pub fn handle<R: Runtime>(
@@ -45,7 +45,7 @@ pub fn handle<R: Runtime>(
     let rest = rest.split('?').next().unwrap_or(rest);
 
     if route == "recent-thumb" {
-        respond_recent_thumb(app, responder, rest);
+        respond_recent_thumb(app, responder, rest, request.uri().query());
         return;
     }
 
@@ -486,16 +486,20 @@ fn respond_video<R: Runtime>(
 }
 
 /// Serve a preview thumbnail for a homepage recent-project card, identified
-/// by its position in the recent list plus a preview slot (0..N). Reads
+/// by its project path plus a preview slot (0..N). The path, not the list
+/// position, names the project: the list reorders while the page shows it, and
+/// a position would then point at another project's photos. Reads
 /// straight from that project's own `.cullant` cache on disk — it need not
 /// be the currently open project, so this bypasses AppState/ThumbPool
 /// entirely and never generates a thumbnail that doesn't already exist.
-fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResponder, rest: &str) {
-    let mut nums = rest.splitn(2, '/');
-    let (Some(index), Some(slot)) = (
-        nums.next().and_then(|s| s.parse::<usize>().ok()),
-        nums.next().and_then(|s| s.parse::<usize>().ok()),
-    ) else {
+fn respond_recent_thumb<R: Runtime>(
+    app: &AppHandle<R>,
+    responder: UriSchemeResponder,
+    rest: &str,
+    query: Option<&str>,
+) {
+    let (Some(slot), Some(project_path)) = (rest.parse::<usize>().ok(), query_param(query, "p"))
+    else {
         responder.respond(plain(
             StatusCode::BAD_REQUEST,
             "bad recent-thumb route".into(),
@@ -504,7 +508,7 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
     };
 
     let list = recent::load_recent(app);
-    let Some(entry) = list.get(index) else {
+    let Some(entry) = list.iter().find(|e| e.path == project_path) else {
         responder.respond(plain(
             StatusCode::NOT_FOUND,
             "no such recent project".into(),
@@ -577,7 +581,10 @@ fn respond_recent_thumb<R: Runtime>(app: &AppHandle<R>, responder: UriSchemeResp
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "image/jpeg")
-                .header(header::CACHE_CONTROL, "no-store")
+                // The URL carries the project's last-opened time, so a changed
+                // thumbnail always has a new URL. Caching keeps a card's image
+                // on screen when the gallery mounts again.
+                .header(header::CACHE_CONTROL, "max-age=31536000, immutable")
                 .body(bytes)
                 .unwrap(),
         ),
