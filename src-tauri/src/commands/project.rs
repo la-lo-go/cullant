@@ -747,7 +747,7 @@ pub fn set_generate_video_thumbs(on: bool, state: State<'_, AppState>) {
 }
 
 /// Copy the live database into the project folder when the store cannot keep
-/// it there. Reports `written`, `unchanged`, `skipped` or `conflict`.
+/// it there. Reports `written`, `unchanged` or `conflict`.
 #[tauri::command(async)]
 pub fn export_folder_copy(
     state: State<'_, AppState>,

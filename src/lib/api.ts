@@ -331,7 +331,7 @@ export const api = {
   reimportProject: () => invoke<ProjectInfo>("reimport_project"),
   // Android: copy the live database into the project folder.
   exportFolderCopy: () =>
-    invoke<"written" | "unchanged" | "skipped" | "conflict">("export_folder_copy"),
+    invoke<"written" | "unchanged" | "conflict">("export_folder_copy"),
   // Android, before open: what the folder's `.cullant/cullant.db` holds. Null
   // for a project whose database already lives in the folder.
   inspectFolderCopy: (path: string) =>

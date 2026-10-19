@@ -367,7 +367,7 @@ class CatalogStore {
       if (result === "conflict") {
         return "The folder has data from another device. Reopen the project to choose.";
       }
-      return result === "written" ? "Copied" : result === "unchanged" ? "No changes" : "Copy already running";
+      return result === "written" ? "Copied" : "No changes";
     } catch (error) {
       console.error("folder copy failed", error);
       return String(error);

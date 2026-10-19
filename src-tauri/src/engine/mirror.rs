@@ -2,7 +2,6 @@
 //! cannot keep the live database there (Android SAF).
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,14 +14,11 @@ const WAL_REL: &str = ".cullant/cullant.db-wal";
 const SNAPSHOT: &str = "mirror.tmp.db";
 const RECORD: &str = "mirror.json";
 
-static EXPORTING: AtomicBool = AtomicBool::new(false);
-
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportOutcome {
     Written,
     Unchanged,
-    Skipped,
     /// The folder holds a copy this device did not write. Nothing was changed.
     Conflict,
 }
@@ -75,20 +71,16 @@ pub fn export_folder_copy(
             "this project keeps its database in the folder".into(),
         ));
     }
-    if EXPORTING.swap(true, Ordering::Acquire) {
-        return Ok(ExportOutcome::Skipped);
-    }
     let guard = ExportGuard(base.join(SNAPSHOT));
     export(db, store, base, &guard.0)
 }
 
-/// Clears the running flag and the snapshot on every exit, a panic included.
+/// Removes the snapshot on every exit, a panic included.
 struct ExportGuard(std::path::PathBuf);
 
 impl Drop for ExportGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
-        EXPORTING.store(false, Ordering::Release);
     }
 }
 
@@ -246,10 +238,6 @@ fn prepare_copy(path: &Path) -> AppResult<()> {
 mod tests {
     use super::*;
     use crate::store::LocalFsStore;
-    use std::sync::Mutex;
-
-    // The exporting flag is process-wide, so the tests take turns.
-    static SERIAL: Mutex<()> = Mutex::new(());
 
     /// A store that claims to mirror, over a plain folder.
     struct Mirroring(LocalFsStore);
@@ -342,7 +330,6 @@ mod tests {
 
     #[test]
     fn first_export_writes_a_readable_copy_then_nothing_changes() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
         let copy = rusqlite::Connection::open(tree.path().join(COPY_REL)).unwrap();
@@ -356,7 +343,6 @@ mod tests {
 
     #[test]
     fn a_changed_row_is_written_again() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         run(&base, &db, &store);
         db.call(|conn| {
@@ -374,7 +360,6 @@ mod tests {
 
     #[test]
     fn the_record_matches_the_copy_on_disk() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, _tree, db, store) = setup();
         run(&base, &db, &store);
         let record: Record =
@@ -387,7 +372,6 @@ mod tests {
 
     #[test]
     fn a_deleted_copy_is_written_again_with_the_same_hash() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         run(&base, &db, &store);
         std::fs::remove_file(tree.path().join(COPY_REL)).unwrap();
@@ -397,25 +381,13 @@ mod tests {
 
     #[test]
     fn a_store_that_does_not_mirror_is_refused() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, _) = setup();
         let plain = LocalFsStore::new(tree.path());
         assert!(export_folder_copy(&db, &plain, base.path()).is_err());
     }
 
     #[test]
-    fn a_second_export_during_one_is_skipped() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        let (base, _tree, db, store) = setup();
-        EXPORTING.store(true, Ordering::SeqCst);
-        let outcome = run(&base, &db, &store);
-        EXPORTING.store(false, Ordering::SeqCst);
-        assert_eq!(outcome, ExportOutcome::Skipped);
-    }
-
-    #[test]
-    fn a_failed_write_leaves_no_snapshot_no_staged_file_and_no_stuck_flag() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    fn a_failed_write_leaves_no_snapshot_no_staged_file() {
         let (base, tree, db, store) = setup();
         let failing = Failing(store);
         assert!(export_folder_copy(&db, &failing, base.path()).is_err());
@@ -424,10 +396,6 @@ mod tests {
             .unwrap()
             .count();
         assert_eq!(left, 0, "a staged file was left behind");
-        assert_ne!(
-            export_folder_copy(&db, &failing.0, base.path()).unwrap(),
-            ExportOutcome::Skipped
-        );
     }
 
     /// A database file with `rows` files and one `saf_documents` row, in its own dir.
@@ -488,7 +456,6 @@ mod tests {
 
     #[test]
     fn a_copy_is_own_only_with_the_recorded_size_and_mtime() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, _tree, db, store) = setup();
         assert!(!is_own(base.path(), fp(1, 1)));
         run(&base, &db, &store);
@@ -505,7 +472,6 @@ mod tests {
 
     #[test]
     fn a_foreign_copy_is_never_overwritten_until_accepted() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         std::fs::create_dir_all(tree.path().join(".cullant")).unwrap();
         let copy = tree.path().join(COPY_REL);
@@ -519,7 +485,6 @@ mod tests {
 
     #[test]
     fn a_copy_changed_after_our_write_is_a_conflict() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         run(&base, &db, &store);
         std::fs::write(tree.path().join(COPY_REL), b"other device").unwrap();
@@ -528,7 +493,6 @@ mod tests {
 
     #[test]
     fn an_accepted_copy_is_own_and_the_next_export_writes() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, _tree, db, store) = setup();
         run(&base, &db, &store);
         let r = read_record(base.path()).unwrap();
@@ -602,7 +566,6 @@ mod tests {
 
     #[test]
     fn an_export_removes_an_empty_wal_and_the_shm_of_a_desktop() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         let dir = tree.path().join(".cullant");
         std::fs::create_dir_all(&dir).unwrap();
@@ -616,7 +579,6 @@ mod tests {
 
     #[test]
     fn a_foreign_wal_next_to_our_copy_is_a_conflict_and_nothing_changes() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         run(&base, &db, &store);
         let copy = tree.path().join(COPY_REL);
@@ -683,7 +645,6 @@ mod tests {
 
     #[test]
     fn an_imported_copy_is_own_and_the_next_export_writes() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         drop(db);
         let (_dir, seed) = copy_with_rows(2);
@@ -697,7 +658,6 @@ mod tests {
 
     #[test]
     fn an_imported_wal_is_removed_by_the_next_export() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         drop(db);
         folder_copy_with_wal(&tree);
@@ -712,7 +672,6 @@ mod tests {
 
     #[test]
     fn an_accepted_wal_is_removed_by_the_next_export() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let (base, tree, db, store) = setup();
         folder_copy_with_wal(&tree);
         assert_eq!(run(&base, &db, &store), ExportOutcome::Conflict);
