@@ -7,6 +7,7 @@
   import { IS_ANDROID, IS_MOBILE, IS_TOUCH, IS_WINDOWS } from "$lib/platform";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { session, flushSessionSave } from "$lib/stores/session.svelte";
+  import { focalKeyLabel } from "$lib/metadataFacets";
   import { settings } from "$lib/stores/settings.svelte";
   import { recent } from "$lib/stores/recent.svelte";
   import { runtimeTools } from "$lib/stores/runtimeTools.svelte";
@@ -103,7 +104,7 @@
     session.hasBursts && session.burstFilter !== "all" && `Burst: ${session.burstFilter}`,
     session.burstKeyFilter && "Burst: selected burst",
     ...Object.entries(folders.scope).map(([path, included]) => `${included ? "Folder" : "Excluded folder"}: ${path || "project root"}`),
-    ...[ ["Camera", session.cameraFilter], ["Lens", session.lensFilter], ["ISO", session.isoFilter], ["Aperture", session.apertureFilter], ["Focal length", session.focalFilter], ["Shutter", session.shutterFilter] ]
+    ...[ ["Camera", session.cameraFilter], ["Lens", session.lensFilter], ["ISO", session.isoFilter], ["Aperture", session.apertureFilter], ["Focal length", session.focalFilter && focalKeyLabel(session.focalFilter)], ["Shutter", session.shutterFilter] ]
       .filter(([, value]) => catalog.media === "photos" && value !== null)
       .map(([label, value]) => `${label}: ${value}`),
   ].filter(Boolean).join("; "));

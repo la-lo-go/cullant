@@ -11,16 +11,17 @@
     type TypeFilter,
     type OrientationFilter,
   } from "../stores/session.svelte";
+  import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
   import { folders } from "../stores/folders.svelte";
   import { formatColorLabel } from "../colorLabels";
   import {
     APERTURE_BUCKETS,
-    FOCAL_BUCKETS,
     ISO_BUCKETS,
     SHUTTER_BUCKETS,
     apertureBucket,
     focalBucket,
+    type FacetBucket,
     isoBucket,
     mergeSpellings,
     shutterBucket,
@@ -80,7 +81,8 @@
     const lenses = new Map<string, number>();
     const isoKeys = new Set<string>();
     const apertureKeys = new Set<string>();
-    const focalKeys = new Set<string>();
+    const focalBuckets = new Map<string, FacetBucket>();
+    const focalMm = new Set<number>();
     const shutterKeys = new Set<string>();
     for (const i of catalog.items) {
       const isPair = i.groupSize > 1 && !i.decoupled;
@@ -102,7 +104,10 @@
       const ab = apertureBucket(i.fNumber);
       if (ab) apertureKeys.add(ab.key);
       const fb = focalBucket(i.focalLength);
-      if (fb) focalKeys.add(fb.key);
+      if (fb) {
+        focalBuckets.set(fb.key, fb);
+        focalMm.add(Math.round(i.focalLength!));
+      }
       const sb = shutterBucket(i.exposureTime);
       if (sb) shutterKeys.add(sb.key);
 
@@ -129,7 +134,8 @@
       lenses,
       isoKeys,
       apertureKeys,
-      focalKeys,
+      focalBuckets,
+      focalMm,
       shutterKeys,
     };
   });
@@ -230,10 +236,23 @@
   const presentApertureBuckets = $derived(
     APERTURE_BUCKETS.filter((b) => facets.apertureKeys.has(b.key)),
   );
-  const presentFocalBuckets = $derived(FOCAL_BUCKETS.filter((b) => facets.focalKeys.has(b.key)));
+  // Band keys and exact keys both end in the mm value, so one numeric sort orders either mode.
+  const focalOrder = (b: FacetBucket) => Number(b.key.split(":")[1]);
+  const presentFocalBuckets = $derived(
+    [...facets.focalBuckets.values()].sort((a, b) => focalOrder(a) - focalOrder(b)),
+  );
+
   const presentShutterBuckets = $derived(
     SHUTTER_BUCKETS.filter((b) => facets.shutterKeys.has(b.key)),
   );
+
+  // A filter keyed for one mode matches nothing in the other, so drop it.
+  function setFocalExact(on: boolean) {
+    if (on === settings.focalExact) return;
+    settings.setFocalExact(on);
+    session.focalFilter = null;
+    session.clampFocus();
+  }
 
   // Burst membership. Counted over the whole project like the flag counts
   // below, so picking an option never rewrites the numbers beside it. byFile
@@ -733,9 +752,19 @@
     </section>
   {/if}
 
-  {#if presentFocalBuckets.length > 1 || session.focalFilter !== null}
+  {#if facets.focalMm.size > 1 || session.focalFilter !== null}
     <section>
-      <span class="lbl">Focal length</span>
+      <div class="head">
+        <span class="lbl">Focal length</span>
+        <div class="row">
+          <button class="seg" class:active={!settings.focalExact} onclick={() => setFocalExact(false)}>
+            <span>Ranges</span>
+          </button>
+          <button class="seg" class:active={settings.focalExact} onclick={() => setFocalExact(true)}>
+            <span>Exact</span>
+          </button>
+        </div>
+      </div>
       <div class="row wrap">
         <button
           class="seg"
@@ -919,6 +948,12 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   .row {

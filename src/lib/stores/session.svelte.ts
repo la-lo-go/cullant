@@ -1393,6 +1393,8 @@ class SessionStore {
         for (const key of ["extFilter", "cameraFilter", "lensFilter", "isoFilter", "apertureFilter", "focalFilter", "shutterFilter", "folderFilter", "dateFilter"] as const) {
           this[key] = savedString(f[key]);
         }
+        // A focal key saved under the other mode would match nothing.
+        if (!this.focalFilter?.startsWith(settings.focalExact ? "focalmm:" : "focal:")) this.focalFilter = null;
         folders.restoreScope(f.folderScope);
       }
       this.pendingFocusKey = savedString(s.focusKey);

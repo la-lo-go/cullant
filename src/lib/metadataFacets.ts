@@ -2,7 +2,8 @@
  * Bucketing of the numeric photographic settings (ISO, aperture, focal length)
  * for the filter panel. A shoot in automatic mode produces dozens of distinct
  * readings, which would flood a chip list — so each value collapses onto a
- * standard photographic step (ISO/aperture) or a focal-range band. The panel
+ * standard photographic step (ISO/aperture) or a focal-range band (or, when
+ * the user prefers, the exact whole-mm value for focal length). The panel
  * offers only the buckets some present photo falls into; both the panel (to
  * build the chips) and the filter predicate (to test a photo) go through the
  * same `*Bucket` functions, so what you click always matches what filters.
@@ -10,6 +11,8 @@
  * The free-text settings (camera, lens) need no bucketing, only a case-folded
  * identity — see `metaTextKey` at the bottom.
  */
+
+import { settings } from "./stores/settings.svelte";
 
 export interface FacetBucket {
   /** Stable identity stored in the filter state and persisted. */
@@ -72,8 +75,18 @@ const FOCAL_BANDS: FocalBand[] = [
 
 export function focalBucket(mm: number | null | undefined): FacetBucket | null {
   if (mm == null || !Number.isFinite(mm) || mm <= 0) return null;
+  if (settings.focalExact) {
+    const whole = Math.max(1, Math.round(mm));
+    // "focalmm:" cannot collide with the "focal:" band keys.
+    return { key: `focalmm:${whole}`, label: `${whole} mm` };
+  }
   const band = FOCAL_BANDS.find((b) => mm <= b.max) ?? FOCAL_BANDS[FOCAL_BANDS.length - 1];
   return { key: band.key, label: band.label };
+}
+
+/** Chip label of a stored focal key, for the active-filter summary. */
+export function focalKeyLabel(key: string): string {
+  return FOCAL_BANDS.find((b) => b.key === key)?.label ?? `${key.split(":")[1]} mm`;
 }
 
 // Standard full-stop shutter speeds in seconds, fast to slow. A raw reading
@@ -137,8 +150,8 @@ export function mergeSpellings(counts: Map<string, number>): string[] {
 }
 
 /** All possible buckets in ascending order — the panel filters these down to
- *  the ones actually present, keeping a stable low-to-high chip order. */
+ *  the ones actually present, keeping a stable low-to-high chip order. Focal
+ *  length has none: its exact values are known only from the photos. */
 export const ISO_BUCKETS: FacetBucket[] = ISO_STOPS.map((s) => isoBucket(s)!);
 export const APERTURE_BUCKETS: FacetBucket[] = APERTURE_STOPS.map((s) => apertureBucket(s)!);
-export const FOCAL_BUCKETS: FacetBucket[] = FOCAL_BANDS.map((b) => ({ key: b.key, label: b.label }));
 export const SHUTTER_BUCKETS: FacetBucket[] = SHUTTER_STOPS.map((s) => shutterBucket(s)!);

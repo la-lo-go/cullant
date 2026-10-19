@@ -46,6 +46,7 @@ const RADIAL_MOUSE_KEY = "cullant.radial.mouse";
 const RADIAL_ROTATION_KEY = "cullant.radial.rotation";
 const COLOR_LABEL_NAMES_KEY = "cullant.colorLabelNames";
 const GRID_PHOTO_FIT_KEY = "cullant.gridPhotoFit";
+const FOCAL_EXACT_KEY = "cullant.focalExact";
 
 export const COLOR_LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
 export type ColorLabel = (typeof COLOR_LABELS)[number];
@@ -236,6 +237,13 @@ function loadRadialSlots(): RadialSlot[] {
 class SettingsStore {
   colorLabelNames = $state<Partial<Record<ColorLabel, string>>>(loadColorLabelNames());
   gridPhotoFit = $state<GridPhotoFit>(loadGridPhotoFit());
+  /** Filter and group focal length by exact mm instead of range bands. */
+  focalExact = $state<boolean>(loadBool(FOCAL_EXACT_KEY, false));
+
+  setFocalExact(on: boolean) {
+    this.focalExact = on;
+    save(FOCAL_EXACT_KEY, on);
+  }
 
   setColorLabelName(label: ColorLabel, name: string) {
     const names = { ...this.colorLabelNames };
