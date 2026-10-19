@@ -1,6 +1,7 @@
 pub mod migrations;
 pub mod sql;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Condvar, Mutex};
@@ -12,6 +13,10 @@ use rusqlite::Connection;
 use crate::error::{AppError, AppResult};
 
 type Job = Box<dyn FnOnce(&mut Connection) + Send>;
+
+/// How many `Db` handles are alive per database file. A handle can outlive its
+/// project: a scan or a command keeps its `Arc` after the project is closed.
+static OPEN: Mutex<BTreeMap<PathBuf, usize>> = Mutex::new(BTreeMap::new());
 
 /// How long a reader/checkpoint waits on a briefly-held lock before erroring.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -45,12 +50,18 @@ impl Drop for Db {
         let Some(writer) = self.writer.take() else {
             return;
         };
-        // Ends the writer loop. A drop on the writer thread itself cannot wait.
+        // Ends the writer loop. The writer thread never owns a `Db`: its jobs
+        // get only the connection, so this join cannot wait on itself.
         self.tx = mpsc::channel().0;
-        if writer.thread().id() != thread::current().id() {
-            let _ = writer.join();
-        }
+        let _ = writer.join();
         self.readers.conns.lock().unwrap().clear();
+        let mut open = OPEN.lock().unwrap();
+        if let Some(count) = open.get_mut(&self.path) {
+            *count -= 1;
+            if *count == 0 {
+                open.remove(&self.path);
+            }
+        }
     }
 }
 
@@ -180,6 +191,7 @@ impl Db {
                 }
             })?;
 
+        *OPEN.lock().unwrap().entry(path.clone()).or_insert(0) += 1;
         Ok(Db {
             tx,
             readers,
@@ -227,6 +239,23 @@ impl Db {
             .conn
             .as_ref()
             .expect("reader guard holds a connection"))
+    }
+
+    /// True while any handle to the database file at `path` is alive.
+    pub fn is_open_at(path: &Path) -> bool {
+        OPEN.lock().unwrap().contains_key(path)
+    }
+
+    /// Wait until no handle to `path` is alive. False when `timeout` passes first.
+    pub fn wait_closed_at(path: &Path, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while Self::is_open_at(path) {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        true
     }
 
     pub fn path(&self) -> &Path {
@@ -280,6 +309,19 @@ mod tests {
         let first = Db::open(dir.path()).unwrap();
         let second = Db::open(dir.path()).unwrap();
         assert_ne!(first.generation(), second.generation());
+    }
+
+    #[test]
+    fn a_database_counts_as_open_until_its_last_handle_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = std::sync::Arc::new(Db::open(dir.path()).unwrap());
+        let second = first.clone();
+        let path = first.path().to_path_buf();
+        assert!(Db::is_open_at(&path));
+        drop(first);
+        assert!(!Db::wait_closed_at(&path, Duration::from_millis(120)));
+        drop(second);
+        assert!(Db::wait_closed_at(&path, Duration::from_millis(120)));
     }
 
     #[test]

@@ -657,7 +657,10 @@ fn close_project_inner(state: &AppState) {
     // thumbnail/preview/video generation keeps running after the user has
     // returned to the home screen. shutdown() drains the pending queue (releasing
     // the scanner's completion channel) and stops the workers.
-    if let Some(prev) = state.project.lock().unwrap().take() {
+    // Taken out first: dropping the project waits for its database to close,
+    // and the project mutex must not be held meanwhile.
+    let previous = state.project.lock().unwrap().take();
+    if let Some(prev) = previous {
         prev.thumbs.shutdown();
     }
     // Cache keys embed file ids, which are only unique within one project's
@@ -968,16 +971,15 @@ mod saf_copy {
             .as_ref()
             .is_some_and(|p| p.root == base);
         if is_open {
-            // A running scan still holds the database, and its files must not
-            // be replaced under it.
-            if state.scan_active.load(std::sync::atomic::Ordering::Relaxed) {
-                return Err(AppError::Other(
-                    "Cullant is still reading this project. Wait for it to finish, then try again."
-                        .into(),
-                ));
-            }
-            // Dropping the last handle waits for the database to close.
             close_project_inner(state);
+        }
+        // A scan or a command can still hold the old database after the close.
+        // Replacing its files under that handle would corrupt both databases.
+        let live = base.join(".cullant").join("cullant.db");
+        if !Db::wait_closed_at(&live, std::time::Duration::from_secs(5)) {
+            return Err(AppError::Other(
+                "Cullant is still closing this project. Try again.".into(),
+            ));
         }
         let staging = base.join("import.tmp");
         let _ = std::fs::remove_dir_all(&staging);
