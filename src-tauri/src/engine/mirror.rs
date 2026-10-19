@@ -22,6 +22,8 @@ pub enum ExportOutcome {
     Written,
     Unchanged,
     Skipped,
+    /// The folder holds a copy this device did not write. Nothing was changed.
+    Conflict,
 }
 
 /// What this device last wrote to the folder.
@@ -77,6 +79,12 @@ fn export(
     // Always asked: on SAF it also drops cached entries of a copy or folder that
     // was deleted outside the app, so the write below cannot trust them.
     let on_disk = store.stat(COPY_REL)?;
+    // A copy this device neither wrote nor accepted is another device's work.
+    if let Some(found) = on_disk {
+        if previous.as_ref().map(|p| (p.size, p.mtime)) != Some(found) {
+            return Ok(ExportOutcome::Conflict);
+        }
+    }
     if let Some(prev) = previous {
         // The size and mtime check catches a copy that was deleted or replaced.
         if prev.hash == hash && on_disk == Some((prev.size, prev.mtime)) {
@@ -443,6 +451,30 @@ mod tests {
         assert!(is_own(base.path(), r.size, r.mtime));
         assert!(!is_own(base.path(), r.size + 1, r.mtime));
         assert!(!is_own(base.path(), r.size, r.mtime + 1));
+    }
+
+    #[test]
+    fn a_foreign_copy_is_never_overwritten_until_accepted() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, tree, db, store) = setup();
+        std::fs::create_dir_all(tree.path().join(".cullant")).unwrap();
+        let copy = tree.path().join(COPY_REL);
+        std::fs::write(&copy, b"foreign").unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Conflict);
+        assert_eq!(std::fs::read(&copy).unwrap(), b"foreign");
+        assert!(!base.path().join(RECORD).exists());
+        let (size, mtime) = store.stat(COPY_REL).unwrap().unwrap();
+        accept(base.path(), size, mtime).unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+    }
+
+    #[test]
+    fn a_copy_changed_after_our_write_is_a_conflict() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let (base, tree, db, store) = setup();
+        run(&base, &db, &store);
+        std::fs::write(tree.path().join(COPY_REL), b"other device").unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Conflict);
     }
 
     #[test]

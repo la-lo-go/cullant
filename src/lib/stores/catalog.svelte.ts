@@ -350,8 +350,10 @@ class CatalogStore {
     await this.refresh();
   }
 
-  close() {
-    return this.transition(() => this.closeNow());
+  /// `copyFirst` false skips the on-leave copy, for a close that is followed
+  /// by an import over this project's data.
+  close(copyFirst = true) {
+    return this.transition(() => this.closeNow(copyFirst));
   }
 
   /// Copy the project data into the project folder and say what happened.
@@ -362,6 +364,9 @@ class CatalogStore {
     if (!this.project?.mirrorsMetadata) return "";
     try {
       const result = await api.exportFolderCopy();
+      if (result === "conflict") {
+        return "The folder has data from another device. Reopen the project to choose.";
+      }
       return result === "written" ? "Copied" : result === "unchanged" ? "No changes" : "Copy already running";
     } catch (error) {
       console.error("folder copy failed", error);
@@ -373,9 +378,9 @@ class CatalogStore {
     if (settings.copyMetadataOnLeave) await this.copyToFolder();
   }
 
-  private async closeNow() {
+  private async closeNow(copyFirst: boolean) {
     await flushSessionSave();
-    await this.copyToFolderOnLeave();
+    if (copyFirst) await this.copyToFolderOnLeave();
     const generation = ++this.generation;
     this.eventRoot = null;
     try {

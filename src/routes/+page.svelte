@@ -582,7 +582,7 @@
     try {
       // The import replaces the live database, so an open project on it must
       // close first, or the catalog would keep pointing at a closed project.
-      if (useFolder && catalog.project?.rootPath === choice.path) await catalog.close();
+      if (useFolder && catalog.project?.rootPath === choice.path) await catalog.close(false);
       if (useFolder) await api.importFolderCopy(choice.path);
       else await api.acceptLocalData(choice.path);
     } catch (e) {
