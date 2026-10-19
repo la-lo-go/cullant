@@ -184,6 +184,12 @@ pub trait ProjectStore: Send + Sync {
 
     fn remove_file(&self, rel: &str) -> AppResult<()>;
 
+    /// Remove the directory at `rel` with its content. SAF deletes a directory
+    /// document with its content, so `remove_file` does it there.
+    fn remove_dir_all(&self, rel: &str) -> AppResult<()> {
+        self.remove_file(rel)
+    }
+
     fn exists(&self, rel: &str) -> AppResult<bool>;
 
     /// Size in bytes and mtime in whole seconds of the file at `rel`, or `None`

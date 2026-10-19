@@ -10,6 +10,7 @@ use crate::error::{AppError, AppResult};
 use crate::store::ProjectStore;
 
 const COPY_REL: &str = ".cullant/cullant.db";
+const THUMBS_REL: &str = ".cullant/thumbs";
 const WAL_REL: &str = ".cullant/cullant.db-wal";
 const SNAPSHOT: &str = "mirror.tmp.db";
 const RECORD: &str = "mirror.json";
@@ -112,11 +113,16 @@ fn export(
     })?;
     let bytes = std::fs::read(snapshot)?;
     let hash = xxhash_rust::xxh3::xxh3_64(&bytes);
-    if let Some(prev) = previous {
+    if let Some(prev) = &previous {
         // The size and mtime check catches a deleted copy.
         if prev.hash == hash && on_disk == recorded && wal.is_none() {
             return Ok(ExportOutcome::Unchanged);
         }
+    }
+    // The copy of a device with other file ids replaces this one. A cache of
+    // such a device holds keys that would match other files.
+    if previous.as_ref().is_some_and(|p| p.hash == 0) && store.exists(THUMBS_REL)? {
+        store.remove_dir_all(THUMBS_REL)?;
     }
     store.create_dir_all(".cullant")?;
     // A desktop leaves these next to its database. Next to the new main file
@@ -258,6 +264,7 @@ mod tests {
             write_replacing(rel: &str, bytes: &[u8], mime: &str) -> AppResult<()>;
             copy(from: &str, to: &str) -> AppResult<()>;
             remove_file(rel: &str) -> AppResult<()>;
+            remove_dir_all(rel: &str) -> AppResult<()>;
             exists(rel: &str) -> AppResult<bool>;
             stat(rel: &str) -> AppResult<Option<(i64, i64)>>;
         }
@@ -289,6 +296,7 @@ mod tests {
             move_to(rel: &str, parent: &str) -> AppResult<String>;
             copy(from: &str, to: &str) -> AppResult<()>;
             remove_file(rel: &str) -> AppResult<()>;
+            remove_dir_all(rel: &str) -> AppResult<()>;
             exists(rel: &str) -> AppResult<bool>;
             stat(rel: &str) -> AppResult<Option<(i64, i64)>>;
         }
@@ -491,6 +499,22 @@ mod tests {
         accept(base.path(), fp(r.size, r.mtime)).unwrap();
         assert!(is_own(base.path(), fp(r.size, r.mtime)));
         assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+    }
+
+    #[test]
+    fn an_accepted_copy_is_replaced_without_the_cache_of_its_device() {
+        let (base, tree, db, store) = setup();
+        run(&base, &db, &store);
+        let r = read_record(base.path()).unwrap();
+        accept(base.path(), fp(r.size, r.mtime)).unwrap();
+        std::fs::create_dir_all(tree.path().join(THUMBS_REL)).unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+        assert!(!tree.path().join(THUMBS_REL).exists());
+        std::fs::create_dir_all(tree.path().join(THUMBS_REL)).unwrap();
+        db.call(|c| Ok(c.execute("UPDATE files SET size = 2", [])?))
+            .unwrap();
+        assert_eq!(run(&base, &db, &store), ExportOutcome::Written);
+        assert!(tree.path().join(THUMBS_REL).exists(), "own cache is kept");
     }
 
     #[test]

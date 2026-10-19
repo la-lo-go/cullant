@@ -199,6 +199,11 @@ impl ProjectStore for LocalFsStore {
         Ok(())
     }
 
+    fn remove_dir_all(&self, rel: &str) -> AppResult<()> {
+        std::fs::remove_dir_all(self.abs(rel)?)?;
+        Ok(())
+    }
+
     fn exists(&self, rel: &str) -> AppResult<bool> {
         Ok(self.abs(rel)?.try_exists()?)
     }
@@ -302,5 +307,15 @@ mod tests {
         store.remove_file("y.jpg").unwrap();
         assert!(!store.exists("y.jpg").unwrap());
         assert!(store.exists("x.jpg").unwrap());
+    }
+
+    #[test]
+    fn remove_dir_all_removes_the_directory_with_its_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = LocalFsStore::new(dir.path());
+        std::fs::create_dir_all(dir.path().join("t/sub")).unwrap();
+        std::fs::write(dir.path().join("t/sub/x"), b"x").unwrap();
+        store.remove_dir_all("t").unwrap();
+        assert!(!store.exists("t").unwrap());
     }
 }
