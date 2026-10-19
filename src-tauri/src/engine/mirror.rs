@@ -77,9 +77,12 @@ fn export(
     let previous: Option<Record> = std::fs::read(&record_path)
         .ok()
         .and_then(|raw| serde_json::from_slice(&raw).ok());
+    // Always asked: on SAF it also drops cached entries of a copy or folder that
+    // was deleted outside the app, so the write below cannot trust them.
+    let on_disk = store.stat(COPY_REL)?;
     if let Some(prev) = previous {
         // The size and mtime check catches a copy that was deleted or replaced.
-        if prev.hash == hash && store.stat(COPY_REL)? == Some((prev.size, prev.mtime)) {
+        if prev.hash == hash && on_disk == Some((prev.size, prev.mtime)) {
             return Ok(ExportOutcome::Unchanged);
         }
     }
@@ -142,8 +145,8 @@ mod tests {
     struct Failing(Mirroring);
 
     impl ProjectStore for Failing {
-        fn write_replacing(&self, _rel: &str, _bytes: &[u8], _mime: &str) -> AppResult<()> {
-            Err(AppError::Other("write failed".into()))
+        fn move_file(&self, _from: &str, _to: &str) -> AppResult<()> {
+            Err(AppError::Other("move failed".into()))
         }
         fn list_recursive(
             &self,
@@ -159,7 +162,6 @@ mod tests {
             create_dir_all(rel: &str) -> AppResult<()>;
             rename_in_place(rel: &str, new_name: &str) -> AppResult<String>;
             move_to(rel: &str, parent: &str) -> AppResult<String>;
-            move_file(from: &str, to: &str) -> AppResult<()>;
             copy(from: &str, to: &str) -> AppResult<()>;
             remove_file(rel: &str) -> AppResult<()>;
             exists(rel: &str) -> AppResult<bool>;
@@ -266,12 +268,16 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_write_leaves_no_snapshot_and_no_stuck_flag() {
+    fn a_failed_write_leaves_no_snapshot_no_staged_file_and_no_stuck_flag() {
         let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        let (base, _tree, db, store) = setup();
+        let (base, tree, db, store) = setup();
         let failing = Failing(store);
         assert!(export_folder_copy(&db, &failing, base.path()).is_err());
         assert!(!base.path().join(SNAPSHOT).exists());
+        let left = std::fs::read_dir(tree.path().join(".cullant"))
+            .unwrap()
+            .count();
+        assert_eq!(left, 0, "a staged file was left behind");
         assert_ne!(
             export_folder_copy(&db, &failing.0, base.path()).unwrap(),
             ExportOutcome::Skipped
