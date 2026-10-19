@@ -4,7 +4,7 @@
   import { settings } from "$lib/stores/settings.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
-  import { runCommand } from "$lib/keyboard/dispatcher.svelte";
+  import { markPressed, pressed, runCommand } from "$lib/keyboard/dispatcher.svelte";
   import { shortcutHint } from "$lib/keyboard/hints";
   import { formatColorLabel } from "$lib/colorLabels";
   import { tooltips } from "$lib/tooltips";
@@ -111,12 +111,27 @@
   // Run a command, then release focus so a clicked button never swallows the
   // arrow keys used for grid navigation (mirrors the `blurring()` toolbar
   // helper). On touch this blur is a harmless no-op.
-  function act(fn: () => void): (e: MouseEvent) => void {
+  function act(fn: () => void, id: string): (e: MouseEvent) => void {
     return (e) => {
+      markPressed(id);
       fn();
       (e.currentTarget as HTMLElement).blur();
     };
   }
+
+  // Flash the control that fired, from a tap or a key. The Web Animations API
+  // restarts on every call, so a repeated press flashes again. Reduced motion
+  // keeps the flash but drops the fade.
+  let bar: HTMLElement;
+  $effect(() => {
+    const { id, n } = pressed;
+    if (!n) return;
+    const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    bar.querySelector(`[data-press="${CSS.escape(id)}"]`)?.animate(
+      [{ backgroundColor: "rgba(255, 255, 255, 0.4)" }, {}],
+      { duration: 200, easing: calm ? "steps(1, end)" : "ease-out" },
+    );
+  });
 
   function rate(n: number) {
     // Tapping the current rating clears it, Lightroom-style.
@@ -130,14 +145,14 @@
   }
 </script>
 
-<div class="touchbar" use:tooltips class:forced={forceShow} class:disabled={!focused && !hasSelection} class:hidden>
+<div class="touchbar" bind:this={bar} use:tooltips class:forced={forceShow} class:disabled={!focused && !hasSelection} class:hidden>
   {#if hasSelection}
     <div class="group select">
-      <button class="btn" title="Clear selection" aria-label="Clear selection" onclick={act(() => session.clearSelection())}>
+      <button class="btn" title="Clear selection" aria-label="Clear selection" data-press="select.none" onclick={act(() => session.clearSelection(), "select.none")}>
         <X size={20} />
       </button>
       {#if session.canSurvey && view.mode !== "survey"}
-        <button class="btn task" title={shortcutHint("Review selection (Survey)", "view.survey")} aria-label="Review selection" onclick={act(() => session.openSurvey())}>
+        <button class="btn task" title={shortcutHint("Review selection (Survey)", "view.survey")} aria-label="Review selection" data-press="view.survey" onclick={act(() => session.openSurvey(), "view.survey")}>
           <LayoutGrid size={18} /> Review selection
         </button>
       {/if}
@@ -145,10 +160,10 @@
   {/if}
   {#if view.mode !== "grid"}
     <div class="group nav">
-      <button class="btn" title="Previous" aria-label="Previous" onclick={act(() => runCommand("nav.prev"))}>
+      <button class="btn" title="Previous" aria-label="Previous" data-press="nav.prev" onclick={act(() => runCommand("nav.prev"), "nav.prev")}>
         <ChevronLeft size={22} />
       </button>
-      <button class="btn" title="Next" aria-label="Next" onclick={act(() => runCommand("nav.next"))}>
+      <button class="btn" title="Next" aria-label="Next" data-press="nav.next" onclick={act(() => runCommand("nav.next"), "nav.next")}>
         <ChevronRight size={22} />
       </button>
     </div>
@@ -156,7 +171,7 @@
 
   {#if view.mode === "viewer" || view.mode === "compare"}
     <div class="group recovery">
-      <button class="btn" disabled={!session.canUndoRejection} aria-label="Undo last rejection" title={shortcutHint("Undo last rejection", "undo.rejection")} onclick={act(() => void session.undoLastRejection())}>
+      <button class="btn" disabled={!session.canUndoRejection} aria-label="Undo last rejection" title={shortcutHint("Undo last rejection", "undo.rejection")} data-press="undo.rejection" onclick={act(() => void session.undoLastRejection(), "undo.rejection")}>
         <Undo2 size={18} />
       </button>
     </div>
@@ -165,13 +180,13 @@
   {#each visibleBarItems as itemId (itemId)}
     {#if itemId === "auto" && (view.mode === "viewer" || view.mode === "compare")}
       <div class="group recovery">
-        <button class="btn task" class:active={session.autoAdvanceActive} disabled={session.capsLockActive} aria-label="Auto" aria-pressed={session.autoAdvanceActive} title={session.capsLockActive ? "Caps Lock enables keyboard auto-advance. Turn Caps Lock off to use Auto. Shift reverses keyboard auto-advance for one action." : "Auto: advance after classification. Shift reverses this setting for one action."} onclick={act(toggleAutoAdvance)}>
+        <button class="btn task" class:active={session.autoAdvanceActive} disabled={session.capsLockActive} aria-label="Auto" aria-pressed={session.autoAdvanceActive} title={session.capsLockActive ? "Caps Lock enables keyboard auto-advance. Turn Caps Lock off to use Auto. Shift reverses keyboard auto-advance for one action." : "Auto: advance after classification. Shift reverses this setting for one action."} data-press="auto" onclick={act(toggleAutoAdvance, "auto")}>
           <ArrowRight size={17} /> Auto
         </button>
       </div>
     {:else if itemId === "moveCopy"}
       <div class="group file-actions">
-        <button class="btn" title="Move or copy to folder" aria-label="Move or copy to folder" onclick={act(() => runCommand("action.moveCopy"))}>
+        <button class="btn" title="Move or copy to folder" aria-label="Move or copy to folder" data-press="action.moveCopy" onclick={act(() => runCommand("action.moveCopy"), "action.moveCopy")}>
           <FolderInput size={18} />
         </button>
       </div>
@@ -182,7 +197,8 @@
           class:active-reject={flagActive(-1)}
           title={`${shortcutHint("Reject", "flag.reject")}. Click again to unflag.`}
           aria-label="Reject"
-          onclick={act(() => runCommand(flagActive(-1) ? "flag.unflag" : "flag.reject"))}
+          data-press="flag.reject"
+          onclick={act(() => runCommand(flagActive(-1) ? "flag.unflag" : "flag.reject"), "flag.reject")}
         >
           <X size={20} />
         </button>
@@ -191,7 +207,8 @@
           class:active-pick={flagActive(1)}
           title={`${shortcutHint("Pick", "flag.pick")}. Click again to unflag.`}
           aria-label="Pick"
-          onclick={act(() => runCommand(flagActive(1) ? "flag.unflag" : "flag.pick"))}
+          data-press="flag.pick"
+          onclick={act(() => runCommand(flagActive(1) ? "flag.unflag" : "flag.pick"), "flag.pick")}
         >
           <Check size={20} />
         </button>
@@ -204,7 +221,8 @@
             class:on={rating >= n}
             title={`Rate ${n}`}
             aria-label={`Rate ${n}`}
-            onclick={act(() => rate(n))}
+            data-press={`rate.${n}`}
+            onclick={act(() => rate(n), `rate.${n}`)}
           >
             <Star size={18} fill={rating >= n ? "currentColor" : "none"} />
           </button>
@@ -219,7 +237,8 @@
             title={`${formatColorLabel(name)} label`}
             aria-label={`${formatColorLabel(name)} label`}
             style="--c: {color}"
-            onclick={act(() => session.setLabel(labelActive(name) ? null : name))}
+            data-press={`label.${name.toLowerCase()}`}
+            onclick={act(() => session.setLabel(labelActive(name) ? null : name), `label.${name.toLowerCase()}`)}
           >
             <span class="swatch"></span>
           </button>
@@ -234,7 +253,8 @@
               class:active={tagActive(tag.id)}
               title={`Toggle tag: ${tag.name}`}
               style="--c: {tag.color ?? '#888'}"
-              onclick={act(() => session.toggleTag(tag.id))}
+              data-press={`tag.${tag.id}`}
+              onclick={act(() => session.toggleTag(tag.id), `tag.${tag.id}`)}
             >
               <span class="tagdot"></span>
               <span class="taglabel">{tag.name}</span>
@@ -248,7 +268,8 @@
           class="btn"
           title="Clear all classification (rating, flag, label, tags)"
           aria-label="Clear all classification"
-          onclick={act(() => session.clearClassification())}
+          data-press="clear"
+          onclick={act(() => session.clearClassification(), "clear")}
         >
           <Eraser size={20} />
         </button>

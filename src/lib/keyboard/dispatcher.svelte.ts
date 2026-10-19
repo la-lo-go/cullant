@@ -230,10 +230,22 @@ function handleChord(e: KeyboardEvent): boolean {
   const n = Number(e.key);
   if (Number.isInteger(n) && n >= 1 && n <= 9) {
     const tag = tags.all[n - 1];
-    if (tag) void session.toggleTag(tag.id, e);
+    if (tag) {
+      markPressed(`tag.${tag.id}`);
+      void session.toggleTag(tag.id, e);
+    }
     return true; // digit consumed by the chord, never reaches rate.N
   }
   return false; // any other key cancels the chord and runs normally
+}
+
+/** Last control that fired, keyed by command id (`tag.<id>` for a tag). The
+ * counter makes a repeat of the same control a new signal. */
+export const pressed = $state({ id: "", n: 0 });
+
+export function markPressed(id: string) {
+  pressed.id = id;
+  pressed.n++;
 }
 
 /** Run a command outside the keyboard path (e.g. from a touch button).
@@ -298,6 +310,7 @@ export function handleKeydown(e: KeyboardEvent) {
   if (command) {
     e.preventDefault();
     if (e.repeat && NO_REPEAT.has(command)) return;
+    markPressed(command);
     execute(command, e);
     return;
   }
@@ -306,6 +319,7 @@ export function handleKeydown(e: KeyboardEvent) {
   if (tag) {
     e.preventDefault();
     if (e.repeat) return;
+    markPressed(`tag.${tag.id}`);
     void session.toggleTag(tag.id, e);
   }
 }
