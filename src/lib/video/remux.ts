@@ -26,6 +26,9 @@ import { bufferedRanges, videoTrace } from "./trace";
 
 /** Raised when the fallback cannot help, so the caller offers an external app. */
 export class UnplayableError extends Error {
+  /** Set when the media pipeline refused this codec, which is a certain cause. */
+  codec?: string;
+
   constructor(message: string, readonly retryable = false) {
     super(message);
   }
@@ -224,7 +227,9 @@ export async function remuxForPlayback(
       mime = mimeFor([videoCodec]);
       dropAudio = true;
       if (!MediaSource.isTypeSupported(mime)) {
-        throw new UnplayableError(`this device cannot play ${videoCodec}`);
+        const error = new UnplayableError(`this device cannot play ${videoCodec}`);
+        error.codec = videoCodec;
+        throw error;
       }
     }
   } catch (e) {

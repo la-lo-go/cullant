@@ -4,6 +4,8 @@
   import { needsPlaybackFallback, remuxForPlayback, UnplayableError, type Remux } from "../video/remux";
   import { bufferedRanges, videoTrace } from "../video/trace";
   import { unplayableVideos, playbackFailureKey } from "../video/failures";
+  import { codecReason, type PlaybackReason } from "../video/codecs";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { tooltips } from "../tooltips";
   import Play from "@lucide/svelte/icons/play";
   import Pause from "@lucide/svelte/icons/pause";
@@ -35,6 +37,9 @@
   const rememberedFailure = $derived(unplayableVideos.has(failureKey));
   let currentFailure = $state(false);
   const failed = $derived(currentFailure || rememberedFailure);
+  /** Shown only for a cause that is certain, such as a codec the device refused. */
+  let currentReason = $state<PlaybackReason | null>(null);
+  const reason = $derived(currentReason ?? unplayableVideos.get(failureKey) ?? null);
 
   // The source on the element: the file itself, unless the WebView turned that
   // down and the in-app remuxer produced a MediaSource it will accept.
@@ -106,8 +111,9 @@
     });
     cancelPosterFrame();
     currentFailure = true;
+    currentReason = error instanceof UnplayableError && error.codec ? codecReason(error.codec) : null;
     if (!(error instanceof UnplayableError && error.retryable) && video?.error?.code !== 1) {
-      unplayableVideos.add(failureKey);
+      unplayableVideos.set(failureKey, currentReason);
     }
     showPoster = true;
     remuxing = false;
@@ -351,6 +357,7 @@
     uiVisible = true;
     hovering = false;
     currentFailure = false;
+    currentReason = null;
     showPoster = true;
     posterFailed = false;
     sharpPosterFailed = false;
@@ -533,7 +540,18 @@
 
   {#if failed}
     <div class="fallback" role="status">
-      <p>This video can't be played here.</p>
+      <div class="why">
+        <p>This video can't be played here.</p>
+        {#if reason}
+          <p class="reason">{reason.text}</p>
+          {#if reason.install}
+            <button class="install" onclick={() => void openUrl(reason.install!)}>
+              <ExternalLink size={13} />
+              <span>Installation page</span>
+            </button>
+          {/if}
+        {/if}
+      </div>
       <button class="open-ext" onclick={openExternally}>
         <ExternalLink size={16} />
         <span>Open in external player</span>
@@ -662,6 +680,32 @@
     margin: 0;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.7);
+  }
+
+  .why {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+    flex: 1 1 220px;
+  }
+
+  .fallback .reason {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+  }
+
+  .install {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font-size: 12px;
+    cursor: pointer;
   }
 
   /* Progress of the in-app remux. Tucked into the top corner, under the safe-area
