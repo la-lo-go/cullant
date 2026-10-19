@@ -225,7 +225,10 @@
                 <Check size={13} />
               {/if}
             </span>
-            <span class="label">{node.label}</span>
+            <span class="label"
+              >{#if node.kind === "item" && node.value}<span class="type">{node.label}:</span>
+                <span class="value">{node.value}</span>{:else}{node.label}{/if}</span
+            >
             {#if node.kind === "submenu"}
               <ChevronRight size={13} class="chev" />
             {:else if node.hint}
@@ -343,6 +346,14 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .type {
+    font-weight: 600;
+  }
+
+  .value {
+    opacity: 0.7;
   }
 
   .hint {

@@ -25,6 +25,9 @@ export interface MenuItemNode extends NodeBase {
   hint?: string;
   /** Drawn as already-applied (a filter that is on, a toggle that is set). */
   checked?: boolean;
+  /** Value half of a "Type: value" row. `label` then holds only the type, which
+   *  the renderer draws stronger than the value. */
+  value?: string;
   run: () => void;
 }
 

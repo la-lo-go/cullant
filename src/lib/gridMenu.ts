@@ -75,7 +75,8 @@ function axisRow(
   return [
     {
       kind: "item",
-      label: isThis ? `Clear ${label.toLowerCase()} filter` : `${label}: ${value}`,
+      label: isThis ? `Clear ${label.toLowerCase()} filter` : label,
+      value: isThis ? undefined : value,
       checked: isThis,
       run: () => {
         set(isThis ? null : value);
@@ -97,7 +98,8 @@ function bucketRow(
   return [
     {
       kind: "item",
-      label: isThis ? `Clear ${label.toLowerCase()} filter` : `${label}: ${bucket.label}`,
+      label: isThis ? `Clear ${label.toLowerCase()} filter` : label,
+      value: isThis ? undefined : bucket.label,
       checked: isThis,
       run: () => {
         set(isThis ? null : bucket.key);
@@ -321,6 +323,8 @@ function filterBlock(item: ItemLite): MenuNode[] {
         .map((d) => ({
           kind: "item" as const,
           label: d.label,
+          // The header's own text, so the row names the section it creates.
+          value: d.of(item, session.groupContext).label,
           checked: session.groupBy.length === 1 && session.groupBy[0] === d.key,
           run: () =>
             (session.groupBy =
