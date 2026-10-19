@@ -15,6 +15,9 @@
   import Minimize from "@lucide/svelte/icons/minimize";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import Film from "@lucide/svelte/icons/film";
+  import Info from "@lucide/svelte/icons/info";
+  import Download from "@lucide/svelte/icons/download";
+  import X from "@lucide/svelte/icons/x";
 
   let { item }: { item: ItemLite } = $props();
 
@@ -40,6 +43,21 @@
   /** Shown only for a cause that is certain, such as a codec the device refused. */
   let currentReason = $state<PlaybackReason | null>(null);
   const reason = $derived(currentReason ?? unplayableVideos.get(failureKey) ?? null);
+  let fixOpen = $state(false);
+  let fixEl = $state<HTMLElement | null>(null);
+
+  // Same rule as the (i) explanations: a press anywhere else closes the steps
+  // and still reaches what it landed on.
+  $effect(() => {
+    if (!fixOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (!target || target.closest("[data-fix-toggle]") || fixEl?.contains(target)) return;
+      fixOpen = false;
+    };
+    window.addEventListener("click", onClick, true);
+    return () => window.removeEventListener("click", onClick, true);
+  });
 
   // The source on the element: the file itself, unless the WebView turned that
   // down and the in-app remuxer produced a MediaSource it will accept.
@@ -358,6 +376,7 @@
     hovering = false;
     currentFailure = false;
     currentReason = null;
+    fixOpen = false;
     showPoster = true;
     posterFailed = false;
     sharpPosterFailed = false;
@@ -426,6 +445,11 @@
   // Keep native Space activation on controls. The player surface owns playback
   // Space, and neither route must reach the global zoom shortcut.
   function onKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && fixOpen) {
+      e.stopPropagation();
+      fixOpen = false;
+      return;
+    }
     if (e.key === " " || e.code === "Space") {
       e.stopPropagation();
       if (e.target === e.currentTarget || e.target === video) {
@@ -540,22 +564,49 @@
 
   {#if failed}
     <div class="fallback" role="status">
+      {#if reason && fixOpen}
+        <div class="fix" role="dialog" aria-label="How to fix" bind:this={fixEl}>
+          <header>
+            <span>How to fix</span>
+            <button class="fix-close" aria-label="Close" onclick={() => (fixOpen = false)}><X size={14} /></button>
+          </header>
+          <ol>
+            {#each reason.steps as step (step)}<li>{step}</li>{/each}
+          </ol>
+          <div class="fix-links">
+            {#each reason.links as link, i (link.url)}
+              <button class:primary={i === 0} onclick={() => void openUrl(link.url)}>
+                <Download size={14} />
+                <span>{link.name}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
       <div class="why">
         <p>This video can't be played here.</p>
         {#if reason}
-          <p class="reason">{reason.text}</p>
-          {#if reason.install}
-            <button class="install" onclick={() => void openUrl(reason.install!)}>
-              <ExternalLink size={13} />
-              <span>Installation page</span>
+          <p class="reason">
+            {reason.text}
+            <button class="how" data-fix-toggle aria-expanded={fixOpen} onclick={() => (fixOpen = !fixOpen)}>
+              <Info size={13} />
+              <span>How to fix</span>
             </button>
-          {/if}
+          </p>
         {/if}
       </div>
-      <button class="open-ext" onclick={openExternally}>
-        <ExternalLink size={16} />
-        <span>Open in external player</span>
-      </button>
+      <div class="actions">
+        {#if reason?.install}
+          <button class="open-ext" onclick={() => void openUrl(reason.install!.url)}>
+            <Download size={16} />
+            <span>{reason.install.name}</span>
+          </button>
+        {/if}
+        <button class="open-ext" class:secondary={!!reason?.install} onclick={openExternally}>
+          <ExternalLink size={16} />
+          <span>Open in external player</span>
+        </button>
+      </div>
     </div>
   {/if}
 
@@ -696,16 +747,99 @@
     color: rgba(255, 255, 255, 0.55);
   }
 
-  .install {
+  .how {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 0;
+    gap: 5px;
+    margin-left: 6px;
+    white-space: nowrap;
+    vertical-align: bottom;
+    padding: 0;
     border: none;
     background: none;
     color: var(--accent);
     font-size: 12px;
     cursor: pointer;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .open-ext.secondary {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .open-ext.secondary:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  /* Same look as the app's (i) explanations. It floats above the failure panel,
+     so the panel stays readable while the steps are open. */
+  .fix {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 8px);
+    width: 360px;
+    max-width: 100%;
+    padding: 12px 14px;
+    background: #2c2c33;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  }
+
+  .fix header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .fix-close {
+    display: inline-flex;
+    padding: 3px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .fix ol {
+    margin: 8px 0 10px;
+    padding-left: 18px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.82);
+  }
+
+  .fix-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .fix-links button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .fix-links button.primary {
+    background: rgba(var(--accent-rgb), 0.85);
+    font-weight: 600;
   }
 
   /* Progress of the in-app remux. Tucked into the top corner, under the safe-area
