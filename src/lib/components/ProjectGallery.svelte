@@ -231,7 +231,10 @@
                        thumbnail covers it. Hiding a thumbnail that never arrives
                        therefore reveals a coloured card instead of a hole — for a
                        project whose import has not reached the previews yet, and
-                       for one that simply holds fewer photos than there are slots. -->
+                       for one that simply holds fewer photos than there are slots.
+                       Once the thumbnail is kept, the placeholder goes: its colour
+                       shows through the soft edges of a tilted card. -->
+                  {#if !copy}
                   <span
                     class="peek peek-{i} placeholder"
                     style="background: {placeholderColor(project.path, slot)}"
@@ -251,6 +254,7 @@
                       </g>
                     </svg>
                   </span>
+                  {/if}
                   <span class="peek peek-{i} thumbnail">
                     {#if copy}
                       <canvas use:paint={copy.bitmap}></canvas>
