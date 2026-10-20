@@ -1,57 +1,50 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use serde_json::Value;
-use tauri::{AppHandle, EventId, Listener, Manager};
+use tauri::{AppHandle, EventId, Listener};
 use tauri_plugin_import_notify::{ImportNotifyExt, Outcome, Phase};
 
-use crate::thumbs::ThumbPool;
-use crate::AppState;
+/// Token of the guard that owns the single Android service. A guard from an
+/// earlier open must not end the service of a newer one.
+static OWNER: Mutex<u64> = Mutex::new(0);
 
-#[derive(Default)]
-struct Seen {
-    file_count: Option<u64>,
-    empty: bool,
-    error: Option<String>,
+/// How the scanner thread ended. `None` instead of an `End` means it was cancelled or replaced.
+pub enum End {
+    Done(u64),
+    Empty,
+    Error(String),
 }
 
-/// Keeps the Android import service alive while the scanner thread runs. It
-/// reads the progress events the scan already emits, so the scan code does not
-/// know about notifications. Dropping it ends the service, also after a panic.
+/// Keeps the Android import service alive while the scanner thread runs.
+/// Dropping it ends the service, also after a panic.
 pub struct ImportNotifyGuard {
     app: AppHandle,
-    thumbs: Arc<ThumbPool>,
-    generation: u64,
     name: String,
-    seen: Arc<Mutex<Seen>>,
-    listeners: Vec<(&'static str, EventId)>,
+    token: u64,
+    end: Option<End>,
+    listeners: Vec<EventId>,
 }
 
 impl ImportNotifyGuard {
     /// `roots` are the ids the scan events carry as `projectRoot`.
-    pub fn start(
-        app: &AppHandle,
-        thumbs: Arc<ThumbPool>,
-        generation: u64,
-        name: String,
-        roots: [String; 2],
-    ) -> Self {
+    pub fn start(app: &AppHandle, name: String, roots: [String; 2]) -> Self {
+        let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
+        *owner += 1;
         if let Err(error) = app.import_notify().start(&name) {
             tracing::debug!("import notification not started: {error}");
         }
-        let seen = Arc::new(Mutex::new(Seen::default()));
-        let mut listeners = Vec::new();
-        for (event, phase) in [
+        // Progress is best effort: an event may arrive late or not at all. The
+        // outcome never comes from events, the scanner thread hands it over.
+        let listeners = [
             ("scan:progress", Phase::Finding),
             ("metadata:progress", Phase::Metadata),
             ("thumbs:progress", Phase::Thumbnails),
             ("previews:progress", Phase::Previews),
             ("videos:progress", Phase::Videos),
-            ("scan:done", Phase::Finding),
-            ("scan:error", Phase::Finding),
-            ("scan:empty", Phase::Finding),
-        ] {
-            let (app_handle, seen, roots) = (app.clone(), seen.clone(), roots.clone());
-            let id = app.listen(event, move |e| {
+        ]
+        .map(|(event, phase)| {
+            let (app_handle, roots) = (app.clone(), roots.clone());
+            app.listen(event, move |e| {
                 let Ok(payload) = serde_json::from_str::<Value>(e.payload()) else {
                     return;
                 };
@@ -62,73 +55,49 @@ impl ImportNotifyGuard {
                     return;
                 }
                 let count = |key: &str| payload[key].as_u64().unwrap_or(0);
-                let update = match event {
-                    "scan:progress" => Some((count("found"), None)),
-                    "scan:done" => {
-                        seen.lock().unwrap().file_count = Some(count("fileCount"));
-                        None
-                    }
-                    "scan:empty" => {
-                        seen.lock().unwrap().empty = true;
-                        None
-                    }
-                    "scan:error" => {
-                        let message = payload["error"].as_str().unwrap_or_default();
-                        seen.lock().unwrap().error = Some(message.to_string());
-                        None
-                    }
-                    _ => Some((count("done"), Some(count("total")))),
+                let (done, total) = if phase == Phase::Finding {
+                    (count("found"), None)
+                } else {
+                    (count("done"), Some(count("total")))
                 };
-                if let Some((done, total)) = update {
-                    let _ = app_handle.import_notify().update(phase, done, total);
-                }
-            });
-            listeners.push((event, id));
-        }
+                let _ = app_handle.import_notify().update(phase, done, total);
+            })
+        })
+        .to_vec();
         Self {
             app: app.clone(),
-            thumbs,
-            generation,
             name,
-            seen,
+            token: *owner,
+            end: None,
             listeners,
         }
     }
 
-    fn end(&self) -> tauri_plugin_import_notify::Result<()> {
-        let notify = self.app.import_notify();
-        let seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
-        // A rolled-back empty project is closed on purpose, so `empty` comes before the closed check.
-        if seen.empty {
-            return notify.finish(Outcome::Empty, &self.name, 0);
-        }
-        if self.project_replaced() {
-            return notify.stop();
-        }
-        match (&seen.error, seen.file_count) {
-            (Some(message), _) => notify.finish(Outcome::Error(message.clone()), &self.name, 0),
-            (None, Some(count)) => notify.finish(Outcome::Done, &self.name, count),
-            (None, None) => notify.stop(),
-        }
-    }
-
-    fn project_replaced(&self) -> bool {
-        let state = self.app.state::<AppState>();
-        let guard = state.project.lock().unwrap();
-        self.thumbs.is_shut_down()
-            || guard
-                .as_ref()
-                .is_none_or(|p| p.db.generation() != self.generation)
+    pub fn set_end(&mut self, end: Option<End>) {
+        self.end = end;
     }
 }
 
 impl Drop for ImportNotifyGuard {
     fn drop(&mut self) {
-        for (_, id) in &self.listeners {
+        for id in &self.listeners {
             self.app.unlisten(*id);
         }
-        if let Err(error) = self.end() {
-            tracing::debug!("import notification not ended: {error}");
+        let owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
+        if *owner == self.token {
+            let _ = self.send_end();
+        }
+    }
+}
+
+impl ImportNotifyGuard {
+    fn send_end(&mut self) -> tauri_plugin_import_notify::Result<()> {
+        let notify = self.app.import_notify();
+        match self.end.take() {
+            Some(End::Done(count)) => notify.finish(Outcome::Done, &self.name, count),
+            Some(End::Empty) => notify.finish(Outcome::Empty, &self.name, 0),
+            Some(End::Error(message)) => notify.finish(Outcome::Error(message), &self.name, 0),
+            None => notify.stop(),
         }
     }
 }

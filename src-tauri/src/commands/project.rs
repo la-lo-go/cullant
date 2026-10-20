@@ -6,7 +6,7 @@ use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::commands::import_notify::ImportNotifyGuard;
+use crate::commands::import_notify::{End, ImportNotifyGuard};
 use crate::db::{migrations, Db};
 use crate::error::{AppError, AppResult};
 use crate::store::ProjectStore;
@@ -132,8 +132,6 @@ fn spawn_scan(
     let notify = initial_open_id.as_ref().map(|id| {
         ImportNotifyGuard::start(
             &app,
-            thumbs.clone(),
-            db.generation(),
             project_display_name(id),
             [db.project_root(), id.clone()],
         )
@@ -143,7 +141,7 @@ fn spawn_scan(
         .spawn(move || {
             let _active = active;
             // Declared after `_active`, so it drops first and sees the final scan state.
-            let _notify = notify;
+            let mut notify = notify;
             let project_root = db.project_root();
             let error_app = app.clone();
             // Last line of defence: whatever panics in the walk or the ingest,
@@ -152,14 +150,14 @@ fn spawn_scan(
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 run_scan(app, db, store, root, thumbs, initial_open_id)
             }));
-            if let Err(payload) = outcome {
-                let message = crate::panic_message(payload.as_ref());
+            let end = outcome.unwrap_or_else(|payload| {
+                let message = format!("internal error: {}", crate::panic_message(payload.as_ref()));
                 tracing::error!("scanner panicked: {message}");
-                emit_scan_error(
-                    &error_app,
-                    &project_root,
-                    format!("internal error: {message}"),
-                );
+                emit_scan_error(&error_app, &project_root, message.clone());
+                Some(End::Error(message))
+            });
+            if let Some(notify) = notify.as_mut() {
+                notify.set_end(end);
             }
         })
         .map_err(|error| AppError::Other(format!("could not start scanner: {error}")))?;
@@ -173,15 +171,15 @@ fn run_scan(
     root: PathBuf,
     thumbs: Arc<ThumbPool>,
     initial_open_id: Option<String>,
-) {
+) -> Option<End> {
     let cancelled = || thumbs.is_shut_down();
     let done = match scan::scan_project(&app, &db, store.as_ref(), &cancelled) {
         Ok(done) => done,
-        Err(AppError::Cancelled) => return,
-        Err(_) if cancelled() => return,
+        Err(AppError::Cancelled) => return None,
+        Err(_) if cancelled() => return None,
         Err(error) => {
             emit_scan_error(&app, &db.project_root(), error.to_string());
-            return;
+            return Some(End::Error(error.to_string()));
         }
     };
     // After the walk, not before it: the cache of a file the previous scan
@@ -193,20 +191,30 @@ fn run_scan(
     if done.file_count == 0 {
         if let Some(id) = initial_open_id {
             let result = rollback_fresh_empty(&app, db, store, root, thumbs);
-            match result {
-                Ok(true) => {
-                    let _ = crate::commands::recent::delete_project_data(app.clone(), id.clone());
-                    let _ = app.emit("scan:empty", serde_json::json!({"projectRoot": id}));
-                }
-                Ok(false) => {}
-                Err(error) => emit_scan_error(&app, &id, error.to_string()),
-            }
-            return;
+            return empty_end(&app, &id, result);
         }
     }
-    if let Err(error) = scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &thumbs) {
-        if !thumbs.is_shut_down() {
+    match scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &thumbs) {
+        Ok(_) => Some(End::Done(done.file_count.max(0) as u64)),
+        Err(_) if thumbs.is_shut_down() => None,
+        Err(error) => {
             emit_scan_error(&app, &db.project_root(), error.to_string());
+            Some(End::Error(error.to_string()))
+        }
+    }
+}
+
+fn empty_end(app: &AppHandle, id: &str, rollback: AppResult<bool>) -> Option<End> {
+    match rollback {
+        Ok(true) => {
+            let _ = crate::commands::recent::delete_project_data(app.clone(), id.to_string());
+            let _ = app.emit("scan:empty", serde_json::json!({"projectRoot": id}));
+            Some(End::Empty)
+        }
+        Ok(false) => None,
+        Err(error) => {
+            emit_scan_error(app, id, error.to_string());
+            Some(End::Error(error.to_string()))
         }
     }
 }
