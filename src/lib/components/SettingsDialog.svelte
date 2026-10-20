@@ -122,6 +122,7 @@
   import Heart from "@lucide/svelte/icons/heart";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import DatabaseBackup from "@lucide/svelte/icons/database-backup";
+  import BellRing from "@lucide/svelte/icons/bell-ring";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
@@ -522,6 +523,10 @@
           {:else}
             <DatabaseBackup size={13} /> Write now
           {/if}
+        </button>
+      {:else if s.slot === "notificationSettings"}
+        <button class="act" onclick={releasing(() => void api.openNotificationSettings().catch(() => {}))}>
+          <BellRing size={13} /> Open system settings
         </button>
       {/if}
     </svelte:element>

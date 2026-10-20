@@ -28,12 +28,14 @@ import PanelBottom from "@lucide/svelte/icons/panel-bottom";
 import CircleDot from "@lucide/svelte/icons/circle-dot";
 import Palette from "@lucide/svelte/icons/palette";
 import FolderSync from "@lucide/svelte/icons/folder-sync";
+import Bell from "@lucide/svelte/icons/bell";
+import { IS_ANDROID } from "./platform";
 
-export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project" | "folderCopy";
+export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project" | "folderCopy" | "notifications";
 
 export type SubPanelId = "filmstripBadges" | "touchBar" | "radial" | "colorLabelNames";
 
-export type CustomSlot = "previewQuality" | "copyNow";
+export type CustomSlot = "previewQuality" | "copyNow" | "notificationSettings";
 
 export interface SettingGroup {
   id: GroupId;
@@ -58,6 +60,7 @@ export const GROUPS: SettingGroup[] = [
     icon: FolderSync,
     when: () => catalog.project?.mirrorsMetadata === true,
   },
+  { id: "notifications", label: "Notifications", icon: Bell, when: () => IS_ANDROID },
 ];
 
 interface SettingBase {
@@ -425,6 +428,17 @@ export const SETTINGS: Setting[] = [
     label: "Last copy",
     info: "Write the folder copy to the .cullant folder in the project now.",
     keywords: "metadata database sync backup mirror export write folder copy now",
+    modified: () => false,
+    reset: () => {},
+  },
+  {
+    kind: "custom",
+    slot: "notificationSettings",
+    id: "notificationSettings",
+    group: "notifications",
+    label: "Import notifications",
+    info: "Choose which import notifications to show.",
+    keywords: "android alerts progress finished errors channels permission",
     modified: () => false,
     reset: () => {},
   },
