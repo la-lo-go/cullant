@@ -574,6 +574,40 @@ fn preview_select(decodable: &str, edge: u32) -> String {
     )
 }
 
+/// True when the ingest pass would still do something: read metadata, or make a
+/// thumbnail, a preview or (when enabled) a video poster.
+pub fn has_pending_work(
+    db: &Db,
+    store: &dyn ProjectStore,
+    generate_videos: bool,
+) -> AppResult<bool> {
+    let decodable = crate::db::sql::decodable_photo("f", decode::heif::available(store));
+    let video_metadata_available =
+        store.extracts_video_posters() || decode::video::ffprobe_available();
+    let mut selects = vec![
+        format!(
+            "SELECT 1 FROM files f WHERE f.status = 0 AND f.kind IN (0, 1, 2) AND {META_PENDING}"
+        ),
+        thumb_select(&decodable, ""),
+        preview_select(&decodable, crate::thumbs::preview_long_edge()),
+    ];
+    if generate_videos {
+        selects.push(POSTER_SELECT.to_string());
+    }
+    let any = selects
+        .iter()
+        .map(|select| format!("EXISTS({select})"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    db.call_read(move |conn| {
+        Ok(
+            conn.query_row(&format!("SELECT {any}"), [video_metadata_available], |r| {
+                r.get(0)
+            })?,
+        )
+    })
+}
+
 /// How many videos still need a poster.
 pub fn videos_needing_poster(db: &Db) -> AppResult<u64> {
     count_rows(db, POSTER_SELECT)
@@ -1358,6 +1392,25 @@ mod tests {
         run_all(&db, root);
         // Everything fresh: a second pass finds nothing to do.
         assert_eq!(run_all(&db, root), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_complete_project_has_no_pending_work() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db = project_with_jpegs(root, 3);
+        let (store, _pool) = store_and_pool(&db, root);
+
+        assert!(has_pending_work(&db, store.as_ref(), true).unwrap());
+        run_all(&db, root);
+        assert!(!has_pending_work(&db, store.as_ref(), true).unwrap());
+
+        // A new file is work again.
+        let img = image::RgbImage::from_pixel(64, 48, image::Rgb([1, 2, 3]));
+        img.save(root.join("new.jpg")).unwrap();
+        crate::scan::scan_project_inner(&db, root, &mut |_| {}).unwrap();
+        assert!(has_pending_work(&db, store.as_ref(), true).unwrap());
     }
 
     /// A HEIF-only library — every stock iPhone — is the case this exists for.

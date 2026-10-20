@@ -105,15 +105,22 @@ impl Drop for ScanActive {
     }
 }
 
+/// An open of a project, as opposed to a plain rescan. `fresh` is true when the
+/// open created the project data.
+struct Opening {
+    id: String,
+    fresh: bool,
+}
+
 /// Kick off scan + the two-phase ingest pass (metadata gate, then background
 /// thumbnails + previews) on a background thread; the UI is notified through
 /// scan:progress / scan:done / scan:empty / metadata:progress / metadata:done /
 /// thumbs:progress / thumbs:done / previews:progress events.
 ///
-/// `initial_open_id` is `Some(identifier)` (the desktop path or Android SAF
-/// tree URI used by the recent-projects list) only when this scan is the
-/// first one right after opening a project — never on a plain rescan. When
-/// set and the scan finds zero recognized photos/videos, the just-opened
+/// `opening` is `Some` (with the desktop path or Android SAF tree URI used by
+/// the recent-projects list) only when this scan is the first one right after
+/// opening a project — never on a plain rescan. When
+/// its data is fresh and the scan finds zero recognized photos/videos, the just-opened
 /// project is rolled back entirely (closed, forgotten from recents, its
 /// freshly-created `.cullant` sidecar removed) rather than left open on an
 /// empty grid, and `scan:empty` fires instead of running the ingest pass.
@@ -123,7 +130,7 @@ fn spawn_scan(
     store: Arc<dyn ProjectStore>,
     root: PathBuf,
     thumbs: Arc<ThumbPool>,
-    initial_open_id: Option<String>,
+    opening: Option<Opening>,
     notify: Option<ImportNotifyGuard>,
 ) -> AppResult<()> {
     app.state::<AppState>()
@@ -132,9 +139,10 @@ fn spawn_scan(
     let active = ScanActive(app.clone(), db.generation());
     // Late start for an open that found an older guard alive (see `start_import_notify`).
     let notify = notify.or_else(|| {
-        initial_open_id
+        opening
             .as_ref()
-            .map(|id| ImportNotifyGuard::start(&app, project_display_name(id), id.clone()))
+            .filter(|o| o.fresh)
+            .map(|o| ImportNotifyGuard::start(&app, project_display_name(&o.id), o.id.clone()))
     });
     std::thread::Builder::new()
         .name("scanner".into())
@@ -147,15 +155,7 @@ fn spawn_scan(
             // the frontend hears `scan:error` and drops its progress bars instead
             // of showing a phase that will never finish.
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_scan(
-                    app,
-                    db,
-                    store,
-                    root,
-                    thumbs,
-                    initial_open_id,
-                    notify.as_ref(),
-                )
+                run_scan(app, db, store, root, thumbs, opening, &mut notify)
             }));
             let end = outcome.unwrap_or_else(|payload| {
                 let message = format!("internal error: {}", crate::panic_message(payload.as_ref()));
@@ -177,22 +177,49 @@ fn run_scan(
     store: Arc<dyn ProjectStore>,
     root: PathBuf,
     thumbs: Arc<ThumbPool>,
-    initial_open_id: Option<String>,
-    notify: Option<&ImportNotifyGuard>,
+    opening: Option<Opening>,
+    notify: &mut Option<ImportNotifyGuard>,
 ) -> Option<End> {
     let done = match scan::scan_project(&app, &db, store.as_ref(), &|| thumbs.is_shut_down()) {
         Ok(done) => done,
         Err(error) => return walk_end(&app, &db, &thumbs, error),
     };
     prune_cache_after_walk(&db, &root);
-    if let Some(id) = initial_open_id.filter(|_| done.file_count == 0) {
+    let fresh = opening.as_ref().filter(|o| o.fresh);
+    if let Some(id) = fresh.filter(|_| done.file_count == 0).map(|o| o.id.clone()) {
         let result = rollback_fresh_empty(&app, db, store, root, thumbs);
         return empty_end(&app, &id, result);
     }
-    if let Some(notify) = notify {
+    start_late_notify(&app, &db, store.as_ref(), opening.as_ref(), notify);
+    if let Some(notify) = notify.as_ref() {
         notify.expect(&db);
     }
     ingest_end(&app, &db, store.as_ref(), &thumbs)
+}
+
+/// A reopen starts no guard before the walk, because a complete project must
+/// open without a notification. Start one now if the walk left work to do.
+fn start_late_notify(
+    app: &AppHandle,
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+    opening: Option<&Opening>,
+    notify: &mut Option<ImportNotifyGuard>,
+) {
+    let Some(opening) = opening.filter(|_| notify.is_none()) else {
+        return;
+    };
+    let generate_videos = app
+        .state::<AppState>()
+        .generate_video_thumbs
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if scan::ingest::has_pending_work(db, store, generate_videos).unwrap_or(false) {
+        *notify = Some(ImportNotifyGuard::start(
+            app,
+            project_display_name(&opening.id),
+            opening.id.clone(),
+        ));
+    }
 }
 
 /// After the walk, not before it: the cache of a file the previous scan
@@ -457,7 +484,10 @@ fn open_project_inner(
         store,
         root,
         thumbs,
-        fresh_data.then(|| root_str.clone()),
+        Some(Opening {
+            id: root_str.clone(),
+            fresh: fresh_data,
+        }),
         notify.take(),
     )?;
 
@@ -563,7 +593,10 @@ fn open_saf_project(
         store,
         base,
         thumbs,
-        fresh_data.then(|| tree_uri.to_string()),
+        Some(Opening {
+            id: tree_uri.to_string(),
+            fresh: fresh_data,
+        }),
         notify.take(),
     )?;
 
