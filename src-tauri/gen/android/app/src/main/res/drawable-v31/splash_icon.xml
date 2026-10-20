@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ splash icon. The system scales it to a fixed box, so the inset
+     is a fraction of that box (a dp inset would not scale with it). 33.5% per
+     side draws the mark at the size splash_background.xml draws it, measured
+     on a device, so the system splash hands over without a jump. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/splash_logo"
+    android:inset="33.5%" />

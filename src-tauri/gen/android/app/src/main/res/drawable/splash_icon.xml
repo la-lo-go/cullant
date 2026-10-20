@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Android 12+ splash icon. The system draws it in a 240dp box, so a 72dp
-     inset puts the 96dp mark exactly where splash_background.xml draws it, and
-     the system splash hands over to the window background without a jump. -->
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/splash_logo"
-    android:inset="72dp" />

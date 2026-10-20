@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.addCallback
 import androidx.activity.enableEdgeToEdge
+import androidx.core.content.ContextCompat
 
 class MainActivity : TauriActivity() {
   private var webView: WebView? = null
@@ -36,6 +37,9 @@ class MainActivity : TauriActivity() {
   // same place the `back-button` event goes.
   override fun onWebViewCreate(webView: WebView) {
     this.webView = webView
+    // A WebView paints white until the page draws, which flashed between the
+    // dark splash and the app.
+    webView.setBackgroundColor(ContextCompat.getColor(this, R.color.cullant_bg))
     webView.settings.apply {
       setSupportZoom(false)
       builtInZoomControls = false
