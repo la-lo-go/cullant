@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The Cullant mark (logo/logo-w.svg) on a square canvas with a 1/12 margin per side. A status bar icon
+<!-- The Cullant mark (logo/logo-w.svg) on a square canvas with a margin of 1/12 of the mark per side. A status bar icon
      uses only the alpha channel, so the fill color does not matter. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
