@@ -45,8 +45,6 @@ android {
     }
     buildTypes {
         getByName("debug") {
-            // Installs next to the signed release build, so a test build never
-            // replaces it or wipes its data.
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
@@ -80,6 +78,8 @@ android {
 rust {
     rootDirRel = "../../../"
 }
+
+apply(from = "dev-app-id.gradle")
 
 dependencies {
     implementation("androidx.webkit:webkit:1.14.0")

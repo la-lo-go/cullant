@@ -1,0 +1,10 @@
+// The debug build installs next to the signed release build, so a test build
+// never replaces it or deletes its data. This lives outside build.gradle.kts
+// because `tauri android build` removes an applicationIdSuffix line there.
+android {
+    buildTypes {
+        debug {
+            applicationIdSuffix ".dev"
+        }
+    }
+}
