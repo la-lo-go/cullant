@@ -42,6 +42,7 @@
 
   const { panel, target, thicknessFor, orientation, children }: Props = $props();
 
+  const describedBy = $derived(`dock-grip-help-${panel}`);
   const DRAG_THRESHOLD = 5;
   const MAX_SHARE = 0.5;
   // Rough height of the menu, to open it above a grip in the lower half of the window.
@@ -165,6 +166,7 @@
   class:labelled={!!children}
   type="button"
   aria-label={children ? undefined : `Move ${DOCK_LABELS[panel].toLowerCase()}`}
+  aria-describedby={children ? describedBy : undefined}
   title="Drag to move. Click to choose a position."
   {onpointerdown}
   {onpointermove}
@@ -188,6 +190,13 @@
     {@render icon()}
   {/if}
 </button>
+
+{#if children}
+  <!-- A hidden element can still describe the button. -->
+  <span id={describedBy} hidden>
+    Move {DOCK_LABELS[panel].toLowerCase()}. Click to choose a position.
+  </span>
+{/if}
 
 {#if menu}
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
@@ -259,7 +268,7 @@
   }
   .dock-grip.labelled.dragging {
     background: var(--accent-fill);
-    color: var(--accent);
+    color: #fff;
   }
   .labelled:hover .lead,
   .labelled:focus-visible .lead,

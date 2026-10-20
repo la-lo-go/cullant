@@ -333,14 +333,14 @@
 
   /* Inner-edge hide tab (same 18x44 size, surface fill, accent chevron as
      .tree-peek). Anchored to the panel's inner edge and layered above the
-     resize handle (z-index 25) and overlay scrollbar (z-index 26) so its click
-     target wins. */
+     resize handle (z-index 25 left, 27 right) and overlay scrollbar (z-index 26)
+     so its click target wins. */
   .tree-hide {
     position: absolute;
     top: 50%;
     right: 0;
     transform: translateY(-50%);
-    z-index: 27;
+    z-index: 28;
     display: inline-flex;
     align-items: center;
     justify-content: center;
