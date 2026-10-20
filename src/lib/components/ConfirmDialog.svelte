@@ -1,6 +1,7 @@
 <script lang="ts">
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
+  import X from "@lucide/svelte/icons/x";
 
   let {
     title,
@@ -10,6 +11,7 @@
     onalt,
     enterConfirms = true,
     initialFocus,
+    choice = false,
     onconfirm,
     oncancel,
   }: {
@@ -23,6 +25,8 @@
     enterConfirms?: boolean;
     /** Selector of the button that gets focus first. */
     initialFocus?: string;
+    /** A choice between two safe options: confirm is the accent button and an X replaces Cancel. */
+    choice?: boolean;
     onconfirm: () => void;
     oncancel: () => void;
   } = $props();
@@ -52,14 +56,17 @@
     role="dialog"
     tabindex="-1"
   >
+    {#if choice}
+      <button class="close-x" onclick={oncancel} aria-label="Close" title="Close"><X size={18} /></button>
+    {/if}
     <h2>{title}</h2>
     <p>{message}</p>
     <div class="actions">
-      <button onclick={oncancel}>Cancel</button>
+      {#if !choice}<button onclick={oncancel}>Cancel</button>{/if}
       {#if altLabel && onalt}
         <button class="alt" onclick={onalt}>{altLabel}</button>
       {/if}
-      <button class="confirm" onclick={onconfirm}>{confirmLabel}</button>
+      <button class="confirm" class:accent={choice} onclick={onconfirm}>{confirmLabel}</button>
     </div>
   </div>
 </div>
@@ -91,10 +98,30 @@
     width: 380px;
     max-width: 100%;
     outline: none;
+    position: relative;
+  }
+
+  .close-x {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 0;
+    background: none;
+    opacity: 0.6;
+  }
+
+  .close-x:hover {
+    opacity: 1;
   }
 
   h2 {
-    margin: 0 0 8px;
+    margin: 0 36px 8px 0;
     font-size: 15px;
   }
 
@@ -134,5 +161,14 @@
   button.confirm:hover {
     border-color: transparent;
     background: #b84a4a;
+  }
+
+  button.confirm.accent {
+    background: var(--accent-fill);
+  }
+
+  button.confirm.accent:hover {
+    background: var(--accent-fill);
+    filter: brightness(1.15);
   }
 </style>
