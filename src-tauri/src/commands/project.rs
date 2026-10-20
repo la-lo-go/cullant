@@ -124,18 +124,12 @@ fn spawn_scan(
     root: PathBuf,
     thumbs: Arc<ThumbPool>,
     initial_open_id: Option<String>,
+    notify: Option<ImportNotifyGuard>,
 ) -> AppResult<()> {
     app.state::<AppState>()
         .scan_active
         .store(true, std::sync::atomic::Ordering::Release);
     let active = ScanActive(app.clone(), db.generation());
-    let notify = initial_open_id.as_ref().map(|id| {
-        ImportNotifyGuard::start(
-            &app,
-            project_display_name(id),
-            [db.project_root(), id.clone()],
-        )
-    });
     std::thread::Builder::new()
         .name("scanner".into())
         .spawn(move || {
@@ -330,11 +324,37 @@ pub fn consume_usb_attach(app: AppHandle) -> AppResult<bool> {
     }
 }
 
+/// Starts the import service for a fresh open before the slow work (database
+/// migrations, closing the old project), so leaving the app early still keeps
+/// the import alive.
+fn start_import_notify(app: &AppHandle, id: &str, fresh: bool) -> Option<ImportNotifyGuard> {
+    fresh.then(|| ImportNotifyGuard::start(app, project_display_name(id), id.to_string()))
+}
+
+/// An open that fails after the guard started tells the user, who may be in another app by now.
+fn report_open_failure<T>(result: AppResult<T>, notify: Option<ImportNotifyGuard>) -> AppResult<T> {
+    if let (Err(error), Some(mut guard)) = (&result, notify) {
+        guard.set_end(Some(End::Error(error.to_string())));
+    }
+    result
+}
+
 pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResult<ProjectInfo> {
+    let mut notify = None;
+    let result = open_project_inner(path, app, state, &mut notify);
+    report_open_failure(result, notify)
+}
+
+fn open_project_inner(
+    path: &str,
+    app: &AppHandle,
+    state: &AppState,
+    notify: &mut Option<ImportNotifyGuard>,
+) -> AppResult<ProjectInfo> {
     // On Android a project is a SAF `content://` tree, not a filesystem path.
     #[cfg(target_os = "android")]
     if path.starts_with("content://") {
-        return open_saf_project(path, app, state);
+        return open_saf_project(path, app, state, notify);
     }
 
     let root = PathBuf::from(path);
@@ -356,9 +376,10 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
     }
 
     let fresh_data = !root.join(".cullant").exists();
+    let root_str = root.to_string_lossy().into_owned();
+    *notify = start_import_notify(app, &root_str, fresh_data);
     let db = Arc::new(Db::open(&root)?);
     let db_path = db.path().to_string_lossy().into_owned();
-    let root_str = root.to_string_lossy().into_owned();
     let store: Arc<dyn ProjectStore> = Arc::new(crate::store::LocalFsStore::new(root.clone()));
 
     let root_for_db = root_str.clone();
@@ -403,6 +424,7 @@ pub fn do_open_project(path: &str, app: &AppHandle, state: &AppState) -> AppResu
         root,
         thumbs,
         fresh_data.then(|| root_str.clone()),
+        notify.take(),
     )?;
 
     Ok(ProjectInfo {
@@ -442,18 +464,23 @@ pub(crate) fn project_data_base<R: tauri::Runtime>(
 /// media; the DB and thumbnail cache live in private app storage keyed by a hash
 /// of the tree URI, because SQLite cannot run inside a SAF tree.
 #[cfg(target_os = "android")]
-fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppResult<ProjectInfo> {
+fn open_saf_project(
+    tree_uri: &str,
+    app: &AppHandle,
+    state: &AppState,
+    notify: &mut Option<ImportNotifyGuard>,
+) -> AppResult<ProjectInfo> {
     use tauri_plugin_saf::SafExt;
-
-    let root_doc = app
-        .saf()
-        .root_document_id(tree_uri)
-        .map_err(|e| AppError::Other(format!("saf: {e}")))?;
 
     let base = project_data_base(app, tree_uri)?;
     std::fs::create_dir_all(&base)?;
 
     let fresh_data = !base.join(".cullant").exists();
+    *notify = start_import_notify(app, tree_uri, fresh_data);
+    let root_doc = app
+        .saf()
+        .root_document_id(tree_uri)
+        .map_err(|e| AppError::Other(format!("saf: {e}")))?;
     let db = Arc::new(Db::open(&base)?);
     let db_path = db.path().to_string_lossy().into_owned();
     let store: Arc<dyn ProjectStore> = Arc::new(crate::store::SafStore::new(
@@ -504,6 +531,7 @@ fn open_saf_project(tree_uri: &str, app: &AppHandle, state: &AppState) -> AppRes
         base,
         thumbs,
         fresh_data.then(|| tree_uri.to_string()),
+        notify.take(),
     )?;
 
     Ok(ProjectInfo {
@@ -588,7 +616,7 @@ pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<(
             project.thumbs.clone(),
         )
     };
-    spawn_scan(app, db, store, root, thumbs, None)
+    spawn_scan(app, db, store, root, thumbs, None, None)
 }
 
 /// Forget everything Cullant has stored about the open project and read the

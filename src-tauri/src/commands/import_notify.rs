@@ -27,8 +27,8 @@ pub struct ImportNotifyGuard {
 }
 
 impl ImportNotifyGuard {
-    /// `roots` are the ids the scan events carry as `projectRoot`.
-    pub fn start(app: &AppHandle, name: String, roots: [String; 2]) -> Self {
+    /// `root` is the id the scan events carry as `projectRoot`.
+    pub fn start(app: &AppHandle, name: String, root: String) -> Self {
         let mut owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
         *owner += 1;
         if let Err(error) = app.import_notify().start(&name) {
@@ -47,16 +47,13 @@ impl ImportNotifyGuard {
             ("videos:progress", Phase::Videos),
         ]
         .map(|(event, phase)| {
-            let (app_handle, roots) = (app.clone(), roots.clone());
+            let (app_handle, root) = (app.clone(), root.clone());
             let previews_started = previews_started.clone();
             app.listen(event, move |e| {
                 let Ok(payload) = serde_json::from_str::<Value>(e.payload()) else {
                     return;
                 };
-                if !payload["projectRoot"]
-                    .as_str()
-                    .is_some_and(|r| roots.iter().any(|x| x == r))
-                {
+                if !payload["projectRoot"].as_str().is_some_and(|r| r == root) {
                     return;
                 }
                 let count = |key: &str| payload[key].as_u64().unwrap_or(0);
