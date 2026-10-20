@@ -143,7 +143,7 @@ object ImportNotifier {
         val (channel, title, text) = when (outcome) {
             "done" -> Triple(DONE_CHANNEL, "Project ready", "$name · ${format(fileCount)} files")
             "empty" -> Triple(DONE_CHANNEL, "No photos or videos found", name)
-            else -> Triple(ERROR_CHANNEL, "Import failed", listOfNotNull(name, error?.lineSequence()?.first()?.take(MAX_ERROR_CHARS)).joinToString(" · "))
+            else -> Triple(ERROR_CHANNEL, "Import failed", listOfNotNull(name, error?.lineSequence()?.first()?.take(MAX_ERROR_CHARS)?.ifBlank { null }).joinToString(" · "))
         }
         return base(context, channel, title)
             .setContentText(text)
@@ -155,7 +155,10 @@ object ImportNotifier {
     fun isForeground(): Boolean {
         val info = ActivityManager.RunningAppProcessInfo()
         ActivityManager.getMyMemoryState(info)
-        return info.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+        // VISIBLE counts: an activity under a permission dialog may still start a foreground service.
+        // FOREGROUND_SERVICE (125) sits between the two and must not count.
+        return info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
+            info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
     }
 
     private const val MAX_ERROR_CHARS = 120

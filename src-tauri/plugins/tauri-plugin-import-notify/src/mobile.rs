@@ -75,7 +75,13 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
             Msg::Update(phase, done, total) => {
                 let payload = UpdatePayload { phase, done, total };
                 if sent_phase == Some(phase) {
-                    pending = Some(payload);
+                    // Without this, a flood of updates keeps replacing the pending one and none is sent.
+                    if last_sent.elapsed() >= UPDATE_INTERVAL {
+                        pending = None;
+                        send_update(payload, &mut last_sent);
+                    } else {
+                        pending = Some(payload);
+                    }
                 } else {
                     if let Some(old) = pending.take() {
                         send_update(old, &mut last_sent);
