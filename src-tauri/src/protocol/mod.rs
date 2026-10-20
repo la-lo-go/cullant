@@ -532,7 +532,9 @@ fn respond_recent_thumb<R: Runtime>(
     // group_id but is one photo), so slots 0/1/2 are three distinct photos.
     // Within a group prefer the member with a valid cached thumbnail, then the
     // lowest id; order groups by their newest member (most-recent-first, as the
-    // old `ORDER BY id DESC` did). Serving still never generates a thumbnail.
+    // old `ORDER BY id DESC` did). Only groups with a ready thumbnail count, so a
+    // project that is not fully imported shows the newest photos it has.
+    // Serving still never generates a thumbnail.
     let candidate = rusqlite::Connection::open_with_flags(&db_path, flags)
         .ok()
         .and_then(|conn| {
@@ -551,7 +553,7 @@ fn respond_recent_thumb<R: Runtime>(
                         AND t.cache_path <> '' AND t.source_mtime = f.mtime
                    WHERE f.status = 0 AND f.kind IN (0, 1)
                  )
-                 WHERE rn = 1
+                 WHERE rn = 1 AND cache_path IS NOT NULL
                  ORDER BY group_newest DESC
                  LIMIT 1 OFFSET ?1",
                 [slot as i64],
