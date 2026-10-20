@@ -164,7 +164,7 @@
   class:dragging
   class:labelled={!!children}
   type="button"
-  aria-label={`Move ${DOCK_LABELS[panel].toLowerCase()}`}
+  aria-label={children ? undefined : `Move ${DOCK_LABELS[panel].toLowerCase()}`}
   title="Drag to move. Click to choose a position."
   {onpointerdown}
   {onpointermove}
@@ -245,6 +245,11 @@
     display: inline-flex;
     opacity: 0;
     transition: opacity 120ms ease;
+  }
+  .dock-grip.labelled:hover,
+  .dock-grip.labelled:focus-visible,
+  .dock-grip.labelled.dragging {
+    opacity: 1;
   }
   .labelled:hover .after,
   .labelled:focus-visible .after,

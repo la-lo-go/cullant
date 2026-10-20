@@ -42,20 +42,28 @@
   let chipW = $state(0);
   let chipH = $state(0);
 
-  // Near the pointer, but outside the compass so it never covers a target, and always inside the window.
+  // Near the pointer. When that spot would overlap the compass, it goes below the compass instead.
+  // Either way it stays inside the window.
   const chip = $derived.by(() => {
     if (!drag) return { left: 0, top: 0 };
     const { region, x, y } = drag;
     const cx = region.left + region.width / 2;
     const cy = region.top + region.height / 2;
-    if (Math.abs(x - cx) <= COMPASS_REACH && Math.abs(y - cy) <= COMPASS_REACH) {
-      return { left: cx - chipW / 2, top: cy + COMPASS_REACH + 10 };
-    }
     let left = x + CHIP_OFFSET;
     let top = y + CHIP_OFFSET;
     if (left + chipW > window.innerWidth - CHIP_MARGIN) left = x - CHIP_OFFSET - chipW;
     if (top + chipH > window.innerHeight - CHIP_MARGIN) top = y - CHIP_OFFSET - chipH;
-    return { left: Math.max(CHIP_MARGIN, left), top: Math.max(CHIP_MARGIN, top) };
+    const reach = COMPASS_REACH + CHIP_MARGIN;
+    const overlaps =
+      left < cx + reach && left + chipW > cx - reach && top < cy + reach && top + chipH > cy - reach;
+    if (overlaps) {
+      left = cx - chipW / 2;
+      top = cy + COMPASS_REACH + 10;
+    }
+    return {
+      left: Math.min(Math.max(CHIP_MARGIN, left), window.innerWidth - CHIP_MARGIN - chipW),
+      top: Math.min(Math.max(CHIP_MARGIN, top), window.innerHeight - CHIP_MARGIN - chipH),
+    };
   });
 </script>
 
