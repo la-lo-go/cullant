@@ -45,7 +45,6 @@ export interface DockDrag {
 
 /** Compass geometry in px. `DockGuides` draws from the same constants that `pickSide` tests. */
 export const COMPASS_BUTTON = 36;
-export const COMPASS_HUB = 20;
 /** Distance from the compass centre to the centre of each button. */
 export const COMPASS_OFFSET = 40;
 const EDGE_ZONE_MAX = 64;

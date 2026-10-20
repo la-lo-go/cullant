@@ -1,16 +1,13 @@
 <script lang="ts">
-  /** Draws the state of a grip drag: region outline, compass, preview rectangle and ghost chip. */
+  /** Draws the state of a grip drag: region outline, compass buttons and preview rectangle. */
   import PanelTop from "@lucide/svelte/icons/panel-top";
   import PanelRight from "@lucide/svelte/icons/panel-right";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import {
     COMPASS_BUTTON,
-    COMPASS_HUB,
     COMPASS_OFFSET,
-    DOCK_LABELS,
     DOCK_SIDES,
-    SIDE_LABELS,
     dock,
     previewRect,
     type Side,
@@ -23,10 +20,6 @@
     bottom: [0, COMPASS_OFFSET],
     left: [-COMPASS_OFFSET, 0],
   };
-  const CHIP_OFFSET = 14;
-  const CHIP_MARGIN = 6;
-  const COMPASS_REACH = COMPASS_OFFSET + COMPASS_BUTTON / 2;
-
   const drag = $derived(dock.drag);
   // Keeps the last side so the preview fades out where it was instead of jumping.
   let lastSide = $state<Side>("bottom");
@@ -38,32 +31,6 @@
     if (!drag) return null;
     const side = drag.candidate ?? lastSide;
     return previewRect(drag.region, side, drag.thickness(side));
-  });
-  let chipW = $state(0);
-  let chipH = $state(0);
-
-  // Near the pointer. When that spot would overlap the compass, it goes below the compass instead.
-  // Either way it stays inside the window.
-  const chip = $derived.by(() => {
-    if (!drag) return { left: 0, top: 0 };
-    const { region, x, y } = drag;
-    const cx = region.left + region.width / 2;
-    const cy = region.top + region.height / 2;
-    let left = x + CHIP_OFFSET;
-    let top = y + CHIP_OFFSET;
-    if (left + chipW > window.innerWidth - CHIP_MARGIN) left = x - CHIP_OFFSET - chipW;
-    if (top + chipH > window.innerHeight - CHIP_MARGIN) top = y - CHIP_OFFSET - chipH;
-    const reach = COMPASS_REACH + CHIP_MARGIN;
-    const overlaps =
-      left < cx + reach && left + chipW > cx - reach && top < cy + reach && top + chipH > cy - reach;
-    if (overlaps) {
-      left = cx - chipW / 2;
-      top = cy + COMPASS_REACH + 10;
-    }
-    return {
-      left: Math.min(Math.max(CHIP_MARGIN, left), window.innerWidth - CHIP_MARGIN - chipW),
-      top: Math.min(Math.max(CHIP_MARGIN, top), window.innerHeight - CHIP_MARGIN - chipH),
-    };
   });
 </script>
 
@@ -90,12 +57,6 @@
       style:left="{region.left + region.width / 2}px"
       style:top="{region.top + region.height / 2}px"
     >
-      <div
-        class="hub"
-        style:width="{COMPASS_HUB}px"
-        style:height="{COMPASS_HUB}px"
-        style:margin="{-COMPASS_HUB / 2}px 0 0 {-COMPASS_HUB / 2}px"
-      ></div>
       {#each DOCK_SIDES[drag.panel] as side (side)}
         {@const Icon = SIDE_ICONS[side]}
         <div
@@ -109,15 +70,6 @@
           <Icon size={18} />
         </div>
       {/each}
-    </div>
-    <div
-      class="chip"
-      bind:clientWidth={chipW}
-      bind:clientHeight={chipH}
-      style:left="{chip.left}px"
-      style:top="{chip.top}px"
-    >
-      {DOCK_LABELS[drag.panel]}{#if candidate}<span class="side">&rarr; {SIDE_LABELS[candidate]}</span>{/if}
     </div>
   </div>
 {/if}
@@ -157,13 +109,6 @@
     height: 0;
     animation: compass-in 120ms ease-out;
   }
-  .hub {
-    position: absolute;
-    box-sizing: border-box;
-    border: 1px solid var(--border);
-    border-radius: 50%;
-    background: #232329;
-  }
   .target {
     position: absolute;
     display: flex;
@@ -184,22 +129,6 @@
     border-color: var(--accent);
     background: var(--accent);
     color: #0f1514;
-  }
-  .chip {
-    position: absolute;
-    display: flex;
-    gap: 6px;
-    padding: 4px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: #232329;
-    color: #e6e6ea;
-    font-size: 12px;
-    white-space: nowrap;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  }
-  .side {
-    color: var(--accent);
   }
   @keyframes compass-in {
     from {
