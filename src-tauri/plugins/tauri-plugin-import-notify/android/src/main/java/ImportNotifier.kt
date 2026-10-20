@@ -35,6 +35,10 @@ object ImportNotifier {
     private var foregroundReached = false
     private var stopRequested = false
 
+    // Title of an import whose service start was refused because the app was hidden.
+    // The next resume starts the service, unless the import ended in between.
+    private var pendingTitle: String? = null
+
     @Synchronized
     fun requestStart() {
         active = true
@@ -42,6 +46,20 @@ object ImportNotifier {
         serviceRequested = true
         foregroundReached = false
         stopRequested = false
+        pendingTitle = null
+    }
+
+    @Synchronized
+    fun deferStart(title: String) {
+        pendingTitle = title
+    }
+
+    /** Takes the deferred start and requests it in one step, so a stop cannot slip in between. */
+    @Synchronized
+    fun resumePending(): String? {
+        val title = pendingTitle ?: return null
+        requestStart()
+        return title
     }
 
     /** Called by the service after startForeground. True when a stop is waiting. */
@@ -61,6 +79,7 @@ object ImportNotifier {
     @Synchronized
     fun requestStop(context: Context) {
         active = false
+        pendingTitle = null
         if (!serviceRequested) return
         if (foregroundReached) {
             serviceRequested = false

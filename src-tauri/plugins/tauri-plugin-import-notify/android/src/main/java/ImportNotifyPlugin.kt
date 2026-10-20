@@ -78,18 +78,33 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
             // app then crashes if the service never enters the foreground. Do not try.
             if (!ImportNotifier.isForeground()) {
                 Logger.warn("ImportNotify", "App is in the background, not starting the service")
+                ImportNotifier.deferStart(title)
                 return@safely
             }
             ImportNotifier.requestStart()
-            try {
-                ContextCompat.startForegroundService(
-                    context,
-                    Intent(context, ImportService::class.java).putExtra(ImportService.EXTRA_TITLE, title)
-                )
-            } catch (e: Exception) {
-                ImportNotifier.serviceEnded()
-                throw e
-            }
+            startService()
+        }
+    }
+
+    private fun startService() {
+        try {
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, ImportService::class.java).putExtra(ImportService.EXTRA_TITLE, title)
+            )
+        } catch (e: Exception) {
+            ImportNotifier.serviceEnded()
+            throw e
+        }
+    }
+
+    // The app is visible again: a refused start can go ahead now, and a result is no news.
+    override fun onResume() {
+        try {
+            NotificationManagerCompat.from(context).cancel(ImportNotifier.RESULT_ID)
+            if (ImportNotifier.resumePending() != null) startService()
+        } catch (e: Exception) {
+            Logger.error("ImportNotify", e.message ?: "resume failed", e)
         }
     }
 
