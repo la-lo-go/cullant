@@ -180,6 +180,8 @@ fn run_scan(
     opening: Option<Opening>,
     notify: &mut Option<ImportNotifyGuard>,
 ) -> Option<End> {
+    // A scan is a request to do the work, also after the user stopped the last pass.
+    thumbs.resume_ingest();
     let done = match scan::scan_project(&app, &db, store.as_ref(), &|| thumbs.is_shut_down()) {
         Ok(done) => done,
         Err(error) => return walk_end(&app, &db, &thumbs, error),
@@ -390,6 +392,28 @@ pub fn consume_usb_attach(app: AppHandle) -> AppResult<bool> {
 fn start_import_notify(app: &AppHandle, id: &str, fresh: bool) -> Option<ImportNotifyGuard> {
     (fresh && !ImportNotifyGuard::any_alive())
         .then(|| ImportNotifyGuard::start(app, project_display_name(id), id.to_string()))
+}
+
+/// The Stop action of the import notification. With `close`, the open project
+/// closes, because it is not usable yet. Without it, only its background pass
+/// stops. Returns false when `root` is not the open project.
+pub(crate) fn stop_import(app: &AppHandle, root: &str, close: bool) -> bool {
+    let state = app.state::<AppState>();
+    let _lifecycle = lifecycle_lock(&state);
+    let thumbs = {
+        let guard = state.project.lock().unwrap();
+        guard
+            .as_ref()
+            .filter(|p| p.db.project_root() == root)
+            .map(|p| p.thumbs.clone())
+    };
+    let Some(thumbs) = thumbs else { return false };
+    if close {
+        close_project_inner(&state);
+    } else {
+        thumbs.stop_ingest();
+    }
+    true
 }
 
 /// An open that fails after the guard started tells the user, who may be in another app by now.
@@ -654,6 +678,12 @@ pub fn ingest_pending(state: State<'_, AppState>) -> AppResult<i64> {
             |r| r.get(0),
         )?)
     })
+}
+
+/// Whether a scanner thread is still walking or ingesting the open project.
+#[tauri::command]
+pub fn import_running(state: State<'_, AppState>) -> bool {
+    state.scan_active.load(std::sync::atomic::Ordering::Acquire)
 }
 
 #[tauri::command]

@@ -57,9 +57,12 @@ class CatalogStore {
   private eventRoot: string | null = null;
   private transitionTail: Promise<void> = Promise.resolve();
 
+  private transitions = 0;
+
   private transition(run: () => Promise<void>): Promise<void> {
+    this.transitions++;
     const task = this.transitionTail.then(run);
-    this.transitionTail = task.catch(() => {});
+    this.transitionTail = task.catch(() => {}).finally(() => this.transitions--);
     return task;
   }
   project = $state<ProjectInfo | null>(null);
@@ -426,6 +429,10 @@ class CatalogStore {
       return;
     }
     if (generation !== this.generation) return;
+    this.clearProject();
+  }
+
+  private clearProject() {
     this.project = null;
     setMediaProjectRoot(null);
     this.resetProjectState();
@@ -436,6 +443,45 @@ class CatalogStore {
     // outlive the project that filled it — the same invariant close_project
     // keeps on the backend when it clears the thumbnail memory cache.
     this.previewReady.clear();
+  }
+
+  /** Drops every progress bar of the import. */
+  endImport() {
+    this.scanning = false;
+    this.preloading = false;
+    this.metaProgress = { done: 0, total: 0 };
+    this.thumbProgress = { done: 0, total: 0 };
+    this.previewProgress = { done: 0, total: 0 };
+    this.videoProgress = { done: 0, total: 0 };
+    this.resetPreviewPass();
+  }
+
+  /** The user stopped the import from its notification. The backend closed the
+   *  project (`closed`) because it was not usable yet, or stopped only the
+   *  background pass. What the pass did not finish resumes on the next open. */
+  importStopped(closed: boolean) {
+    if (closed) {
+      this.generation++;
+      this.eventRoot = null;
+      this.clearProject();
+      this.endImport();
+      return;
+    }
+    this.endImport();
+    void this.refresh()
+      .then(() => this.refreshPreviewReady())
+      .catch((error) => { this.error = String(error); });
+  }
+
+  /** The stop event can be lost while the app is hidden, so look at the backend
+   *  when the app is visible again. */
+  async syncAfterResume() {
+    if (!this.project || this.transitions > 0) return;
+    const generation = this.generation;
+    const [info, running] = await Promise.all([api.currentProject(), api.importRunning()]);
+    if (generation !== this.generation || this.transitions > 0) return;
+    if (!info) this.importStopped(true);
+    else if (!running && this.ingesting) this.importStopped(false);
   }
 
   async refresh() {
@@ -556,15 +602,13 @@ listen<{ projectRoot: string; done: number; total: number }>("videos:progress", 
 });
 listen<{ projectRoot: string; error: string }>("scan:error", (e) => {
   if (!catalog.acceptEvent(e.payload)) return;
-  catalog.scanning = false;
-  catalog.resetPreviewPass();
-  catalog.metaProgress = { done: 0, total: 0 };
-  catalog.thumbProgress = { done: 0, total: 0 };
-  catalog.previewProgress = { done: 0, total: 0 };
-  catalog.videoProgress = { done: 0, total: 0 };
   // Never leave the preload panel blocking the UI after a scan failure.
-  catalog.preloading = false;
+  catalog.endImport();
   catalog.error = e.payload.error;
+});
+listen<{ projectRoot: string; closed: boolean }>("import:stopped", (e) => {
+  if (!catalog.acceptEvent(e.payload)) return;
+  catalog.importStopped(e.payload.closed);
 });
 // The just-opened folder had no recognized photos/videos. The backend already
 // rolled the whole open back (closed the project, forgot it from recents,

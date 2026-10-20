@@ -520,6 +520,16 @@
     return () => document.removeEventListener("visibilitychange", onHide);
   });
 
+  $effect(() => {
+    const onShow = () => {
+      if (document.visibilityState === "visible") {
+        void catalog.syncAfterResume().catch(() => {});
+      }
+    };
+    document.addEventListener("visibilitychange", onShow);
+    return () => document.removeEventListener("visibilitychange", onShow);
+  });
+
   async function pickProject() {
     // Android has no filesystem folder dialog, so use the SAF tree picker, which
     // returns a content:// URI. Desktop uses the native directory dialog.

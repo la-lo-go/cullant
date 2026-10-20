@@ -330,6 +330,7 @@ export const api = {
   // Files still awaiting metadata (Phase A). Used to recover the open gate if a
   // `metadata:done` event was missed on the startup auto-open path.
   ingestPending: () => invoke<number>("ingest_pending"),
+  importRunning: () => invoke<boolean>("import_running"),
   closeProject: () => invoke("close_project"),
   rescanProject: () => invoke("rescan_project"),
   // Discard everything stored about the open project and read the folder again

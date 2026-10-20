@@ -360,6 +360,7 @@ pub fn run() {
             commands::project::consume_usb_attach,
             commands::project::current_project,
             commands::project::ingest_pending,
+            commands::project::import_running,
             commands::project::rescan_project,
             commands::project::close_project,
             commands::project::reimport_project,
