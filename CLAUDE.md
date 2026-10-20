@@ -66,7 +66,15 @@ npm run tauri dev            # dev app
 CULLANT_OPEN_PROJECT=<dir> npm run tauri dev   # auto-open a project at startup (test hook)
 npm run tauri:debug          # dev app + CDP on port 9222 (UI automation)
 npm run tauri build          # NSIS + MSI installers
+npm run android:dev          # fast debug APK on the USB device, as "Cullant Dev"
 ```
+
+- **Use `npm run android:dev` for every test on an Android device.** Use the release build (`tauri android build`) only to publish. The release profile has full LTO, one codegen unit and R8, so a one-line change costs about 6 minutes. `android:dev` costs about 30 s after a Rust change.
+  - It builds a debug APK for `aarch64` only. Dependencies are optimized (`[profile.dev.package."*"]`), so decode speed stays usable. The app crate builds incrementally.
+  - It skips the frontend build when no frontend input is newer than `build/index.html`.
+  - It finds the SDK, NDK and JDK itself (`local.properties`, then the usual install paths). You do not export variables.
+  - The debug build has the ID `org.cullant.app.dev`. It installs next to the signed release build, so it never replaces it or deletes its data. Its projects, private database and SAF grants are separate.
+  - The first run after a clean `target/` takes about 15 minutes, because it builds every dependency once.
 
 - Synthetic test data: `cd src-tauri && cargo run --release --example gen_testdata -- C:\dev\cullant-testdata 600`. Good for counts, ordering and state; useless for the decoder.
 - Real camera files: `npm run fixtures` populates `fixtures/media/` from CC0 samples (gitignored, checksummed — see `fixtures/README.md`). `cargo test the_corpus -- --nocapture` runs the ingest over them. It has already found three decode gaps that synthetic JPEGs cannot expose.

@@ -11,6 +11,7 @@
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
     "tauri:debug": "tauri dev --config src-tauri/tauri.debug.conf.json",
+    "android:dev": "node scripts/android-dev.mjs",
     "fixtures": "node fixtures/fetch.mjs",
     "version:set": "node scripts/version.mjs"
   },
