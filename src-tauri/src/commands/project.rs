@@ -130,6 +130,12 @@ fn spawn_scan(
         .scan_active
         .store(true, std::sync::atomic::Ordering::Release);
     let active = ScanActive(app.clone(), db.generation());
+    // Late start for an open that found an older guard alive (see `start_import_notify`).
+    let notify = notify.or_else(|| {
+        initial_open_id
+            .as_ref()
+            .map(|id| ImportNotifyGuard::start(&app, project_display_name(id), id.clone()))
+    });
     std::thread::Builder::new()
         .name("scanner".into())
         .spawn(move || {
@@ -326,9 +332,11 @@ pub fn consume_usb_attach(app: AppHandle) -> AppResult<bool> {
 
 /// Starts the import service for a fresh open before the slow work (database
 /// migrations, closing the old project), so leaving the app early still keeps
-/// the import alive.
+/// the import alive. If an older import still runs, this open could fail and
+/// end its service, so `spawn_scan` starts the guard late instead.
 fn start_import_notify(app: &AppHandle, id: &str, fresh: bool) -> Option<ImportNotifyGuard> {
-    fresh.then(|| ImportNotifyGuard::start(app, project_display_name(id), id.to_string()))
+    (fresh && !ImportNotifyGuard::any_alive())
+        .then(|| ImportNotifyGuard::start(app, project_display_name(id), id.to_string()))
 }
 
 /// An open that fails after the guard started tells the user, who may be in another app by now.
@@ -473,14 +481,13 @@ fn open_saf_project(
     use tauri_plugin_saf::SafExt;
 
     let base = project_data_base(app, tree_uri)?;
-    std::fs::create_dir_all(&base)?;
-
     let fresh_data = !base.join(".cullant").exists();
     *notify = start_import_notify(app, tree_uri, fresh_data);
     let root_doc = app
         .saf()
         .root_document_id(tree_uri)
         .map_err(|e| AppError::Other(format!("saf: {e}")))?;
+    std::fs::create_dir_all(&base)?;
     let db = Arc::new(Db::open(&base)?);
     let db_path = db.path().to_string_lossy().into_owned();
     let store: Arc<dyn ProjectStore> = Arc::new(crate::store::SafStore::new(
