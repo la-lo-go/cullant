@@ -102,7 +102,7 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
     override fun onResume() {
         try {
             NotificationManagerCompat.from(context).cancel(ImportNotifier.RESULT_ID)
-            if (ImportNotifier.resumePending() != null) startService()
+            if (ImportNotifier.resumePending()) startService()
         } catch (e: Exception) {
             Logger.error("ImportNotify", e.message ?: "resume failed", e)
         }

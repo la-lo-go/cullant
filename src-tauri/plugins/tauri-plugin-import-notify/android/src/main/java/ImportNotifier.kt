@@ -56,10 +56,10 @@ object ImportNotifier {
 
     /** Takes the deferred start and requests it in one step, so a stop cannot slip in between. */
     @Synchronized
-    fun resumePending(): String? {
-        val title = pendingTitle ?: return null
+    fun resumePending(): Boolean {
+        if (pendingTitle == null) return false
         requestStart()
-        return title
+        return true
     }
 
     /** Called by the service after startForeground. True when a stop is waiting. */
@@ -149,6 +149,8 @@ object ImportNotifier {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            // Android 12+ delays a foreground service notification by up to 10 s otherwise.
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
         if (total == null || total <= 0) {
             builder.setProgress(0, 0, true)
         } else {
