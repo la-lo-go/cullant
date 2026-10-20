@@ -468,15 +468,47 @@ class CatalogStore {
     if (closed) {
       this.generation++;
       this.eventRoot = null;
+      this.resumeOnShow = false;
       this.clearProject();
       this.endImport();
       return;
     }
     this.endImport();
     this.previewsPaused = true;
+    // Stop pauses the import until the user comes back to the app.
+    this.resumeOnShow = true;
+    if (this.hiddenDuringImport && document.visibilityState === "visible") {
+      void this.resumeAfterStop().catch(() => {});
+    }
     void this.refresh()
       .then(() => this.refreshPreviewReady())
       .catch((error) => { this.error = String(error); });
+  }
+
+  private resumeOnShow = false;
+  private hiddenDuringImport = false;
+
+  /** The app went to the background. A stop that arrives later is a pause. */
+  onHide() {
+    if (this.ingesting) this.hiddenDuringImport = true;
+  }
+
+  /** The app is visible again. */
+  async onShow() {
+    await this.syncAfterResume();
+    await this.resumeAfterStop();
+    // Kept while bars show: a stop event that is still on its way is a pause.
+    if (!this.ingesting) this.hiddenDuringImport = false;
+  }
+
+  /** Once per stop, runs the rescan the user would run, so the import continues
+   *  and shows its notification when work is left. */
+  private async resumeAfterStop() {
+    if (!this.resumeOnShow || !this.project || this.transitions > 0 || this.ingesting) return;
+    if (await api.importRunning()) return;
+    this.resumeOnShow = false;
+    this.hiddenDuringImport = false;
+    await api.rescanProject(true);
   }
 
   /** The stop event can be lost while the app is hidden, so look at the backend

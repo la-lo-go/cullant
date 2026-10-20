@@ -522,9 +522,8 @@
 
   $effect(() => {
     const onShow = () => {
-      if (document.visibilityState === "visible") {
-        void catalog.syncAfterResume().catch(() => {});
-      }
+      if (document.visibilityState === "visible") void catalog.onShow().catch(() => {});
+      else catalog.onHide();
     };
     document.addEventListener("visibilitychange", onShow);
     return () => document.removeEventListener("visibilitychange", onShow);
