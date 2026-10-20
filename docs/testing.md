@@ -424,7 +424,7 @@ A non-empty `cullant.db-wal` from a desktop counts as data from another device.
 The import service starts only on a fresh open of a folder.
 The Kotlin code compiles only for Android, so do this check on a phone:
 
-1. Run `npm run android:dev`. Install the build on the phone. Clear the app data, so the permission question comes back.
+1. Run `npm run android:dev`. Clear the app data, so the permission question comes back.
 2. Open a large new folder. Allow notifications when Android asks.
 3. Press Home at once. Make sure the notification shade shows the import progress.
 4. Run `adb shell dumpsys activity services org.cullant.app.dev`. Make sure `ImportService` is listed while the import runs.
