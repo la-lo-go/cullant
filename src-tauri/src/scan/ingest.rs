@@ -1864,7 +1864,9 @@ mod tests {
     #[test]
     fn changing_the_preview_size_restages_only_the_previews() {
         let _guard = ingest_guard();
-        use crate::thumbs::{set_preview_long_edge, PREVIEW_LONG_EDGE_DEFAULT};
+        use crate::thumbs::{
+            set_preview_long_edge, PREVIEW_LONG_EDGE_CHOICES, PREVIEW_LONG_EDGE_DEFAULT,
+        };
 
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -1876,7 +1878,11 @@ mod tests {
         assert_eq!(run_all(&db, root), (0, 0, 0));
 
         // A different size makes every preview stale — and nothing else.
-        set_preview_long_edge(1600);
+        let other = PREVIEW_LONG_EDGE_CHOICES
+            .into_iter()
+            .find(|&edge| edge != PREVIEW_LONG_EDGE_DEFAULT)
+            .unwrap();
+        set_preview_long_edge(other);
         let (meta, thumbs, previews) = run_all(&db, root);
         assert_eq!((meta, thumbs), (0, 0));
         assert_eq!(previews, 3);
