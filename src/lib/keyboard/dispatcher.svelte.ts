@@ -1,6 +1,7 @@
 import { session } from "../stores/session.svelte";
 import { tags } from "../stores/tags.svelte";
 import { view } from "../stores/view.svelte";
+import { dock, isVertical } from "../stores/dock.svelte";
 import {
   effectiveBindings,
   COMMANDS,
@@ -65,6 +66,21 @@ function backFromView() {
   }
 }
 
+// Up and Down walk a visible vertical filmstrip one photo at a time.
+function stepsAlongStrip(): boolean {
+  return (
+    (view.mode === "viewer" || view.mode === "compare") &&
+    isVertical(dock.filmstrip) &&
+    session.showFilmstrip &&
+    !view.fullscreen
+  );
+}
+
+function rowStep(direction: 1 | -1): number {
+  const single = view.mode === "survey" || stepsAlongStrip();
+  return direction * (single ? 1 : session.gridCols ?? 1);
+}
+
 function execute(id: CommandId, e?: KeyboardEvent) {
   switch (id) {
     case "undo.rejection":
@@ -82,11 +98,11 @@ function execute(id: CommandId, e?: KeyboardEvent) {
     case "nav.prev":
       return e?.shiftKey ? session.extendSelection(-1) : session.moveFocus(-1);
     case "nav.down": {
-      const rows = view.mode === "survey" ? 1 : session.gridCols ?? 1;
+      const rows = rowStep(1);
       return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
     }
     case "nav.up": {
-      const rows = view.mode === "survey" ? -1 : -(session.gridCols ?? 1);
+      const rows = rowStep(-1);
       return e?.shiftKey ? session.extendSelection(rows) : session.moveFocus(rows);
     }
     case "nav.home":
