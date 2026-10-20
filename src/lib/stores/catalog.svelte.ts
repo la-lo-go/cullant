@@ -19,6 +19,15 @@ import { settings } from "./settings.svelte";
 import { recent } from "./recent.svelte";
 import { clearThumbCache } from "../thumbLoader";
 
+export type FolderCopyOutcome = {
+  status: "written" | "unchanged" | "conflict" | "failed";
+  detail?: string;
+};
+
+/** The last folder copy of one project, so settings can say what happened
+ *  even when the timer or a leave wrote it. */
+export type FolderCopyLast = { root: string; outcome: FolderCopyOutcome; at: Date };
+
 class CatalogStore {
   generation = 0;
   private refreshRequest = 0;
@@ -41,6 +50,8 @@ class CatalogStore {
   sortDesc = $state(false);
   media = $state<MediaTab>("photos");
   scanning = $state(false);
+  folderCopying = $state(false);
+  folderCopyLast = $state<FolderCopyLast | null>(null);
   scanFound = $state(0);
   /** Photos that took their state from an XMP sidecar in the last scan; drives
    *  a one-off notice so an import is never silent. 0 = nothing to say. */
@@ -357,20 +368,23 @@ class CatalogStore {
   }
 
   /** Write the folder copy and say what happened. Never throws: a failed
-   *  copy is logged and returned as text, so leaving a project does not depend
-   *  on it. Does nothing where the live database already is the folder's. */
-  async copyToFolder(): Promise<string> {
-    if (!this.project?.mirrorsMetadata) return "";
+   *  copy is logged and returned as `failed`, so leaving a project does not
+   *  depend on it. Null where the live database already is the folder's. */
+  async copyToFolder(): Promise<FolderCopyOutcome | null> {
+    if (!this.project?.mirrorsMetadata) return null;
+    const root = this.project.rootPath;
+    this.folderCopying = true;
+    let outcome: FolderCopyOutcome;
     try {
-      const result = await api.exportFolderCopy();
-      if (result === "conflict") {
-        return "The folder has a folder copy from another device. Reopen the project to choose.";
-      }
-      return result === "written" ? "Folder copy written" : "Folder copy is up to date";
+      outcome = { status: await api.exportFolderCopy() };
     } catch (error) {
       console.error("folder copy failed", error);
-      return String(error);
+      outcome = { status: "failed", detail: String(error) };
+    } finally {
+      this.folderCopying = false;
     }
+    this.folderCopyLast = { root, outcome, at: new Date() };
+    return outcome;
   }
 
   async copyToFolderOnLeave() {

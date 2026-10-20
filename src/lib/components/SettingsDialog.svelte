@@ -122,6 +122,7 @@
   import Heart from "@lucide/svelte/icons/heart";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import DatabaseBackup from "@lucide/svelte/icons/database-backup";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import X from "@lucide/svelte/icons/x";
@@ -317,20 +318,41 @@
     }
   }
 
-  let copyMsg = $state("");
-  let copyBusy = $state(false);
-
-  $effect(() => {
-    void catalog.project?.rootPath;
-    copyMsg = "";
-  });
+  // The export takes a few milliseconds. Without a floor, the busy state is a
+  // flicker that reads as "nothing happened".
+  const COPY_MIN_BUSY_MS = 500;
+  let copyHolding = $state(false);
+  const copyBusy = $derived(copyHolding || catalog.folderCopying);
+  const copyLast = $derived(
+    catalog.folderCopyLast?.root === catalog.project?.rootPath ? catalog.folderCopyLast : null,
+  );
 
   async function copyNow() {
-    copyBusy = true;
+    copyHolding = true;
     try {
-      copyMsg = await catalog.copyToFolder();
+      await Promise.all([catalog.copyToFolder(), new Promise((r) => setTimeout(r, COPY_MIN_BUSY_MS))]);
     } finally {
-      copyBusy = false;
+      copyHolding = false;
+    }
+  }
+
+  function copyStatus(): { tone: "" | "ok" | "warn"; text: string; detail?: string } {
+    if (copyBusy) return { tone: "", text: "Writing the folder copy…" };
+    if (!copyLast) return { tone: "", text: "Not written in this session" };
+    const at = copyLast.at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    switch (copyLast.outcome.status) {
+      case "written":
+        return { tone: "ok", text: `Written at ${at}` };
+      case "unchanged":
+        return { tone: "ok", text: `Up to date at ${at}` };
+      case "conflict":
+        return {
+          tone: "warn",
+          text: "Not written. Reopen the project to choose a copy.",
+          detail: "The folder has a folder copy from another device.",
+        };
+      case "failed":
+        return { tone: "warn", text: "Not written. An error occurred.", detail: copyLast.outcome.detail };
     }
   }
 
@@ -441,6 +463,7 @@
       class="row"
       class:changed={s.modified()}
       class:whole-row={s.kind === "toggle"}
+      class:action-row={s.kind === "custom" && s.slot === "copyNow"}
     >
       {#if s.kind === "toggle"}
         <input
@@ -451,10 +474,21 @@
           onchange={releasing((e) => s.set(e.currentTarget.checked))}
         />
       {/if}
-      <span class="name">
-        <span class="label">{s.label}</span>
-        <InfoTip title={s.label} text={s.info} />
-      </span>
+      {#if s.kind === "custom" && s.slot === "copyNow"}
+        {@const status = copyStatus()}
+        <span class="name stacked">
+          <span class="line">
+            <span class="label">{s.label}</span>
+            <InfoTip title={s.label} text={s.info} />
+          </span>
+          <span class="status {status.tone}" role="status" title={status.detail}>{status.text}</span>
+        </span>
+      {:else}
+        <span class="name">
+          <span class="label">{s.label}</span>
+          <InfoTip title={s.label} text={s.info} />
+        </span>
+      {/if}
 
       {#if s.kind === "toggle"}
         <span class="switch" class:on={s.get()}>
@@ -482,7 +516,13 @@
           {/each}
         </select>
       {:else if s.slot === "copyNow"}
-        <button class="wide" disabled={copyBusy} onclick={releasing(copyNow)}>Write folder copy</button>
+        <button class="act" disabled={copyBusy} aria-busy={copyBusy} onclick={releasing(copyNow)}>
+          {#if copyBusy}
+            <span class="spin"><LoaderCircle size={13} /></span> Writing
+          {:else}
+            <DatabaseBackup size={13} /> Write now
+          {/if}
+        </button>
       {/if}
     </svelte:element>
   {/if}
@@ -509,9 +549,6 @@
     {/each}
     {#if g.id === "quality" && previewMsg}
       <p class="hint">{previewMsg}</p>
-    {/if}
-    {#if g.id === "folderCopy" && copyMsg}
-      <p class="hint" role="status">{copyMsg}</p>
     {/if}
   </section>
 {/snippet}
@@ -1321,7 +1358,8 @@
       background: var(--hover);
     }
 
-    .preferences:not(.touch-pointer) .wide:hover {
+    .preferences:not(.touch-pointer) .wide:hover,
+    .preferences:not(.touch-pointer) .act:not(:disabled):hover {
       background: var(--hover);
     }
 
@@ -1529,6 +1567,85 @@
     border-radius: 50%;
     background: var(--accent);
     vertical-align: middle;
+  }
+
+  /* The status line is always there and always one line, so a copy that
+     starts or ends changes words, never the height of the panel. */
+  /* The button goes under the text, full width. Beside it, a phone squeezes
+     the label and the status to a few letters. */
+  .row.action-row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-bottom: 6px;
+  }
+
+  .row.action-row .name {
+    flex-basis: 100%;
+  }
+
+  .name.stacked {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 1px;
+    padding: 4px 0;
+  }
+
+  .stacked .line {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .status {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    line-height: 1.35;
+    opacity: 0.6;
+  }
+
+  .status.ok {
+    color: var(--accent);
+    opacity: 0.9;
+  }
+
+  .status.warn {
+    color: #ffb86b;
+    opacity: 1;
+  }
+
+  .act {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+
+  .act:disabled {
+    cursor: default;
+    opacity: 0.75;
+  }
+
+  .spin {
+    display: inline-flex;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* Values end at the edge their controls hug. Left-aligned inside boxes of
