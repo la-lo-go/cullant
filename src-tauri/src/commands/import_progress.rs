@@ -37,6 +37,9 @@ fn weight(phase: Phase) -> u64 {
     }
 }
 
+/// The bar never shows full: the notification ends when the import ends, and a
+/// phase without an estimate (thumbnail stragglers) can finish early on paper.
+const MAX_PERMILLE: u16 = 990;
 /// A video poster costs this many previews, until its own speed is measured.
 const VIDEO_COST_FACTOR: f64 = 4.0;
 /// The estimate needs a phase that ran this long and finished this many items.
@@ -157,7 +160,8 @@ impl Tracker {
             return None;
         }
         // A total that grows or a pass that restarts must not pull the bar back.
-        self.shown_permille = self.shown_permille.max((done * 1000 / all) as u16);
+        let now = ((done * 1000 / all) as u16).min(MAX_PERMILLE);
+        self.shown_permille = self.shown_permille.max(now);
         Some(self.shown_permille)
     }
 
@@ -269,6 +273,16 @@ mod tests {
             );
             last = permille;
         }
+    }
+
+    #[test]
+    fn the_bar_stays_below_full_when_every_phase_is_complete() {
+        let (mut tracker, now) = fresh(100, 5);
+        let mut permille = None;
+        for phase in COUNTED {
+            permille = tracker.update(phase, 100, Some(100), now).permille;
+        }
+        assert_eq!(permille, Some(990));
     }
 
     #[test]
