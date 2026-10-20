@@ -13,7 +13,7 @@
   import { runtimeTools } from "$lib/stores/runtimeTools.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
-  import { dock } from "$lib/stores/dock.svelte";
+  import { dock, isVertical } from "$lib/stores/dock.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
   import { shortcutHint } from "$lib/keyboard/hints";
   import { formatColorLabel } from "$lib/colorLabels";
@@ -53,6 +53,9 @@
   import Eye from "@lucide/svelte/icons/eye";
   import Columns2 from "@lucide/svelte/icons/columns-2";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
+  import PanelTop from "@lucide/svelte/icons/panel-top";
+  import PanelLeft from "@lucide/svelte/icons/panel-left";
+  import PanelRight from "@lucide/svelte/icons/panel-right";
   import ImageIcon from "@lucide/svelte/icons/image";
   import VideoIcon from "@lucide/svelte/icons/video";
   import ListFilter from "@lucide/svelte/icons/list-filter";
@@ -92,6 +95,10 @@
   // as --bottom-bar-h so overlays inside the grid — the background-status pill —
   // can sit above it instead of being buried by it in selection mode.
   let bottomBarH = $state(0);
+  // The region of the action bar outside the grid: the view and the bar.
+  let viewFrame = $state<HTMLElement | null>(null);
+  const BAR_ICONS = { top: PanelTop, right: PanelRight, bottom: PanelBottom, left: PanelLeft };
+  const BarIcon = $derived(BAR_ICONS[dock.actionBar]);
   const flagNames = { all: "All", pick: "Picked", reject: "Rejected", unflagged: "Unflagged", anyflag: "Flagged", notrejected: "Not rejected" };
   const dateNames: Record<string, string> = { today: "Today", last7days: "Last 7 days" };
   const activeFilterSummary = $derived([
@@ -744,7 +751,7 @@
             aria-label="Show/hide the action bar"
             onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
           >
-            <PanelBottom size={14} />
+            <BarIcon size={14} />
           </button>
         {/if}
         <button title="Settings" aria-label="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
@@ -772,67 +779,78 @@
         </div>
       </div>
     {:else}
-      {#if view.mode === "grid"}
-        <div class="grid-area">
-          {#if session.selectedIds.size > 0}
-            <!-- Rendered as an overlay inside the (positioned) grid area, NOT in
-                 flow: the bar appearing/disappearing mid-marquee would otherwise
-                 shift every thumbnail, re-map the pointer's row hit-testing, and
-                 oscillate the selection it just created. -->
-            <SelectionBar />
-          {/if}
-          {#if session.folderTreeVisible}
-            <FolderTree />
-          {:else if hasSubfolders}
-            <button
-              class="tree-peek"
-              class:right={dock.folderTree === "right"}
-              title={shortcutHint("Show folder tree", "ui.toggleFolderTree")}
-              aria-label="Show folder tree"
-              onclick={blurring(() => (session.folderTreeVisible = true))}
-            >
-              {#if dock.folderTree === "right"}<ChevronLeft size={16} />{:else}<ChevronRight size={16} />{/if}
-            </button>
-          {/if}
-          <div class="grid-content" class:dock-moving={dock.animating("folderTree")} style={dock.reserveStyle("folderTree")}>
-            {#if session.filtered.length === 0 && catalog.items.length > 0}
-              <!-- The active tab has photos/videos, but every filter combined
-                   leaves nothing — a blank grid otherwise reads as a bug/empty
-                   project rather than "your filters excluded everything". -->
-              <div class="empty-filtered">
-                <ListFilter size={28} />
-                <p>No items match the current filters</p>
-                <p class="filter-summary">{activeFilterSummary}</p>
-                <button
-                  onclick={blurring(() => (session.filtersPanelOpen = true))}
-                >
-                  <ListFilter size={13} /> Open Sort &amp; Filter
-                </button>
-              </div>
+      <!-- The view and the action bar share this frame, which is the dock region of
+           the bar. In the grid it vanishes (display: contents): the bar is an overlay
+           there and the grid fills the app as before. -->
+      <div class="view-frame" class:grid={view.mode === "grid"} class:vertical={isVertical(dock.actionBar)} bind:this={viewFrame}>
+        {#if view.mode === "grid"}
+          <div class="grid-area">
+            {#if session.selectedIds.size > 0}
+              <!-- Rendered as an overlay inside the (positioned) grid area, NOT in
+                   flow: the bar appearing/disappearing mid-marquee would otherwise
+                   shift every thumbnail, re-map the pointer's row hit-testing, and
+                   oscillate the selection it just created. -->
+              <SelectionBar />
+            {/if}
+            {#if session.folderTreeVisible}
+              <FolderTree />
+            {:else if hasSubfolders}
+              <button
+                class="tree-peek"
+                class:right={dock.folderTree === "right"}
+                title={shortcutHint("Show folder tree", "ui.toggleFolderTree")}
+                aria-label="Show folder tree"
+                onclick={blurring(() => (session.folderTreeVisible = true))}
+              >
+                {#if dock.folderTree === "right"}<ChevronLeft size={16} />{:else}<ChevronRight size={16} />{/if}
+              </button>
+            {/if}
+            <div class="grid-content" class:dock-moving={dock.animating("folderTree")} style={dock.reserveStyle("folderTree")}>
+              {#if session.filtered.length === 0 && catalog.items.length > 0}
+                <!-- The active tab has photos/videos, but every filter combined
+                     leaves nothing — a blank grid otherwise reads as a bug/empty
+                     project rather than "your filters excluded everything". -->
+                <div class="empty-filtered">
+                  <ListFilter size={28} />
+                  <p>No items match the current filters</p>
+                  <p class="filter-summary">{activeFilterSummary}</p>
+                  <button
+                    onclick={blurring(() => (session.filtersPanelOpen = true))}
+                  >
+                    <ListFilter size={13} /> Open Sort &amp; Filter
+                  </button>
+                </div>
+              {:else}
+                <VirtualGrid items={session.filtered} />
+              {/if}
+            </div>
+          </div>
+        {:else}
+          <div class="view-content" class:dock-moving={dock.animating("actionBar")} style={dock.reserveStyle("actionBar")}>
+            {#if view.mode === "viewer"}
+              <Viewer />
+            {:else if view.mode === "survey"}
+              <SurveyView />
             {:else}
-              <VirtualGrid items={session.filtered} />
+              <CompareView />
             {/if}
           </div>
+        {/if}
+        <!-- Grid mode docks the bar as an overlay (same principle as SelectionBar:
+             appearing on the first selection must not shrink the grid and jump the
+             layout). Viewer/compare keep it in flow, as before. -->
+        <div
+          class="touchbar-dock"
+          class:overlay={view.mode === "grid"}
+          bind:clientHeight={bottomBarH}
+        >
+          <TouchActionBar
+            forceShow={touchBarVisible && view.mode !== "grid"}
+            hidden={(view.mode === "grid" && session.selectedIds.size === 0) || view.fullscreen}
+            side={view.mode === "grid" ? "bottom" : dock.actionBar}
+            region={() => viewFrame}
+          />
         </div>
-      {:else if view.mode === "viewer"}
-        <Viewer />
-      {:else if view.mode === "survey"}
-        <SurveyView />
-      {:else}
-        <CompareView />
-      {/if}
-      <!-- Grid mode docks the bar as an overlay (same principle as SelectionBar:
-           appearing on the first selection must not shrink the grid and jump the
-           layout). Viewer/compare keep it in flow, as before. -->
-      <div
-        class="touchbar-dock"
-        class:overlay={view.mode === "grid"}
-        bind:clientHeight={bottomBarH}
-      >
-        <TouchActionBar
-          forceShow={touchBarVisible && view.mode !== "grid"}
-          hidden={(view.mode === "grid" && session.selectedIds.size === 0) || view.fullscreen}
-        />
       </div>
     {/if}
   {:else}
@@ -1573,6 +1591,37 @@
       padding-left: max(4px, var(--safe-left));
       padding-right: max(4px, var(--safe-right));
     }
+  }
+
+  /* The region of the action bar: the view and the bar, in the bar's direction. */
+  .view-frame {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  .view-frame.vertical {
+    flex-direction: row;
+  }
+
+  .view-frame.grid {
+    display: contents;
+  }
+
+  /* Holds the view, and makes room for the bar while it is dragged to another side. */
+  .view-content {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .view-content.dock-moving {
+    transition: margin var(--dock-motion);
   }
 
   /* Holds the grid, and makes room for the tree while it is dragged to another side. */
