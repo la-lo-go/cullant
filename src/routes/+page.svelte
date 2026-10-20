@@ -48,6 +48,8 @@
   import { api, type FolderCopyStat } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import { dock } from "$lib/stores/dock.svelte";
   import Eye from "@lucide/svelte/icons/eye";
   import Columns2 from "@lucide/svelte/icons/columns-2";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
@@ -784,11 +786,12 @@
           {:else if hasSubfolders}
             <button
               class="tree-peek"
+              class:right={dock.folderTree === "right"}
               title={shortcutHint("Show folder tree", "ui.toggleFolderTree")}
               aria-label="Show folder tree"
               onclick={blurring(() => (session.folderTreeVisible = true))}
             >
-              <ChevronRight size={16} />
+              {#if dock.folderTree === "right"}<ChevronLeft size={16} />{:else}<ChevronRight size={16} />{/if}
             </button>
           {/if}
           {#if session.filtered.length === 0 && catalog.items.length > 0}
@@ -1647,6 +1650,16 @@
     background: var(--surface);
     color: var(--accent);
     cursor: pointer;
+  }
+
+  /* Above the grid's overlay scrollbar (z-index 26) at the same edge. */
+  .tree-peek.right {
+    left: auto;
+    right: 0;
+    z-index: 27;
+    border-left: 1px solid var(--border);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
   }
 
   .tree-peek:hover {

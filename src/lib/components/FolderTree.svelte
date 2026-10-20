@@ -9,9 +9,12 @@
   import type { MenuNode } from "../menu";
   import FolderTreeNode from "./FolderTreeNode.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
+  import DockGrip from "./DockGrip.svelte";
+  import { dock } from "../stores/dock.svelte";
   import { buildFolderTree, collectFolderPaths, hasCollapsedBranch, visibleFolderPaths, type TreeNode } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import Eye from "@lucide/svelte/icons/eye";
@@ -101,6 +104,8 @@
   const MAX_W = 480;
   const COLLAPSE_AT = 120;
 
+  const right = $derived(dock.folderTree === "right");
+
   let aside = $state<HTMLElement | null>(null);
   let resizing = $state(false);
   // True while the drag is past the collapse threshold: the tree clamps to its
@@ -123,7 +128,8 @@
 
   function onResizeMove(e: PointerEvent) {
     if (!resizing || !aside) return;
-    const w = e.clientX - aside.getBoundingClientRect().left;
+    const rect = aside.getBoundingClientRect();
+    const w = right ? rect.right - e.clientX : e.clientX - rect.left;
     // Past the threshold only flags a pending collapse (tree stays at MIN_W,
     // dimmed) instead of committing it, so dragging back out cancels the hide.
     pendingCollapse = w < COLLAPSE_AT;
@@ -148,7 +154,12 @@
 </script>
 
 {#if children.length > 0}
-  <aside class="tree" class:pending-collapse={pendingCollapse} bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
+  <aside
+    class="tree"
+    class:right
+    class:pending-collapse={pendingCollapse}
+    class:docking={dock.drag?.panel === "folderTree"}
+    bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
     <div
       class="scroll"
       id="folder-tree-scroll"
@@ -158,7 +169,9 @@
     >
       <div class="inner" bind:clientHeight={contentH}>
         <div class="header">
-          <span>Folders</span>
+          <DockGrip panel="folderTree" target={() => aside?.parentElement ?? null} thicknessFor={() => session.folderTreeWidth} orientation="vertical">
+            <span>Folders</span>
+          </DockGrip>
         </div>
         <button class="node root" class:active={folders.allSelected} aria-pressed={folders.allSelected} class:menu-target={menu?.path === ""}
           use:folderContextMenu={openAllMenu} onclick={(e) => { showAll(); e.currentTarget.blur(); }}>
@@ -181,7 +194,7 @@
         if (scroller) scroller.scrollTop = pos;
       }}
     />
-    <!-- Right-edge resize handle (hidden on narrow screens where the tree floats). -->
+    <!-- Inner-edge resize handle (hidden on narrow screens where the tree floats). -->
     <div
       class="resize-handle"
       class:resizing
@@ -193,7 +206,7 @@
       onpointerup={endResize}
       onpointercancel={endResize}
     ></div>
-    <!-- Hide tab on the panel's inner (right) edge, pointing left to collapse.
+    <!-- Hide tab on the panel's inner edge, pointing to the outer edge to collapse.
          Overlaid (absolute) so it costs no layout width; sits above the resize
          handle and overlay scrollbar (higher z-index) so it stays clickable. -->
     <button
@@ -202,7 +215,7 @@
       aria-label="Hide folder tree"
       onclick={() => (session.folderTreeVisible = false)}
     >
-      <ChevronLeft size={16} />
+      {#if right}<ChevronRight size={16} />{:else}<ChevronLeft size={16} />{/if}
     </button>
   </aside>
 {/if}
@@ -227,6 +240,17 @@
   .tree.pending-collapse {
     opacity: 0.6;
     transition: opacity 0.1s;
+  }
+
+  /* The tree is being dragged to another side. */
+  .tree.docking {
+    opacity: 0.5;
+  }
+
+  .tree.right {
+    order: 1;
+    border-right: none;
+    border-left: 1px solid var(--border);
   }
 
   .scroll {
@@ -270,6 +294,11 @@
     transition: background 0.12s;
   }
 
+  .right .resize-handle {
+    right: auto;
+    left: -3px;
+  }
+
   .resize-handle:hover::after,
   .resize-handle.resizing::after {
     background: var(--accent);
@@ -286,6 +315,12 @@
       z-index: 20;
       width: min(75%, 240px);
       box-shadow: 4px 0 18px rgba(0, 0, 0, 0.55);
+    }
+
+    .tree.right {
+      left: auto;
+      right: 0;
+      box-shadow: -4px 0 18px rgba(0, 0, 0, 0.55);
     }
 
     .resize-handle {
@@ -321,6 +356,14 @@
     background: var(--hover);
   }
 
+  .right .tree-hide {
+    right: auto;
+    left: 0;
+    border-right: 1px solid var(--border);
+    border-left: none;
+    border-radius: 0 6px 6px 0;
+  }
+
   .header {
     position: sticky;
     top: 0;
@@ -337,6 +380,11 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
+  }
+
+  /* The label is the grip: keep it identical to a plain label at rest. */
+  .header :global(.dock-grip.labelled) {
+    opacity: 1;
   }
 
   .node.root {
