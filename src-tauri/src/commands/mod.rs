@@ -3,6 +3,7 @@ pub mod catalog;
 pub mod culling;
 pub mod groups;
 pub mod import_notify;
+pub mod import_progress;
 pub mod media;
 pub mod metadata;
 pub mod project;

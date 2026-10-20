@@ -19,7 +19,7 @@ mod error;
 mod models;
 
 pub use error::{Error, Result};
-pub use models::{Outcome, Phase};
+pub use models::{Outcome, Overall, Phase};
 
 #[cfg(target_os = "android")]
 mod mobile;

@@ -51,7 +51,7 @@ const CHUNK: usize = if cfg!(target_os = "android") { 8 } else { 32 };
 /// Photos whose grid thumbnail is generated before the fused pass starts.
 /// Roughly the first two or three screens: enough that the grid stops looking
 /// empty immediately, few enough that paying a second read for them is noise.
-const LEAD_WINDOW: usize = 60;
+pub(crate) const LEAD_WINDOW: usize = 60;
 
 /// Minimum gap between metadata progress emits. Progress is counted per file
 /// (inside the parallel burst); this throttle coalesces the emits so a fast

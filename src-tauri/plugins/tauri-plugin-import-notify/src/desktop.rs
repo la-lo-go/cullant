@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use tauri::{plugin::PluginApi, AppHandle, Runtime};
 
 use crate::error::Result;
-use crate::models::{Outcome, Phase};
+use crate::models::{Outcome, Overall, Phase};
 
 /// Desktop stub: an import there needs no foreground service, so every call
 /// succeeds and does nothing.
@@ -21,10 +21,16 @@ impl<R: Runtime> ImportNotify<R> {
     pub fn start(&self, _project_name: &str) -> Result<()> {
         Ok(())
     }
-    pub fn update(&self, _phase: Phase, _done: u64, _total: Option<u64>) -> Result<()> {
+    pub fn update(
+        &self,
+        _phase: Phase,
+        _done: u64,
+        _total: Option<u64>,
+        _overall: Overall,
+    ) -> Result<()> {
         Ok(())
     }
-    pub fn finish(&self, _outcome: Outcome, _project_name: &str, _file_count: u64) -> Result<()> {
+    pub fn finish(&self, _outcome: Outcome, _project_name: &str) -> Result<()> {
         Ok(())
     }
     pub fn stop(&self) -> Result<()> {

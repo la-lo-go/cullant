@@ -33,13 +33,16 @@ class UpdateArgs {
     lateinit var phase: String
     var done: Long = 0
     var total: Long? = null
+    var permille: Int? = null
+    var etaMinutes: Int? = null
 }
 
 @InvokeArg
 class FinishArgs {
     lateinit var outcome: String
     lateinit var projectName: String
-    var fileCount: Long = 0
+    var photos: Long = 0
+    var videos: Long = 0
     var error: String? = null
 }
 
@@ -124,7 +127,7 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(UpdateArgs::class.java)
         safely(invoke) {
             if (!ImportNotifier.active) return@safely
-            val notification = ImportNotifier.progress(context, title, args.phase, args.done, args.total)
+            val notification = ImportNotifier.progress(context, title, args.phase, args.done, args.total, args.permille, args.etaMinutes)
             ImportNotifier.latest = notification
             notify(ImportNotifier.PROGRESS_ID, notification)
         }
@@ -140,7 +143,7 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
             if (!foreground) {
                 notify(
                     ImportNotifier.RESULT_ID,
-                    ImportNotifier.result(context, args.outcome, args.projectName, args.fileCount, args.error)
+                    ImportNotifier.result(context, args)
                 )
             }
         }

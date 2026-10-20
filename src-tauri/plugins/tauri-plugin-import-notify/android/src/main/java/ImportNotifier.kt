@@ -141,14 +141,30 @@ object ImportNotifier {
             .setContentTitle(title)
             .setContentIntent(contentIntent(context))
 
-    fun progress(context: Context, title: String, phase: String, done: Long, total: Long?): Notification {
+    private fun timeLeft(minutes: Int): String = when {
+        minutes < 1 -> "less than a minute left"
+        minutes < 60 -> "about $minutes min left"
+        else -> "about ${minutes / 60} h left"
+    }
+
+    // The title counts the current phase. The bar and the time left cover the whole import.
+    fun progress(
+        context: Context,
+        title: String,
+        phase: String,
+        done: Long,
+        total: Long?,
+        permille: Int?,
+        etaMinutes: Int?,
+    ): Notification {
         val count = when {
             phase !in PHASES -> null
             total == null -> "${format(done)} found"
             else -> "${format(done)} / ${format(total)}"
         }
+        val text = listOfNotNull(label(phase), etaMinutes?.let(::timeLeft)).joinToString(" · ")
         val builder = base(context, PROGRESS_CHANNEL, if (count == null) title else "$title · $count")
-            .setContentText(label(phase))
+            .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
@@ -156,21 +172,25 @@ object ImportNotifier {
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             // Android 12+ delays a foreground service notification by up to 10 s otherwise.
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        if (total == null || total <= 0) {
+        if (permille == null) {
             builder.setProgress(0, 0, true)
         } else {
-            // Progress takes Int; scale so a very large library cannot overflow.
-            val max = 1000
-            builder.setProgress(max, (done.coerceIn(0, total) * max / total).toInt(), false)
+            builder.setProgress(1000, permille.coerceIn(0, 1000), false)
         }
         return builder.build()
     }
 
-    fun result(context: Context, outcome: String, name: String, fileCount: Long, error: String?): Notification {
-        val (channel, title, text) = when (outcome) {
-            "done" -> Triple(DONE_CHANNEL, "Project ready", "$name · ${format(fileCount)} files")
+    private fun counts(args: FinishArgs): String = listOfNotNull(
+        args.photos.takeIf { it > 0 }?.let { "${format(it)} ${if (it == 1L) "photo" else "photos"}" },
+        args.videos.takeIf { it > 0 }?.let { "${format(it)} ${if (it == 1L) "video" else "videos"}" },
+    ).joinToString(" · ")
+
+    fun result(context: Context, args: FinishArgs): Notification {
+        val name = args.projectName
+        val (channel, title, text) = when (args.outcome) {
+            "done" -> Triple(DONE_CHANNEL, "Project ready", listOf(name, counts(args)).filter { it.isNotEmpty() }.joinToString(" · "))
             "empty" -> Triple(DONE_CHANNEL, "No photos or videos found", name)
-            else -> Triple(ERROR_CHANNEL, "Import failed", listOfNotNull(name, error?.lineSequence()?.first()?.take(MAX_ERROR_CHARS)?.ifBlank { null }).joinToString(" · "))
+            else -> Triple(ERROR_CHANNEL, "Import failed", listOfNotNull(name, args.error?.lineSequence()?.first()?.take(MAX_ERROR_CHARS)?.ifBlank { null }).joinToString(" · "))
         }
         return base(context, channel, title)
             .setContentText(text)

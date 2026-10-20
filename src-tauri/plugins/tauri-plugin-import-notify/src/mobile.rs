@@ -17,8 +17,8 @@ const HEARTBEAT: Duration = Duration::from_secs(60);
 
 enum Msg {
     Start(String),
-    Update(Phase, u64, Option<u64>),
-    Finish(Outcome, String, u64),
+    Update(Phase, u64, Option<u64>, Overall),
+    Finish(Outcome, String),
     Stop,
 }
 
@@ -94,8 +94,13 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
         let Some(msg) = msg else { return };
 
         match msg {
-            Msg::Update(phase, done, total) => {
-                let payload = UpdatePayload { phase, done, total };
+            Msg::Update(phase, done, total, overall) => {
+                let payload = UpdatePayload {
+                    phase,
+                    done,
+                    total,
+                    overall,
+                };
                 if sent_phase == Some(phase) {
                     // Without this, a flood of updates keeps replacing the pending one and none is sent.
                     if sender.last_sent.elapsed() >= UPDATE_INTERVAL {
@@ -123,16 +128,16 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
                     },
                 );
             }
-            Msg::Finish(outcome, project_name, file_count) => {
+            Msg::Finish(outcome, project_name) => {
                 if let Some(payload) = pending.take() {
                     sender.send(payload);
                 }
                 sent_phase = None;
                 sender.latest = None;
-                let (outcome, error) = match &outcome {
-                    Outcome::Done => ("done", None),
-                    Outcome::Empty => ("empty", None),
-                    Outcome::Error(message) => ("error", Some(message.as_str())),
+                let (outcome, error, photos, videos) = match &outcome {
+                    Outcome::Done { photos, videos } => ("done", None, *photos, *videos),
+                    Outcome::Empty => ("empty", None, 0, 0),
+                    Outcome::Error(message) => ("error", Some(message.as_str()), 0, 0),
                 };
                 let _ = handle.run_mobile_plugin::<Ack>(
                     "finish",
@@ -140,7 +145,8 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
                         outcome,
                         error,
                         project_name: &project_name,
-                        file_count,
+                        photos,
+                        videos,
                     },
                 );
             }
@@ -166,15 +172,22 @@ impl<R: Runtime> ImportNotify<R> {
         self.queue(Msg::Start(project_name.to_string()))
     }
 
-    /// Update the progress notification. `total: None` shows an indeterminate bar.
+    /// Update the progress notification. `done` and `total` count the current
+    /// phase and show as text. The bar shows `overall`.
     /// Returns at once; updates are coalesced to at most two per second.
-    pub fn update(&self, phase: Phase, done: u64, total: Option<u64>) -> Result<()> {
-        self.queue(Msg::Update(phase, done, total))
+    pub fn update(
+        &self,
+        phase: Phase,
+        done: u64,
+        total: Option<u64>,
+        overall: Overall,
+    ) -> Result<()> {
+        self.queue(Msg::Update(phase, done, total, overall))
     }
 
     /// Stop the service. Post a result notification only if the app is in the background.
-    pub fn finish(&self, outcome: Outcome, project_name: &str, file_count: u64) -> Result<()> {
-        self.queue(Msg::Finish(outcome, project_name.to_string(), file_count))
+    pub fn finish(&self, outcome: Outcome, project_name: &str) -> Result<()> {
+        self.queue(Msg::Finish(outcome, project_name.to_string()))
     }
 
     /// Stop the service and post nothing.

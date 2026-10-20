@@ -21,7 +21,7 @@ class ImportService : Service() {
         ImportNotifier.createChannels(this)
         // Progress may have been posted before this runs. Do not overwrite it.
         val notification = ImportNotifier.latest
-            ?: ImportNotifier.progress(this, title, "preparing", 0, null)
+            ?: ImportNotifier.progress(this, title, "preparing", 0, null, null, null)
         // The fallback in enterForeground cannot cover a startForeground failure thrown before Android clears fgRequired.
         if (!enterForeground(notification)) {
             ImportNotifier.serviceEnded()

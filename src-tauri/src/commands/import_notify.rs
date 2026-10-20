@@ -1,9 +1,14 @@
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use serde_json::Value;
-use tauri::{AppHandle, EventId, Listener};
+use tauri::{AppHandle, EventId, Listener, Manager};
 use tauri_plugin_import_notify::{ImportNotifyExt, Outcome, Phase};
+
+use crate::commands::import_progress::{Expect, Tracker};
+use crate::db::Db;
+use crate::error::AppResult;
 
 /// Token of the guard that owns the single Android service. A guard from an
 /// earlier open must not end the service of a newer one.
@@ -13,9 +18,35 @@ static OWNER: Mutex<u64> = Mutex::new(0);
 /// service of an older import that still runs, so an open starts early only when this is 0.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 
+/// What a project holds. A photo is a shot: a RAW+JPEG pair counts once.
+#[derive(Clone, Copy, Default)]
+pub struct Counts {
+    pub photos: u64,
+    pub videos: u64,
+}
+
+impl Counts {
+    pub fn load(db: &Db) -> AppResult<Self> {
+        db.call_read(|conn| {
+            Ok(conn.query_row(
+                "SELECT COUNT(DISTINCT CASE WHEN kind IN (0, 1) THEN group_id END),
+                        COUNT(CASE WHEN kind = 2 THEN 1 END)
+                 FROM files WHERE status = 0",
+                [],
+                |r| {
+                    Ok(Self {
+                        photos: r.get::<_, i64>(0)? as u64,
+                        videos: r.get::<_, i64>(1)? as u64,
+                    })
+                },
+            )?)
+        })
+    }
+}
+
 /// How the scanner thread ended. `None` instead of an `End` means it was cancelled or replaced.
 pub enum End {
-    Done(u64),
+    Done(Counts),
     Empty,
     Error(String),
 }
@@ -28,6 +59,7 @@ pub struct ImportNotifyGuard {
     token: u64,
     end: Option<End>,
     listeners: Vec<EventId>,
+    tracker: Arc<Mutex<Tracker>>,
 }
 
 impl ImportNotifyGuard {
@@ -48,6 +80,7 @@ impl ImportNotifyGuard {
         // Thumbnail progress before the first preview is the short lead pass,
         // whose total is not the library size.
         let previews_started = Arc::new(AtomicBool::new(false));
+        let tracker = Arc::new(Mutex::new(Tracker::default()));
         let listeners = [
             ("scan:progress", Phase::Finding),
             ("metadata:progress", Phase::Metadata),
@@ -58,6 +91,7 @@ impl ImportNotifyGuard {
         .map(|(event, phase)| {
             let (app_handle, root) = (app.clone(), root.clone());
             let previews_started = previews_started.clone();
+            let tracker = tracker.clone();
             app.listen(event, move |e| {
                 let Ok(payload) = serde_json::from_str::<Value>(e.payload()) else {
                     return;
@@ -81,7 +115,12 @@ impl ImportNotifyGuard {
                 } else {
                     (count("done"), Some(count("total")))
                 };
-                let _ = app_handle.import_notify().update(phase, done, total);
+                // Held across the send, so two events cannot reach the worker out of order.
+                let mut tracker = tracker.lock().unwrap_or_else(|e| e.into_inner());
+                let overall = tracker.update(phase, done, total, Instant::now());
+                let _ = app_handle
+                    .import_notify()
+                    .update(phase, done, total, overall);
             })
         })
         .to_vec();
@@ -92,7 +131,25 @@ impl ImportNotifyGuard {
             // The default covers a scanner thread that never starts. A started one replaces it.
             end: Some(End::Error("Could not start the import.".into())),
             listeners,
+            tracker,
         }
+    }
+
+    /// Gives the bar the size of the phases that have not started. Call it when the walk ends.
+    pub fn expect(&self, counts: Counts) {
+        let generate_videos = self
+            .app
+            .state::<crate::AppState>()
+            .generate_video_thumbs
+            .load(Ordering::Relaxed);
+        let expect = Expect {
+            photos: counts.photos,
+            videos: if generate_videos { counts.videos } else { 0 },
+        };
+        self.tracker
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .expect(expect);
     }
 
     pub fn set_end(&mut self, end: Option<End>) {
@@ -102,9 +159,15 @@ impl ImportNotifyGuard {
     fn send_end(&mut self) {
         let notify = self.app.import_notify();
         let result = match self.end.take() {
-            Some(End::Done(count)) => notify.finish(Outcome::Done, &self.name, count),
-            Some(End::Empty) => notify.finish(Outcome::Empty, &self.name, 0),
-            Some(End::Error(message)) => notify.finish(Outcome::Error(message), &self.name, 0),
+            Some(End::Done(counts)) => notify.finish(
+                Outcome::Done {
+                    photos: counts.photos,
+                    videos: counts.videos,
+                },
+                &self.name,
+            ),
+            Some(End::Empty) => notify.finish(Outcome::Empty, &self.name),
+            Some(End::Error(message)) => notify.finish(Outcome::Error(message), &self.name),
             None => notify.stop(),
         };
         if let Err(error) = result {

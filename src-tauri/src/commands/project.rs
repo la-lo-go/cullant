@@ -6,7 +6,7 @@ use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::commands::import_notify::{End, ImportNotifyGuard};
+use crate::commands::import_notify::{Counts, End, ImportNotifyGuard};
 use crate::db::{migrations, Db};
 use crate::error::{AppError, AppResult};
 use crate::store::ProjectStore;
@@ -147,7 +147,15 @@ fn spawn_scan(
             // the frontend hears `scan:error` and drops its progress bars instead
             // of showing a phase that will never finish.
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                run_scan(app, db, store, root, thumbs, initial_open_id)
+                run_scan(
+                    app,
+                    db,
+                    store,
+                    root,
+                    thumbs,
+                    initial_open_id,
+                    notify.as_ref(),
+                )
             }));
             let end = outcome.unwrap_or_else(|payload| {
                 let message = format!("internal error: {}", crate::panic_message(payload.as_ref()));
@@ -170,6 +178,7 @@ fn run_scan(
     root: PathBuf,
     thumbs: Arc<ThumbPool>,
     initial_open_id: Option<String>,
+    notify: Option<&ImportNotifyGuard>,
 ) -> Option<End> {
     let cancelled = || thumbs.is_shut_down();
     let done = match scan::scan_project(&app, &db, store.as_ref(), &cancelled) {
@@ -193,13 +202,25 @@ fn run_scan(
             return empty_end(&app, &id, result);
         }
     }
-    match scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &thumbs) {
+    if let Some(notify) = notify {
+        notify.expect(Counts::load(&db).unwrap_or_default());
+    }
+    ingest_end(&app, &db, store.as_ref(), &thumbs)
+}
+
+fn ingest_end(
+    app: &AppHandle,
+    db: &Arc<Db>,
+    store: &dyn ProjectStore,
+    thumbs: &ThumbPool,
+) -> Option<End> {
+    match scan::ingest::run_ingest_pass(app, db, store, thumbs) {
         // The ingest pass returns Ok when the pool shuts down, so a closed project is not done.
         Ok(_) if thumbs.is_shut_down() => None,
-        Ok(_) => Some(End::Done(done.file_count.max(0) as u64)),
+        Ok(_) => Some(End::Done(Counts::load(db).unwrap_or_default())),
         Err(_) if thumbs.is_shut_down() => None,
         Err(error) => {
-            emit_scan_error(&app, &db.project_root(), error.to_string());
+            emit_scan_error(app, &db.project_root(), error.to_string());
             Some(End::Error(error.to_string()))
         }
     }
