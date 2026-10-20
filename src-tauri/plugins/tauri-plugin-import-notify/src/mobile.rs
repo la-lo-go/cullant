@@ -14,6 +14,8 @@ const UPDATE_INTERVAL: Duration = Duration::from_millis(500);
 /// The notification expires on its own (see `ImportNotifier.PROGRESS_TIMEOUT_MS`), so a
 /// quiet phase must repeat the latest state well before that.
 const HEARTBEAT: Duration = Duration::from_secs(60);
+/// A time estimate older than this is stale: a heartbeat repeats the count only.
+const ETA_FRESH: Duration = Duration::from_secs(30);
 
 enum Msg {
     Start(String),
@@ -47,11 +49,28 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
 struct UpdateSender<'a, R: Runtime> {
     handle: &'a PluginHandle<R>,
     last_sent: Instant,
+    /// When `latest` came from a real update and not from a heartbeat.
+    last_real: Instant,
     latest: Option<UpdatePayload>,
 }
 
 impl<R: Runtime> UpdateSender<'_, R> {
     fn send(&mut self, payload: UpdatePayload) {
+        self.last_real = Instant::now();
+        self.deliver(payload);
+    }
+
+    fn heartbeat(&mut self) {
+        let Some(mut payload) = self.latest.clone() else {
+            return;
+        };
+        if self.last_real.elapsed() >= ETA_FRESH {
+            payload.overall.eta_minutes = None;
+        }
+        self.deliver(payload);
+    }
+
+    fn deliver(&mut self, payload: UpdatePayload) {
         self.last_sent = Instant::now();
         self.latest = Some(payload.clone());
         let _ = self.handle.run_mobile_plugin::<Ack>("update", payload);
@@ -69,6 +88,7 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
     let mut sender = UpdateSender {
         handle,
         last_sent: Instant::now(),
+        last_real: Instant::now(),
         latest: None,
     };
 
@@ -83,8 +103,9 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
             Some(wait) => match rx.recv_timeout(wait.saturating_sub(sender.last_sent.elapsed())) {
                 Ok(msg) => Some(msg),
                 Err(RecvTimeoutError::Timeout) => {
-                    if let Some(payload) = pending.take().or_else(|| sender.latest.clone()) {
-                        sender.send(payload);
+                    match pending.take() {
+                        Some(payload) => sender.send(payload),
+                        None => sender.heartbeat(),
                     }
                     continue;
                 }
