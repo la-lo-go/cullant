@@ -34,9 +34,9 @@
     target: () => HTMLElement | null;
     /** Size in px of the panel if it is docked at that side. */
     thicknessFor: (side: Side) => number;
-    /** The panel's own orientation. */
+    /** The orientation of the row, bar or tab the grip sits in. The dots run across it. */
     orientation: "horizontal" | "vertical";
-    /** A label that becomes the handle. The grip icon then fades in after it on hover. */
+    /** A label that becomes the handle. The grip dots stay visible before it, and the grip fills its row. */
     children?: Snippet;
   }
 
@@ -173,7 +173,7 @@
   onlostpointercapture={cancel}
   {onclick}
 >
-  <!-- A horizontal panel is a bar, so its handle is a short vertical strip of dots. -->
+  <!-- The dots run across the row the grip sits in. -->
   {#snippet icon()}
     {#if orientation === "horizontal"}
       <GripVertical size={12} />
@@ -228,18 +228,21 @@
       min-height: 28px;
     }
   }
-  /* The padding gives the hover pill room; the negative margin keeps the
-     content where a plain label would sit. */
+  /* The grip is the whole row: it stretches over its flex parent, and the host
+     sets the padding that places the label. */
   .dock-grip.labelled {
     width: auto;
     height: auto;
+    flex: 1;
+    align-self: stretch;
+    justify-content: flex-start;
     gap: 5px;
-    padding: 3px 6px;
-    margin: -3px -6px;
-    border-radius: 4px;
+    padding: 0;
+    border-radius: 0;
     font: inherit;
     letter-spacing: inherit;
     text-transform: inherit;
+    text-align: left;
     opacity: 1;
     transition: background 120ms ease, color 120ms ease;
   }
@@ -251,10 +254,11 @@
   .dock-grip.labelled:hover,
   .dock-grip.labelled:focus-visible,
   .dock-grip.labelled.dragging {
-    background: color-mix(in srgb, var(--hover) 60%, transparent);
+    background: var(--hover);
     color: #ccc;
   }
   .dock-grip.labelled.dragging {
+    background: var(--accent-fill);
     color: var(--accent);
   }
   .labelled:hover .lead,

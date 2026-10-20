@@ -98,7 +98,7 @@
     folders.reconcileScope(collectFolderPaths(tree));
   });
 
-  // Drag-to-resize the panel. Dragging the right edge past COLLAPSE_AT hides
+  // Drag-to-resize the panel. Dragging the inner edge past COLLAPSE_AT hides
   // the panel altogether (a peek arrow in +page.svelte brings it back).
   const MIN_W = 160;
   const MAX_W = 480;
@@ -169,7 +169,7 @@
     >
       <div class="inner" bind:clientHeight={contentH}>
         <div class="header">
-          <DockGrip panel="folderTree" target={() => aside?.parentElement ?? null} thicknessFor={() => session.folderTreeWidth} orientation="vertical">
+          <DockGrip panel="folderTree" target={() => aside?.parentElement ?? null} thicknessFor={() => session.folderTreeWidth} orientation="horizontal">
             <span>Folders</span>
           </DockGrip>
         </div>
@@ -270,7 +270,7 @@
     display: none;
   }
 
-  /* Grabbable strip straddling the right edge; widens the hit area without a
+  /* Grabbable strip straddling the inner edge; widens the hit area without a
      visible chrome until hovered/dragged. */
   .resize-handle {
     position: absolute;
@@ -297,6 +297,8 @@
   .right .resize-handle {
     right: auto;
     left: -3px;
+    /* Above the grid's overlay scrollbar (26), which ends at this edge. */
+    z-index: 27;
   }
 
   .resize-handle:hover::after,
@@ -312,7 +314,8 @@
       top: 0;
       bottom: 0;
       left: 0;
-      z-index: 20;
+      /* Above the grid's overlay scrollbar (26), which ends under this edge. */
+      z-index: 27;
       width: min(75%, 240px);
       box-shadow: 4px 0 18px rgba(0, 0, 0, 0.55);
     }
@@ -328,8 +331,8 @@
     }
   }
 
-  /* Right-edge hide tab (same 18x44 size, surface fill, accent chevron as
-     .tree-peek). Anchored to the panel's inner right edge and layered above the
+  /* Inner-edge hide tab (same 18x44 size, surface fill, accent chevron as
+     .tree-peek). Anchored to the panel's inner edge and layered above the
      resize handle (z-index 25) and overlay scrollbar (z-index 26) so its click
      target wins. */
   .tree-hide {
@@ -375,13 +378,16 @@
     box-sizing: border-box;
     background: var(--surface);
     color: #888;
-    padding: 8px 10px;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
 
+  /* The whole header row is the grip, so the grip carries the padding. */
+  .header :global(.dock-grip.labelled) {
+    padding: 8px 10px;
+  }
 
   .node.root {
     display: flex;
