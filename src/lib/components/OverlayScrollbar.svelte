@@ -14,6 +14,7 @@
     controls,
     onSeek,
     alwaysVisible = false,
+    edge = "end",
   }: {
     orientation: "vertical" | "horizontal";
     /** Visible size of the scroll container along the scroll axis (px). */
@@ -30,6 +31,8 @@
      *  time it's scrollable. The filmstrip/carousel opts into this; every
      *  other host (folder tree) gets the default auto-hide. */
     alwaysVisible?: boolean;
+    /** Which edge the track sits on: right/bottom ("end") or left/top ("start"). */
+    edge?: "start" | "end";
   } = $props();
 
   const MIN_THUMB = 24;
@@ -107,7 +110,7 @@
 </script>
 
 {#if scrollable}
-  <div class="track {orientation}" role="presentation" onpointerdown={onTrackDown}>
+  <div class="track {orientation}" class:start={edge === "start"} role="presentation" onpointerdown={onTrackDown}>
     <div
       class="thumb"
       class:dragging
@@ -147,11 +150,21 @@
     width: 8px;
   }
 
+  .track.vertical.start {
+    right: auto;
+    left: 0;
+  }
+
   .track.horizontal {
     left: 0;
     right: 0;
     bottom: 0;
     height: 8px;
+  }
+
+  .track.horizontal.start {
+    bottom: auto;
+    top: 0;
   }
 
   .thumb {
