@@ -140,7 +140,6 @@ fn spawn_scan(
         .name("scanner".into())
         .spawn(move || {
             let _active = active;
-            // Declared after `_active`, so it drops first and sees the final scan state.
             let mut notify = notify;
             let project_root = db.project_root();
             let error_app = app.clone();
@@ -195,6 +194,8 @@ fn run_scan(
         }
     }
     match scan::ingest::run_ingest_pass(&app, &db, store.as_ref(), &thumbs) {
+        // The ingest pass returns Ok when the pool shuts down, so a closed project is not done.
+        Ok(_) if thumbs.is_shut_down() => None,
         Ok(_) => Some(End::Done(done.file_count.max(0) as u64)),
         Err(_) if thumbs.is_shut_down() => None,
         Err(error) => {

@@ -76,6 +76,19 @@ impl ImportNotifyGuard {
     pub fn set_end(&mut self, end: Option<End>) {
         self.end = end;
     }
+
+    fn send_end(&mut self) {
+        let notify = self.app.import_notify();
+        let result = match self.end.take() {
+            Some(End::Done(count)) => notify.finish(Outcome::Done, &self.name, count),
+            Some(End::Empty) => notify.finish(Outcome::Empty, &self.name, 0),
+            Some(End::Error(message)) => notify.finish(Outcome::Error(message), &self.name, 0),
+            None => notify.stop(),
+        };
+        if let Err(error) = result {
+            tracing::debug!("import notification not ended: {error}");
+        }
+    }
 }
 
 impl Drop for ImportNotifyGuard {
@@ -85,19 +98,7 @@ impl Drop for ImportNotifyGuard {
         }
         let owner = OWNER.lock().unwrap_or_else(|e| e.into_inner());
         if *owner == self.token {
-            let _ = self.send_end();
-        }
-    }
-}
-
-impl ImportNotifyGuard {
-    fn send_end(&mut self) -> tauri_plugin_import_notify::Result<()> {
-        let notify = self.app.import_notify();
-        match self.end.take() {
-            Some(End::Done(count)) => notify.finish(Outcome::Done, &self.name, count),
-            Some(End::Empty) => notify.finish(Outcome::Empty, &self.name, 0),
-            Some(End::Error(message)) => notify.finish(Outcome::Error(message), &self.name, 0),
-            None => notify.stop(),
+            self.send_end();
         }
     }
 }
