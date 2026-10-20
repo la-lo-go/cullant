@@ -1682,7 +1682,7 @@
   }
 
   /* Default: transparent wrapper — the touch bar stays an in-flow flex child of
-     .app (viewer/compare behavior unchanged). */
+     .view-frame (viewer/compare behavior unchanged). */
   .touchbar-dock {
     display: contents;
   }

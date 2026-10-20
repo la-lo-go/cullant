@@ -31,12 +31,12 @@
   let {
     forceShow = false,
     hidden = false,
-    side = "bottom",
+    side,
     region,
-  }: { forceShow?: boolean; hidden?: boolean; side?: Side; region?: () => HTMLElement | null } =
+  }: { forceShow?: boolean; hidden?: boolean; side: Side; region: () => HTMLElement | null } =
     $props();
 
-  const dockable = $derived(view.mode !== "grid" && !!region);
+  const dockable = $derived(view.mode !== "grid");
   const vertical = $derived(isVertical(side));
   const orientation = $derived(vertical ? "vertical" : "horizontal");
 
@@ -201,7 +201,7 @@
   style={dockable && moving ? `--bar-size: ${thicknessFor(side)}px` : ""}
 >
   {#if dockable}
-    <DockGrip panel="actionBar" target={region!} {thicknessFor} {orientation} />
+    <DockGrip panel="actionBar" target={region} {thicknessFor} {orientation} />
   {/if}
   <div class="items">
     {#if hasSelection}
@@ -352,12 +352,13 @@
     border-top: 1px solid var(--border-strong);
   }
 
-  /* The border sits on the inner edge, the one that faces the view. */
+  /* The bar comes first in the frame for top and left. */
   .touchbar.top,
   .touchbar.left {
     order: -1;
   }
 
+  /* The border sits on the inner edge, the one that faces the view. */
   .touchbar.top {
     padding-bottom: 4px;
     border-top: none;
