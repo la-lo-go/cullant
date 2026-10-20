@@ -2,6 +2,7 @@ package org.cullant.app
 
 import android.content.Intent
 import android.hardware.usb.UsbManager
+import android.os.Build
 import android.os.Bundle
 import android.webkit.WebView
 import androidx.activity.addCallback
@@ -14,6 +15,12 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    // The window background draws the same mark at the same place as the
+    // Android 12 splash, so cut over at once. The system exit animation moves
+    // the mark while it fades, which showed as a short jump.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      splashScreen.setOnExitAnimationListener { it.remove() }
+    }
   }
 
   override fun onNewIntent(intent: Intent) {
