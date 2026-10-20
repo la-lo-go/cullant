@@ -61,9 +61,13 @@ struct Slot {
 
 impl Slot {
     fn record(&mut self, done: u64, total: Option<u64>, now: Instant) {
-        // The count went back: this is a new pass of the same phase.
-        if done < self.done {
+        // A new pass restarts at 0 or has another total. Metadata reports from
+        // parallel workers, so a smaller count with the same total is only late.
+        let new_pass = (done == 0 && self.done > 0) || self.total.is_some_and(|t| Some(t) != total);
+        if new_pass {
             *self = Slot::default();
+        } else if done < self.done {
+            return;
         }
         self.done = done;
         self.total = total;
@@ -283,6 +287,25 @@ mod tests {
             permille = tracker.update(phase, 100, Some(100), now).permille;
         }
         assert_eq!(permille, Some(990));
+    }
+
+    #[test]
+    fn a_late_count_does_not_start_a_new_pass() {
+        let (mut tracker, now) = fresh(100, 0);
+        tracker.update(Phase::Metadata, 60, Some(100), now);
+        tracker.update(Phase::Metadata, 40, Some(100), now);
+        assert_eq!(tracker.slot(Phase::Metadata).done, 60);
+    }
+
+    #[test]
+    fn a_restart_or_a_new_total_starts_a_new_pass() {
+        let (mut tracker, now) = fresh(100, 0);
+        tracker.update(Phase::Previews, 60, Some(100), now);
+        tracker.update(Phase::Previews, 0, Some(100), now);
+        assert_eq!(tracker.slot(Phase::Previews).done, 0);
+        tracker.update(Phase::Previews, 30, Some(100), now);
+        tracker.update(Phase::Previews, 10, Some(50), now);
+        assert_eq!(tracker.slot(Phase::Previews).done, 10);
     }
 
     #[test]
