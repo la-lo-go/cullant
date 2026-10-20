@@ -419,6 +419,21 @@ A copy that this device did not write is never overwritten.
 The export returns `conflict` until the user chooses on the next open.
 A non-empty `cullant.db-wal` from a desktop counts as data from another device.
 
+## Android import notification
+
+The import service starts only on a fresh open of a folder.
+The Kotlin code compiles only for Android, so do this check on a phone:
+
+1. Run `npm run android:dev`. Install the build on the phone. Clear the app data, so the permission question comes back.
+2. Open a large new folder. Allow notifications when Android asks.
+3. Press Home at once. Make sure the notification shade shows the import progress.
+4. Run `adb shell dumpsys activity services org.cullant.app.dev`. Make sure `ImportService` is listed while the import runs.
+5. Run `adb shell dumpsys notification`. Make sure it lists the progress notification.
+6. Wait for the import to end. Make sure a "Project ready" notification replaces the progress notification.
+   Open the app first and make sure no result notification shows.
+7. Open the system notification settings of the app. Make sure it lists the channels `import_progress`, `import_done` and `import_error`.
+8. Clear the app data again. Deny the permission once. Open the folder and press Home. Make sure the import still finishes.
+
 ## What the tests do not cover
 
 This list is explicit, because the gaps matter more than the coverage.
