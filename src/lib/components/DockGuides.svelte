@@ -119,7 +119,6 @@
     }
   }
   @media (prefers-reduced-motion: reduce) {
-    .preview,
     .target {
       transition: none;
     }

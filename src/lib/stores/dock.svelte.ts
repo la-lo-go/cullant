@@ -139,6 +139,11 @@ export function previewRect(region: DOMRect, side: Side, thickness: number) {
   }
 }
 
+/** The folder tree floats over the grid at this width, so it reserves no room. */
+const NARROW = "(max-width: 720px)";
+/** Equal to --dock-motion in +page.svelte (0 under reduced motion). */
+const MOTION_MS = 160;
+
 const STORAGE_KEY = "cullant.dock.v1";
 const PANELS = Object.keys(DOCK_DEFAULTS) as DockPanel[];
 
@@ -165,6 +170,9 @@ class DockStore {
   actionBar = $state<Side>(DOCK_DEFAULTS.actionBar);
   /** Set while the user drags a grip. */
   drag = $state<DockDrag | null>(null);
+  /** The panel that moves back to its place after a cancelled drag, for one motion. */
+  returning = $state<DockPanel | null>(null);
+  private returnTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor() {
     Object.assign(this, load());
@@ -176,10 +184,29 @@ class DockStore {
     return drag?.panel === panel && drag.candidate !== null && drag.candidate !== this[panel];
   }
 
+  /** True while the panel or its content moves because of a drag, and on the way back after a cancel. */
+  animating(panel: DockPanel): boolean {
+    return this.drag?.panel === panel || this.returning === panel;
+  }
+
+  /** Keeps `animating` on for one motion, so the slot and the gap return together. */
+  beginReturn(panel: DockPanel) {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    this.endReturn();
+    this.returning = panel;
+    this.returnTimer = setTimeout(() => this.endReturn(), MOTION_MS + 40);
+  }
+
+  endReturn() {
+    clearTimeout(this.returnTimer);
+    this.returning = null;
+  }
+
   /** The gap the content keeps for a vacating panel: the preview's side and size. */
   reserve(panel: DockPanel): { side: Side; size: number } | null {
     const drag = this.drag;
     if (!drag?.candidate || !this.vacating(panel)) return null;
+    if (panel === "folderTree" && window.matchMedia(NARROW).matches) return null;
     return { side: drag.candidate, size: drag.thickness(drag.candidate) };
   }
 

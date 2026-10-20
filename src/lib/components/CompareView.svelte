@@ -192,7 +192,7 @@
 </script>
 
 <div class="compare" class:row={isVertical(dock.filmstrip)} use:tooltips>
-  <div class="panes" bind:this={panes} style={dock.reserveStyle("filmstrip")}>
+  <div class="panes" bind:this={panes} class:dock-moving={dock.animating("filmstrip")} style={dock.reserveStyle("filmstrip")}>
     <button
       class="back"
       title="Back to grid (Esc)"
@@ -374,7 +374,10 @@
     display: flex;
     gap: 2px;
     position: relative;
-    /* Makes room for the filmstrip while it is dragged to another side. */
+  }
+
+  /* Makes room for the filmstrip while it is dragged to another side. */
+  .panes.dock-moving {
     transition: margin var(--dock-motion);
   }
 

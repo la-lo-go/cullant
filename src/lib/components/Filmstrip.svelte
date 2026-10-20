@@ -342,6 +342,7 @@
       class:vertical
       class:pending-collapse={pendingCollapse}
       class:docking={dock.drag?.panel === "filmstrip"}
+      class:dock-moving={dock.animating("filmstrip")}
       class:vacating={dock.vacating("filmstrip")}
       bind:this={root}
       style="--thickness: {stripT}px"
@@ -589,6 +590,11 @@
   /* The strip is being dragged to another side. */
   .filmstrip.docking {
     opacity: 0.5;
+  }
+
+  /* On a drag, and on the way back after a cancel. Never on a drop, so the
+     landed strip and the content gap swap in one frame. */
+  .filmstrip.dock-moving {
     transition: height var(--dock-motion), width var(--dock-motion), opacity var(--dock-motion);
   }
 
@@ -607,12 +613,6 @@
   .filmstrip.docking.vacating.vertical {
     width: 0;
     height: auto;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .filmstrip.docking {
-      transition: none;
-    }
   }
 
   .strip {

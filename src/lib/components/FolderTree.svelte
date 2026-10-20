@@ -159,6 +159,7 @@
     class:right
     class:pending-collapse={pendingCollapse}
     class:docking={dock.drag?.panel === "folderTree"}
+    class:dock-moving={dock.animating("folderTree")}
     class:vacating={dock.vacating("folderTree")}
     bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
     <div
@@ -246,6 +247,11 @@
   /* The tree is being dragged to another side. */
   .tree.docking {
     opacity: 0.5;
+  }
+
+  /* On a drag, and on the way back after a cancel. Never on a drop, so the
+     landed panel and the content gap swap in one frame. */
+  .tree.dock-moving {
     transition: width var(--dock-motion), opacity var(--dock-motion);
   }
 
@@ -261,12 +267,6 @@
 
   .tree.docking.vacating .scroll {
     min-width: var(--tree-w);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .tree.docking {
-      transition: none;
-    }
   }
 
   .tree.right {

@@ -794,7 +794,7 @@
               {#if dock.folderTree === "right"}<ChevronLeft size={16} />{:else}<ChevronRight size={16} />{/if}
             </button>
           {/if}
-          <div class="grid-content" style={dock.reserveStyle("folderTree")}>
+          <div class="grid-content" class:dock-moving={dock.animating("folderTree")} style={dock.reserveStyle("folderTree")}>
             {#if session.filtered.length === 0 && catalog.items.length > 0}
               <!-- The active tab has photos/videos, but every filter combined
                    leaves nothing — a blank grid otherwise reads as a bug/empty
@@ -1581,6 +1581,9 @@
     display: flex;
     min-width: 0;
     min-height: 0;
+  }
+
+  .grid-content.dock-moving {
     transition: margin var(--dock-motion);
   }
 

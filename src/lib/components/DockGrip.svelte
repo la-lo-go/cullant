@@ -77,9 +77,26 @@
     };
   }
 
+  // The region without its padding: a panel sits inside it, so the preview must too.
+  function contentBox(el: HTMLElement): DOMRect {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    const inset = (side: string) =>
+      parseFloat(style.getPropertyValue(`padding-${side}`)) +
+      parseFloat(style.getPropertyValue(`border-${side}-width`));
+    const [left, top] = [inset("left"), inset("top")];
+    return new DOMRect(
+      rect.left + left,
+      rect.top + top,
+      rect.width - left - inset("right"),
+      rect.height - top - inset("bottom"),
+    );
+  }
+
   function track(e: PointerEvent) {
-    const region = target()?.getBoundingClientRect();
-    if (!region) return cancel();
+    const el = target();
+    if (!el) return cancel();
+    const region = contentBox(el);
     dock.drag = {
       panel,
       region,
@@ -116,7 +133,11 @@
     dragging = false;
     listen(false);
     if (held && button?.hasPointerCapture(held.id)) button.releasePointerCapture(held.id);
+    // Read before the drag ends. A drop on a new side no longer vacates (the panel is
+    // there). A cancel does, and then the slot and the gap move back together.
+    const leaving = dock.vacating(panel);
     if (dock.drag?.panel === panel) dock.drag = null;
+    if (leaving) dock.beginReturn(panel);
     button?.blur();
   }
 
@@ -138,6 +159,7 @@
     if (!dragging) {
       if (Math.hypot(e.clientX - press.x, e.clientY - press.y) <= DRAG_THRESHOLD) return;
       dragging = true;
+      dock.endReturn();
     }
     track(e);
   }
