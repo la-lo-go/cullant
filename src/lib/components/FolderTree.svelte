@@ -382,10 +382,6 @@
     letter-spacing: 0.04em;
   }
 
-  /* The label is the grip: keep it identical to a plain label at rest. */
-  .header :global(.dock-grip.labelled) {
-    opacity: 1;
-  }
 
   .node.root {
     display: flex;

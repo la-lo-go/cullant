@@ -182,8 +182,8 @@
     {/if}
   {/snippet}
   {#if children}
+    <span class="lead" aria-hidden="true">{@render icon()}</span>
     {@render children()}
-    <span class="after">{@render icon()}</span>
   {:else}
     {@render icon()}
   {/if}
@@ -225,44 +225,46 @@
       height: 28px;
     }
     .dock-grip.labelled {
-      width: auto;
-      height: auto;
       min-height: 28px;
     }
   }
+  /* The padding gives the hover pill room; the negative margin keeps the
+     content where a plain label would sit. */
   .dock-grip.labelled {
     width: auto;
     height: auto;
-    gap: 6px;
-    padding: 0;
-    border-radius: 0;
+    gap: 5px;
+    padding: 3px 6px;
+    margin: -3px -6px;
+    border-radius: 4px;
     font: inherit;
     letter-spacing: inherit;
     text-transform: inherit;
-    opacity: 0.85;
+    opacity: 1;
+    transition: background 120ms ease, color 120ms ease;
   }
-  .after {
+  .lead {
     display: inline-flex;
-    opacity: 0;
+    opacity: 0.45;
     transition: opacity 120ms ease;
   }
   .dock-grip.labelled:hover,
   .dock-grip.labelled:focus-visible,
   .dock-grip.labelled.dragging {
+    background: color-mix(in srgb, var(--hover) 60%, transparent);
+    color: #ccc;
+  }
+  .dock-grip.labelled.dragging {
+    color: var(--accent);
+  }
+  .labelled:hover .lead,
+  .labelled:focus-visible .lead,
+  .labelled.dragging .lead {
     opacity: 1;
   }
-  .labelled:hover .after,
-  .labelled:focus-visible .after,
-  .labelled.dragging .after {
-    opacity: 0.6;
-  }
-  @media (pointer: coarse) {
-    .after {
-      opacity: 0.5;
-    }
-  }
   @media (prefers-reduced-motion: reduce) {
-    .after {
+    .dock-grip.labelled,
+    .lead {
       transition: none;
     }
   }
