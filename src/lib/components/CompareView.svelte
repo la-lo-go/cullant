@@ -11,6 +11,7 @@
   import { tooltips } from "../tooltips";
   import ZoomImage from "./ZoomImage.svelte";
   import Filmstrip from "./Filmstrip.svelte";
+  import { dock, isVertical } from "../stores/dock.svelte";
   import X from "@lucide/svelte/icons/x";
   import Check from "@lucide/svelte/icons/check";
   import Pin from "@lucide/svelte/icons/pin";
@@ -190,7 +191,7 @@
   });
 </script>
 
-<div class="compare" use:tooltips>
+<div class="compare" class:row={isVertical(dock.filmstrip)} use:tooltips>
   <div class="panes" bind:this={panes}>
     <button
       class="back"
@@ -361,9 +362,15 @@
     position: relative;
   }
 
+  /* A filmstrip docked left or right sits beside the panes. */
+  .compare.row {
+    flex-direction: row;
+  }
+
   .panes {
     flex: 1;
     min-height: 0;
+    min-width: 0;
     display: flex;
     gap: 2px;
     position: relative;

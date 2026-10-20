@@ -1,6 +1,7 @@
 <script lang="ts">
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
+  import { dock, isVertical } from "../stores/dock.svelte";
   import ZoomImage from "./ZoomImage.svelte";
   import VideoPlayer from "./VideoPlayer.svelte";
   import Filmstrip from "./Filmstrip.svelte";
@@ -72,7 +73,7 @@
   });
 </script>
 
-<div class="viewer">
+<div class="viewer" class:row={isVertical(dock.filmstrip)}>
   {#if item}
     <div class="stage" bind:this={stage}>
       {#if item.kind === 2}
@@ -168,9 +169,15 @@
     position: relative;
   }
 
+  /* A filmstrip docked left or right sits beside the stage. */
+  .viewer.row {
+    flex-direction: row;
+  }
+
   .stage {
     flex: 1;
     min-height: 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     position: relative;

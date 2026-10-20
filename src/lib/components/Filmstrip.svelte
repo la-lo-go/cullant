@@ -3,11 +3,15 @@
   import { describeHalf, session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
+  import { dock, isVertical, type Side } from "../stores/dock.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
+  import DockGrip from "./DockGrip.svelte";
   import { gridThumb } from "../thumbLoader";
   import Scissors from "@lucide/svelte/icons/scissors";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Check from "@lucide/svelte/icons/check";
   import X from "@lucide/svelte/icons/x";
   import Play from "@lucide/svelte/icons/play";
@@ -32,6 +36,16 @@
   const CELL = 96;
   const OVERSCAN = 6;
 
+  // The strip docks on any side. "Main" is the axis it scrolls along, "cross"
+  // is its thickness. A vertical strip is a column: the main axis is Y.
+  const side = $derived(dock.filmstrip);
+  const vertical = $derived(isVertical(side));
+  // The tab that hides the strip points to the outer edge, the peek tab inward.
+  const HIDE_ICON = { bottom: ChevronDown, top: ChevronUp, left: ChevronLeft, right: ChevronRight };
+  const PEEK_ICON = { bottom: ChevronUp, top: ChevronDown, left: ChevronRight, right: ChevronLeft };
+  const HideIcon = $derived(HIDE_ICON[side]);
+  const PeekIcon = $derived(PEEK_ICON[side]);
+
   // Video ids whose pregenerated poster couldn't be served (no frame extractor
   // on this platform, or the clip was undecodable → 404). Those cells fall back
   // to a Film-glyph tile, the same as VirtualGrid — never a live <video>
@@ -43,59 +57,75 @@
     posterFailed = new Set(posterFailed).add(id);
   }
   // .cell's own padding (see its CSS) — the box object-fit: contain fits into.
-  const PAD_X = 3;
-  const PAD_Y = 8;
-  const AVAIL_W = CELL - PAD_X * 2;
+  // It is transposed in a vertical strip.
+  const PAD_MAIN = 3;
+  const PAD_CROSS = 8;
+  const AVAIL_MAIN = CELL - PAD_MAIN * 2;
   // Absolute floor/ceiling for the drag-resize (see onResizeMove) — the
-  // effective ceiling is the lower of MAX_H and contentMaxH below.
-  const MIN_H = 72;
-  const MAX_H = 320;
+  // effective ceiling is the lower of MAX_T and contentMax below.
+  const MIN_T = 72;
+  const MAX_T = 320;
 
+  let root = $state<HTMLDivElement | null>(null);
   let strip = $state<HTMLDivElement | null>(null);
-  let scrollLeft = $state(0);
-  let width = $state(0);
+  let scrollPos = $state(0);
+  let clientW = $state(0);
+  let clientH = $state(0);
+  const viewLen = $derived(vertical ? clientH : clientW);
 
-  // Tallest the strip ever needs to be: the height at which even the most-
-  // portrait thumbnail stops growing (each thumbnail is contain-fit, so its
-  // rendered height tops out at AVAIL_W * h/w — width-bound). Dragging past
-  // that only adds empty space above/below every cell. With no known dims
-  // there's no content cap, just the absolute MAX_H.
-  // Memoized on the items reference: the max aspect ratio only changes when the
+  // Thickest the strip ever needs to be: the thickness at which even the most
+  // extreme thumbnail stops growing (each thumbnail is contain-fit, so across
+  // the strip it tops out at AVAIL_MAIN * the aspect ratio that binds there:
+  // h/w for a row, w/h for a column). Dragging past that only adds empty space
+  // around every cell. With no known dims there's no content cap, just MAX_T.
+  // Memoized on the items reference: the max aspect ratios only change when the
   // item set (hence the array reference) changes. A flag/sort/filter remap that
   // yields the same reference reuses the cached value instead of re-scanning the
   // whole catalog. Dimensions only become known via a catalog refresh, which
   // also replaces the array, so a stale reference can never hide a dims change.
   let cachedItemsRef: ItemLite[] | null = null;
-  let cachedContentMaxH = MAX_H;
-  const contentMaxH = $derived.by(() => {
-    if (items === cachedItemsRef) return cachedContentMaxH;
-    let maxRatio = 0;
+  let cachedRatios = { hOverW: 0, wOverH: 0 };
+  const ratios = $derived.by(() => {
+    if (items === cachedItemsRef) return cachedRatios;
+    let hOverW = 0;
+    let wOverH = 0;
     for (const item of items) {
       const dims = displayDims(item);
-      if (dims && dims.w > 0) maxRatio = Math.max(maxRatio, dims.h / dims.w);
+      if (dims && dims.w > 0 && dims.h > 0) {
+        hOverW = Math.max(hOverW, dims.h / dims.w);
+        wOverH = Math.max(wOverH, dims.w / dims.h);
+      }
     }
     cachedItemsRef = items;
-    cachedContentMaxH =
-      maxRatio <= 0
-        ? MAX_H
-        : Math.min(MAX_H, Math.max(MIN_H, Math.ceil(AVAIL_W * maxRatio) + PAD_Y * 2));
-    return cachedContentMaxH;
+    cachedRatios = { hOverW, wOverH };
+    return cachedRatios;
   });
-  // Rendered height: the persisted preference clamped to what the current
-  // items can actually fill (a tall preference saved from a portrait-heavy
-  // catalog must not leave dead space in a landscape-only one).
-  const stripH = $derived(Math.max(MIN_H, Math.min(session.filmstripHeight, contentMaxH)));
-  // Reactive: the strip is user-resizable (drag its top edge), and unlike the
-  // (square, fixed-height) grid cell, a filmstrip cell's height is the OTHER
-  // free axis besides width — object-fit: contain can bind on either one
+  function contentMax(forVertical: boolean): number {
+    const ratio = forVertical ? ratios.wOverH : ratios.hOverW;
+    if (ratio <= 0) return MAX_T;
+    return Math.min(MAX_T, Math.max(MIN_T, Math.ceil(AVAIL_MAIN * ratio) + PAD_CROSS * 2));
+  }
+  // Rendered thickness of a strip docked at `at`: the persisted preference
+  // clamped to what the current items can actually fill (a thick preference
+  // saved from a catalog of extreme ratios must not leave dead space in
+  // another one).
+  function thicknessFor(at: Side): number {
+    const v = isVertical(at);
+    const preferred = v ? session.filmstripWidth : session.filmstripHeight;
+    return Math.max(MIN_T, Math.min(preferred, contentMax(v)));
+  }
+  const stripT = $derived(thicknessFor(side));
+  // Reactive: the strip is user-resizable (drag its inner edge), and unlike the
+  // (square, fixed-size) grid cell, a filmstrip cell's cross size is the OTHER
+  // free axis besides its length — object-fit: contain can bind on either one
   // depending on the photo's own aspect ratio, so badges anchored to a fixed
   // offset from the CELL (rather than the actual rendered photo) drift away
-  // from the image whenever height is the non-binding axis.
-  const availH = $derived(Math.max(0, stripH - PAD_Y * 2));
+  // from the image whenever the cross axis is the non-binding one.
+  const availCross = $derived(Math.max(0, stripT - PAD_CROSS * 2));
 
-  const first = $derived(Math.max(0, Math.floor(scrollLeft / CELL) - OVERSCAN));
+  const first = $derived(Math.max(0, Math.floor(scrollPos / CELL) - OVERSCAN));
   const last = $derived(
-    Math.min(items.length, Math.ceil((scrollLeft + width) / CELL) + OVERSCAN)
+    Math.min(items.length, Math.ceil((scrollPos + viewLen) / CELL) + OVERSCAN)
   );
 
   // Keyed by file id in the template so each frame keeps a stable <img>:
@@ -103,17 +133,24 @@
   // which previously left a node showing its old thumbnail until the new one
   // decoded — a rapid flicker on fast (right-to-left) scroll. `photoW`/`photoH`
   // are the exact contain-fit box for the item's real aspect ratio (or the
-  // full available box, when dims aren't known yet) — see AVAIL_W/availH.
+  // full available box, when dims aren't known yet) — see AVAIL_MAIN/availCross.
   const visible = $derived.by(() => {
-    const out: { item: ItemLite; index: number; x: number; photoW: number; photoH: number }[] =
+    const out: { item: ItemLite; index: number; offset: number; photoW: number; photoH: number }[] =
       [];
     for (let i = first; i < last; i++) {
       const item = items[i];
-      const fit = containFit(displayDims(item), AVAIL_W, availH);
-      out.push({ item, index: i, x: i * CELL, photoW: fit.w, photoH: fit.h });
+      const dims = displayDims(item);
+      const fit = vertical
+        ? containFit(dims, availCross, AVAIL_MAIN)
+        : containFit(dims, AVAIL_MAIN, availCross);
+      out.push({ item, index: i, offset: i * CELL, photoW: fit.w, photoH: fit.h });
     }
     return out;
   });
+
+  function scrollMain(pos: number, behavior: ScrollBehavior = "auto") {
+    strip?.scrollTo(vertical ? { top: pos, behavior } : { left: pos, behavior });
+  }
 
   // Keep the focused frame centered as the user arrows through the shoot.
   // A single step scrolls smoothly; while stepping fast (holding an arrow key)
@@ -141,14 +178,14 @@
   // the loupe. Independent scrolling (mode off) just tracks the position.
   function onStripScroll() {
     if (!strip) return;
-    scrollLeft = strip.scrollLeft;
+    scrollPos = vertical ? strip.scrollTop : strip.scrollLeft;
     if (selfScroll) {
       selfScroll = false;
       return;
     }
-    if (settings.lockCarousel && width > 0 && items.length > 0) {
+    if (settings.lockCarousel && viewLen > 0 && items.length > 0) {
       lockScrollTs = performance.now();
-      const centered = Math.round((scrollLeft + width / 2 - CELL / 2) / CELL);
+      const centered = Math.round((scrollPos + viewLen / 2 - CELL / 2) / CELL);
       const idx = Math.max(0, Math.min(items.length - 1, centered));
       if (idx !== session.focusedIndex) {
         session.focusedIndex = idx;
@@ -157,15 +194,17 @@
     }
   }
   // The strip div is destroyed/recreated every time the filmstrip is hidden
-  // and shown again (the {#if} above swaps it for the peek button), so track
-  // its identity: a freshly (re)mounted strip must always center instantly,
-  // never replaying a leftover "smooth" from before it was last hidden.
+  // and shown again (the {#if} above swaps it for the peek button) and when it
+  // changes side (the {#key}), so track its identity: a freshly (re)mounted
+  // strip must always center instantly, never replaying a leftover "smooth" from
+  // before, and starts from a zero scroll position.
   let lastStripEl: HTMLDivElement | null = null;
   $effect(() => {
-    if (!strip || width === 0) return;
+    if (!strip || viewLen === 0) return;
     if (strip !== lastStripEl) {
       lastStripEl = strip;
       hasCentered = false;
+      scrollPos = 0;
     }
     const focused = session.focusedIndex; // tracked for reactivity
     // In lock-carousel mode a focus change that came from the user's own strip
@@ -176,7 +215,7 @@
       hasCentered = true;
       return;
     }
-    const target = Math.max(0, focused * CELL - width / 2 + CELL / 2);
+    const target = Math.max(0, focused * CELL - viewLen / 2 + CELL / 2);
     const now = performance.now();
     const rapid = now - lastRecentre < RAPID_STEP_MS;
     lastRecentre = now;
@@ -186,7 +225,7 @@
     // glitch" — before it lands. A jump has no intermediate frames.
     const instant = !hasCentered || rapid || settings.lockCarousel;
     selfScroll = true;
-    strip.scrollTo({ left: target, behavior: instant ? "auto" : "smooth" });
+    scrollMain(target, instant ? "auto" : "smooth");
     // A recentre that changes nothing (already there, or clamped to the same
     // limit) fires no scroll event, so disarm on the next frame rather than
     // leaving the flag to swallow the user's next real scroll.
@@ -194,8 +233,8 @@
     hasCentered = true;
   });
 
-  // Drag the top edge to resize; dragging it below COLLAPSE_AT hides the strip
-  // (the peek arrow at the bottom, and the F toggle, bring it back).
+  // Drag the inner edge to resize; dragging it below COLLAPSE_AT hides the strip
+  // (the peek arrow at the outer edge, and the F toggle, bring it back).
   const COLLAPSE_AT = 56;
 
   let resizing = $state(false);
@@ -210,13 +249,29 @@
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
+  // Distance from the pointer to the outer edge of the strip.
+  function thicknessAt(rect: DOMRect, e: PointerEvent): number {
+    switch (side) {
+      case "bottom":
+        return rect.bottom - e.clientY;
+      case "top":
+        return e.clientY - rect.top;
+      case "left":
+        return e.clientX - rect.left;
+      case "right":
+        return rect.right - e.clientX;
+    }
+  }
+
   function onResizeMove(e: PointerEvent) {
     if (!resizing || !strip) return;
-    const h = strip.getBoundingClientRect().bottom - e.clientY;
-    // Past the threshold only *flags* a pending collapse (strip stays at MIN_H,
+    const t = thicknessAt(strip.getBoundingClientRect(), e);
+    // Past the threshold only *flags* a pending collapse (strip stays at MIN_T,
     // dimmed) instead of committing it, so dragging back out cancels the hide.
-    pendingCollapse = h < COLLAPSE_AT;
-    session.filmstripHeight = Math.min(contentMaxH, Math.max(MIN_H, h));
+    pendingCollapse = t < COLLAPSE_AT;
+    const clamped = Math.min(contentMax(vertical), Math.max(MIN_T, t));
+    if (vertical) session.filmstripWidth = clamped;
+    else session.filmstripHeight = clamped;
   }
 
   function endResize(e: PointerEvent) {
@@ -225,6 +280,8 @@
     if (pendingCollapse) {
       pendingCollapse = false;
       session.setShowFilmstrip(false);
+    } else if (vertical) {
+      session.setFilmstripWidth(session.filmstripWidth);
     } else {
       session.setFilmstripHeight(session.filmstripHeight);
     }
@@ -246,7 +303,7 @@
 
   function onCellPointerDown(e: PointerEvent, index: number) {
     // Do NOT setPointerCapture here — that would swallow the strip's native
-    // horizontal scroll. We only read coordinates.
+    // scroll. We only read coordinates.
     tapPointerId = e.pointerId;
     tapStartX = e.clientX;
     tapStartY = e.clientY;
@@ -272,176 +329,197 @@
 </script>
 
 {#if session.showFilmstrip}
-  <div class="filmstrip" class:pending-collapse={pendingCollapse} style="height: {stripH}px">
+  <!-- Keyed on the side: a side change remounts the strip, which then centres
+       the focused cell at once instead of scrolling from a stale position. -->
+  {#key side}
     <div
-      class="resize-handle"
-      class:resizing
-      role="separator"
-      aria-orientation="horizontal"
-      aria-label="Resize filmstrip"
-      onpointerdown={startResize}
-      onpointermove={onResizeMove}
-      onpointerup={endResize}
-      onpointercancel={endResize}
-    ></div>
-    <!-- Hide arrow: same size/style as the collapsed peek below, pointing the
-         opposite way, overlaid above the thumbnail row (high z-index) instead
-         of taking layout space — the same overlay pattern as the folder tree's
-         peek arrow. -->
-    <button
-      class="strip-hide"
-      title="Hide filmstrip"
-      aria-label="Hide filmstrip"
-      onclick={() => session.setShowFilmstrip(false)}
+      class="filmstrip {side}"
+      class:vertical
+      class:pending-collapse={pendingCollapse}
+      class:docking={dock.drag?.panel === "filmstrip"}
+      bind:this={root}
+      style="{vertical ? 'width' : 'height'}: {stripT}px"
     >
-      <ChevronDown size={16} />
-    </button>
-    <div
-      class="strip"
-      id="filmstrip-scroll"
-      bind:this={strip}
-      bind:clientWidth={width}
-      onscroll={onStripScroll}
-    >
-      <div class="canvas" style="width:{items.length * CELL}px">
-        {#each visible as v (v.item.id)}
-          {@const burst = session.burstPositionAt(v.index)}
-          <div
-            class="cell"
-            class:focused={v.index === session.focusedIndex}
-            class:companion={v.index !== session.focusedIndex && v.index === companionIndex}
-            style="transform: translateX({v.x}px); width:{CELL}px"
-            onpointerdown={(e) => onCellPointerDown(e, v.index)}
-            onpointerup={onCellPointerUp}
-            onpointercancel={resetTap}
-            role="button"
-            tabindex="-1"
-          >
-            <!-- Sized to the item's actual contain-fit box (photoW/photoH,
-                 computed from its real aspect ratio — see `visible` above),
-                 not the cell: object-fit: contain can bind on either the
-                 width or the height axis here (unlike the grid's square
-                 cells), so anchoring badges to the cell instead of this box
-                 left them a variable, often-large distance from the image
-                 whenever height was the slack axis. -->
+      <div
+        class="resize-handle"
+        class:resizing
+        role="separator"
+        aria-orientation={vertical ? "vertical" : "horizontal"}
+        aria-label="Resize filmstrip"
+        onpointerdown={startResize}
+        onpointermove={onResizeMove}
+        onpointerup={endResize}
+        onpointercancel={endResize}
+      ></div>
+      <!-- Hide tab on the inner edge: the grip, then the arrow towards the
+           outer edge. Overlaid above the thumbnails (high z-index) instead of
+           taking layout space — the same overlay pattern as the folder tree's
+           hide tab. -->
+      <div class="strip-tab">
+        <DockGrip
+          panel="filmstrip"
+          target={() => root?.parentElement ?? null}
+          {thicknessFor}
+          orientation={vertical ? "vertical" : "horizontal"}
+        />
+        <button
+          class="strip-hide"
+          title="Hide filmstrip"
+          aria-label="Hide filmstrip"
+          onclick={() => session.setShowFilmstrip(false)}
+        >
+          <HideIcon size={16} />
+        </button>
+      </div>
+      <div
+        class="strip"
+        id="filmstrip-scroll"
+        bind:this={strip}
+        bind:clientWidth={clientW}
+        bind:clientHeight={clientH}
+        onscroll={onStripScroll}
+      >
+        <div class="canvas" style="{vertical ? 'height' : 'width'}:{items.length * CELL}px">
+          {#each visible as v (v.item.id)}
+            {@const burst = session.burstPositionAt(v.index)}
             <div
-              class="photo"
-              class:queued={settings.dimQueuedDeletes &&
-                (v.item.flag === -1 || session.pendingDeleteIds.has(v.item.id))}
-              style="width:{v.photoW}px; height:{v.photoH}px"
+              class="cell"
+              class:focused={v.index === session.focusedIndex}
+              class:companion={v.index !== session.focusedIndex && v.index === companionIndex}
+              style="transform: translate{vertical ? 'Y' : 'X'}({v.offset}px); {vertical ? 'height' : 'width'}:{CELL}px"
+              onpointerdown={(e) => onCellPointerDown(e, v.index)}
+              onpointerup={onCellPointerUp}
+              onpointercancel={resetTap}
+              role="button"
+              tabindex="-1"
             >
-              {#if v.item.kind === 2}
-                {#if posterFailed.has(v.item.id)}
-                  <div class="no-poster" title="{v.item.name}.{v.item.ext}">
-                    <Film size={16} />
-                    <span>{v.item.ext.toUpperCase()}</span>
-                  </div>
+              <!-- Sized to the item's actual contain-fit box (photoW/photoH,
+                   computed from its real aspect ratio — see `visible` above),
+                   not the cell: object-fit: contain can bind on either the
+                   width or the height axis here (unlike the grid's square
+                   cells), so anchoring badges to the cell instead of this box
+                   left them a variable, often-large distance from the image
+                   whenever height was the slack axis. -->
+              <div
+                class="photo"
+                class:queued={settings.dimQueuedDeletes &&
+                  (v.item.flag === -1 || session.pendingDeleteIds.has(v.item.id))}
+                style="width:{v.photoW}px; height:{v.photoH}px"
+              >
+                {#if v.item.kind === 2}
+                  {#if posterFailed.has(v.item.id)}
+                    <div class="no-poster" title="{v.item.name}.{v.item.ext}">
+                      <Film size={16} />
+                      <span>{v.item.ext.toUpperCase()}</span>
+                    </div>
+                  {:else}
+                    <img
+                      alt=""
+                      decoding="async"
+                      draggable="false"
+                      use:gridThumb={{
+                        url: thumbUrl(v.item),
+                        id: v.item.id,
+                        exists: !!v.item.thumbReady,
+                        retries: 0,
+                        onfail: () => markPosterFailed(v.item.id),
+                      }}
+                    />
+                  {/if}
+                  <span class="videobadge"><Play size={9} /></span>
                 {:else}
+                  <!-- The grid's loader: the frame keeps a placeholder until its
+                       thumbnail exists, never Chromium's broken-image glyph. -->
                   <img
                     alt=""
                     decoding="async"
                     draggable="false"
-                    use:gridThumb={{
-                      url: thumbUrl(v.item),
-                      id: v.item.id,
-                      exists: !!v.item.thumbReady,
-                      retries: 0,
-                      onfail: () => markPosterFailed(v.item.id),
-                    }}
+                    use:gridThumb={{ url: thumbUrl(v.item), id: v.item.id, exists: !!v.item.thumbReady }}
                   />
                 {/if}
-                <span class="videobadge"><Play size={9} /></span>
-              {:else}
-                <!-- The grid's loader: the frame keeps a placeholder until its
-                     thumbnail exists, never Chromium's broken-image glyph. -->
-                <img
-                  alt=""
-                  decoding="async"
-                  draggable="false"
-                  use:gridThumb={{ url: thumbUrl(v.item), id: v.item.id, exists: !!v.item.thumbReady }}
-                />
-              {/if}
-              {#if settings.filmstripShowLabel && v.item.label}
-                <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
-              {/if}
-            </div>
-            <div class="info-top">
-              {#if burst}
-                <span class="burst" title="Shot {burst.position} of a burst of {burst.total}">
-                  <Layers size={8} />{burst.position}/{burst.total}
-                </span>
-              {/if}
-              {#if settings.filmstripShowType}
-                {#if session.mirrorMode && v.item.groupSize > 1}
-                  {@const pair = session.pairHalves(v.item)}
-                  <span
-                    class="chip"
-                    class:split={v.item.decoupled}
-                    title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
-                  >
-                    {#if v.item.decoupled}
-                      <Scissors size={8} /><span>SPLIT</span>
-                    {:else if pair?.diverged}
-                      {#each pair.halves as h, hi (h.id)}
-                        {#if hi > 0}<span class="half-sep"></span>{/if}
-                        <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
-                      {/each}
-                    {:else}
-                      RAW+JPG
-                    {/if}
-                  </span>
-                {:else if v.item.kind === 0}
-                  <span class="chip">RAW</span>
+                {#if settings.filmstripShowLabel && v.item.label}
+                  <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
                 {/if}
-              {/if}
-              {#if settings.filmstripShowFlag && v.item.flag !== 0}
-                <span class="flagbadge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
-                  {#if v.item.flag === 1}<Check size={11} />{:else}<X size={11} />{/if}
-                </span>
-              {/if}
-            </div>
-            <div class="info-bottom">
-              {#if settings.filmstripShowRating && v.item.rating > 0}
-                <span class="stars">{"★".repeat(v.item.rating)}</span>
-              {/if}
-              {#if settings.filmstripShowTags && v.item.tagIds.length > 0}
-                <span class="tags">
-                  {#each v.item.tagIds.slice(0, 3) as tagId}
+              </div>
+              <div class="info-top">
+                {#if burst}
+                  <span class="burst" title="Shot {burst.position} of a burst of {burst.total}">
+                    <Layers size={8} />{burst.position}/{burst.total}
+                  </span>
+                {/if}
+                {#if settings.filmstripShowType}
+                  {#if session.mirrorMode && v.item.groupSize > 1}
+                    {@const pair = session.pairHalves(v.item)}
                     <span
-                      class="tagdot"
-                      style="background: {tags.byId.get(tagId)?.color ?? '#888'}"
-                      title={tags.byId.get(tagId)?.name}
-                    ></span>
-                  {/each}
-                </span>
-              {/if}
+                      class="chip"
+                      class:split={v.item.decoupled}
+                      title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
+                    >
+                      {#if v.item.decoupled}
+                        <Scissors size={8} /><span>SPLIT</span>
+                      {:else if pair?.diverged}
+                        {#each pair.halves as h, hi (h.id)}
+                          {#if hi > 0}<span class="half-sep"></span>{/if}
+                          <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
+                        {/each}
+                      {:else}
+                        RAW+JPG
+                      {/if}
+                    </span>
+                  {:else if v.item.kind === 0}
+                    <span class="chip">RAW</span>
+                  {/if}
+                {/if}
+                {#if settings.filmstripShowFlag && v.item.flag !== 0}
+                  <span class="flagbadge" class:pick={v.item.flag === 1} class:reject={v.item.flag === -1}>
+                    {#if v.item.flag === 1}<Check size={11} />{:else}<X size={11} />{/if}
+                  </span>
+                {/if}
+              </div>
+              <div class="info-bottom">
+                {#if settings.filmstripShowRating && v.item.rating > 0}
+                  <span class="stars">{"★".repeat(v.item.rating)}</span>
+                {/if}
+                {#if settings.filmstripShowTags && v.item.tagIds.length > 0}
+                  <span class="tags">
+                    {#each v.item.tagIds.slice(0, 3) as tagId}
+                      <span
+                        class="tagdot"
+                        style="background: {tags.byId.get(tagId)?.color ?? '#888'}"
+                        title={tags.byId.get(tagId)?.name}
+                      ></span>
+                    {/each}
+                  </span>
+                {/if}
+              </div>
             </div>
-          </div>
-        {/each}
+          {/each}
+        </div>
+      </div>
+      <!-- Overlay scrollbar floating over the outer edge of the cells, aligned
+           with the strip's safe-area box. -->
+      <div class="strip-overlay">
+        <OverlayScrollbar
+          orientation={vertical ? "vertical" : "horizontal"}
+          edge={side === "top" || side === "left" ? "start" : "end"}
+          viewport={viewLen}
+          content={items.length * CELL}
+          position={scrollPos}
+          controls="filmstrip-scroll"
+          onSeek={(pos) => scrollMain(pos)}
+          alwaysVisible
+        />
       </div>
     </div>
-    <!-- Overlay scrollbar floating over the bottom edge of the cells, aligned
-         with the strip's safe-area box. -->
-    <div class="strip-overlay">
-      <OverlayScrollbar
-        orientation="horizontal"
-        viewport={width}
-        content={items.length * CELL}
-        position={scrollLeft}
-        controls="filmstrip-scroll"
-        onSeek={(pos) => strip?.scrollTo({ left: pos })}
-        alwaysVisible
-      />
-    </div>
-  </div>
+  {/key}
 {:else}
   <button
-    class="strip-peek"
+    class="strip-peek {side}"
     title="Show filmstrip"
     aria-label="Show filmstrip"
     onclick={() => session.setShowFilmstrip(true)}
   >
-    <ChevronUp size={16} />
+    <PeekIcon size={16} />
   </button>
 {/if}
 
@@ -450,11 +528,43 @@
     position: relative;
     flex: none;
     background: var(--surface);
+  }
+
+  /* The border is on the inner edge, towards the view. Top and left strips come
+     first in the row or column of their container. */
+  .filmstrip.bottom {
     border-top: 1px solid var(--border);
-    /* Edge-to-edge: the surface bleeds under a landscape navigation bar or
-       cutout while the cells stay inside the safe area. */
+  }
+
+  .filmstrip.top {
+    order: -1;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .filmstrip.left {
+    order: -1;
+    border-right: 1px solid var(--border);
+  }
+
+  .filmstrip.right {
+    border-left: 1px solid var(--border);
+  }
+
+  /* Edge-to-edge: the surface bleeds under a landscape navigation bar or
+     cutout while the cells stay inside the safe area. */
+  .filmstrip:not(.vertical),
+  .filmstrip.left,
+  .filmstrip.right {
     padding-left: var(--safe-left);
     padding-right: var(--safe-right);
+  }
+
+  .filmstrip.left {
+    padding-right: 0;
+  }
+
+  .filmstrip.right {
+    padding-left: 0;
   }
 
   /* Dragged past the collapse threshold: a subtle dim signals that releasing
@@ -464,13 +574,23 @@
     transition: opacity 0.1s;
   }
 
+  /* The strip is being dragged to another side. */
+  .filmstrip.docking {
+    opacity: 0.5;
+  }
+
   .strip {
     height: 100%;
     overflow-x: auto;
     overflow-y: hidden;
     /* Native bar hidden: a classic scrollbar would carve 8px out of the cell
-       height. OverlayScrollbar floats over the thumbnails instead. */
+       thickness. OverlayScrollbar floats over the thumbnails instead. */
     scrollbar-width: none;
+  }
+
+  .vertical .strip {
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   .strip::-webkit-scrollbar {
@@ -488,10 +608,22 @@
     pointer-events: none;
   }
 
-  /* Grabbable strip straddling the top edge; a hairline reveals on hover/drag. */
+  .vertical .strip-overlay {
+    left: 0;
+    right: 0;
+  }
+
+  .left .strip-overlay {
+    left: var(--safe-left);
+  }
+
+  .right .strip-overlay {
+    right: var(--safe-right);
+  }
+
+  /* Grabbable strip straddling the inner edge; a hairline reveals on hover/drag. */
   .resize-handle {
     position: absolute;
-    top: -3px;
     left: 0;
     right: 0;
     height: 7px;
@@ -505,10 +637,52 @@
     position: absolute;
     left: 0;
     right: 0;
-    top: 3px;
     height: 2px;
     background: transparent;
     transition: background 0.12s;
+  }
+
+  .bottom .resize-handle {
+    top: -3px;
+  }
+
+  .top .resize-handle {
+    bottom: -3px;
+  }
+
+  .bottom .resize-handle::after {
+    top: 3px;
+  }
+
+  .top .resize-handle::after {
+    bottom: 3px;
+  }
+
+  .vertical .resize-handle {
+    top: 0;
+    bottom: 0;
+    left: auto;
+    right: auto;
+    width: 7px;
+    height: auto;
+    cursor: col-resize;
+  }
+
+  .vertical .resize-handle::after {
+    top: 0;
+    bottom: 0;
+    left: 3px;
+    right: auto;
+    width: 2px;
+    height: auto;
+  }
+
+  .left .resize-handle {
+    right: -3px;
+  }
+
+  .right .resize-handle {
+    left: -3px;
   }
 
   .resize-handle:hover::after,
@@ -516,15 +690,12 @@
     background: var(--accent);
   }
 
-  /* Peek tab shown at the bottom edge when the filmstrip is collapsed. It floats
-     (absolute) so the collapsed strip reserves NO height — the freed band goes
-     back to the viewer/compare stage above. Anchored to the view's bottom edge
-     (its parent .viewer/.compare is position:relative). */
+  /* Peek tab shown at the outer edge when the filmstrip is collapsed. It floats
+     (absolute) so the collapsed strip reserves NO space — the freed band goes
+     back to the viewer/compare stage. Anchored to the view's outer edge (its
+     parent .viewer/.compare is position:relative), centred along it. */
   .strip-peek {
     position: absolute;
-    left: 50%;
-    bottom: var(--safe-bottom);
-    transform: translateX(-50%);
     z-index: 10;
     display: inline-flex;
     align-items: center;
@@ -533,11 +704,47 @@
     height: 18px;
     padding: 0;
     border: 1px solid var(--border);
-    border-bottom: none;
-    border-radius: 6px 6px 0 0;
     background: var(--surface);
     color: var(--accent);
     cursor: pointer;
+  }
+
+  .strip-peek.bottom,
+  .strip-peek.top {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .strip-peek.bottom {
+    bottom: var(--safe-bottom);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
+
+  .strip-peek.top {
+    top: 0;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+  }
+
+  .strip-peek.left,
+  .strip-peek.right {
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 44px;
+  }
+
+  .strip-peek.left {
+    left: var(--safe-left);
+    border-left: none;
+    border-radius: 0 6px 6px 0;
+  }
+
+  .strip-peek.right {
+    right: var(--safe-right);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
   }
 
   .strip-peek:hover {
@@ -545,32 +752,98 @@
     border-color: var(--accent);
   }
 
-  /* Hide arrow: the mirror of .strip-peek above — same size, hanging from the
-     TOP edge instead (pointing down), overlaid above the thumbnails with a
-     z-index higher than the resize handle so it stays clickable. */
-  .strip-hide {
+  /* Hide tab on the inner edge, over the thumbnails: the grip, then the arrow
+     (the mirror of .strip-peek, pointing outward). Its z-index is above the
+     resize handle so both parts stay clickable. */
+  .strip-tab {
     position: absolute;
-    left: 50%;
-    top: 0;
-    transform: translateX(-50%);
     z-index: 30;
+    display: flex;
+    box-sizing: border-box;
+    height: 18px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .bottom .strip-tab,
+  .top .strip-tab {
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .bottom .strip-tab {
+    top: 0;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+  }
+
+  .top .strip-tab {
+    bottom: 0;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
+
+  .vertical .strip-tab {
+    flex-direction: column;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: auto;
+  }
+
+  .left .strip-tab {
+    right: 0;
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+  }
+
+  .right .strip-tab {
+    left: 0;
+    border-left: none;
+    border-radius: 0 6px 6px 0;
+  }
+
+  .strip-tab :global(.dock-grip) {
+    width: 20px;
+    height: auto;
+    border-radius: 0;
+    color: #8a8a93;
+  }
+
+  .vertical .strip-tab :global(.dock-grip) {
+    width: auto;
+    height: 20px;
+  }
+
+  .strip-tab :global(.dock-grip:hover),
+  .strip-tab :global(.dock-grip.dragging) {
+    background: var(--hover);
+  }
+
+  .strip-hide {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex: none;
     width: 44px;
-    height: 18px;
     padding: 0;
-    border: 1px solid var(--border);
-    border-top: none;
-    border-radius: 0 0 6px 6px;
-    background: var(--surface);
+    border: none;
+    border-left: 1px solid var(--border);
+    background: transparent;
     color: var(--accent);
     cursor: pointer;
   }
 
+  .vertical .strip-hide {
+    width: auto;
+    height: 44px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
   .strip-hide:hover {
     background: var(--hover);
-    border-color: var(--accent);
   }
 
   .canvas {
@@ -578,12 +851,17 @@
     height: 100%;
   }
 
+  .vertical .canvas {
+    width: 100%;
+    height: auto;
+  }
+
   .cell {
     position: absolute;
     top: 0;
     height: 100%;
-    /* Defines the box `visible`'s containFit() sizes .photo into (see AVAIL_W/
-       availH in the script) — .photo ends up centered within whatever slack
+    /* Defines the box `visible`'s containFit() sizes .photo into (see AVAIL_MAIN/
+       availCross in the script) — .photo ends up centered within whatever slack
        that leaves, via the flex centering below. */
     padding: 8px 3px;
     box-sizing: border-box;
@@ -591,6 +869,14 @@
     align-items: center;
     justify-content: center;
     border-radius: 6px;
+  }
+
+  /* Transposed: the cell is a row of the column, so its padding swaps too. */
+  .vertical .cell {
+    left: 0;
+    width: 100%;
+    height: auto;
+    padding: 3px 8px;
   }
 
   /* In compare the two marks must never read as equal: the action bar only
@@ -793,6 +1079,21 @@
   .info-bottom {
     bottom: 8px;
     justify-content: space-between;
+  }
+
+  /* Transposed with the cell padding, so the rows still sit on the photo. */
+  .vertical .info-top,
+  .vertical .info-bottom {
+    left: 8px;
+    right: 8px;
+  }
+
+  .vertical .info-top {
+    top: 3px;
+  }
+
+  .vertical .info-bottom {
+    bottom: 3px;
   }
 
   .info-top > .burst,
