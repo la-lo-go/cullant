@@ -493,7 +493,7 @@
         // `ingesting`, not `scanning`: the walk is only the first phase, and
         // piling one onto a running metadata/thumbnail pass makes the rescan
         // compete with it for the same saturated storage backend.
-        if (storageOk && !catalog.ingesting) void api.rescanProject();
+        if (storageOk && !catalog.ingesting) void api.rescanProject(false);
       },
       minutes * 60 * 1000,
     );

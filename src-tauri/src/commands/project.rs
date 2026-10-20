@@ -686,8 +686,10 @@ pub fn import_running(state: State<'_, AppState>) -> bool {
     state.scan_active.load(std::sync::atomic::Ordering::Acquire)
 }
 
+/// `notify` is false for the automatic rescan timer, which stays silent. A rescan
+/// the user asked for starts the import service when it finds work, like a reopen.
 #[tauri::command]
-pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+pub fn rescan_project(app: AppHandle, state: State<'_, AppState>, notify: bool) -> AppResult<()> {
     let (db, store, root, thumbs) = {
         let guard = state.project.lock().unwrap();
         let project = guard.as_ref().ok_or(AppError::NoProject)?;
@@ -712,7 +714,11 @@ pub fn rescan_project(app: AppHandle, state: State<'_, AppState>) -> AppResult<(
             project.thumbs.clone(),
         )
     };
-    spawn_scan(app, db, store, root, thumbs, None, None)
+    let opening = notify.then(|| Opening {
+        id: db.project_root(),
+        fresh: false,
+    });
+    spawn_scan(app, db, store, root, thumbs, opening, None)
 }
 
 /// Forget everything Cullant has stored about the open project and read the

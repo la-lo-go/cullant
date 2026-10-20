@@ -332,7 +332,9 @@ export const api = {
   ingestPending: () => invoke<number>("ingest_pending"),
   importRunning: () => invoke<boolean>("import_running"),
   closeProject: () => invoke("close_project"),
-  rescanProject: () => invoke("rescan_project"),
+  /** `notify` is false only for the automatic timer: a rescan the user asked for
+   *  starts the import notification when it finds work. */
+  rescanProject: (notify = true) => invoke("rescan_project", { notify }),
   // Discard everything stored about the open project and read the folder again
   // from nothing. Never touches the photos — only Cullant's own data directory.
   reimportProject: () => invoke<ProjectInfo>("reimport_project"),
