@@ -1432,7 +1432,7 @@
               />
             {/if}
             <!-- A completed pass shows a retry control for missing previews. -->
-            {#if v.item.kind !== 2 && !v.item.thumbFailed && !v.item.previewFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id)}
+            {#if v.item.kind !== 2 && !v.item.thumbFailed && !v.item.previewFailed && loaded.has(v.item.id) && !previewReady.has(v.item.id) && !catalog.previewsPaused}
               {#if catalog.previewUnavailable.has(v.item.id)}
                 <button
                   class="preview-unavailable"

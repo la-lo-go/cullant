@@ -530,6 +530,14 @@
     return () => document.removeEventListener("visibilitychange", onShow);
   });
 
+  // A stop or an end can happen while the app is hidden and its event can be
+  // lost. While bars show, ask the backend now and then, so none stays forever.
+  $effect(() => {
+    if (!catalog.ingesting) return;
+    const id = setInterval(() => void catalog.syncAfterResume().catch(() => {}), 5000);
+    return () => clearInterval(id);
+  });
+
   async function pickProject() {
     // Android has no filesystem folder dialog, so use the SAF tree picker, which
     // returns a content:// URI. Desktop uses the native directory dialog.

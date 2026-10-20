@@ -262,7 +262,12 @@ class CatalogStore {
     }
   }
 
+  /** True after the user stopped the import: the missing previews are not being
+   *  made, so their cells show no spinner. A new scan clears it. */
+  previewsPaused = $state(false);
+
   resetPreviewPass() {
+    this.previewsPaused = false;
     this.previewPass++;
     this.previewPassComplete = false;
     this.previewUnavailable.clear();
@@ -468,6 +473,7 @@ class CatalogStore {
       return;
     }
     this.endImport();
+    this.previewsPaused = true;
     void this.refresh()
       .then(() => this.refreshPreviewReady())
       .catch((error) => { this.error = String(error); });
