@@ -15,6 +15,7 @@
 
 import { BOTTOM_BAR_ITEMS, DEFAULTS, settings } from "./stores/settings.svelte";
 import { catalog } from "./stores/catalog.svelte";
+import { DOCK_DEFAULTS, DOCK_LABELS, DOCK_SIDES, SIDE_LABELS, dock, type DockPanel, type Side } from "./stores/dock.svelte";
 import { DEFAULT_RADIAL_SLOTS, slotKey } from "./radial";
 import type { BurstMode } from "./bursts";
 import { AUTO_RESCAN_CHOICES, BURST_GAP_CHOICES, COPY_METADATA_CHOICES } from "./stores/settings.svelte";
@@ -194,6 +195,22 @@ const BADGE_DEFAULTS = [
   DEFAULTS.filmstripShowTags,
 ];
 
+function dockChoice(panel: DockPanel): ChoiceSetting {
+  return {
+    kind: "choice",
+    id: `${panel}Position`,
+    group: "appearance",
+    label: `${DOCK_LABELS[panel]} position`,
+    info: `The side where the ${DOCK_LABELS[panel].toLowerCase()} sits. You can also drag the grip on the panel to move it.`,
+    keywords: "dock move side left right top bottom layout",
+    options: DOCK_SIDES[panel].map((side) => ({ value: side, label: SIDE_LABELS[side] })),
+    get: () => dock[panel],
+    set: (v) => dock.set(panel, v as Side),
+    modified: () => dock[panel] !== DOCK_DEFAULTS[panel],
+    reset: () => dock.set(panel, DOCK_DEFAULTS[panel]),
+  };
+}
+
 const DEFAULT_BAR_ORDER = BOTTOM_BAR_ITEMS.map((i) => i.id).join();
 
 function barReordered(): boolean {
@@ -286,6 +303,9 @@ export const SETTINGS: Setting[] = [
     modified: () => settings.bottomBarHidden.length > 0 || barReordered(),
     reset: () => settings.resetBottomBar(),
   },
+  dockChoice("actionBar"),
+  dockChoice("filmstrip"),
+  dockChoice("folderTree"),
   {
     kind: "panel",
     panel: "colorLabelNames",

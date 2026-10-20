@@ -125,6 +125,7 @@ const SHOW_EXTENSIONS_KEY = "cullant.showExtensions";
 const SHOW_FILMSTRIP_KEY = "cullant.showFilmstrip";
 const FOLDER_TREE_WIDTH_KEY = "cullant.folderTreeWidth";
 const FILMSTRIP_HEIGHT_KEY = "cullant.filmstripHeight";
+const FILMSTRIP_WIDTH_KEY = "cullant.filmstripWidth";
 
 function loadBoolPref(key: string, fallback: boolean): boolean {
   try {
@@ -500,6 +501,8 @@ class SessionStore {
   showFilmstrip = $state<boolean>(loadBoolPref(SHOW_FILMSTRIP_KEY, true));
   /** Height of the filmstrip/carousel in px (persisted, drag-resizable). */
   filmstripHeight = $state<number>(loadNumPref(FILMSTRIP_HEIGHT_KEY, 104));
+  /** Width of the filmstrip/carousel in px when it is docked left or right (persisted). */
+  filmstripWidth = $state<number>(loadNumPref(FILMSTRIP_WIDTH_KEY, 132));
 
   setShowFilmstrip(show: boolean) {
     this.showFilmstrip = show;
@@ -517,6 +520,11 @@ class SessionStore {
   setFilmstripHeight(px: number) {
     this.filmstripHeight = px;
     saveNumPref(FILMSTRIP_HEIGHT_KEY, px);
+  }
+
+  setFilmstripWidth(px: number) {
+    this.filmstripWidth = px;
+    saveNumPref(FILMSTRIP_WIDTH_KEY, px);
   }
 
   // Auto-advance: Lightroom semantics. Caps Lock ON advances after any
