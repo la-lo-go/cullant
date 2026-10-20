@@ -6,6 +6,7 @@ use rusqlite::params;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use crate::commands::import_notify::ImportNotifyGuard;
 use crate::db::{migrations, Db};
 use crate::error::{AppError, AppResult};
 use crate::store::ProjectStore;
@@ -128,10 +129,21 @@ fn spawn_scan(
         .scan_active
         .store(true, std::sync::atomic::Ordering::Release);
     let active = ScanActive(app.clone(), db.generation());
+    let notify = initial_open_id.as_ref().map(|id| {
+        ImportNotifyGuard::start(
+            &app,
+            thumbs.clone(),
+            db.generation(),
+            project_display_name(id),
+            [db.project_root(), id.clone()],
+        )
+    });
     std::thread::Builder::new()
         .name("scanner".into())
         .spawn(move || {
             let _active = active;
+            // Declared after `_active`, so it drops first and sees the final scan state.
+            let _notify = notify;
             let project_root = db.project_root();
             let error_app = app.clone();
             // Last line of defence: whatever panics in the walk or the ingest,

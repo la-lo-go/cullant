@@ -2,6 +2,7 @@ pub mod actions;
 pub mod catalog;
 pub mod culling;
 pub mod groups;
+pub mod import_notify;
 pub mod media;
 pub mod metadata;
 pub mod project;
