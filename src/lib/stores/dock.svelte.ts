@@ -141,7 +141,7 @@ export function previewRect(region: DOMRect, side: Side, thickness: number) {
 
 /** The folder tree floats over the grid at this width, so it reserves no room. */
 const NARROW = "(max-width: 720px)";
-/** Equal to --dock-motion in +page.svelte (0 under reduced motion). */
+/** Equal to --dock-motion in the `:global(:root)` block of +page.svelte (0 in its reduced-motion override). */
 const MOTION_MS = 160;
 
 const STORAGE_KEY = "cullant.dock.v1";
@@ -191,13 +191,14 @@ class DockStore {
 
   /** Keeps `animating` on for one motion, so the slot and the gap return together. */
   beginReturn(panel: DockPanel) {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     this.endReturn();
     this.returning = panel;
     this.returnTimer = setTimeout(() => this.endReturn(), MOTION_MS + 40);
   }
 
-  endReturn() {
+  /** Ends the return of `panel`, or of any panel when none is given. */
+  endReturn(panel?: DockPanel) {
+    if (panel && this.returning !== panel) return;
     clearTimeout(this.returnTimer);
     this.returning = null;
   }

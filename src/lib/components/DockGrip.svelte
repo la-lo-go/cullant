@@ -159,7 +159,7 @@
     if (!dragging) {
       if (Math.hypot(e.clientX - press.x, e.clientY - press.y) <= DRAG_THRESHOLD) return;
       dragging = true;
-      dock.endReturn();
+      dock.endReturn(panel);
     }
     track(e);
   }
