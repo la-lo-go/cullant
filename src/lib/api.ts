@@ -314,6 +314,13 @@ export interface CullState {
 export const api = {
   runtimeTools: () => invoke<RuntimeToolStatus>("runtime_tools"),
   openProject: (path: string) => invoke<ProjectInfo>("open_project", { path }),
+  // Android 13+: asks POST_NOTIFICATIONS. Resolves true when granted, and always
+  // true below API 33 and on desktop.
+  requestNotificationPermission: () =>
+    invoke<boolean>("plugin:import-notify|request_permission"),
+  // Opens the system notification settings of the app, where the import
+  // channels are tuned.
+  openNotificationSettings: () => invoke<void>("plugin:import-notify|open_settings"),
   // Android SAF folder picker; returns a content:// tree URI (or null if
   // cancelled) suitable to pass to openProject. No-op returning null on desktop.
   pickSafTree: (preferRemovable = false) =>

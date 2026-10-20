@@ -18,6 +18,25 @@ import { folders } from "./folders.svelte";
 import { settings } from "./settings.svelte";
 import { recent } from "./recent.svelte";
 import { clearThumbCache } from "../thumbLoader";
+import { IS_ANDROID } from "../platform";
+
+const ASKED_KEY = "cullant.notificationPermissionAsked";
+
+/** The import service shows its progress as a notification, so the permission
+ *  has to be settled before the first open. A refusal or an error never blocks
+ *  the open. */
+async function askNotificationPermissionOnce() {
+  if (!IS_ANDROID) return;
+  try {
+    if (localStorage.getItem(ASKED_KEY)) return;
+    localStorage.setItem(ASKED_KEY, "1");
+  } catch {
+    return;
+  }
+  try {
+    await api.requestNotificationPermission();
+  } catch { /* The import works without notifications. */ }
+}
 
 export type FolderCopyOutcome = {
   status: "written" | "unchanged" | "conflict" | "failed";
@@ -179,6 +198,7 @@ class CatalogStore {
     // to that project's DB before its connection goes away underneath it.
     await flushSessionSave();
     await this.copyToFolderOnLeave();
+    await askNotificationPermissionOnce();
     const generation = ++this.generation;
     this.eventRoot = path;
     session.restoring = true;
