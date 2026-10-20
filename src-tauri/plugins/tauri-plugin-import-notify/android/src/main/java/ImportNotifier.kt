@@ -98,6 +98,7 @@ object ImportNotifier {
     private fun label(phase: String): String = when (phase) {
         "finding" -> "Finding files"
         "metadata" -> "Reading metadata"
+        "first_thumbnails" -> "Creating first thumbnails"
         "thumbnails" -> "Creating thumbnails"
         "previews" -> "Creating previews"
         "videos" -> "Creating video posters"
@@ -123,8 +124,8 @@ object ImportNotifier {
             total == null -> "${format(done)} found"
             else -> "${format(done)} / ${format(total)}"
         }
-        val builder = base(context, PROGRESS_CHANNEL, title)
-            .setContentText(if (count == null) label(phase) else "${label(phase)} · $count")
+        val builder = base(context, PROGRESS_CHANNEL, if (count == null) title else "$title · $count")
+            .setContentText(label(phase))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
@@ -162,5 +163,5 @@ object ImportNotifier {
     }
 
     private const val MAX_ERROR_CHARS = 120
-    private val PHASES = setOf("finding", "metadata", "thumbnails", "previews", "videos")
+    private val PHASES = setOf("finding", "metadata", "first_thumbnails", "thumbnails", "previews", "videos")
 }

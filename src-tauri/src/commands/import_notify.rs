@@ -1,4 +1,5 @@
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use tauri::{AppHandle, EventId, Listener};
@@ -35,6 +36,9 @@ impl ImportNotifyGuard {
         }
         // Progress is best effort: an event may arrive late or not at all. The
         // outcome never comes from events, the scanner thread hands it over.
+        // Thumbnail progress before the first preview is the short lead pass,
+        // whose total is not the library size.
+        let previews_started = Arc::new(AtomicBool::new(false));
         let listeners = [
             ("scan:progress", Phase::Finding),
             ("metadata:progress", Phase::Metadata),
@@ -44,6 +48,7 @@ impl ImportNotifyGuard {
         ]
         .map(|(event, phase)| {
             let (app_handle, roots) = (app.clone(), roots.clone());
+            let previews_started = previews_started.clone();
             app.listen(event, move |e| {
                 let Ok(payload) = serde_json::from_str::<Value>(e.payload()) else {
                     return;
@@ -55,6 +60,16 @@ impl ImportNotifyGuard {
                     return;
                 }
                 let count = |key: &str| payload[key].as_u64().unwrap_or(0);
+                let phase = match phase {
+                    Phase::Previews => {
+                        previews_started.store(true, Ordering::Relaxed);
+                        phase
+                    }
+                    Phase::Thumbnails if !previews_started.load(Ordering::Relaxed) => {
+                        Phase::FirstThumbnails
+                    }
+                    _ => phase,
+                };
                 let (done, total) = if phase == Phase::Finding {
                     (count("found"), None)
                 } else {

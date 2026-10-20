@@ -2,10 +2,13 @@ use serde::{Deserialize, Serialize};
 
 /// Import stage shown in the notification text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Phase {
     Finding,
     Metadata,
+    /// The short thumbnail lead that fills the first screens of the grid. Its
+    /// total is the lead size, not the library size.
+    FirstThumbnails,
     Thumbnails,
     Previews,
     Videos,
