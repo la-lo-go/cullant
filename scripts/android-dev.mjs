@@ -56,8 +56,13 @@ const env = {
 };
 const adb = join(sdk, "platform-tools", "adb");
 
-function run(command, args) {
-  const result = spawnSync(command, args, { stdio: "inherit", env, shell: process.platform === "win32" });
+// Only npx needs a shell on Windows, because it is a .cmd file. Its arguments
+// are quoted, since a shell joins them without escaping.
+function run(command, args, shell = false) {
+  const options = { stdio: "inherit", env, shell };
+  const result = shell
+    ? spawnSync([command, ...args.map((arg) => `"${arg}"`)].join(" "), options)
+    : spawnSync(command, args, options);
   if (result.status !== 0) fail(`${command} ${args.join(" ")} failed`);
 }
 
@@ -80,7 +85,7 @@ if (frontendIsCurrent) {
   writeFileSync(config, JSON.stringify({ build: { beforeBuildCommand: "" } }));
   build.push("--config", config);
 }
-run("npx", build);
+run("npx", build, process.platform === "win32");
 if (!existsSync(APK)) fail(`the build did not produce ${APK}`);
 run(adb, ["install", "-r", APK]);
 run(adb, ["shell", "monkey", "-p", PACKAGE, "-c", "android.intent.category.LAUNCHER", "1"]);
