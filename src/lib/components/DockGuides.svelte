@@ -24,7 +24,8 @@
     left: [-COMPASS_OFFSET, 0],
   };
   const CHIP_OFFSET = 14;
-  const CHIP_WIDTH = 190;
+  const CHIP_MARGIN = 6;
+  const COMPASS_REACH = COMPASS_OFFSET + COMPASS_BUTTON / 2;
 
   const drag = $derived(dock.drag);
   // Keeps the last side so the preview fades out where it was instead of jumping.
@@ -38,9 +39,24 @@
     const side = drag.candidate ?? lastSide;
     return previewRect(drag.region, side, drag.thickness(side));
   });
-  const chipLeft = $derived(
-    drag ? Math.min(drag.x + CHIP_OFFSET, window.innerWidth - CHIP_WIDTH) : 0
-  );
+  let chipW = $state(0);
+  let chipH = $state(0);
+
+  // Near the pointer, but outside the compass so it never covers a target, and always inside the window.
+  const chip = $derived.by(() => {
+    if (!drag) return { left: 0, top: 0 };
+    const { region, x, y } = drag;
+    const cx = region.left + region.width / 2;
+    const cy = region.top + region.height / 2;
+    if (Math.abs(x - cx) <= COMPASS_REACH && Math.abs(y - cy) <= COMPASS_REACH) {
+      return { left: cx - chipW / 2, top: cy + COMPASS_REACH + 10 };
+    }
+    let left = x + CHIP_OFFSET;
+    let top = y + CHIP_OFFSET;
+    if (left + chipW > window.innerWidth - CHIP_MARGIN) left = x - CHIP_OFFSET - chipW;
+    if (top + chipH > window.innerHeight - CHIP_MARGIN) top = y - CHIP_OFFSET - chipH;
+    return { left: Math.max(CHIP_MARGIN, left), top: Math.max(CHIP_MARGIN, top) };
+  });
 </script>
 
 {#if drag && preview}
@@ -86,7 +102,13 @@
         </div>
       {/each}
     </div>
-    <div class="chip" style:left="{chipLeft}px" style:top="{drag.y + CHIP_OFFSET}px">
+    <div
+      class="chip"
+      bind:clientWidth={chipW}
+      bind:clientHeight={chipH}
+      style:left="{chip.left}px"
+      style:top="{chip.top}px"
+    >
       {DOCK_LABELS[drag.panel]}{#if candidate}<span class="side">&rarr; {SIDE_LABELS[candidate]}</span>{/if}
     </div>
   </div>

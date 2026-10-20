@@ -8,6 +8,7 @@
    * pointer never see hover. `pointerdown` stops at the grip so a host such as a
    * filmstrip cell or a resize handle does not react to it.
    */
+  import type { Snippet } from "svelte";
   import GripVertical from "@lucide/svelte/icons/grip-vertical";
   import GripHorizontal from "@lucide/svelte/icons/grip-horizontal";
   import PanelTop from "@lucide/svelte/icons/panel-top";
@@ -35,12 +36,17 @@
     thicknessFor: (side: Side) => number;
     /** The panel's own orientation. */
     orientation: "horizontal" | "vertical";
+    /** A label that becomes the handle. The grip icon then fades in after it on hover. */
+    children?: Snippet;
   }
 
-  const { panel, target, thicknessFor, orientation }: Props = $props();
+  const { panel, target, thicknessFor, orientation, children }: Props = $props();
 
   const DRAG_THRESHOLD = 5;
   const MAX_SHARE = 0.5;
+  // Rough height of the menu, to open it above a grip in the lower half of the window.
+  const MENU_ROW = 28;
+  const MENU_CHROME = 44;
   const SIDE_ICONS = { top: PanelTop, right: PanelRight, bottom: PanelBottom, left: PanelLeft };
 
   let button = $state<HTMLButtonElement | null>(null);
@@ -52,9 +58,11 @@
     const rect = button?.getBoundingClientRect();
     if (!rect) return;
     const current = dock[panel];
+    const height = DOCK_SIDES[panel].length * MENU_ROW + MENU_CHROME;
+    const above = rect.bottom > window.innerHeight / 2;
     menu = {
       x: rect.left,
-      y: rect.bottom + 4,
+      y: above ? Math.max(8, rect.top - 4 - height) : rect.bottom + 4,
       items: [
         { kind: "header", label: `${DOCK_LABELS[panel]} position` },
         ...DOCK_SIDES[panel].map((side): MenuNode => ({
@@ -102,11 +110,11 @@
   }
 
   function end() {
-    const wasDragging = dragging;
-    if (press && button?.hasPointerCapture(press.id)) button.releasePointerCapture(press.id);
+    const held = press;
     press = null;
     dragging = false;
-    if (wasDragging) listen(false);
+    listen(false);
+    if (held && button?.hasPointerCapture(held.id)) button.releasePointerCapture(held.id);
     if (dock.drag?.panel === panel) dock.drag = null;
     button?.blur();
   }
@@ -121,6 +129,7 @@
     e.preventDefault();
     press = { id: e.pointerId, x: e.clientX, y: e.clientY };
     button?.setPointerCapture(e.pointerId);
+    listen(true);
   }
 
   function onpointermove(e: PointerEvent) {
@@ -128,7 +137,6 @@
     if (!dragging) {
       if (Math.hypot(e.clientX - press.x, e.clientY - press.y) <= DRAG_THRESHOLD) return;
       dragging = true;
-      listen(true);
     }
     track(e);
   }
@@ -154,6 +162,7 @@
   bind:this={button}
   class="dock-grip"
   class:dragging
+  class:labelled={!!children}
   type="button"
   aria-label={`Move ${DOCK_LABELS[panel].toLowerCase()}`}
   title="Drag to move. Click to choose a position."
@@ -165,10 +174,18 @@
   {onclick}
 >
   <!-- A horizontal panel is a bar, so its handle is a short vertical strip of dots. -->
-  {#if orientation === "horizontal"}
-    <GripVertical size={12} />
+  {#snippet icon()}
+    {#if orientation === "horizontal"}
+      <GripVertical size={12} />
+    {:else}
+      <GripHorizontal size={12} />
+    {/if}
+  {/snippet}
+  {#if children}
+    {@render children()}
+    <span class="after">{@render icon()}</span>
   {:else}
-    <GripHorizontal size={12} />
+    {@render icon()}
   {/if}
 </button>
 
@@ -206,6 +223,42 @@
     .dock-grip {
       width: 28px;
       height: 28px;
+    }
+    .dock-grip.labelled {
+      width: auto;
+      height: auto;
+      min-height: 28px;
+    }
+  }
+  .dock-grip.labelled {
+    width: auto;
+    height: auto;
+    gap: 6px;
+    padding: 0;
+    border-radius: 0;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    opacity: 0.85;
+  }
+  .after {
+    display: inline-flex;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+  .labelled:hover .after,
+  .labelled:focus-visible .after,
+  .labelled.dragging .after {
+    opacity: 0.6;
+  }
+  @media (pointer: coarse) {
+    .after {
+      opacity: 0.5;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .after {
+      transition: none;
     }
   }
 </style>
