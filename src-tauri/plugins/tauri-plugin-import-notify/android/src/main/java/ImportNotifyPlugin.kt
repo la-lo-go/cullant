@@ -19,6 +19,7 @@ import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.Permission
 import app.tauri.annotation.PermissionCallback
 import app.tauri.annotation.TauriPlugin
+import app.tauri.plugin.Channel
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
@@ -46,6 +47,11 @@ class FinishArgs {
     var error: String? = null
 }
 
+@InvokeArg
+class StopHandlerArgs {
+    lateinit var handler: Channel
+}
+
 @TauriPlugin(
     permissions = [Permission(strings = [Manifest.permission.POST_NOTIFICATIONS], alias = "notifications")]
 )
@@ -69,6 +75,12 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         } catch (_: SecurityException) {
             // POST_NOTIFICATIONS denied on API 33+. The service still keeps the import alive.
         }
+    }
+
+    @Command
+    fun setStopHandler(invoke: Invoke) {
+        val args = invoke.parseArgs(StopHandlerArgs::class.java)
+        safely(invoke) { ImportNotifier.stopChannel = args.handler }
     }
 
     @Command

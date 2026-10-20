@@ -22,6 +22,12 @@ pub enum Outcome {
     Error(String),
 }
 
+/// The channel Kotlin sends to when the user taps Stop.
+#[derive(Serialize)]
+pub struct StopHandlerPayload {
+    pub handler: tauri::ipc::Channel<()>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartPayload<'a> {

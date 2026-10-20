@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
+use tauri::ipc::Channel;
 use tauri::plugin::PluginHandle;
-use tauri::{plugin::PluginApi, AppHandle, Runtime};
+use tauri::{plugin::PluginApi, AppHandle, Emitter, Runtime};
 
 use crate::error::{Error, Result};
 use crate::models::*;
@@ -35,14 +36,30 @@ pub struct ImportNotify<R: Runtime> {
 }
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
-    _app: &AppHandle<R>,
+    app: &AppHandle<R>,
     api: PluginApi<R, C>,
 ) -> Result<ImportNotify<R>> {
     let handle = Arc::new(api.register_android_plugin(PLUGIN_IDENTIFIER, "ImportNotifyPlugin")?);
     let (tx, rx) = channel();
     let worker_handle = handle.clone();
-    std::thread::spawn(move || run_worker(&worker_handle, rx));
+    let app = app.clone();
+    std::thread::spawn(move || {
+        listen_for_stop(&app, &worker_handle);
+        run_worker(&worker_handle, rx);
+    });
     Ok(ImportNotify { handle, tx })
+}
+
+/// Turns a tap on the notification's Stop action into an app event.
+/// Runs on the worker thread: `run_mobile_plugin` waits for the Android main
+/// thread, and the plugin setup runs on it.
+fn listen_for_stop<R: Runtime>(app: &AppHandle<R>, handle: &PluginHandle<R>) {
+    let app = app.clone();
+    let handler = Channel::new(move |_| {
+        let _ = app.emit(crate::STOP_EVENT, ());
+        Ok(())
+    });
+    let _ = handle.run_mobile_plugin::<Ack>("setStopHandler", StopHandlerPayload { handler });
 }
 
 /// Sends updates to Android and remembers the last one for the heartbeat.
@@ -75,6 +92,24 @@ impl<R: Runtime> UpdateSender<'_, R> {
         self.latest = Some(payload.clone());
         let _ = self.handle.run_mobile_plugin::<Ack>("update", payload);
     }
+}
+
+fn send_finish<R: Runtime>(handle: &PluginHandle<R>, outcome: &Outcome, project_name: &str) {
+    let (outcome, error, photos, videos) = match outcome {
+        Outcome::Done { photos, videos } => ("done", None, *photos, *videos),
+        Outcome::Empty => ("empty", None, 0, 0),
+        Outcome::Error(message) => ("error", Some(message.as_str()), 0, 0),
+    };
+    let _ = handle.run_mobile_plugin::<Ack>(
+        "finish",
+        FinishPayload {
+            outcome,
+            error,
+            project_name,
+            photos,
+            videos,
+        },
+    );
 }
 
 /// Sends the queued messages to Android. Updates of one phase collapse to the
@@ -155,21 +190,7 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
                 }
                 sent_phase = None;
                 sender.latest = None;
-                let (outcome, error, photos, videos) = match &outcome {
-                    Outcome::Done { photos, videos } => ("done", None, *photos, *videos),
-                    Outcome::Empty => ("empty", None, 0, 0),
-                    Outcome::Error(message) => ("error", Some(message.as_str()), 0, 0),
-                };
-                let _ = handle.run_mobile_plugin::<Ack>(
-                    "finish",
-                    FinishPayload {
-                        outcome,
-                        error,
-                        project_name: &project_name,
-                        photos,
-                        videos,
-                    },
-                );
+                send_finish(handle, &outcome, &project_name);
             }
             Msg::Stop => {
                 // The notification goes away, so a pending count has no reader.

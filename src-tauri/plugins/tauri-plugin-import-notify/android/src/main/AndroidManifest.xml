@@ -10,5 +10,8 @@
             android:name="app.tauri.importnotify.ImportService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <receiver
+            android:name="app.tauri.importnotify.ImportStopReceiver"
+            android:exported="false" />
     </application>
 </manifest>

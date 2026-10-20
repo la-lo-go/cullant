@@ -21,6 +21,9 @@ mod models;
 pub use error::{Error, Result};
 pub use models::{Outcome, Overall, Phase};
 
+/// App event emitted when the user taps Stop on the progress notification.
+pub const STOP_EVENT: &str = "import-notify:stop";
+
 #[cfg(target_os = "android")]
 mod mobile;
 #[cfg(target_os = "android")]

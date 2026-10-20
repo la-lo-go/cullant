@@ -10,6 +10,7 @@ import android.content.Intent
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import app.tauri.plugin.Channel
 import java.text.NumberFormat
 
 /** Channels, notification builders and the shared "is an import running" flag. */
@@ -19,6 +20,7 @@ object ImportNotifier {
     const val ERROR_CHANNEL = "import_error"
     const val PROGRESS_ID = 1
     const val RESULT_ID = 2
+    const val ACTION_STOP = "app.tauri.importnotify.STOP"
 
     // A killed process cannot cancel its own notification, so progress expires by itself.
     // The Rust worker repeats the latest update every minute while an import runs.
@@ -38,6 +40,12 @@ object ImportNotifier {
     private var serviceRequested = false
     private var foregroundReached = false
     private var stopRequested = false
+
+    // Rust listens here for a tap on Stop. It is process-wide, not owned by a plugin
+    // instance, so it survives a recreated activity. A restarted process has none, and
+    // the tap only removes the orphaned notification.
+    @Volatile
+    var stopChannel: Channel? = null
 
     // An import whose service start was refused because the app was hidden.
     // The next resume starts the service, unless the import ended in between.
@@ -135,6 +143,13 @@ object ImportNotifier {
         )
     }
 
+    private fun stopIntent(context: Context): PendingIntent = PendingIntent.getBroadcast(
+        context,
+        1,
+        Intent(ACTION_STOP).setClass(context, ImportStopReceiver::class.java),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
     private fun base(context: Context, channel: String, title: String): NotificationCompat.Builder =
         NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_import_notify)
@@ -172,6 +187,7 @@ object ImportNotifier {
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             // Android 12+ delays a foreground service notification by up to 10 s otherwise.
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .addAction(0, "Stop", stopIntent(context))
         if (permille == null) {
             builder.setProgress(0, 0, true)
         } else {
