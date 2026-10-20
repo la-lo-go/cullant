@@ -26,9 +26,13 @@ pub const THUMB_LONG_EDGE: u32 = 384;
 /// roughly four times fewer decoded pixels, and a proportionally smaller peak per
 /// in-flight worker. That is the trade the setting exposes.
 ///
-/// Runtime state rather than a `const` because of that, but the default is
-/// unchanged on every platform: nobody gets worse previews without asking.
+/// Runtime state rather than a `const` because of that. The frontend pushes its
+/// setting at startup; this default only has to match the frontend's, which is
+/// 1600 on mobile (a phone screen does not need more) and 2560 on desktop.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub const PREVIEW_LONG_EDGE_DEFAULT: u32 = 2560;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub const PREVIEW_LONG_EDGE_DEFAULT: u32 = 1600;
 
 /// Preview sizes offered in Settings. Anything else is rejected, so a stale or
 /// hand-edited localStorage value can never put the cache in a state the ingest

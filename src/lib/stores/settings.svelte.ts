@@ -1,6 +1,7 @@
 /** App-wide user preferences, persisted in localStorage. */
 
 import type { BurstMode } from "../bursts";
+import { IS_MOBILE } from "../platform";
 import ArrowRight from "@lucide/svelte/icons/arrow-right";
 import FolderInput from "@lucide/svelte/icons/folder-input";
 import Flag from "@lucide/svelte/icons/flag";
@@ -71,9 +72,9 @@ export const COPY_METADATA_CHOICES = [0, 5, 15, 30] as const;
  *  twice the target, so 1600 halves a 4000px JPEG's decode where 2560 does not. */
 export const PREVIEW_QUALITY_CHOICES = [1600, 2560, 3840] as const;
 
-/** Unchanged from when the size was a constant: nobody gets worse previews
- *  without asking for them. */
-export const PREVIEW_QUALITY_DEFAULT = 2560;
+/** A phone screen does not need 2560, and the smaller size imports faster with
+ *  less memory. Desktop keeps the size it had when this was a constant. */
+export const PREVIEW_QUALITY_DEFAULT = IS_MOBILE ? 1600 : 2560;
 
 export const PREVIEW_QUALITY_LABELS: Record<number, string> = {
   1600: "Balanced",
