@@ -45,6 +45,8 @@ android {
     }
     buildTypes {
         getByName("debug") {
+            // Installs next to the signed release build, so a test build never
+            // replaces it or wipes its data.
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isDebuggable = true
             isJniDebuggable = true
