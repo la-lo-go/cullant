@@ -180,32 +180,37 @@ fn run_scan(
     initial_open_id: Option<String>,
     notify: Option<&ImportNotifyGuard>,
 ) -> Option<End> {
-    let cancelled = || thumbs.is_shut_down();
-    let done = match scan::scan_project(&app, &db, store.as_ref(), &cancelled) {
+    let done = match scan::scan_project(&app, &db, store.as_ref(), &|| thumbs.is_shut_down()) {
         Ok(done) => done,
-        Err(AppError::Cancelled) => return None,
-        Err(_) if cancelled() => return None,
-        Err(error) => {
-            emit_scan_error(&app, &db.project_root(), error.to_string());
-            return Some(End::Error(error.to_string()));
-        }
+        Err(error) => return walk_end(&app, &db, &thumbs, error),
     };
-    // After the walk, not before it: the cache of a file the previous scan
-    // marked missing is kept when the file has come back. Off the open path too,
-    // so a large cache no longer delays the grid.
-    if let Err(error) = crate::thumbs::prune_cache(&db, &root) {
-        tracing::warn!("could not prune the thumbnail cache: {error}");
-    }
-    if done.file_count == 0 {
-        if let Some(id) = initial_open_id {
-            let result = rollback_fresh_empty(&app, db, store, root, thumbs);
-            return empty_end(&app, &id, result);
-        }
+    prune_cache_after_walk(&db, &root);
+    if let Some(id) = initial_open_id.filter(|_| done.file_count == 0) {
+        let result = rollback_fresh_empty(&app, db, store, root, thumbs);
+        return empty_end(&app, &id, result);
     }
     if let Some(notify) = notify {
         notify.expect(&db);
     }
     ingest_end(&app, &db, store.as_ref(), &thumbs)
+}
+
+/// After the walk, not before it: the cache of a file the previous scan
+/// marked missing is kept when the file has come back. Off the open path too,
+/// so a large cache no longer delays the grid.
+fn prune_cache_after_walk(db: &Arc<Db>, root: &std::path::Path) {
+    if let Err(error) = crate::thumbs::prune_cache(db, root) {
+        tracing::warn!("could not prune the thumbnail cache: {error}");
+    }
+}
+
+/// A cancelled walk, or one of a closed project, ends without a result.
+fn walk_end(app: &AppHandle, db: &Db, thumbs: &ThumbPool, error: AppError) -> Option<End> {
+    if matches!(error, AppError::Cancelled) || thumbs.is_shut_down() {
+        return None;
+    }
+    emit_scan_error(app, &db.project_root(), error.to_string());
+    Some(End::Error(error.to_string()))
 }
 
 fn ingest_end(
