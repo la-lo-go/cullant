@@ -44,6 +44,7 @@
   import { modalFocus } from "$lib/modal";
   import { tooltips } from "$lib/tooltips";
   import TitleBar from "$lib/components/TitleBar.svelte";
+  import DockGuides from "$lib/components/DockGuides.svelte";
   import { api, type FolderCopyStat } from "$lib/api";
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -1019,6 +1020,7 @@
       oncancel={() => (showCloseConfirm = false)}
     />
   {/if}
+  <DockGuides />
 </main>
 
 <style>
