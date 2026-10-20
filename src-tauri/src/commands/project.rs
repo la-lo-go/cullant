@@ -203,7 +203,7 @@ fn run_scan(
         }
     }
     if let Some(notify) = notify {
-        notify.expect(Counts::load(&db).unwrap_or_default());
+        notify.expect(&db);
     }
     ingest_end(&app, &db, store.as_ref(), &thumbs)
 }

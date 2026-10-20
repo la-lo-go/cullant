@@ -139,15 +139,20 @@ impl ImportNotifyGuard {
     }
 
     /// Gives the bar the size of the phases that have not started. Call it when the walk ends.
-    pub fn expect(&self, counts: Counts) {
+    /// Only the videos that still need a poster take time.
+    pub fn expect(&self, db: &Db) {
         let generate_videos = self
             .app
             .state::<crate::AppState>()
             .generate_video_thumbs
             .load(Ordering::Relaxed);
         let expect = Expect {
-            photos: counts.photos,
-            videos: if generate_videos { counts.videos } else { 0 },
+            photos: Counts::load(db).unwrap_or_default().photos,
+            videos: if generate_videos {
+                crate::scan::ingest::videos_needing_poster(db).unwrap_or(0)
+            } else {
+                0
+            },
         };
         self.tracker
             .lock()

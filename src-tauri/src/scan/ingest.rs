@@ -321,10 +321,7 @@ pub fn run_ingest_inner(
              FROM files f
              JOIN groups g ON g.id = f.group_id
              WHERE f.status = 0 AND f.kind IN (0, 1, 2)
-               AND (f.capture_time IS NULL OR
-                    (?1 AND f.kind = 2 AND f.video_codec IS NULL
-                     AND NOT EXISTS(SELECT 1 FROM thumbnails t
-                       WHERE t.file_id=f.id AND t.failed=1 AND t.source_mtime=f.mtime)))",
+               AND {META_PENDING}",
             exts = crate::db::sql::image_exts()
         ))?;
         let rows = stmt.query_map([video_metadata_available], |r| {
@@ -463,19 +460,7 @@ pub fn run_ingest_inner(
     // file (an ffmpeg process on desktop, a platform decoder on Android), so
     // deferring them keeps the photo library browsable before that tier competes.
     let decodable = crate::db::sql::decodable_photo("f", decode::heif::available(store));
-    let thumb_sql = |extra: &str| {
-        format!(
-            "SELECT f.id, f.mtime, f.orientation
-             FROM files f
-             JOIN groups g ON g.id = f.group_id
-             LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
-             WHERE f.status = 0 AND f.kind IN (0, 1) AND {decodable}
-           AND (g.primary_file_id = f.id OR g.decoupled = 1)
-               AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
-             ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC
-             {extra}"
-        )
-    };
+    let thumb_sql = |extra: &str| thumb_select(&decodable, extra);
 
     // 1. Lead window. Small on purpose: every file here is read twice (once for
     //    its thumbnail, once by the fused pass for its preview), which is a fine
@@ -504,17 +489,7 @@ pub fn run_ingest_inner(
             thumbs,
             ThumbKind::Preview,
             true,
-            &format!(
-                "SELECT f.id, f.mtime, f.orientation
-                 FROM files f
-                 JOIN groups g ON g.id = f.group_id
-                 LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
-                 WHERE f.status = 0 AND f.kind IN (0, 1) AND {decodable}
-               AND (g.primary_file_id = f.id OR g.decoupled = 1)
-                   AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime
-                        OR (tp.long_edge <> 0 AND tp.long_edge <> {edge}))
-                 ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC"
-            ),
+            &preview_select(&decodable, edge),
             preview_progress,
         )
         .map(|()| edge)
@@ -541,12 +516,7 @@ pub fn run_ingest_inner(
             thumbs,
             ThumbKind::Thumb,
             false,
-            "SELECT f.id, f.mtime, f.orientation
-             FROM files f
-             LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
-             WHERE f.status = 0 AND f.kind = 2
-               AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
-             ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC",
+            POSTER_SELECT,
             video_progress,
         )?;
     }
@@ -557,6 +527,61 @@ pub fn run_ingest_inner(
 
     crate::photo_profile::report("ingest_complete");
     Ok(())
+}
+
+/// Rows that still need their metadata read (`f` is the files row). A video also
+/// counts while its probe data is missing and the probe has not failed.
+const META_PENDING: &str = "(f.capture_time IS NULL OR
+                    (?1 AND f.kind = 2 AND f.video_codec IS NULL
+                     AND NOT EXISTS(SELECT 1 FROM thumbnails t
+                       WHERE t.file_id=f.id AND t.failed=1 AND t.source_mtime=f.mtime)))";
+
+/// Videos without a current poster.
+const POSTER_SELECT: &str = "SELECT f.id, f.mtime, f.orientation
+             FROM files f
+             LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
+             WHERE f.status = 0 AND f.kind = 2
+               AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
+             ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC";
+
+/// Photos without a current grid thumbnail. `extra` ends the statement.
+fn thumb_select(decodable: &str, extra: &str) -> String {
+    format!(
+        "SELECT f.id, f.mtime, f.orientation
+         FROM files f
+         JOIN groups g ON g.id = f.group_id
+         LEFT JOIN thumbnails tt ON tt.file_id = f.id AND tt.kind = 0
+         WHERE f.status = 0 AND f.kind IN (0, 1) AND {decodable}
+       AND (g.primary_file_id = f.id OR g.decoupled = 1)
+           AND (tt.file_id IS NULL OR tt.source_mtime <> f.mtime)
+         ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC
+         {extra}"
+    )
+}
+
+/// Photos without a preview made for the long edge `edge`.
+fn preview_select(decodable: &str, edge: u32) -> String {
+    format!(
+        "SELECT f.id, f.mtime, f.orientation
+         FROM files f
+         JOIN groups g ON g.id = f.group_id
+         LEFT JOIN thumbnails tp ON tp.file_id = f.id AND tp.kind = 1
+         WHERE f.status = 0 AND f.kind IN (0, 1) AND {decodable}
+       AND (g.primary_file_id = f.id OR g.decoupled = 1)
+           AND (tp.file_id IS NULL OR tp.source_mtime <> f.mtime
+                OR (tp.long_edge <> 0 AND tp.long_edge <> {edge}))
+         ORDER BY COALESCE(f.capture_time, f.mtime) ASC, f.rel_path ASC"
+    )
+}
+
+/// How many videos still need a poster.
+pub fn videos_needing_poster(db: &Db) -> AppResult<u64> {
+    count_rows(db, POSTER_SELECT)
+}
+
+fn count_rows(db: &Db, select: &str) -> AppResult<u64> {
+    let sql = format!("SELECT COUNT(*) FROM ({select})");
+    db.call_read(move |conn| Ok(conn.query_row(&sql, [], |r| r.get::<_, i64>(0))? as u64))
 }
 
 /// One background artifact tier: select the still-missing files (in grid order)
