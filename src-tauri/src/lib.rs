@@ -313,6 +313,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_saf::init())
+        .plugin(tauri_plugin_import_notify::init())
         .manage(AppState::default())
         .register_asynchronous_uri_scheme_protocol("cullant", |ctx, request, responder| {
             // WebView2 calls this on the UI thread, and every cell costs a

@@ -1,0 +1,20 @@
+[package]
+name = "tauri-plugin-import-notify"
+version = "0.1.0"
+description = "Foreground service and progress notification for project imports on Android."
+authors = ["Cullant contributors"]
+license = "GPL-3.0-or-later"
+edition = "2021"
+links = "tauri-plugin-import-notify"
+
+[lib]
+name = "tauri_plugin_import_notify"
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "2", default-features = false }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
