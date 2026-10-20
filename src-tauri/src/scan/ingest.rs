@@ -273,9 +273,10 @@ pub fn run_ingest_pass(
 }
 
 /// A pass of a project that was closed still runs to its next checkpoint; until
-/// then it must not report into the project that replaced it.
+/// then it must not report into the project that replaced it. A pass the user
+/// stopped is silent too: its stop event already ended the progress.
 fn emit_live<S: Serialize + Clone>(app: &AppHandle, thumbs: &ThumbPool, event: &str, payload: S) {
-    if !thumbs.is_shut_down() {
+    if !thumbs.ingest_cancelled() {
         let _ = app.emit(event, payload);
     }
 }
@@ -404,7 +405,7 @@ pub fn run_ingest_inner(
     for chunk in pending.chunks(CHUNK) {
         // The project was closed or replaced: every further read is wasted, and
         // on SAF it competes with the project the user is looking at now.
-        if thumbs.is_shut_down() {
+        if thumbs.ingest_cancelled() {
             return Ok(());
         }
         let extracted: Vec<Extracted> = chunk
@@ -521,7 +522,7 @@ pub fn run_ingest_inner(
         )?;
     }
 
-    while preview_edge != crate::thumbs::preview_long_edge() && !thumbs.is_shut_down() {
+    while preview_edge != crate::thumbs::preview_long_edge() && !thumbs.ingest_cancelled() {
         preview_edge = preview_pass()?;
     }
 
@@ -636,7 +637,7 @@ fn generate_pass(
     select_sql: &str,
     progress: &mut dyn FnMut(usize, usize, &[i64]),
 ) -> AppResult<()> {
-    if thumbs.is_shut_down() {
+    if thumbs.ingest_cancelled() {
         return Ok(());
     }
     let select = select_sql.to_string();
@@ -1353,6 +1354,57 @@ mod tests {
             })
             .unwrap();
         assert_eq!(read, 0, "no file of a closed project is read");
+    }
+
+    #[test]
+    fn a_stopped_pass_leaves_the_pool_serving_requests() {
+        let _guard = ingest_guard();
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let db = project_with_jpegs(root, 4);
+        let (store, pool) = store_and_pool(&db, root);
+
+        let ingest = |pool: &ThumbPool, stop: bool| {
+            run_ingest_inner(
+                &db,
+                store.as_ref(),
+                pool,
+                &|_, _| {},
+                &mut |_| {},
+                &mut |_, _, _| {
+                    if stop {
+                        pool.stop_ingest();
+                    }
+                },
+                &mut |_, _, _| {},
+                &mut |_, _, _| {},
+                true,
+            )
+            .unwrap();
+        };
+        // The user stops the pass as its first tier opens.
+        ingest(&pool, true);
+        assert_eq!((thumb_count(&db, 0), thumb_count(&db, 1)), (0, 0));
+
+        // Interactive requests still work on the same pool.
+        let id: i64 = db
+            .call_read(|c| Ok(c.query_row("SELECT MIN(id) FROM files", [], |r| r.get(0))?))
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        pool.enqueue(ThumbRequest {
+            file_id: id,
+            kind: ThumbKind::Thumb,
+            known_version: None,
+            also_thumb: false,
+            cache_checked: false,
+            respond: Box::new(move |result| tx.send(result.is_ok()).unwrap()),
+        });
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(10)).unwrap());
+
+        // The next scan resumes the pass.
+        pool.resume_ingest();
+        ingest(&pool, false);
+        assert_eq!(thumb_count(&db, 0), 4);
     }
 
     #[test]

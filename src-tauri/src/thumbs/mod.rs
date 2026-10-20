@@ -160,6 +160,9 @@ struct Queues {
 
 struct Queue {
     cancelled: Arc<AtomicBool>,
+    /// Set by the user's Stop on the import notification. Refuses background
+    /// work only; interactive requests keep working. Guarded by the `items` lock.
+    ingest_stopped: AtomicBool,
     items: Mutex<Option<Queues>>,
     signal: Condvar,
     /// Ceiling on the interactive queue. A fast scroll can ask for hundreds of
@@ -202,6 +205,7 @@ impl ThumbPool {
 
         let queue = Arc::new(Queue {
             cancelled: Arc::new(AtomicBool::new(false)),
+            ingest_stopped: AtomicBool::new(false),
             items: Mutex::new(Some(Queues {
                 interactive: VecDeque::new(),
                 background: VecDeque::new(),
@@ -324,7 +328,8 @@ impl ThumbPool {
             })
             .collect();
         let mut guard = self.queue.items.lock().unwrap();
-        let Some(q) = guard.as_mut() else {
+        let stopped = self.queue.ingest_stopped.load(Ordering::Relaxed);
+        let Some(q) = guard.as_mut().filter(|_| !stopped) else {
             for (request, _) in requests {
                 (request.respond)(Err(AppError::Other("thumb pool shut down".into())));
             }
@@ -394,6 +399,36 @@ impl ThumbPool {
     /// scanner thread polls it to stop work nobody is waiting for.
     pub fn is_shut_down(&self) -> bool {
         self.queue.cancelled.load(Ordering::Relaxed)
+    }
+
+    /// True when the ingest pass must stop: the project was closed, or the user
+    /// stopped the pass.
+    pub fn ingest_cancelled(&self) -> bool {
+        self.is_shut_down() || self.queue.ingest_stopped.load(Ordering::Relaxed)
+    }
+
+    /// Stops the background pass and keeps the pool alive. Queued background
+    /// work answers with an error, so the pass that waits for it returns, and the
+    /// pass cannot queue more. A decode in progress finishes. Interactive
+    /// requests keep working.
+    pub fn stop_ingest(&self) {
+        let dropped = {
+            let mut guard = self.queue.items.lock().unwrap();
+            self.queue.ingest_stopped.store(true, Ordering::Relaxed);
+            guard.as_mut().map(|q| std::mem::take(&mut q.background))
+        };
+        for pending in dropped.into_iter().flatten() {
+            fan_out(
+                Err(AppError::Other("background work stopped".into())),
+                pending.responders,
+            );
+        }
+    }
+
+    /// Lets the next scan queue background work again after `stop_ingest`.
+    pub fn resume_ingest(&self) {
+        let _guard = self.queue.items.lock().unwrap();
+        self.queue.ingest_stopped.store(false, Ordering::Relaxed);
     }
 
     pub fn shutdown(&self) {
