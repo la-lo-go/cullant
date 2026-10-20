@@ -76,11 +76,11 @@
     background: rgba(var(--accent-rgb), 0.22);
     opacity: 0;
     transition:
-      left 140ms ease,
-      top 140ms ease,
-      width 140ms ease,
-      height 140ms ease,
-      opacity 140ms ease;
+      left var(--dock-motion),
+      top var(--dock-motion),
+      width var(--dock-motion),
+      height var(--dock-motion),
+      opacity var(--dock-motion);
   }
   .preview.on {
     opacity: 1;

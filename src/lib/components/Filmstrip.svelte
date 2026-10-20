@@ -589,7 +589,7 @@
   /* The strip is being dragged to another side. */
   .filmstrip.docking {
     opacity: 0.5;
-    transition: height 160ms ease-out, width 160ms ease-out, opacity 160ms ease-out;
+    transition: height var(--dock-motion), width var(--dock-motion), opacity var(--dock-motion);
   }
 
   /* The preview is at another side: the strip closes its slot and the view takes

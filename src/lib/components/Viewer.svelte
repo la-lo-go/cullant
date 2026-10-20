@@ -75,7 +75,7 @@
 
 <div class="viewer" class:row={isVertical(dock.filmstrip)}>
   {#if item}
-    <div class="stage" bind:this={stage}>
+    <div class="stage" bind:this={stage} style={dock.reserveStyle("filmstrip")}>
       {#if item.kind === 2}
         {#key item.id}
           <VideoPlayer {item} />
@@ -147,7 +147,7 @@
       {/if}
     </div>
   {:else}
-    <div class="empty" role="status">
+    <div class="empty" role="status" style={dock.reserveStyle("filmstrip")}>
       <p>No photo selected. The previous photo may no longer be available.</p>
       <button onclick={(e) => { view.mode = "grid"; e.currentTarget.blur(); }}>
         <LayoutGrid size={16} /> Back to grid
@@ -181,6 +181,8 @@
     display: flex;
     flex-direction: column;
     position: relative;
+    /* Makes room for the filmstrip while it is dragged to another side. */
+    transition: margin var(--dock-motion);
   }
 
   .info {
@@ -307,6 +309,7 @@
 
   .empty {
     flex: 1;
+    transition: margin var(--dock-motion);
     display: flex;
     align-items: center;
     justify-content: center;

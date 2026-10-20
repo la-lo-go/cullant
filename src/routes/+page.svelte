@@ -794,23 +794,25 @@
               {#if dock.folderTree === "right"}<ChevronLeft size={16} />{:else}<ChevronRight size={16} />{/if}
             </button>
           {/if}
-          {#if session.filtered.length === 0 && catalog.items.length > 0}
-            <!-- The active tab has photos/videos, but every filter combined
-                 leaves nothing — a blank grid otherwise reads as a bug/empty
-                 project rather than "your filters excluded everything". -->
-            <div class="empty-filtered">
-              <ListFilter size={28} />
-              <p>No items match the current filters</p>
-              <p class="filter-summary">{activeFilterSummary}</p>
-              <button
-                onclick={blurring(() => (session.filtersPanelOpen = true))}
-              >
-                <ListFilter size={13} /> Open Sort &amp; Filter
-              </button>
-            </div>
-          {:else}
-            <VirtualGrid items={session.filtered} />
-          {/if}
+          <div class="grid-content" style={dock.reserveStyle("folderTree")}>
+            {#if session.filtered.length === 0 && catalog.items.length > 0}
+              <!-- The active tab has photos/videos, but every filter combined
+                   leaves nothing — a blank grid otherwise reads as a bug/empty
+                   project rather than "your filters excluded everything". -->
+              <div class="empty-filtered">
+                <ListFilter size={28} />
+                <p>No items match the current filters</p>
+                <p class="filter-summary">{activeFilterSummary}</p>
+                <button
+                  onclick={blurring(() => (session.filtersPanelOpen = true))}
+                >
+                  <ListFilter size={13} /> Open Sort &amp; Filter
+                </button>
+              </div>
+            {:else}
+              <VirtualGrid items={session.filtered} />
+            {/if}
+          </div>
         </div>
       {:else if view.mode === "viewer"}
         <Viewer />
@@ -1127,6 +1129,10 @@
     --accent-rgb: 63, 223, 202;
     --accent-fill: #227268;
 
+    /* One motion for a panel that leaves its slot, the gap that the content
+       keeps for it, and the preview rectangle, so they read as one movement. */
+    --dock-motion: 160ms cubic-bezier(0.2, 0, 0, 1);
+
     /* Raw safe-area insets (status bar, navigation bar, display cutout —
        Android/iOS). They follow the device orientation automatically, e.g. a
        landscape rotation moves the cutout inset to the left or right side.
@@ -1158,6 +1164,12 @@
   @media (max-width: 600px) and (orientation: portrait) {
     :global(:root) {
       --dialog-edge-margin: 20px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(:root) {
+      --dock-motion: 0ms;
     }
   }
 
@@ -1561,6 +1573,15 @@
       padding-left: max(4px, var(--safe-left));
       padding-right: max(4px, var(--safe-right));
     }
+  }
+
+  /* Holds the grid, and makes room for the tree while it is dragged to another side. */
+  .grid-content {
+    flex: 1;
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    transition: margin var(--dock-motion);
   }
 
   .grid-area :global(.viewport) {

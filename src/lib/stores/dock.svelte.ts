@@ -176,6 +176,19 @@ class DockStore {
     return drag?.panel === panel && drag.candidate !== null && drag.candidate !== this[panel];
   }
 
+  /** The gap the content keeps for a vacating panel: the preview's side and size. */
+  reserve(panel: DockPanel): { side: Side; size: number } | null {
+    const drag = this.drag;
+    if (!drag?.candidate || !this.vacating(panel)) return null;
+    return { side: drag.candidate, size: drag.thickness(drag.candidate) };
+  }
+
+  /** Inline style for the content of the region: a margin that fills with the preview. */
+  reserveStyle(panel: DockPanel): string {
+    const gap = this.reserve(panel);
+    return gap ? `margin-${gap.side}: ${gap.size}px` : "";
+  }
+
   set(panel: DockPanel, side: Side) {
     if (!DOCK_SIDES[panel].includes(side)) return;
     this[panel] = side;

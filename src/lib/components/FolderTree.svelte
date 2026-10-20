@@ -246,7 +246,7 @@
   /* The tree is being dragged to another side. */
   .tree.docking {
     opacity: 0.5;
-    transition: width 160ms ease-out, opacity 160ms ease-out;
+    transition: width var(--dock-motion), opacity var(--dock-motion);
   }
 
   /* The preview is at another side: the tree closes its slot, so the grid takes
