@@ -42,11 +42,10 @@
 
   // Size of the bar across its axis. A bar that leaves its slot during a drag
   // measures 0, so the last real size is kept. The other orientation is not on
-  // screen: a column is as wide as its widest labelled button, a row is one button high.
+  // screen, so its size is a constant: a row is one button high, a column is one
+  // 44 px button wide. Both include the padding and the border.
   const ROW_SIZE = 51;
-  const COLUMN_FRAME = 11;
-  const COLUMN_MIN = 60;
-  const COLUMN_MAX = 128;
+  const COLUMN_SIZE = 53;
   let ownSize = 0;
   let offsetH = $state(0);
   let offsetW = $state(0);
@@ -55,15 +54,15 @@
     const size = vertical ? offsetW : offsetH;
     if (dockable && !moving && size) ownSize = size;
   });
-  function columnSize(): number {
-    const labelled = bar.querySelectorAll<HTMLElement>(".task, .tagbtn");
-    const widest = Math.max(0, ...Array.from(labelled, (el) => el.offsetWidth));
-    return Math.min(COLUMN_MAX, Math.max(COLUMN_MIN, widest + COLUMN_FRAME));
+  // A column has no room for a tag name: a short form stands for it.
+  function abbreviation(name: string): string {
+    const words = name.trim().split(/\s+/);
+    return words.length > 1 ? words.slice(0, 2).map((w) => w[0]).join("") : words[0].slice(0, 2);
   }
   function thicknessFor(at: Side): number {
     const column = isVertical(at);
     if (column === vertical && ownSize) return ownSize;
-    return column ? columnSize() : ROW_SIZE;
+    return column ? COLUMN_SIZE : ROW_SIZE;
   }
 
   // The item the actions apply to (mirrors the keyboard path, which acts on the
@@ -201,7 +200,9 @@
   style={dockable && moving ? `--bar-size: ${thicknessFor(side)}px` : ""}
 >
   {#if dockable}
-    <DockGrip panel="actionBar" target={region} {thicknessFor} {orientation} />
+    <div class="gripcell">
+      <DockGrip panel="actionBar" target={region} {thicknessFor} {orientation} />
+    </div>
   {/if}
   <div class="items">
     {#if hasSelection}
@@ -211,7 +212,8 @@
         </button>
         {#if session.canSurvey && view.mode !== "survey"}
           <button class="btn task" title={shortcutHint("Review selection (Survey)", "view.survey")} aria-label="Review selection" data-press="view.survey" onclick={act(() => session.openSurvey(), "view.survey")}>
-            <LayoutGrid size={18} /> <span class="tasklabel">Review selection</span>
+            <LayoutGrid size={18} />
+            {#if !vertical}<span class="tasklabel">Review selection</span>{/if}
           </button>
         {/if}
       </div>
@@ -239,7 +241,8 @@
       {#if itemId === "auto" && (view.mode === "viewer" || view.mode === "compare")}
         <div class="group recovery">
           <button class="btn task" class:active={session.autoAdvanceActive} disabled={session.capsLockActive} aria-label="Auto" aria-pressed={session.autoAdvanceActive} title={session.capsLockActive ? "Caps Lock enables keyboard auto-advance. Turn Caps Lock off to use Auto. Shift reverses keyboard auto-advance for one action." : "Auto: advance after classification. Shift reverses this setting for one action."} data-press="auto" onclick={act(toggleAutoAdvance, "auto")}>
-            <ArrowRight size={17} /> <span class="tasklabel">Auto</span>
+            <ArrowRight size={17} />
+            {#if !vertical}<span class="tasklabel">Auto</span>{/if}
           </button>
         </div>
       {:else if itemId === "moveCopy"}
@@ -310,12 +313,17 @@
                 class="btn tagbtn"
                 class:active={tagActive(tag.id)}
                 title={`Toggle tag: ${tag.name}`}
+                aria-label={`Toggle tag: ${tag.name}`}
                 style="--c: {tag.color ?? '#888'}"
                 data-press={`tag.${tag.id}`}
                 onclick={act(() => session.toggleTag(tag.id), `tag.${tag.id}`)}
               >
                 <span class="tagdot"></span>
-                <span class="taglabel">{tag.name}</span>
+                {#if vertical}
+                  <span class="tagabbr">{abbreviation(tag.name)}</span>
+                {:else}
+                  <span class="taglabel">{tag.name}</span>
+                {/if}
               </button>
             {/each}
           </div>
@@ -369,20 +377,18 @@
   .touchbar.right {
     flex-direction: column;
     align-items: stretch;
-    width: max-content;
-    min-width: 60px;
-    max-width: 128px;
-    padding: 6px 6px calc(6px + var(--safe-bottom));
+    gap: 0;
+    padding: 4px 4px calc(4px + var(--safe-bottom));
     border-top: none;
   }
 
   .touchbar.left {
-    padding-left: calc(6px + var(--safe-left));
+    padding-left: calc(4px + var(--safe-left));
     border-right: 1px solid var(--border-strong);
   }
 
   .touchbar.right {
-    padding-right: calc(6px + var(--safe-right));
+    padding-right: calc(4px + var(--safe-right));
     border-left: 1px solid var(--border-strong);
   }
 
@@ -404,7 +410,7 @@
 
   .vertical .items {
     flex-direction: column;
-    align-items: stretch;
+    align-items: center;
     overflow-x: hidden;
     overflow-y: auto;
   }
@@ -417,8 +423,25 @@
     color: #8a8a93;
   }
 
-  .vertical :global(.dock-grip) {
-    align-self: center;
+  /* The grip is a fixed cell before the scroll area: items scroll beside it and
+     never pass under it. */
+  .gripcell {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    padding-right: 8px;
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .vertical .gripcell {
+    align-self: auto;
+    padding: 0 0 4px;
+    margin-bottom: 4px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
   }
 
   /* On a drag, and on the way back after a cancel. The slot has an explicit size
@@ -494,7 +517,7 @@
 
   .vertical .group {
     flex-direction: column;
-    align-items: stretch;
+    align-items: center;
   }
 
   .vertical .group + .group {
@@ -518,14 +541,17 @@
     touch-action: manipulation;
   }
 
-  /* In a column the buttons fill the bar, so they need no minimum width. */
+  /* In a column every button is one 44 px square-ish cell, centred. */
   .vertical .btn {
-    min-width: 0;
+    width: 44px;
+    min-width: 44px;
     min-height: 36px;
   }
 
   .vertical .star,
   .vertical .swatchbtn {
+    width: 44px;
+    min-width: 44px;
     min-height: 30px;
   }
 
@@ -558,26 +584,10 @@
     font-size: 12px;
   }
 
-  /* Two lines in a column, then an ellipsis. The button keeps its title. */
+  /* In a column a task shows its icon only. The button keeps its title. */
   .vertical .task {
-    justify-content: flex-start;
-    padding: 4px 8px;
-    text-align: left;
-  }
-
-  .vertical .tasklabel {
-    min-width: 0;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .vertical .task :global(svg) {
-    flex: none;
+    gap: 0;
+    padding: 0;
   }
 
   .star {
@@ -648,8 +658,14 @@
   }
 
   .vertical .tagbtn {
-    justify-content: flex-start;
-    padding: 0 8px;
+    gap: 4px;
+    padding: 0;
+  }
+
+  .tagabbr {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
   }
 
   .taglabel {
