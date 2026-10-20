@@ -183,7 +183,7 @@
       selfScroll = false;
       return;
     }
-    if (settings.lockCarousel && viewLen > 0 && items.length > 0) {
+    if (settings.lockCarousel && viewLen > 0 && items.length > 0 && !dock.drag) {
       lockScrollTs = performance.now();
       const centered = Math.round((scrollPos + viewLen / 2 - CELL / 2) / CELL);
       const idx = Math.max(0, Math.min(items.length - 1, centered));
@@ -199,8 +199,11 @@
   // strip must always center instantly, never replaying a leftover "smooth" from
   // before, and starts from a zero scroll position.
   let lastStripEl: HTMLDivElement | null = null;
+  const scrolledByUserJustNow = () =>
+    settings.lockCarousel && performance.now() - lockScrollTs < 250;
   $effect(() => {
-    if (!strip || viewLen === 0) return;
+    // While the strip is dragged, the layout moves under it: recentre after the drop.
+    if (!strip || viewLen === 0 || dock.drag?.panel === "filmstrip") return;
     if (strip !== lastStripEl) {
       lastStripEl = strip;
       hasCentered = false;
@@ -211,7 +214,7 @@
     // scroll must not trigger a counter-scroll (it would fight the drag). A focus
     // change from elsewhere (keyboard nav) still recentres, since no recent
     // scroll set lockScrollTs.
-    if (settings.lockCarousel && performance.now() - lockScrollTs < 250) {
+    if (scrolledByUserJustNow()) {
       hasCentered = true;
       return;
     }
@@ -337,8 +340,9 @@
       class:vertical
       class:pending-collapse={pendingCollapse}
       class:docking={dock.drag?.panel === "filmstrip"}
+      class:vacating={dock.vacating("filmstrip")}
       bind:this={root}
-      style="{vertical ? 'width' : 'height'}: {stripT}px"
+      style="--thickness: {stripT}px"
     >
       <div
         class="resize-handle"
@@ -527,7 +531,13 @@
   .filmstrip {
     position: relative;
     flex: none;
+    height: var(--thickness);
     background: var(--surface);
+  }
+
+  .filmstrip.vertical {
+    width: var(--thickness);
+    height: auto;
   }
 
   /* The border is on the inner edge, towards the view. Top and left strips come
@@ -577,6 +587,30 @@
   /* The strip is being dragged to another side. */
   .filmstrip.docking {
     opacity: 0.5;
+    transition: height 160ms ease-out, width 160ms ease-out, opacity 160ms ease-out;
+  }
+
+  /* The preview is at another side: the strip closes its slot and the view takes
+     the room. The node stays mounted, because the grip in it holds the pointer
+     capture of the drag. Only the thickness shrinks, so the scroll axis keeps its
+     length. */
+  .filmstrip.docking.vacating {
+    height: 0;
+    opacity: 0;
+    overflow: hidden;
+    border-width: 0;
+    padding: 0;
+  }
+
+  .filmstrip.docking.vacating.vertical {
+    width: 0;
+    height: auto;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .filmstrip.docking {
+      transition: none;
+    }
   }
 
   .strip {
@@ -752,18 +786,26 @@
     border-color: var(--accent);
   }
 
-  /* Hide tab on the inner edge, over the thumbnails: the grip, then the arrow
-     (the mirror of .strip-peek, pointing outward). Its z-index is above the
-     resize handle so both parts stay clickable. */
+  /* Hide tab on the inner edge, over the thumbnails: one piece, grip then arrow
+     (the mirror of .strip-peek, pointing outward). It is 64 long: the arrow sits
+     in the middle, with the grip's width as padding on the other side, so the
+     arrow is where the peek tab's arrow is. Its z-index is above the resize
+     handle so both parts stay clickable. */
   .strip-tab {
     position: absolute;
     z-index: 30;
     display: flex;
     box-sizing: border-box;
+    width: 64px;
     height: 18px;
     overflow: hidden;
     border: 1px solid var(--border);
     background: var(--surface);
+  }
+
+  .strip-tab:hover {
+    background: var(--hover);
+    border-color: var(--accent);
   }
 
   .bottom .strip-tab,
@@ -789,7 +831,7 @@
     top: 50%;
     transform: translateY(-50%);
     width: 18px;
-    height: auto;
+    height: 64px;
   }
 
   .left .strip-tab {
@@ -816,34 +858,23 @@
     height: 20px;
   }
 
-  .strip-tab :global(.dock-grip:hover),
-  .strip-tab :global(.dock-grip.dragging) {
-    background: var(--hover);
-  }
-
   .strip-hide {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: none;
-    width: 44px;
-    padding: 0;
+    flex: 1;
+    min-width: 0;
+    padding: 0 20px 0 0;
     border: none;
-    border-left: 1px solid var(--border);
     background: transparent;
     color: var(--accent);
     cursor: pointer;
   }
 
   .vertical .strip-hide {
-    width: auto;
-    height: 44px;
-    border-left: none;
-    border-top: 1px solid var(--border);
-  }
-
-  .strip-hide:hover {
-    background: var(--hover);
+    min-width: auto;
+    min-height: 0;
+    padding: 0 0 20px;
   }
 
   .canvas {
