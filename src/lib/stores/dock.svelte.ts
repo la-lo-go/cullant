@@ -170,6 +170,12 @@ class DockStore {
     Object.assign(this, load());
   }
 
+  /** True while a drag shows a preview at another side than the panel's own: the panel leaves its place. */
+  vacating(panel: DockPanel): boolean {
+    const drag = this.drag;
+    return drag?.panel === panel && drag.candidate !== null && drag.candidate !== this[panel];
+  }
+
   set(panel: DockPanel, side: Side) {
     if (!DOCK_SIDES[panel].includes(side)) return;
     this[panel] = side;

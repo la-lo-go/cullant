@@ -159,6 +159,7 @@
     class:right
     class:pending-collapse={pendingCollapse}
     class:docking={dock.drag?.panel === "folderTree"}
+    class:vacating={dock.vacating("folderTree")}
     bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
     <div
       class="scroll"
@@ -245,6 +246,30 @@
   /* The tree is being dragged to another side. */
   .tree.docking {
     opacity: 0.5;
+  }
+
+  /* The preview is at another side: the tree closes its slot, so the grid takes
+     the room. The node stays mounted, because the grip in it holds the pointer
+     capture of the drag. */
+  .tree.docking {
+    transition: width 160ms ease-out, opacity 160ms ease-out;
+  }
+
+  .tree.vacating {
+    width: 0;
+    opacity: 0;
+    overflow: hidden;
+    border-width: 0;
+  }
+
+  .tree.vacating .scroll {
+    min-width: var(--tree-w);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tree.docking {
+      transition: none;
+    }
   }
 
   .tree.right {
