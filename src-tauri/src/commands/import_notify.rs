@@ -18,7 +18,8 @@ static OWNER: Mutex<u64> = Mutex::new(0);
 /// service of an older import that still runs, so an open starts early only when this is 0.
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 
-/// What a project holds. A photo is a shot: a RAW+JPEG pair counts once.
+/// What a project holds. A photo is a shot: a RAW+JPEG pair counts once, but the
+/// members of a decoupled group count each, like the grid and the preview pass do.
 #[derive(Clone, Copy, Default)]
 pub struct Counts {
     pub photos: u64,
@@ -29,9 +30,11 @@ impl Counts {
     pub fn load(db: &Db) -> AppResult<Self> {
         db.call_read(|conn| {
             Ok(conn.query_row(
-                "SELECT COUNT(DISTINCT CASE WHEN kind IN (0, 1) THEN group_id END),
-                        COUNT(CASE WHEN kind = 2 THEN 1 END)
-                 FROM files WHERE status = 0",
+                "SELECT COUNT(DISTINCT CASE WHEN f.kind IN (0, 1) AND g.decoupled = 0 THEN f.group_id END)
+                        + COUNT(CASE WHEN f.kind IN (0, 1) AND g.decoupled = 1 THEN 1 END),
+                        COUNT(CASE WHEN f.kind = 2 THEN 1 END)
+                 FROM files f JOIN groups g ON g.id = f.group_id
+                 WHERE f.status = 0",
                 [],
                 |r| {
                     Ok(Self {
@@ -186,5 +189,31 @@ impl Drop for ImportNotifyGuard {
             self.send_end();
         }
         LIVE.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_decoupled_pair_counts_as_two_photos() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["a.jpg", "a.cr3", "b.jpg", "b.cr3", "c.mp4"] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        let db = Arc::new(Db::open(dir.path()).unwrap());
+        crate::scan::scan_project_inner(&db, dir.path(), &mut |_| {}).unwrap();
+        db.call(|conn| {
+            conn.execute(
+                "UPDATE groups SET decoupled = 1
+                 WHERE id IN (SELECT group_id FROM files WHERE rel_path = 'b.jpg')",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let counts = Counts::load(&db).unwrap();
+        assert_eq!((counts.photos, counts.videos), (3, 1));
     }
 }
