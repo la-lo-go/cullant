@@ -78,7 +78,7 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
             // app then crashes if the service never enters the foreground. Do not try.
             if (!ImportNotifier.isForeground()) {
                 Logger.warn("ImportNotify", "App is in the background, not starting the service")
-                ImportNotifier.deferStart(title)
+                ImportNotifier.deferStart()
                 return@safely
             }
             ImportNotifier.requestStart()
