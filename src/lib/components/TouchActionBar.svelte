@@ -57,7 +57,9 @@
   // A column has no room for a tag name: a short form stands for it.
   function abbreviation(name: string): string {
     const words = name.trim().split(/\s+/);
-    return words.length > 1 ? words.slice(0, 2).map((w) => w[0]).join("") : words[0].slice(0, 2);
+    const letters =
+      words.length > 1 ? words.slice(0, 2).map((w) => Array.from(w)[0]) : Array.from(words[0]).slice(0, 2);
+    return letters.join("").toUpperCase();
   }
   function thicknessFor(at: Side): number {
     const column = isVertical(at);
@@ -433,7 +435,6 @@
     align-self: stretch;
     padding-right: 8px;
     border-right: 1px solid var(--border);
-    background: var(--surface);
   }
 
   .vertical .gripcell {
@@ -550,8 +551,6 @@
 
   .vertical .star,
   .vertical .swatchbtn {
-    width: 44px;
-    min-width: 44px;
     min-height: 30px;
   }
 
