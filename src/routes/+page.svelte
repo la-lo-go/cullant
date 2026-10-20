@@ -13,6 +13,7 @@
   import { runtimeTools } from "$lib/stores/runtimeTools.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
+  import { dock } from "$lib/stores/dock.svelte";
   import { handleKeydown } from "$lib/keyboard/dispatcher.svelte";
   import { shortcutHint } from "$lib/keyboard/hints";
   import { formatColorLabel } from "$lib/colorLabels";
@@ -49,7 +50,6 @@
   import Grid3x3 from "@lucide/svelte/icons/grid-3x3";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
-  import { dock } from "$lib/stores/dock.svelte";
   import Eye from "@lucide/svelte/icons/eye";
   import Columns2 from "@lucide/svelte/icons/columns-2";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
@@ -1628,7 +1628,7 @@
     z-index: 30;
   }
 
-  /* Peek tab shown at the left edge when the folder tree is collapsed. It
+  /* Peek tab shown at the outer edge when the folder tree is collapsed. It
      floats over the grid (absolute) instead of sitting in the flex row, so on
      narrow screens it never steals a thumbnail column. Its hit area is tiny, so
      the grid underneath still scrolls everywhere else. */
