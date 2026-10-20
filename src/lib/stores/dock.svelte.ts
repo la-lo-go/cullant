@@ -43,10 +43,12 @@ export interface DockDrag {
   thickness: (side: Side) => number;
 }
 
-/** Compass geometry in px. `DockGuides` draws from the same constants that `pickSide` tests. */
+/** Compass geometry in px. `DockGuides` draws from `compassButtons`, which `pickSide` tests. */
 export const COMPASS_BUTTON = 36;
-/** Distance from the compass centre to the centre of each button. */
-export const COMPASS_OFFSET = 40;
+/** Distance from the compass centre to the centre of each button in the cross layout. */
+const COMPASS_OFFSET = 40;
+/** Space between the two buttons of a pair. */
+const COMPASS_PAIR_GAP = 4;
 const EDGE_ZONE_MAX = 64;
 const EDGE_ZONE_RATIO = 0.2;
 
@@ -75,19 +77,26 @@ function edgeZone(region: DOMRect, side: Side): number {
   return Math.min(EDGE_ZONE_MAX, span * EDGE_ZONE_RATIO);
 }
 
-function compassHit(region: DOMRect, x: number, y: number, allowed: readonly Side[]): Side | null {
+/** Centre of each compass button, in client px: a tight pair for two sides, a cross otherwise. */
+export function compassButtons(
+  region: DOMRect,
+  allowed: readonly Side[],
+): { side: Side; x: number; y: number }[] {
   const cx = region.left + region.width / 2;
   const cy = region.top + region.height / 2;
+  const offset = allowed.length === 2 ? (COMPASS_BUTTON + COMPASS_PAIR_GAP) / 2 : COMPASS_OFFSET;
+  return allowed.map((side) => {
+    const [dx, dy] = COMPASS_DIRECTION[side];
+    return { side, x: cx + dx * offset, y: cy + dy * offset };
+  });
+}
+
+function compassHit(region: DOMRect, x: number, y: number, allowed: readonly Side[]): Side | null {
   const half = COMPASS_BUTTON / 2;
-  return (
-    allowed.find((side) => {
-      const [dx, dy] = COMPASS_DIRECTION[side];
-      return (
-        Math.abs(x - (cx + dx * COMPASS_OFFSET)) <= half &&
-        Math.abs(y - (cy + dy * COMPASS_OFFSET)) <= half
-      );
-    }) ?? null
+  const hit = compassButtons(region, allowed).find(
+    (b) => Math.abs(x - b.x) <= half && Math.abs(y - b.y) <= half,
   );
+  return hit?.side ?? null;
 }
 
 function edgeHit(region: DOMRect, x: number, y: number, allowed: readonly Side[]): Side | null {

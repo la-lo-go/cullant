@@ -1,25 +1,19 @@
 <script lang="ts">
-  /** Draws the state of a grip drag: region outline, compass buttons and preview rectangle. */
+  /** Draws the state of a grip drag: compass buttons and preview rectangle. */
   import PanelTop from "@lucide/svelte/icons/panel-top";
   import PanelRight from "@lucide/svelte/icons/panel-right";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
   import {
     COMPASS_BUTTON,
-    COMPASS_OFFSET,
     DOCK_SIDES,
+    compassButtons,
     dock,
     previewRect,
     type Side,
   } from "../stores/dock.svelte";
 
   const SIDE_ICONS = { top: PanelTop, right: PanelRight, bottom: PanelBottom, left: PanelLeft };
-  const OFFSETS: Record<Side, readonly [number, number]> = {
-    top: [0, -COMPASS_OFFSET],
-    right: [COMPASS_OFFSET, 0],
-    bottom: [0, COMPASS_OFFSET],
-    left: [-COMPASS_OFFSET, 0],
-  };
   const drag = $derived(dock.drag);
   // Keeps the last side so the preview fades out where it was instead of jumping.
   let lastSide = $state<Side>("bottom");
@@ -38,13 +32,6 @@
   {@const { region, candidate } = drag}
   <div class="layer" aria-hidden="true">
     <div
-      class="outline"
-      style:left="{region.left}px"
-      style:top="{region.top}px"
-      style:width="{region.width}px"
-      style:height="{region.height}px"
-    ></div>
-    <div
       class="preview"
       class:on={candidate !== null}
       style:left="{preview.left}px"
@@ -57,15 +44,15 @@
       style:left="{region.left + region.width / 2}px"
       style:top="{region.top + region.height / 2}px"
     >
-      {#each DOCK_SIDES[drag.panel] as side (side)}
+      {#each compassButtons(region, DOCK_SIDES[drag.panel]) as { side, x, y } (side)}
         {@const Icon = SIDE_ICONS[side]}
         <div
           class="target"
           class:active={candidate === side}
           style:width="{COMPASS_BUTTON}px"
           style:height="{COMPASS_BUTTON}px"
-          style:left="{OFFSETS[side][0] - COMPASS_BUTTON / 2}px"
-          style:top="{OFFSETS[side][1] - COMPASS_BUTTON / 2}px"
+          style:left="{x - (region.left + region.width / 2) - COMPASS_BUTTON / 2}px"
+          style:top="{y - (region.top + region.height / 2) - COMPASS_BUTTON / 2}px"
         >
           <Icon size={18} />
         </div>
@@ -80,11 +67,6 @@
     inset: 0;
     z-index: 200;
     pointer-events: none;
-  }
-  .outline {
-    position: absolute;
-    box-sizing: border-box;
-    border: 1px dashed rgba(var(--accent-rgb), 0.35);
   }
   .preview {
     position: absolute;
