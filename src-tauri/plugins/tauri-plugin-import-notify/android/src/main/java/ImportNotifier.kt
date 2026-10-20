@@ -20,6 +20,10 @@ object ImportNotifier {
     const val PROGRESS_ID = 1
     const val RESULT_ID = 2
 
+    // A killed process cannot cancel its own notification, so progress expires by itself.
+    // The Rust worker repeats the latest update every minute while an import runs.
+    private const val PROGRESS_TIMEOUT_MS = 5 * 60 * 1000L
+
     // The service can end on its own (timeout), so the plugin must not keep
     // posting progress under an id that no service owns any more.
     @Volatile
@@ -148,6 +152,7 @@ object ImportNotifier {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
+            .setTimeoutAfter(PROGRESS_TIMEOUT_MS)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             // Android 12+ delays a foreground service notification by up to 10 s otherwise.
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)

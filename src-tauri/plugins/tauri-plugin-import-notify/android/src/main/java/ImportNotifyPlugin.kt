@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.webkit.WebView
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import app.tauri.Logger
@@ -95,6 +96,16 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         } catch (e: Exception) {
             ImportNotifier.serviceEnded()
             throw e
+        }
+    }
+
+    // A process killed mid-import leaves its ongoing notification behind. A new
+    // process runs no import yet, so nobody else owns the progress id.
+    override fun load(webView: WebView) {
+        try {
+            if (!ImportNotifier.active) NotificationManagerCompat.from(context).cancel(ImportNotifier.PROGRESS_ID)
+        } catch (e: Exception) {
+            Logger.error("ImportNotify", e.message ?: "cleanup failed", e)
         }
     }
 

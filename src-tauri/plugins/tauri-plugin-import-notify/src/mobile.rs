@@ -11,6 +11,9 @@ use crate::models::*;
 
 const PLUGIN_IDENTIFIER: &str = "app.tauri.importnotify";
 const UPDATE_INTERVAL: Duration = Duration::from_millis(500);
+/// The notification expires on its own (see `ImportNotifier.PROGRESS_TIMEOUT_MS`), so a
+/// quiet phase must repeat the latest state well before that.
+const HEARTBEAT: Duration = Duration::from_secs(60);
 
 enum Msg {
     Start(String),
@@ -40,34 +43,53 @@ pub fn init<R: Runtime, C: DeserializeOwned>(
     Ok(ImportNotify { handle, tx })
 }
 
+/// Sends updates to Android and remembers the last one for the heartbeat.
+struct UpdateSender<'a, R: Runtime> {
+    handle: &'a PluginHandle<R>,
+    last_sent: Instant,
+    latest: Option<UpdatePayload>,
+}
+
+impl<R: Runtime> UpdateSender<'_, R> {
+    fn send(&mut self, payload: UpdatePayload) {
+        self.last_sent = Instant::now();
+        self.latest = Some(payload.clone());
+        let _ = self.handle.run_mobile_plugin::<Ack>("update", payload);
+    }
+}
+
 /// Sends the queued messages to Android. Updates of one phase collapse to the
 /// latest one, at most one per `UPDATE_INTERVAL`. A phase change, `Finish` and
 /// `Start` flush the pending update first, so the last count is never lost.
+/// While an import runs, the latest update repeats every `HEARTBEAT`.
 /// Errors are ignored: Kotlin logs its own failures and an import must not care.
 fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
     let mut pending: Option<UpdatePayload> = None;
     let mut sent_phase: Option<Phase> = None;
-    let mut last_sent = Instant::now();
-
-    let send_update = |payload: UpdatePayload, last_sent: &mut Instant| {
-        *last_sent = Instant::now();
-        let _ = handle.run_mobile_plugin::<Ack>("update", payload);
+    let mut sender = UpdateSender {
+        handle,
+        last_sent: Instant::now(),
+        latest: None,
     };
 
     loop {
-        let msg = if pending.is_none() {
-            rx.recv().ok()
-        } else {
-            match rx.recv_timeout(UPDATE_INTERVAL.saturating_sub(last_sent.elapsed())) {
+        let wait = match (&pending, &sender.latest) {
+            (Some(_), _) => Some(UPDATE_INTERVAL),
+            (None, Some(_)) => Some(HEARTBEAT),
+            (None, None) => None,
+        };
+        let msg = match wait {
+            None => rx.recv().ok(),
+            Some(wait) => match rx.recv_timeout(wait.saturating_sub(sender.last_sent.elapsed())) {
                 Ok(msg) => Some(msg),
                 Err(RecvTimeoutError::Timeout) => {
-                    if let Some(payload) = pending.take() {
-                        send_update(payload, &mut last_sent);
+                    if let Some(payload) = pending.take().or_else(|| sender.latest.clone()) {
+                        sender.send(payload);
                     }
                     continue;
                 }
                 Err(RecvTimeoutError::Disconnected) => None,
-            }
+            },
         };
         let Some(msg) = msg else { return };
 
@@ -76,23 +98,24 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
                 let payload = UpdatePayload { phase, done, total };
                 if sent_phase == Some(phase) {
                     // Without this, a flood of updates keeps replacing the pending one and none is sent.
-                    if last_sent.elapsed() >= UPDATE_INTERVAL {
+                    if sender.last_sent.elapsed() >= UPDATE_INTERVAL {
                         pending = None;
-                        send_update(payload, &mut last_sent);
+                        sender.send(payload);
                     } else {
                         pending = Some(payload);
                     }
                 } else {
                     if let Some(old) = pending.take() {
-                        send_update(old, &mut last_sent);
+                        sender.send(old);
                     }
                     sent_phase = Some(phase);
-                    send_update(payload, &mut last_sent);
+                    sender.send(payload);
                 }
             }
             Msg::Start(project_name) => {
                 pending = None;
                 sent_phase = None;
+                sender.latest = None;
                 let _ = handle.run_mobile_plugin::<Ack>(
                     "start",
                     StartPayload {
@@ -102,9 +125,10 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
             }
             Msg::Finish(outcome, project_name, file_count) => {
                 if let Some(payload) = pending.take() {
-                    send_update(payload, &mut last_sent);
+                    sender.send(payload);
                 }
                 sent_phase = None;
+                sender.latest = None;
                 let (outcome, error) = match &outcome {
                     Outcome::Done => ("done", None),
                     Outcome::Empty => ("empty", None),
@@ -124,6 +148,7 @@ fn run_worker<R: Runtime>(handle: &PluginHandle<R>, rx: Receiver<Msg>) {
                 // The notification goes away, so a pending count has no reader.
                 pending = None;
                 sent_phase = None;
+                sender.latest = None;
                 let _ = handle.run_mobile_plugin::<Ack>("stop", ());
             }
         }

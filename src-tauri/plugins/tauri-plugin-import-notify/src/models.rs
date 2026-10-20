@@ -28,7 +28,7 @@ pub struct StartPayload<'a> {
     pub project_name: &'a str,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePayload {
     pub phase: Phase,
