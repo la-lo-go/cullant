@@ -7,6 +7,9 @@ pub enum Error {
     #[cfg(target_os = "android")]
     #[error(transparent)]
     PluginInvoke(#[from] tauri::plugin::mobile::PluginInvokeError),
+    #[cfg(target_os = "android")]
+    #[error("the notification worker has stopped")]
+    WorkerStopped,
 }
 
 impl Serialize for Error {

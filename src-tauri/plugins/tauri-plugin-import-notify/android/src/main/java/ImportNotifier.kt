@@ -6,6 +6,7 @@ import android.app.ActivityManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -23,6 +24,51 @@ object ImportNotifier {
     // posting progress under an id that no service owns any more.
     @Volatile
     var active = false
+
+    // Latest progress notification. The service shows it when it enters the foreground.
+    @Volatile
+    var latest: Notification? = null
+
+    // Android crashes the app if a started foreground service stops before it called
+    // startForeground. A stop that arrives early is therefore deferred to the service.
+    private var serviceRequested = false
+    private var foregroundReached = false
+    private var stopRequested = false
+
+    @Synchronized
+    fun requestStart() {
+        active = true
+        latest = null
+        serviceRequested = true
+        foregroundReached = false
+        stopRequested = false
+    }
+
+    /** Called by the service after startForeground. True when a stop is waiting. */
+    @Synchronized
+    fun reachedForeground(): Boolean {
+        foregroundReached = true
+        if (stopRequested) serviceRequested = false
+        return stopRequested
+    }
+
+    @Synchronized
+    fun serviceEnded() {
+        active = false
+        serviceRequested = false
+    }
+
+    @Synchronized
+    fun requestStop(context: Context) {
+        active = false
+        if (!serviceRequested) return
+        if (foregroundReached) {
+            serviceRequested = false
+            context.stopService(Intent(context, ImportService::class.java))
+        } else {
+            stopRequested = true
+        }
+    }
 
     fun createChannels(context: Context) {
         val manager = NotificationManagerCompat.from(context)
@@ -97,7 +143,7 @@ object ImportNotifier {
         val (channel, title, text) = when (outcome) {
             "done" -> Triple(DONE_CHANNEL, "Project ready", "$name · ${format(fileCount)} files")
             "empty" -> Triple(DONE_CHANNEL, "No photos or videos found", name)
-            else -> Triple(ERROR_CHANNEL, "Import failed", listOfNotNull(name, error).joinToString(" · "))
+            else -> Triple(ERROR_CHANNEL, "Import failed", listOfNotNull(name, error?.lineSequence()?.first()?.take(MAX_ERROR_CHARS)).joinToString(" · "))
         }
         return base(context, channel, title)
             .setContentText(text)
@@ -105,12 +151,13 @@ object ImportNotifier {
             .build()
     }
 
-    /** True when the app has a visible top activity. A running foreground service reports a lower importance. */
+    /** True when the app has a visible top activity. A hidden app that runs a foreground service ranks lower. */
     fun isForeground(): Boolean {
         val info = ActivityManager.RunningAppProcessInfo()
         ActivityManager.getMyMemoryState(info)
         return info.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
     }
 
+    private const val MAX_ERROR_CHARS = 120
     private val PHASES = setOf("finding", "metadata", "thumbnails", "previews", "videos")
 }

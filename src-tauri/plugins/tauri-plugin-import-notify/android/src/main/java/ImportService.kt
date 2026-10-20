@@ -15,25 +15,44 @@ class ImportService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: ""
-        try {
-            ImportNotifier.createChannels(this)
-            ServiceCompat.startForeground(
-                this,
-                ImportNotifier.PROGRESS_ID,
-                ImportNotifier.progress(this, title, "preparing", 0, null),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } catch (e: Exception) {
-            Log.w(TAG, "Cannot start the foreground service", e)
-            ImportNotifier.active = false
+        ImportNotifier.createChannels(this)
+        // Progress may have been posted before this runs. Do not overwrite it.
+        val notification = ImportNotifier.latest
+            ?: ImportNotifier.progress(this, title, "preparing", 0, null)
+        if (!enterForeground(notification)) {
+            ImportNotifier.serviceEnded()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        // A stop that arrived before this point could not stop the service safely:
+        // Android crashes the app when a service stops without reaching startForeground.
+        if (ImportNotifier.reachedForeground()) {
             stopSelf()
         }
         return START_NOT_STICKY
     }
 
+    // Second try without the type drops the one thing a stricter Android version may refuse.
+    private fun enterForeground(notification: android.app.Notification): Boolean {
+        val id = ImportNotifier.PROGRESS_ID
+        return try {
+            ServiceCompat.startForeground(this, id, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "startForeground with a type failed", e)
+            try {
+                startForeground(id, notification)
+                true
+            } catch (e2: Exception) {
+                Log.w(TAG, "startForeground failed", e2)
+                false
+            }
+        }
+    }
+
     // Android 15 ends a dataSync service after about six hours and requires it to stop.
     override fun onTimeout(startId: Int, fgsType: Int) {
-        ImportNotifier.active = false
+        ImportNotifier.serviceEnded()
         stopSelf()
     }
 

@@ -1,4 +1,6 @@
 use serde::de::DeserializeOwned;
+use std::marker::PhantomData;
+
 use tauri::{plugin::PluginApi, AppHandle, Runtime};
 
 use crate::error::Result;
@@ -6,13 +8,13 @@ use crate::models::{Outcome, Phase};
 
 /// Desktop stub: an import there needs no foreground service, so every call
 /// succeeds and does nothing.
-pub struct ImportNotify<R: Runtime>(#[allow(dead_code)] AppHandle<R>);
+pub struct ImportNotify<R: Runtime>(PhantomData<fn() -> R>);
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
-    app: &AppHandle<R>,
+    _app: &AppHandle<R>,
     _api: PluginApi<R, C>,
 ) -> Result<ImportNotify<R>> {
-    Ok(ImportNotify(app.clone()))
+    Ok(ImportNotify(PhantomData))
 }
 
 impl<R: Runtime> ImportNotify<R> {

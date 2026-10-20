@@ -42,16 +42,12 @@ class FinishArgs {
     var error: String? = null
 }
 
-private const val MIN_UPDATE_GAP_MS = 500L
-
 @TauriPlugin(
     permissions = [Permission(strings = [Manifest.permission.POST_NOTIFICATIONS], alias = "notifications")]
 )
 class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
     private val context get() = activity.applicationContext
     private var title = ""
-    private var lastPhase = ""
-    private var lastPostMs = 0L
 
     // Every call resolves, even on failure: a notification problem must never fail an import.
     private fun safely(invoke: Invoke, block: () -> Unit) {
@@ -71,28 +67,27 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun stopService() {
-        ImportNotifier.active = false
-        context.stopService(Intent(context, ImportService::class.java))
-    }
-
     @Command
     fun start(invoke: Invoke) {
         val args = invoke.parseArgs(StartArgs::class.java)
         safely(invoke) {
             title = args.projectName
-            lastPhase = ""
-            lastPostMs = 0L
             ImportNotifier.createChannels(context)
-            ImportNotifier.active = true
+            NotificationManagerCompat.from(context).cancel(ImportNotifier.RESULT_ID)
+            // Android 12+ refuses to start a foreground service from the background, and the
+            // app then crashes if the service never enters the foreground. Do not try.
+            if (!ImportNotifier.isForeground()) {
+                Logger.warn("ImportNotify", "App is in the background, not starting the service")
+                return@safely
+            }
+            ImportNotifier.requestStart()
             try {
-                // Android 12+ refuses this from the background (ForegroundServiceStartNotAllowedException).
                 ContextCompat.startForegroundService(
                     context,
                     Intent(context, ImportService::class.java).putExtra(ImportService.EXTRA_TITLE, title)
                 )
             } catch (e: Exception) {
-                ImportNotifier.active = false
+                ImportNotifier.serviceEnded()
                 throw e
             }
         }
@@ -103,15 +98,9 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
         val args = invoke.parseArgs(UpdateArgs::class.java)
         safely(invoke) {
             if (!ImportNotifier.active) return@safely
-            val now = System.currentTimeMillis()
-            val last = args.total != null && args.done >= args.total!!
-            if (args.phase == lastPhase && !last && now - lastPostMs < MIN_UPDATE_GAP_MS) return@safely
-            lastPhase = args.phase
-            lastPostMs = now
-            notify(
-                ImportNotifier.PROGRESS_ID,
-                ImportNotifier.progress(context, title, args.phase, args.done, args.total)
-            )
+            val notification = ImportNotifier.progress(context, title, args.phase, args.done, args.total)
+            ImportNotifier.latest = notification
+            notify(ImportNotifier.PROGRESS_ID, notification)
         }
     }
 
@@ -119,9 +108,9 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
     fun finish(invoke: Invoke) {
         val args = invoke.parseArgs(FinishArgs::class.java)
         safely(invoke) {
-            // Read before stopping: the service is what lowers the importance of a hidden app.
+            // Read before stopping, so the answer does not depend on how fast Android re-ranks the process.
             val foreground = ImportNotifier.isForeground()
-            stopService()
+            ImportNotifier.requestStop(context)
             if (!foreground) {
                 notify(
                     ImportNotifier.RESULT_ID,
@@ -133,7 +122,7 @@ class ImportNotifyPlugin(private val activity: Activity) : Plugin(activity) {
 
     @Command
     fun stop(invoke: Invoke) {
-        safely(invoke) { stopService() }
+        safely(invoke) { ImportNotifier.requestStop(context) }
     }
 
     @Command
