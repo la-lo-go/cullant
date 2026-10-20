@@ -183,7 +183,7 @@
       selfScroll = false;
       return;
     }
-    if (settings.lockCarousel && viewLen > 0 && items.length > 0 && !dock.drag) {
+    if (settings.lockCarousel && viewLen > 0 && items.length > 0 && !draggingSelf) {
       lockScrollTs = performance.now();
       const centered = Math.round((scrollPos + viewLen / 2 - CELL / 2) / CELL);
       const idx = Math.max(0, Math.min(items.length - 1, centered));
@@ -194,16 +194,18 @@
     }
   }
   // The strip div is destroyed/recreated every time the filmstrip is hidden
-  // and shown again (the {#if} above swaps it for the peek button) and when it
+  // and shown again (the {#if} in the template swaps it for the peek button) and when it
   // changes side (the {#key}), so track its identity: a freshly (re)mounted
   // strip must always center instantly, never replaying a leftover "smooth" from
   // before, and starts from a zero scroll position.
   let lastStripEl: HTMLDivElement | null = null;
+  // Derived, so another panel's drag does not rerun the effect on each pointer move.
+  const draggingSelf = $derived(dock.drag?.panel === "filmstrip");
   const scrolledByUserJustNow = () =>
     settings.lockCarousel && performance.now() - lockScrollTs < 250;
   $effect(() => {
     // While the strip is dragged, the layout moves under it: recentre after the drop.
-    if (!strip || viewLen === 0 || dock.drag?.panel === "filmstrip") return;
+    if (!strip || viewLen === 0 || draggingSelf) return;
     if (strip !== lastStripEl) {
       lastStripEl = strip;
       hasCentered = false;

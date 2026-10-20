@@ -246,23 +246,20 @@
   /* The tree is being dragged to another side. */
   .tree.docking {
     opacity: 0.5;
+    transition: width 160ms ease-out, opacity 160ms ease-out;
   }
 
   /* The preview is at another side: the tree closes its slot, so the grid takes
      the room. The node stays mounted, because the grip in it holds the pointer
      capture of the drag. */
-  .tree.docking {
-    transition: width 160ms ease-out, opacity 160ms ease-out;
-  }
-
-  .tree.vacating {
+  .tree.docking.vacating {
     width: 0;
     opacity: 0;
     overflow: hidden;
     border-width: 0;
   }
 
-  .tree.vacating .scroll {
+  .tree.docking.vacating .scroll {
     min-width: var(--tree-w);
   }
 
