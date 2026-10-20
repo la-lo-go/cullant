@@ -49,6 +49,11 @@ tempfile = "3.27.0"
 
 # Smaller, faster release binaries (notably shrinks the Android .so, which is
 # otherwise dominated by symbols). opt-level stays at 3 to keep decode fast.
+# Dependencies are built once with optimizations and then cached. The app crate
+# stays a fast incremental build, and RAW decode and resize keep a usable speed.
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 strip = true
 lto = true
