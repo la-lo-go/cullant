@@ -8,6 +8,8 @@
   import { shortcutHint } from "$lib/keyboard/hints";
   import { formatColorLabel } from "$lib/colorLabels";
   import { tooltips } from "$lib/tooltips";
+  import { dock, isVertical, type Side } from "$lib/stores/dock.svelte";
+  import DockGrip from "./DockGrip.svelte";
   import type { CommandId } from "$lib/keyboard/keymap";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -23,8 +25,46 @@
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
   // opt-in: the parent flips `forceShow` from a toolbar toggle. `hidden` lets
   // the parent suppress the bar in the grid until there's a selection.
-  let { forceShow = false, hidden = false }: { forceShow?: boolean; hidden?: boolean } =
+  // `side` is where the bar is docked. In the grid the bar is a fixed overlay at
+  // the bottom: it has no grip and ignores the setting. `region` is the element
+  // whose edges the bar can attach to.
+  let {
+    forceShow = false,
+    hidden = false,
+    side = "bottom",
+    region,
+  }: { forceShow?: boolean; hidden?: boolean; side?: Side; region?: () => HTMLElement | null } =
     $props();
+
+  const dockable = $derived(view.mode !== "grid" && !!region);
+  const vertical = $derived(isVertical(side));
+  const orientation = $derived(vertical ? "vertical" : "horizontal");
+
+  // Size of the bar across its axis. A bar that leaves its slot during a drag
+  // measures 0, so the last real size is kept. The other orientation is not on
+  // screen: a column is as wide as its widest labelled button, a row is one button high.
+  const ROW_SIZE = 51;
+  const COLUMN_FRAME = 11;
+  const COLUMN_MIN = 60;
+  const COLUMN_MAX = 128;
+  let ownSize = 0;
+  let offsetH = $state(0);
+  let offsetW = $state(0);
+  const moving = $derived(dock.animating("actionBar"));
+  $effect(() => {
+    const size = vertical ? offsetW : offsetH;
+    if (dockable && !moving && size) ownSize = size;
+  });
+  function columnSize(): number {
+    const labelled = bar.querySelectorAll<HTMLElement>(".task, .tagbtn");
+    const widest = Math.max(0, ...Array.from(labelled, (el) => el.offsetWidth));
+    return Math.min(COLUMN_MAX, Math.max(COLUMN_MIN, widest + COLUMN_FRAME));
+  }
+  function thicknessFor(at: Side): number {
+    const column = isVertical(at);
+    if (column === vertical && ownSize) return ownSize;
+    return column ? columnSize() : ROW_SIZE;
+  }
 
   // The item the actions apply to (mirrors the keyboard path, which acts on the
   // focused item / current selection).
@@ -145,137 +185,156 @@
   }
 </script>
 
-<div class="touchbar" bind:this={bar} use:tooltips class:forced={forceShow} class:disabled={!focused && !hasSelection} class:hidden>
-  {#if hasSelection}
-    <div class="group select">
-      <button class="btn" title="Clear selection" aria-label="Clear selection" data-press="select.none" onclick={act(() => session.clearSelection(), "select.none")}>
-        <X size={20} />
-      </button>
-      {#if session.canSurvey && view.mode !== "survey"}
-        <button class="btn task" title={shortcutHint("Review selection (Survey)", "view.survey")} aria-label="Review selection" data-press="view.survey" onclick={act(() => session.openSurvey(), "view.survey")}>
-          <LayoutGrid size={18} /> Review selection
-        </button>
-      {/if}
-    </div>
+<div
+  class="touchbar {side}"
+  bind:this={bar}
+  bind:offsetHeight={offsetH}
+  bind:offsetWidth={offsetW}
+  use:tooltips
+  class:vertical
+  class:forced={forceShow}
+  class:disabled={!focused && !hasSelection}
+  class:hidden
+  class:docking={dockable && dock.drag?.panel === "actionBar"}
+  class:dock-moving={dockable && moving}
+  class:vacating={dockable && dock.vacating("actionBar")}
+  style={dockable && moving ? `--bar-size: ${thicknessFor(side)}px` : ""}
+>
+  {#if dockable}
+    <DockGrip panel="actionBar" target={region!} {thicknessFor} {orientation} />
   {/if}
-  {#if view.mode !== "grid"}
-    <div class="group nav">
-      <button class="btn" title="Previous" aria-label="Previous" data-press="nav.prev" onclick={act(() => runCommand("nav.prev"), "nav.prev")}>
-        <ChevronLeft size={22} />
-      </button>
-      <button class="btn" title="Next" aria-label="Next" data-press="nav.next" onclick={act(() => runCommand("nav.next"), "nav.next")}>
-        <ChevronRight size={22} />
-      </button>
-    </div>
-  {/if}
-
-  {#if view.mode === "viewer" || view.mode === "compare"}
-    <div class="group recovery">
-      <button class="btn" disabled={!session.canUndoRejection} aria-label="Undo last rejection" title={shortcutHint("Undo last rejection", "undo.rejection")} data-press="undo.rejection" onclick={act(() => void session.undoLastRejection(), "undo.rejection")}>
-        <Undo2 size={18} />
-      </button>
-    </div>
-  {/if}
-
-  {#each visibleBarItems as itemId (itemId)}
-    {#if itemId === "auto" && (view.mode === "viewer" || view.mode === "compare")}
-      <div class="group recovery">
-        <button class="btn task" class:active={session.autoAdvanceActive} disabled={session.capsLockActive} aria-label="Auto" aria-pressed={session.autoAdvanceActive} title={session.capsLockActive ? "Caps Lock enables keyboard auto-advance. Turn Caps Lock off to use Auto. Shift reverses keyboard auto-advance for one action." : "Auto: advance after classification. Shift reverses this setting for one action."} data-press="auto" onclick={act(toggleAutoAdvance, "auto")}>
-          <ArrowRight size={17} /> Auto
-        </button>
-      </div>
-    {:else if itemId === "moveCopy"}
-      <div class="group file-actions">
-        <button class="btn" title="Move or copy to folder" aria-label="Move or copy to folder" data-press="action.moveCopy" onclick={act(() => runCommand("action.moveCopy"), "action.moveCopy")}>
-          <FolderInput size={18} />
-        </button>
-      </div>
-    {:else if itemId === "flags"}
-      <div class="group flags">
-        <button
-          class="btn reject"
-          class:active-reject={flagActive(-1)}
-          title={`${shortcutHint("Reject", "flag.reject")}. Click again to unflag.`}
-          aria-label="Reject"
-          data-press="flag.reject"
-          onclick={act(() => runCommand(flagActive(-1) ? "flag.unflag" : "flag.reject"), "flag.reject")}
-        >
+  <div class="items">
+    {#if hasSelection}
+      <div class="group select">
+        <button class="btn" title="Clear selection" aria-label="Clear selection" data-press="select.none" onclick={act(() => session.clearSelection(), "select.none")}>
           <X size={20} />
         </button>
-        <button
-          class="btn pick"
-          class:active-pick={flagActive(1)}
-          title={`${shortcutHint("Pick", "flag.pick")}. Click again to unflag.`}
-          aria-label="Pick"
-          data-press="flag.pick"
-          onclick={act(() => runCommand(flagActive(1) ? "flag.unflag" : "flag.pick"), "flag.pick")}
-        >
-          <Check size={20} />
+        {#if session.canSurvey && view.mode !== "survey"}
+          <button class="btn task" title={shortcutHint("Review selection (Survey)", "view.survey")} aria-label="Review selection" data-press="view.survey" onclick={act(() => session.openSurvey(), "view.survey")}>
+            <LayoutGrid size={18} /> <span class="tasklabel">Review selection</span>
+          </button>
+        {/if}
+      </div>
+    {/if}
+    {#if view.mode !== "grid"}
+      <div class="group nav">
+        <button class="btn" title="Previous" aria-label="Previous" data-press="nav.prev" onclick={act(() => runCommand("nav.prev"), "nav.prev")}>
+          <ChevronLeft size={22} />
         </button>
-      </div>
-    {:else if itemId === "rating"}
-      <div class="group stars">
-        {#each [1, 2, 3, 4, 5] as n (n)}
-          <button
-            class="btn star"
-            class:on={rating >= n}
-            title={`Rate ${n}`}
-            aria-label={`Rate ${n}`}
-            data-press={`rate.${n}`}
-            onclick={act(() => rate(n), `rate.${n}`)}
-          >
-            <Star size={18} fill={rating >= n ? "currentColor" : "none"} />
-          </button>
-        {/each}
-      </div>
-    {:else if itemId === "labels"}
-      <div class="group labels">
-        {#each Object.entries(labelColors) as [name, color] (name)}
-          <button
-            class="btn swatchbtn"
-            class:active={labelActive(name)}
-            title={`${formatColorLabel(name)} label`}
-            aria-label={`${formatColorLabel(name)} label`}
-            style="--c: {color}"
-            data-press={`label.${name.toLowerCase()}`}
-            onclick={act(() => session.setLabel(labelActive(name) ? null : name), `label.${name.toLowerCase()}`)}
-          >
-            <span class="swatch"></span>
-          </button>
-        {/each}
-      </div>
-    {:else if itemId === "tags"}
-      {#if scopedTags.length > 0}
-        <div class="group tags">
-          {#each scopedTags as tag (tag.id)}
-            <button
-              class="btn tagbtn"
-              class:active={tagActive(tag.id)}
-              title={`Toggle tag: ${tag.name}`}
-              style="--c: {tag.color ?? '#888'}"
-              data-press={`tag.${tag.id}`}
-              onclick={act(() => session.toggleTag(tag.id), `tag.${tag.id}`)}
-            >
-              <span class="tagdot"></span>
-              <span class="taglabel">{tag.name}</span>
-            </button>
-          {/each}
-        </div>
-      {/if}
-    {:else if itemId === "clear"}
-      <div class="group clear">
-        <button
-          class="btn"
-          title="Clear all classification (rating, flag, label, tags)"
-          aria-label="Clear all classification"
-          data-press="clear"
-          onclick={act(() => session.clearClassification(), "clear")}
-        >
-          <Eraser size={20} />
+        <button class="btn" title="Next" aria-label="Next" data-press="nav.next" onclick={act(() => runCommand("nav.next"), "nav.next")}>
+          <ChevronRight size={22} />
         </button>
       </div>
     {/if}
-  {/each}
+
+    {#if view.mode === "viewer" || view.mode === "compare"}
+      <div class="group recovery">
+        <button class="btn" disabled={!session.canUndoRejection} aria-label="Undo last rejection" title={shortcutHint("Undo last rejection", "undo.rejection")} data-press="undo.rejection" onclick={act(() => void session.undoLastRejection(), "undo.rejection")}>
+          <Undo2 size={18} />
+        </button>
+      </div>
+    {/if}
+
+    {#each visibleBarItems as itemId (itemId)}
+      {#if itemId === "auto" && (view.mode === "viewer" || view.mode === "compare")}
+        <div class="group recovery">
+          <button class="btn task" class:active={session.autoAdvanceActive} disabled={session.capsLockActive} aria-label="Auto" aria-pressed={session.autoAdvanceActive} title={session.capsLockActive ? "Caps Lock enables keyboard auto-advance. Turn Caps Lock off to use Auto. Shift reverses keyboard auto-advance for one action." : "Auto: advance after classification. Shift reverses this setting for one action."} data-press="auto" onclick={act(toggleAutoAdvance, "auto")}>
+            <ArrowRight size={17} /> <span class="tasklabel">Auto</span>
+          </button>
+        </div>
+      {:else if itemId === "moveCopy"}
+        <div class="group file-actions">
+          <button class="btn" title="Move or copy to folder" aria-label="Move or copy to folder" data-press="action.moveCopy" onclick={act(() => runCommand("action.moveCopy"), "action.moveCopy")}>
+            <FolderInput size={18} />
+          </button>
+        </div>
+      {:else if itemId === "flags"}
+        <div class="group flags">
+          <button
+            class="btn reject"
+            class:active-reject={flagActive(-1)}
+            title={`${shortcutHint("Reject", "flag.reject")}. Click again to unflag.`}
+            aria-label="Reject"
+            data-press="flag.reject"
+            onclick={act(() => runCommand(flagActive(-1) ? "flag.unflag" : "flag.reject"), "flag.reject")}
+          >
+            <X size={20} />
+          </button>
+          <button
+            class="btn pick"
+            class:active-pick={flagActive(1)}
+            title={`${shortcutHint("Pick", "flag.pick")}. Click again to unflag.`}
+            aria-label="Pick"
+            data-press="flag.pick"
+            onclick={act(() => runCommand(flagActive(1) ? "flag.unflag" : "flag.pick"), "flag.pick")}
+          >
+            <Check size={20} />
+          </button>
+        </div>
+      {:else if itemId === "rating"}
+        <div class="group stars">
+          {#each [1, 2, 3, 4, 5] as n (n)}
+            <button
+              class="btn star"
+              class:on={rating >= n}
+              title={`Rate ${n}`}
+              aria-label={`Rate ${n}`}
+              data-press={`rate.${n}`}
+              onclick={act(() => rate(n), `rate.${n}`)}
+            >
+              <Star size={18} fill={rating >= n ? "currentColor" : "none"} />
+            </button>
+          {/each}
+        </div>
+      {:else if itemId === "labels"}
+        <div class="group labels">
+          {#each Object.entries(labelColors) as [name, color] (name)}
+            <button
+              class="btn swatchbtn"
+              class:active={labelActive(name)}
+              title={`${formatColorLabel(name)} label`}
+              aria-label={`${formatColorLabel(name)} label`}
+              style="--c: {color}"
+              data-press={`label.${name.toLowerCase()}`}
+              onclick={act(() => session.setLabel(labelActive(name) ? null : name), `label.${name.toLowerCase()}`)}
+            >
+              <span class="swatch"></span>
+            </button>
+          {/each}
+        </div>
+      {:else if itemId === "tags"}
+        {#if scopedTags.length > 0}
+          <div class="group tags">
+            {#each scopedTags as tag (tag.id)}
+              <button
+                class="btn tagbtn"
+                class:active={tagActive(tag.id)}
+                title={`Toggle tag: ${tag.name}`}
+                style="--c: {tag.color ?? '#888'}"
+                data-press={`tag.${tag.id}`}
+                onclick={act(() => session.toggleTag(tag.id), `tag.${tag.id}`)}
+              >
+                <span class="tagdot"></span>
+                <span class="taglabel">{tag.name}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      {:else if itemId === "clear"}
+        <div class="group clear">
+          <button
+            class="btn"
+            title="Clear all classification (rating, flag, label, tags)"
+            aria-label="Clear all classification"
+            data-press="clear"
+            onclick={act(() => session.clearClassification(), "clear")}
+          >
+            <Eraser size={20} />
+          </button>
+        </div>
+      {/if}
+    {/each}
+  </div>
 </div>
 
 <style>
@@ -283,19 +342,122 @@
      (`.forced`) reveals it. Layout lives here so both paths share it. */
   .touchbar {
     display: none;
+    box-sizing: border-box;
+    flex: none;
     align-items: center;
-    /* Keep the button groups together and centered, with the slack split to the
-       two sides. `safe` falls back to start-alignment when the groups overflow a
-       narrow screen, so the leading ones stay reachable while it scrolls. */
-    justify-content: safe center;
     gap: 8px;
-    overflow-x: auto;
-    flex-wrap: nowrap;
     padding: 4px calc(10px + var(--safe-right)) calc(4px + var(--safe-bottom))
       calc(10px + var(--safe-left));
     background: var(--surface);
     border-top: 1px solid var(--border-strong);
+  }
+
+  /* The border sits on the inner edge, the one that faces the view. */
+  .touchbar.top,
+  .touchbar.left {
+    order: -1;
+  }
+
+  .touchbar.top {
+    padding-bottom: 4px;
+    border-top: none;
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  .touchbar.left,
+  .touchbar.right {
+    flex-direction: column;
+    align-items: stretch;
+    width: max-content;
+    min-width: 60px;
+    max-width: 128px;
+    padding: 6px 6px calc(6px + var(--safe-bottom));
+    border-top: none;
+  }
+
+  .touchbar.left {
+    padding-left: calc(6px + var(--safe-left));
+    border-right: 1px solid var(--border-strong);
+  }
+
+  .touchbar.right {
+    padding-right: calc(6px + var(--safe-right));
+    border-left: 1px solid var(--border-strong);
+  }
+
+  /* Keep the button groups together and centered, with the slack split to the
+     two sides. `safe` falls back to start-alignment when the groups overflow a
+     narrow screen, so the leading ones stay reachable while it scrolls. */
+  .items {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: safe center;
+    gap: 8px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
     scrollbar-width: none;
+  }
+
+  .vertical .items {
+    flex-direction: column;
+    align-items: stretch;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .items::-webkit-scrollbar {
+    display: none;
+  }
+
+  .touchbar :global(.dock-grip) {
+    color: #8a8a93;
+  }
+
+  .vertical :global(.dock-grip) {
+    align-self: center;
+  }
+
+  /* On a drag, and on the way back after a cancel. The slot has an explicit size
+     then, because a size can only move from one number to another. */
+  .touchbar.dock-moving {
+    height: var(--bar-size);
+    transition:
+      height var(--dock-motion),
+      width var(--dock-motion),
+      opacity var(--dock-motion),
+      padding var(--dock-motion),
+      border-width var(--dock-motion);
+  }
+
+  .touchbar.vertical.dock-moving {
+    width: var(--bar-size);
+    min-width: 0;
+    height: auto;
+  }
+
+  .touchbar.docking {
+    opacity: 0.5;
+  }
+
+  /* The preview is at another side: the bar closes its slot and the view takes
+     the room. The node stays mounted, because the grip in it holds the pointer
+     capture of the drag. */
+  .touchbar.docking.vacating {
+    height: 0;
+    opacity: 0;
+    overflow: hidden;
+    border-width: 0;
+    padding-block: 0;
+  }
+
+  .touchbar.docking.vacating.vertical {
+    width: 0;
+    height: auto;
+    min-width: 0;
+    padding-inline: 0;
   }
 
   @media (pointer: coarse) {
@@ -309,10 +471,6 @@
   }
 
   .touchbar.hidden {
-    display: none;
-  }
-
-  .touchbar::-webkit-scrollbar {
     display: none;
   }
 
@@ -333,6 +491,18 @@
     border-left: 1px solid var(--border);
   }
 
+  .vertical .group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .vertical .group + .group {
+    padding-left: 0;
+    padding-top: 10px;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
   .btn {
     display: inline-flex;
     align-items: center;
@@ -345,6 +515,25 @@
     color: #e8e8e8;
     padding: 0;
     touch-action: manipulation;
+  }
+
+  /* In a column the buttons fill the bar, so they need no minimum width. */
+  .vertical .btn {
+    min-width: 0;
+    min-height: 36px;
+  }
+
+  .vertical .star,
+  .vertical .swatchbtn {
+    min-height: 30px;
+  }
+
+  @media (pointer: coarse) {
+    .vertical .btn,
+    .vertical .star,
+    .vertical .swatchbtn {
+      min-height: 42px;
+    }
   }
 
   .btn:active {
@@ -366,6 +555,28 @@
     white-space: nowrap;
     font-family: inherit;
     font-size: 12px;
+  }
+
+  /* Two lines in a column, then an ellipsis. The button keeps its title. */
+  .vertical .task {
+    justify-content: flex-start;
+    padding: 4px 8px;
+    text-align: left;
+  }
+
+  .vertical .tasklabel {
+    min-width: 0;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .vertical .task :global(svg) {
+    flex: none;
   }
 
   .star {
@@ -435,7 +646,15 @@
     flex: none;
   }
 
+  .vertical .tagbtn {
+    justify-content: flex-start;
+    padding: 0 8px;
+  }
+
   .taglabel {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
     font-size: 12px;
     white-space: nowrap;
   }
