@@ -73,7 +73,7 @@ npm run android:dev          # fast debug APK on the USB device, as "Cullant Dev
   - It builds a debug APK for `aarch64` only. Dependencies are optimized (`[profile.dev.package."*"]`), so decode speed stays usable. The app crate builds incrementally.
   - It skips the frontend build when no frontend input is newer than `build/index.html`.
   - It finds the SDK, NDK and JDK itself (`local.properties`, then the usual install paths). You do not export variables.
-  - The debug build has the ID `org.cullant.app.dev`. It installs next to the signed release build, so it never replaces it or deletes its data. Its projects, private database and SAF grants are separate.
+  - The debug build has the ID `org.cullant.app.dev`. It installs next to the signed release build, so it never replaces it or deletes its data. Its projects, private database and SAF grants are separate. The suffix is in `app/dev-app-id.gradle`, because `tauri android build` removes an `applicationIdSuffix` line from `build.gradle.kts`.
   - The first run after a clean `target/` takes about 15 minutes, because it builds every dependency once. The optimized dependencies also apply to desktop `tauri dev` and `cargo test`.
 
 - Synthetic test data: `cd src-tauri && cargo run --release --example gen_testdata -- C:\dev\cullant-testdata 600`. Good for counts, ordering and state; useless for the decoder.
