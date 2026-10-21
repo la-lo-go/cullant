@@ -124,6 +124,7 @@
   import Heart from "@lucide/svelte/icons/heart";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import DatabaseBackup from "@lucide/svelte/icons/database-backup";
+  import DatabaseZap from "@lucide/svelte/icons/database-zap";
   import BellRing from "@lucide/svelte/icons/bell-ring";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -372,12 +373,12 @@
   };
   const resetDestination = {
     label: "Reset all settings",
-    info: "Restore the settings in this dialog to their defaults.",
+    info: "Put every setting back to its default.",
     keywords: "reset defaults preferences restore",
   };
   const reimportDestination = {
     label: "Reimport this project",
-    info: "Clear the project catalog and read its folder again.",
+    info: "Erase the stored data and read the folder again. Ratings and tags are lost unless XMP files hold them.",
     keywords: "reimport rebuild reset project database repair recover",
   };
   const showSupport = $derived(matches(supportDestination, query));
@@ -820,37 +821,51 @@
           {/if}
 
           {#if panelRows.length > 0 || destinations.length > 0}
-            <div class="jump">
-              {#each panelRows as s (s.id)}
-                {@render settingRow(s)}
-              {/each}
-              {#each destinations as item (item.label)}
-                <button class="wide" onclick={releasing(item.go)}>
-                  <item.icon size={14} />
-                  <span>{item.label}</span>
-                  <ChevronRight size={14} />
-                </button>
-              {/each}
-            </div>
+            <section class="group section">
+              <header><span class="gname">Customize</span></header>
+              <div class="jump">
+                {#each panelRows as s (s.id)}
+                  {@render settingRow(s)}
+                {/each}
+                {#each destinations as item (item.label)}
+                  <button class="wide" onclick={releasing(item.go)}>
+                    <item.icon size={14} />
+                    <span>{item.label}</span>
+                    <ChevronRight size={14} />
+                  </button>
+                {/each}
+              </div>
+            </section>
           {/if}
 
-          {#if showSupport}
-            <!-- Deliberately not a third grey row like the two above. Nothing funds
-                 this app, so the one ask it makes gets to be seen. -->
-            <button class="support" onclick={releasing(onshowsupport)}>
-              <Heart size={20} />
-              <span class="s-text">
-                <span class="s-title">Support Cullant</span>
-                <span class="s-note">
-                  Support development with a donation or help with feedback.
-                </span>
-              </span>
-              <ChevronRight size={16} />
-            </button>
+          {#if showReset || showReimport}
+            <section class="group section">
+              <header><span class="gname">Maintenance</span></header>
+              <div class="tasks">
+                {#if showReset}
+                  <button class="wide task" onclick={releasing(() => (confirmResetAll = true))}>
+                    <RotateCcw size={16} />
+                    <span class="t-text">
+                      <span class="t-title">Reset all settings</span>
+                      <span class="t-note">{resetDestination.info}</span>
+                    </span>
+                  </button>
+                {/if}
+                {#if showReimport}
+                  <button class="wide task warn" onclick={releasing(() => (confirmReimport = true))}>
+                    <DatabaseZap size={16} />
+                    <span class="t-text">
+                      <span class="t-title">Reimport this project</span>
+                      <span class="t-note">{reimportDestination.info}</span>
+                    </span>
+                  </button>
+                {/if}
+              </div>
+            </section>
           {/if}
 
           {#if elsewhere.length > 0}
-              <section class="group elsewhere">
+              <section class="group section">
                 <header><span class="gname">Elsewhere</span></header>
                 {#each elsewhere as item (item.label)}
                   <button class="out" onclick={releasing(item.go)}>
@@ -867,24 +882,21 @@
             </p>
           {/if}
 
-            {#if showReset}
-              <button
-                class="reset-all"
-                onclick={releasing(() => (confirmResetAll = true))}
-              >
-                <RotateCcw size={13} />
-                <span>Reset all settings</span>
-              </button>
-            {/if}
-            {#if showReimport}
-              <!-- The escape hatch for a project that has gone strange. Down here
-                   with the other reset, because it is one: it throws away what
-                   Cullant stored, not a preference. -->
-              <button class="reset-all" onclick={releasing(() => (confirmReimport = true))}>
-                <DatabaseBackup size={13} />
-                <span>Reimport this project…</span>
-              </button>
-            {/if}
+          {#if showSupport}
+            <!-- Deliberately not a grey row like the ones above. Nothing funds
+                 this app, so the one ask it makes gets to be seen. -->
+            <button class="support" onclick={releasing(onshowsupport)}>
+              <Heart size={20} />
+              <span class="s-text">
+                <span class="s-title">Support Cullant</span>
+                <span class="s-note">
+                  Support development with a donation or help with feedback.
+                </span>
+              </span>
+              <ChevronRight size={16} />
+            </button>
+          {/if}
+
           {#if !query}
             <p class="version">Cullant {appVersion || "…"}</p>
           {/if}
@@ -1210,6 +1222,45 @@
     opacity: 0.5;
   }
 
+  .tasks {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .task {
+    gap: 12px;
+    padding: 10px 12px;
+  }
+
+  .t-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .t-title {
+    font-size: 12.5px;
+  }
+
+  .t-note {
+    font-size: 11.5px;
+    line-height: 1.4;
+    opacity: 0.6;
+  }
+
+  .task :global(svg:first-child) {
+    flex: none;
+    opacity: 0.8;
+  }
+
+  .task.warn :global(svg:first-child) {
+    color: #ffb86b;
+    opacity: 1;
+  }
+
   .support {
     display: flex;
     align-items: center;
@@ -1254,7 +1305,7 @@
     opacity: 0.7;
   }
 
-  .elsewhere {
+  .section {
     margin-top: 16px;
     padding-top: 10px;
     border-top: 1px solid var(--border);
@@ -1311,21 +1362,6 @@
     text-align: center;
     font-size: 12.5px;
     opacity: 0.6;
-  }
-
-  .reset-all {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 12px;
-    padding: 6px 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: none;
-    color: inherit;
-    font-size: 11.5px;
-    opacity: 0.8;
-    cursor: pointer;
   }
 
   .sub {
