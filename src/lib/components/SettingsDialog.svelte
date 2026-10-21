@@ -803,6 +803,21 @@
     {:else}
       <ScrollArea bind:element={list} onscroll={() => (listScroll = list?.scrollTop ?? 0)}>
         <div class="content">
+          {#if showSupport}
+            <!-- Deliberately not a grey row like the ones above. Nothing funds
+                 this app, so the one ask it makes comes first and gets to be seen. -->
+            <button class="support" onclick={releasing(onshowsupport)}>
+              <Heart size={20} />
+              <span class="s-text">
+                <span class="s-title">Support Cullant</span>
+                <span class="s-note">
+                  Support development with a donation or help with feedback.
+                </span>
+              </span>
+              <ChevronRight size={16} />
+            </button>
+          {/if}
+
           {#if visibleGroups.length === 0 && panelRows.length === 0 && destinations.length === 0 && elsewhere.length === 0 && !showSupport && !showReset && !showReimport}
             <p class="empty">Nothing matches “{query}”.</p>
           {:else if visibleGroups.length > 0}
@@ -880,21 +895,6 @@
             <p class="hint tail">
               Pull down on the grid to rescan the project now.
             </p>
-          {/if}
-
-          {#if showSupport}
-            <!-- Deliberately not a grey row like the ones above. Nothing funds
-                 this app, so the one ask it makes gets to be seen. -->
-            <button class="support" onclick={releasing(onshowsupport)}>
-              <Heart size={20} />
-              <span class="s-text">
-                <span class="s-title">Support Cullant</span>
-                <span class="s-note">
-                  Support development with a donation or help with feedback.
-                </span>
-              </span>
-              <ChevronRight size={16} />
-            </button>
           {/if}
 
           {#if !query}
@@ -1266,7 +1266,7 @@
     align-items: center;
     gap: 12px;
     width: 100%;
-    margin-top: 10px;
+    margin-top: 14px;
     padding: 12px 14px;
     border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
     border-radius: 10px;
