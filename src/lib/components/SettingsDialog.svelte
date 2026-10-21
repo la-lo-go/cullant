@@ -24,6 +24,7 @@
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import SettingsPanel from "./SettingsPanel.svelte";
   import InfoTip from "./InfoTip.svelte";
+  import SegmentedControl from "./SegmentedControl.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
@@ -511,6 +512,16 @@
         <span class="switch" class:on={s.get()}>
           <span class="knob"></span>
         </span>
+      {:else if s.kind === "choice" && s.display === "segments"}
+        <SegmentedControl
+          label={s.label}
+          options={s.options}
+          value={s.get()}
+          onselect={(v, e) => {
+            s.set(v);
+            releaseFocus(e);
+          }}
+        />
       {:else if s.kind === "choice"}
         <select
           aria-label={s.label}

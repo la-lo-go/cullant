@@ -30,6 +30,9 @@ import CircleDot from "@lucide/svelte/icons/circle-dot";
 import Palette from "@lucide/svelte/icons/palette";
 import FolderSync from "@lucide/svelte/icons/folder-sync";
 import Bell from "@lucide/svelte/icons/bell";
+import PanelLeft from "@lucide/svelte/icons/panel-left";
+import PanelRight from "@lucide/svelte/icons/panel-right";
+import PanelTop from "@lucide/svelte/icons/panel-top";
 import { IS_ANDROID } from "./platform";
 
 export type GroupId = "culling" | "appearance" | "quality" | "bursts" | "project" | "folderCopy" | "notifications";
@@ -86,7 +89,10 @@ export interface ToggleSetting extends SettingBase {
 
 export interface ChoiceSetting extends SettingBase {
   kind: "choice";
-  options: { value: string; label: string }[];
+  options: { value: string; label: string; icon?: typeof Zap }[];
+  /** How the dialog draws the choice. This is the one rule for it: a list of
+   *  2 to 4 short options declares "segments", and every other list is a menu. */
+  display?: "segments";
   /** Stringified, because that is what a <select> deals in. Each declaration
    *  parses it back to whatever the store wants. */
   get(): string;
@@ -195,6 +201,15 @@ const BADGE_DEFAULTS = [
   DEFAULTS.filmstripShowTags,
 ];
 
+/** Left, Top, Bottom, Right: the order the sides sit around a window. */
+const SIDE_ORDER: Side[] = ["left", "top", "bottom", "right"];
+const SIDE_ICONS: Record<Side, typeof Zap> = {
+  left: PanelLeft,
+  top: PanelTop,
+  bottom: PanelBottom,
+  right: PanelRight,
+};
+
 function dockChoice(panel: DockPanel): ChoiceSetting {
   return {
     kind: "choice",
@@ -203,7 +218,12 @@ function dockChoice(panel: DockPanel): ChoiceSetting {
     label: `${DOCK_LABELS[panel]} position`,
     info: `The side where the ${DOCK_LABELS[panel].toLowerCase()} sits. You can also drag the grip on the panel to move it.`,
     keywords: "dock move side left right top bottom layout",
-    options: DOCK_SIDES[panel].map((side) => ({ value: side, label: SIDE_LABELS[side] })),
+    display: "segments",
+    options: SIDE_ORDER.filter((side) => DOCK_SIDES[panel].includes(side)).map((side) => ({
+      value: side,
+      label: SIDE_LABELS[side],
+      icon: SIDE_ICONS[side],
+    })),
     get: () => dock[panel],
     set: (v) => dock.set(panel, v as Side),
     modified: () => dock[panel] !== DOCK_DEFAULTS[panel],
@@ -373,6 +393,7 @@ export const SETTINGS: Setting[] = [
     label: "Threshold",
     info: "How the burst threshold is chosen. Adaptive reads the shoot's own rhythm and falls back to the fixed gap when the intervals show no clear split, because a sports shoot and a wedding do not photograph alike.",
     keywords: "adaptive automatic fixed gap",
+    display: "segments",
     options: [
       { value: "fixed", label: "Fixed" },
       { value: "adaptive", label: "Adaptive" },
