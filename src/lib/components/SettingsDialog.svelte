@@ -1266,7 +1266,7 @@
     align-items: center;
     gap: 12px;
     width: 100%;
-    margin-top: 14px;
+    margin: 14px 0 8px;
     padding: 12px 14px;
     border: 1px solid var(--border);
     border-radius: 10px;
