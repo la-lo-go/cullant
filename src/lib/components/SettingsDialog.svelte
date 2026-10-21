@@ -25,6 +25,7 @@
   import SettingsPanel from "./SettingsPanel.svelte";
   import InfoTip from "./InfoTip.svelte";
   import SegmentedControl from "./SegmentedControl.svelte";
+  import MenuSelect from "./MenuSelect.svelte";
   import { catalog } from "../stores/catalog.svelte";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
@@ -279,7 +280,7 @@
     };
   }
 
-  // Preview quality invalidates every generated preview, so the select never
+  // Preview quality invalidates every generated preview, so the menu never
   // applies straight away: it parks the choice here and waits for a confirm.
   let pendingQuality = $state<number | null>(null);
   let previewBusy = $state(false);
@@ -292,14 +293,8 @@
       .catch(() => (appVersion = "unknown"));
   });
 
-  function changePreviewQuality(e: Event) {
-    const select = e.currentTarget as HTMLSelectElement;
-    releaseFocus(e);
-    const next = Number(select.value);
-    if (next === settings.previewQuality) return;
-    // Keep showing the value still in force until the change is confirmed.
-    select.value = String(settings.previewQuality);
-    pendingQuality = next;
+  function requestPreviewQuality(next: number) {
+    if (next !== settings.previewQuality) pendingQuality = next;
   }
 
   async function applyPreviewQuality() {
@@ -523,26 +518,29 @@
           }}
         />
       {:else if s.kind === "choice"}
-        <select
-          aria-label={s.label}
+        <MenuSelect
+          label={s.label}
+          options={s.options}
           value={s.get()}
-          onchange={releasing((e) => s.set(e.currentTarget.value))}
-        >
-          {#each s.options as o (o.value)}
-            <option value={o.value}>{o.label}</option>
-          {/each}
-        </select>
+          onselect={(v, e) => {
+            s.set(v);
+            releaseFocus(e);
+          }}
+        />
       {:else if s.slot === "previewQuality"}
-        <select
-          aria-label={s.label}
+        <MenuSelect
+          label={s.label}
           disabled={previewBusy}
-          value={settings.previewQuality}
-          onchange={changePreviewQuality}
-        >
-          {#each PREVIEW_QUALITY_CHOICES as choice (choice)}
-            <option value={choice}>{choice} px · {PREVIEW_QUALITY_LABELS[choice]}</option>
-          {/each}
-        </select>
+          options={PREVIEW_QUALITY_CHOICES.map((c) => ({
+            value: String(c),
+            label: `${c} px · ${PREVIEW_QUALITY_LABELS[c]}`,
+          }))}
+          value={String(settings.previewQuality)}
+          onselect={(v, e) => {
+            releaseFocus(e);
+            requestPreviewQuality(Number(v));
+          }}
+        />
       {:else if s.slot === "copyNow"}
         <button class="act" disabled={copyBusy} aria-busy={copyBusy} onclick={releasing(copyNow)}>
           {#if copyBusy}
