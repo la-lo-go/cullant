@@ -9,6 +9,7 @@
    */
   import { view } from "../stores/view.svelte";
   import { keepClamped } from "../popover";
+  import ScrollArea from "./ScrollArea.svelte";
 
   const NARROW_QUERY = "(max-width: 600px)";
   let narrow = $state(false);
@@ -72,10 +73,14 @@
     <div class="dim" aria-hidden="true"></div>
   {/if}
   <div class="pop" class:sheet={narrow} bind:this={popEl} role="tooltip">
-    {#if narrow}
-      <span class="title">{view.infoTip.title}</span>
-    {/if}
-    <p>{view.infoTip.text}</p>
+    <ScrollArea>
+      <div class="text">
+        {#if narrow}
+          <span class="title">{view.infoTip.title}</span>
+        {/if}
+        <p>{view.infoTip.text}</p>
+      </div>
+    </ScrollArea>
   </div>
 {/if}
 
@@ -108,8 +113,8 @@
     z-index: 91;
     width: 300px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
-    overflow-y: auto;
-    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
     background: #2c2c33;
     border: 1px solid var(--border-strong);
     border-radius: 8px;
@@ -124,9 +129,16 @@
     width: auto;
     max-width: none;
     max-height: calc(100dvh - var(--dialog-edge-margin) * 2);
-    padding: 16px 18px calc(20px + var(--inset-bottom));
     border-width: 1px 0 0;
     border-radius: 14px 14px 0 0;
+  }
+
+  .text {
+    padding: 10px 12px;
+  }
+
+  .sheet .text {
+    padding: 16px 18px calc(20px + var(--inset-bottom));
   }
 
   .title {

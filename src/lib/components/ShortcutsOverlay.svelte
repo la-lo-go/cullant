@@ -9,6 +9,7 @@
   } from "../keyboard/keymap";
   import X from "@lucide/svelte/icons/x";
   import { modalFocus } from "../modal";
+  import ScrollArea from "./ScrollArea.svelte";
 
   let { onclose }: { onclose: () => void } = $props();
 
@@ -102,33 +103,35 @@
         <X size={18} />
       </button>
     </header>
-    <div class="sections">
-      {#each sections as section}
-        <section>
-          <h3>{section.category}</h3>
-          <div class="rows">
-            {#each section.rows as row}
-              <span class="title">{row.title}</span>
-              <span class="keys">
-                {#if row.bindings.length === 0}
-                  <span class="unbound">—</span>
-                {:else}
-                  {#each row.bindings as binding, bi}
-                    {#if bi > 0}<span class="sep">/</span>{/if}
-                    <span class="combo">
-                      {#each keyChips(binding) as chip, ci}
-                        {#if ci > 0}<span class="plus">+</span>{/if}
-                        <kbd>{chip}</kbd>
-                      {/each}
-                    </span>
-                  {/each}
-                {/if}
-              </span>
-            {/each}
-          </div>
-        </section>
-      {/each}
-    </div>
+    <ScrollArea>
+      <div class="sections">
+        {#each sections as section}
+          <section>
+            <h3>{section.category}</h3>
+            <div class="rows">
+              {#each section.rows as row}
+                <span class="title">{row.title}</span>
+                <span class="keys">
+                  {#if row.bindings.length === 0}
+                    <span class="unbound">—</span>
+                  {:else}
+                    {#each row.bindings as binding, bi}
+                      {#if bi > 0}<span class="sep">/</span>{/if}
+                      <span class="combo">
+                        {#each keyChips(binding) as chip, ci}
+                          {#if ci > 0}<span class="plus">+</span>{/if}
+                          <kbd>{chip}</kbd>
+                        {/each}
+                      </span>
+                    {/each}
+                  {/if}
+                </span>
+              {/each}
+            </div>
+          </section>
+        {/each}
+      </div>
+    </ScrollArea>
   </div>
 </div>
 
@@ -171,7 +174,6 @@
   }
 
   .sections {
-    overflow-y: auto;
     /* Pack sections into responsive columns so the long list stays compact. */
     columns: 2;
     column-gap: 28px;

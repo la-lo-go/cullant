@@ -6,6 +6,7 @@
   import SettingsPanel from "./SettingsPanel.svelte";
   import { COMMANDS, formatKey, isModifierKey, normalizeKey } from "../keyboard/keymap";
   import { keymap } from "../keyboard/dispatcher.svelte";
+  import ScrollArea from "./ScrollArea.svelte";
 
   let { onclose, onback }: { onclose: () => void; onback?: () => void } = $props();
 
@@ -145,30 +146,32 @@
       while recording clears a shortcut.
     </p>
 
-    <div class="list">
-      {#each tags.all as tag, i}
-        <span class="dot" style="background: {tag.color ?? '#888'}"></span>
-        <span class="name">{i + 1}. {tag.name}</span>
-        <select aria-label={`Scope for ${tag.name}`} value={String(tag.scope)} disabled={saving} onchange={(e) => setScope(tag, e)}>
-          {#each scopeNames as s, v}
-            <option value={String(v)}>{s}</option>
-          {/each}
-        </select>
-        <button class="key" aria-label={`Change ${tag.name} shortcut`} title={`Change shortcut for ${tag.name}`} class:waiting={recording === tag.id} disabled={saving} onclick={() => recordShortcut(tag)}>
-          {recording === tag.id ? "press key…" : (tag.shortcut ? formatKey(tag.shortcut) : "—")}
-        </button>
-        <button class="edit" title="Edit tag" aria-label={`Edit ${tag.name}`} disabled={saving} onclick={() => edit(tag)}><Pencil size={14} /></button>
-        <button class="del" title="Delete tag" aria-label={`Delete ${tag.name}`} disabled={saving} onclick={() => remove(tag)}><Trash2 size={14} /></button>
-        {#if editing === tag.id}
-          <form class="edit-row" onsubmit={(e) => { e.preventDefault(); void saveEdit(); }}>
-            <input aria-label="Tag name" use:focusName bind:value={editName} disabled={saving} />
-            <input type="color" aria-label="Tag color" bind:value={editColor} disabled={saving} />
-            <button type="submit" disabled={!editName.trim() || saving}>{saving ? "Saving…" : "Save"}</button>
-            <button type="button" disabled={saving} onclick={() => { editing = null; error = ""; }}>Cancel</button>
-          </form>
-        {/if}
-      {/each}
-    </div>
+    <ScrollArea>
+      <div class="list">
+        {#each tags.all as tag, i}
+          <span class="dot" style="background: {tag.color ?? '#888'}"></span>
+          <span class="name">{i + 1}. {tag.name}</span>
+          <select aria-label={`Scope for ${tag.name}`} value={String(tag.scope)} disabled={saving} onchange={(e) => setScope(tag, e)}>
+            {#each scopeNames as s, v}
+              <option value={String(v)}>{s}</option>
+            {/each}
+          </select>
+          <button class="key" aria-label={`Change ${tag.name} shortcut`} title={`Change shortcut for ${tag.name}`} class:waiting={recording === tag.id} disabled={saving} onclick={() => recordShortcut(tag)}>
+            {recording === tag.id ? "press key…" : (tag.shortcut ? formatKey(tag.shortcut) : "—")}
+          </button>
+          <button class="edit" title="Edit tag" aria-label={`Edit ${tag.name}`} disabled={saving} onclick={() => edit(tag)}><Pencil size={14} /></button>
+          <button class="del" title="Delete tag" aria-label={`Delete ${tag.name}`} disabled={saving} onclick={() => remove(tag)}><Trash2 size={14} /></button>
+          {#if editing === tag.id}
+            <form class="edit-row" onsubmit={(e) => { e.preventDefault(); void saveEdit(); }}>
+              <input aria-label="Tag name" use:focusName bind:value={editName} disabled={saving} />
+              <input type="color" aria-label="Tag color" bind:value={editColor} disabled={saving} />
+              <button type="submit" disabled={!editName.trim() || saving}>{saving ? "Saving…" : "Save"}</button>
+              <button type="button" disabled={saving} onclick={() => { editing = null; error = ""; }}>Cancel</button>
+            </form>
+          {/if}
+        {/each}
+      </div>
+    </ScrollArea>
 
     <div class="create">
       <input aria-label="New tag name" placeholder="New tag name…" bind:value={newName} onkeydown={(e) => e.key === "Enter" && create()} />
@@ -205,7 +208,6 @@
     grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
     gap: 6px 10px;
     align-items: center;
-    overflow-y: auto;
   }
 
   .dot {

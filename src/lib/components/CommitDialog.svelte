@@ -25,6 +25,7 @@
   import X from "@lucide/svelte/icons/x";
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
+  import ScrollArea from "./ScrollArea.svelte";
 
   let plan = $state<CommitPlan | null>(null);
   let running = $state(false);
@@ -629,263 +630,273 @@
       </button>
     </div>
 
-    {#if tab === "history"}
-      {#if commits === null}
-        <p class="loading">Loading…</p>
-      {:else if commits.length === 0}
-        <p class="loading">Nothing committed in this project yet.</p>
-      {:else}
-        <div class="history">
-          {#each commits as c (c.id)}
-            <div class="hcommit" class:undone={c.undoneAt !== null}>
-              <!-- A commit with something to undo gets the hold gesture, and
-                   its tap is handled on release; one with nothing left to undo
-                   never arms a hold, so a plain click expands it. -->
-              <button
-                class="hrow"
-                onpointerdown={(e) =>
-                  c.undoable > 0 && !undoing
-                    ? startHold(`commit:${c.id}`, HOLD_MS, e, () => void undoWholeCommit(c.id))
-                    : undefined}
-                onpointerup={() => endHold(`commit:${c.id}`, () => void toggleCommit(c.id))}
-                onpointercancel={resetHold}
-                onblur={resetHold}
-                onclick={(e) => (e.detail === 0 || c.undoable === 0 ? void toggleCommit(c.id) : undefined)}
-                aria-expanded={openCommit === c.id}
-                aria-controls={`commit-entries-${c.id}`}
-                title={c.undoable > 0 ? "Tap to expand · hold to undo" : "Tap to expand"}
-              >
-                <span class="hold-fill" style="width: {fillOf(`commit:${c.id}`)}%"></span>
-                <span class="hwhen">{whenOf(c.startedAt)}</span>
-                <span class="hwhat" title={summaryOf(c)}>{summaryOf(c)}</span>
-                {#if c.errors > 0}
-                  <span class="hbadge err"><TriangleAlert size={11} /> {c.errors}</span>
-                {/if}
-                {#if c.undoneAt !== null || undoCounts[c.id]}
-                  <span class="hbadge done">{undoCounts[c.id]?.filesRetained || undoCounts[c.id]?.sidecarsRetained ? "Partial undo" : "Undone"}</span>
-                {:else if c.undoable > 0}
-                  <span class="hbadge"><Undo2 size={11} /> {c.undoable}</span>
-                {/if}
-              </button>
-              {#if c.undoable > 0}
-                <button class="hundo" disabled={undoing} onclick={() => void undoWholeCommit(c.id)}>
-                  <Undo2 size={13} /> Undo reversible actions
-                </button>
-              {/if}
+    <ScrollArea style="margin: 0 -20px -16px">
+      <div class="body">
+        {#if tab === "history"}
+          {#if commits === null}
+            <p class="loading">Loading…</p>
+          {:else if commits.length === 0}
+            <p class="loading">Nothing committed in this project yet.</p>
+          {:else}
+            <div class="history">
+              {#each commits as c (c.id)}
+                <div class="hcommit" class:undone={c.undoneAt !== null}>
+                  <!-- A commit with something to undo gets the hold gesture, and
+                       its tap is handled on release; one with nothing left to undo
+                       never arms a hold, so a plain click expands it. -->
+                  <button
+                    class="hrow"
+                    onpointerdown={(e) =>
+                      c.undoable > 0 && !undoing
+                        ? startHold(`commit:${c.id}`, HOLD_MS, e, () => void undoWholeCommit(c.id))
+                        : undefined}
+                    onpointerup={() => endHold(`commit:${c.id}`, () => void toggleCommit(c.id))}
+                    onpointercancel={resetHold}
+                    onblur={resetHold}
+                    onclick={(e) => (e.detail === 0 || c.undoable === 0 ? void toggleCommit(c.id) : undefined)}
+                    aria-expanded={openCommit === c.id}
+                    aria-controls={`commit-entries-${c.id}`}
+                    title={c.undoable > 0 ? "Tap to expand · hold to undo" : "Tap to expand"}
+                  >
+                    <span class="hold-fill" style="width: {fillOf(`commit:${c.id}`)}%"></span>
+                    <span class="hwhen">{whenOf(c.startedAt)}</span>
+                    <span class="hwhat" title={summaryOf(c)}>{summaryOf(c)}</span>
+                    {#if c.errors > 0}
+                      <span class="hbadge err"><TriangleAlert size={11} /> {c.errors}</span>
+                    {/if}
+                    {#if c.undoneAt !== null || undoCounts[c.id]}
+                      <span class="hbadge done">{undoCounts[c.id]?.filesRetained || undoCounts[c.id]?.sidecarsRetained ? "Partial undo" : "Undone"}</span>
+                    {:else if c.undoable > 0}
+                      <span class="hbadge"><Undo2 size={11} /> {c.undoable}</span>
+                    {/if}
+                  </button>
+                  {#if c.undoable > 0}
+                    <button class="hundo" disabled={undoing} onclick={() => void undoWholeCommit(c.id)}>
+                      <Undo2 size={13} /> Undo reversible actions
+                    </button>
+                  {/if}
 
-              {#if openCommit === c.id}
-                <ul class="hentries" id={`commit-entries-${c.id}`}>
-                  {#each entries as e (e.id)}
-                    <li class:gone={e.undoneAt !== null}>
-                      <span class="eaction">{ACTION_NAMES[e.action] ?? "?"}</span>
-                      <span class="epath" title={e.beforePath ?? ""}>{e.beforePath ?? "—"}</span>
-                      {#if e.afterPath && e.action !== 0}
-                        <span class="edest">→ {e.afterPath}</span>
-                      {/if}
-                      {#if e.undoable}
-                        <button
-                          class="eundo"
-                          disabled={undoing}
-                          title="Undo just this one"
-                          aria-label={`Undo ${e.beforePath ?? "entry"}`}
-                          onclick={() => void undoOneEntry(e.id)}
-                        >
-                          <Undo2 size={12} />
-                        </button>
+                  {#if openCommit === c.id}
+                    <ul class="hentries" id={`commit-entries-${c.id}`}>
+                      {#each entries as e (e.id)}
+                        <li class:gone={e.undoneAt !== null}>
+                          <span class="eaction">{ACTION_NAMES[e.action] ?? "?"}</span>
+                          <span class="epath" title={e.beforePath ?? ""}>{e.beforePath ?? "—"}</span>
+                          {#if e.afterPath && e.action !== 0}
+                            <span class="edest">→ {e.afterPath}</span>
+                          {/if}
+                          {#if e.undoable}
+                            <button
+                              class="eundo"
+                              disabled={undoing}
+                              title="Undo just this one"
+                              aria-label={`Undo ${e.beforePath ?? "entry"}`}
+                              onclick={() => void undoOneEntry(e.id)}
+                            >
+                              <Undo2 size={12} />
+                            </button>
+                          {:else}
+                            <!-- Say why, rather than showing a dead button. -->
+                            <span class="ewhy">{e.error ?? e.blockedReason ?? ""}</span>
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+            <p class="hint">Activate a commit to see its actions. Use Undo reversible actions to restore its files.</p>
+          {/if}
+          {#if error}
+            <p class="error">{error}</p>
+          {/if}
+        {:else if plan}
+          {#if running}
+            <div class="committing">
+              <p class="committing-title">
+                <span class="spin"><LoaderCircle size={16} /></span> Committing changes…
+              </p>
+              <ul class="phases">
+                {#each runningPhases as ph (ph)}
+                  <li class="phase" class:done={completedPhases.has(ph)} class:active={activePhase === ph}>
+                    <span class="phase-icon">
+                      {#if completedPhases.has(ph)}
+                        <Check size={14} />
+                      {:else if activePhase === ph}
+                        <span class="spin"><LoaderCircle size={14} /></span>
                       {:else}
-                        <!-- Say why, rather than showing a dead button. -->
-                        <span class="ewhy">{e.error ?? e.blockedReason ?? ""}</span>
+                        <span class="pending-dot"></span>
                       {/if}
-                    </li>
-                  {/each}
-                </ul>
+                    </span>
+                    <span class="phase-name">{PHASE_LABEL[ph]}</span>
+                    {#if activePhase === ph}
+                      <span class="phase-count">{phaseDone}/{phaseTotal}</span>
+                    {:else if completedPhases.has(ph)}
+                      <span class="phase-count">done</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+              {#if activePhase}
+                <progress max={phaseTotal || 1} value={phaseDone}></progress>
               {/if}
             </div>
-          {/each}
-        </div>
-        <p class="hint">Activate a commit to see its actions. Use Undo reversible actions to restore its files.</p>
-      {/if}
-      {#if error}
-        <p class="error">{error}</p>
-      {/if}
-    {:else if plan}
-      {#if running}
-        <div class="committing">
-          <p class="committing-title">
-            <span class="spin"><LoaderCircle size={16} /></span> Committing changes…
-          </p>
-          <ul class="phases">
-            {#each runningPhases as ph (ph)}
-              <li class="phase" class:done={completedPhases.has(ph)} class:active={activePhase === ph}>
-                <span class="phase-icon">
-                  {#if completedPhases.has(ph)}
-                    <Check size={14} />
-                  {:else if activePhase === ph}
-                    <span class="spin"><LoaderCircle size={14} /></span>
-                  {:else}
-                    <span class="pending-dot"></span>
-                  {/if}
-                </span>
-                <span class="phase-name">{PHASE_LABEL[ph]}</span>
-                {#if activePhase === ph}
-                  <span class="phase-count">{phaseDone}/{phaseTotal}</span>
-                {:else if completedPhases.has(ph)}
-                  <span class="phase-count">done</span>
-                {/if}
-              </li>
-            {/each}
-          </ul>
-          {#if activePhase}
-            <progress max={phaseTotal || 1} value={phaseDone}></progress>
-          {/if}
-        </div>
-      {:else}
-        {#if plan.conflicts.length > 0}
-          <div class="conflicts">
-            <TriangleAlert size={14} style="vertical-align: -2px" />
-            {plan.conflicts.length} {plan.conflicts.length === 1 ? "conflict" : "conflicts"}:
-            <ul>
-              {#each plan.conflicts.slice(0, 5) as c}<li>{c}</li>{/each}
-            </ul>
-          </div>
-        {/if}
-
-        <p class="hint">
-          <span class="fine">Click a row to expand · hold it to run that section on its own.</span>
-          <span class="coarse">Tap a row to expand · hold it to run that section on its own.</span>
-          Enter expands the focused row. Hold Space to run that section.
-        </p>
-
-        <div class="rows">
-          <button
-            class="row"
-            disabled={plan.deletes.length === 0}
-            onpointerdown={(e) => onRowPointerDown("deletes", e)}
-            onpointerup={() => onRowPointerUp("deletes")}
-            onpointercancel={resetHold}
-            onkeydown={(e) => onRowKeydown("deletes", e)}
-            onkeyup={(e) => onRowKeyup("deletes", e)}
-            onblur={resetHold}
-            title="Tap to expand · hold to delete"
-          >
-            <span
-              class="hold-fill"
-              class:danger={isDangerHold("deletes")}
-              style="width: {fillOf('section:deletes')}%"
-            ></span>
-            <span class="icon"><Trash2 size={16} /></span>
-            <span class="what">Delete {plan.deletes.length} {plan.deletes.length === 1 ? "file" : "files"}</span>
-            <span class="how">{deletionModeNames[plan.deletionMode]}</span>
-          </button>
-          {#if expanded === "deletes"}
-            <ul class="detail">
-              {#each deleteRows as row}
-                <li>
-                  {row.label}
-                  <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, true)}><X size={12} /></button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-
-          <button
-            class="row"
-            disabled={plan.moves.length === 0}
-            onpointerdown={(e) => onRowPointerDown("moves", e)}
-            onpointerup={() => onRowPointerUp("moves")}
-            onpointercancel={resetHold}
-            onkeydown={(e) => onRowKeydown("moves", e)}
-            onkeyup={(e) => onRowKeyup("moves", e)}
-            onblur={resetHold}
-            title="Tap to expand · hold to move"
-          >
-            <span class="hold-fill" style="width: {fillOf('section:moves')}%"></span>
-            <span class="icon"><FolderInput size={16} /></span>
-            <span class="what">Move {plan.moves.length} {plan.moves.length === 1 ? "file" : "files"}</span>
-          </button>
-          {#if expanded === "moves"}
-            <ul class="detail">
-              {#each moveRows as row}
-                <li>
-                  {row.label} → {row.dest}/
-                  <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, false)}><X size={12} /></button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-
-          <button
-            class="row"
-            disabled={plan.copies.length === 0}
-            onpointerdown={(e) => onRowPointerDown("copies", e)}
-            onpointerup={() => onRowPointerUp("copies")}
-            onpointercancel={resetHold}
-            onkeydown={(e) => onRowKeydown("copies", e)}
-            onkeyup={(e) => onRowKeyup("copies", e)}
-            onblur={resetHold}
-            title="Tap to expand · hold to copy"
-          >
-            <span class="hold-fill" style="width: {fillOf('section:copies')}%"></span>
-            <span class="icon"><Copy size={16} /></span>
-            <span class="what">Copy {plan.copies.length} {plan.copies.length === 1 ? "file" : "files"}</span>
-          </button>
-          {#if expanded === "copies"}
-            <ul class="detail">
-              {#each copyRows as row}
-                <li>
-                  {row.label} → {row.dest}/
-                  <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, false)}><X size={12} /></button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-
-          <button
-            class="row"
-            disabled={plan.xmpCount === 0}
-            onpointerdown={(e) => onRowPointerDown("xmp", e)}
-            onpointerup={() => onRowPointerUp("xmp")}
-            onpointercancel={resetHold}
-            onkeydown={(e) => onRowKeydown("xmp", e)}
-            onkeyup={(e) => onRowKeyup("xmp", e)}
-            onblur={resetHold}
-            title="Hold to write sidecars"
-          >
-            <span class="hold-fill" style="width: {fillOf('section:xmp')}%"></span>
-            <span class="icon"><Tag size={16} /></span>
-            <span class="what">Write {plan.xmpCount} XMP {plan.xmpCount === 1 ? "sidecar" : "sidecars"}</span>
-            <span class="how">rating · flag · color label</span>
-          </button>
-        </div>
-
-        <div class="mode">
-          <label for="delmode">Deletion mode</label>
-          <select id="delmode" value={plan.deletionMode} onchange={changeMode}>
-            <option value="trash">Project _trash folder</option>
-            <option value="permanent">Permanent (no undo!)</option>
-          </select>
-        </div>
-
-        {#if error}
-          <p class="error">{error}</p>
-        {/if}
-
-        <footer>
-          <span class="summary">{total} {total === 1 ? "operation" : "operations"}</span>
-          <button class="primary" disabled={total === 0} onclick={executeAll}>
-            {#if plan.deletionMode === "permanent" && plan.deletes.length > 0}
-              <TriangleAlert size={14} style="vertical-align: -2px" />
-              Execute (deletes {plan.deletes.length} {plan.deletes.length === 1 ? "file" : "files"} permanently)
-            {:else}
-              Execute
+          {:else}
+            {#if plan.conflicts.length > 0}
+              <div class="conflicts">
+                <TriangleAlert size={14} style="vertical-align: -2px" />
+                {plan.conflicts.length} {plan.conflicts.length === 1 ? "conflict" : "conflicts"}:
+                <ul>
+                  {#each plan.conflicts.slice(0, 5) as c}<li>{c}</li>{/each}
+                </ul>
+              </div>
             {/if}
-          </button>
-        </footer>
-      {/if}
-    {:else}
-      <p>Loading…</p>
-      {#if error}<p class="error">{error}</p>{/if}
-    {/if}
+
+            <p class="hint">
+              <span class="fine">Click a row to expand · hold it to run that section on its own.</span>
+              <span class="coarse">Tap a row to expand · hold it to run that section on its own.</span>
+              Enter expands the focused row. Hold Space to run that section.
+            </p>
+
+            <div class="rows">
+              <button
+                class="row"
+                disabled={plan.deletes.length === 0}
+                onpointerdown={(e) => onRowPointerDown("deletes", e)}
+                onpointerup={() => onRowPointerUp("deletes")}
+                onpointercancel={resetHold}
+                onkeydown={(e) => onRowKeydown("deletes", e)}
+                onkeyup={(e) => onRowKeyup("deletes", e)}
+                onblur={resetHold}
+                title="Tap to expand · hold to delete"
+              >
+                <span
+                  class="hold-fill"
+                  class:danger={isDangerHold("deletes")}
+                  style="width: {fillOf('section:deletes')}%"
+                ></span>
+                <span class="icon"><Trash2 size={16} /></span>
+                <span class="what">Delete {plan.deletes.length} {plan.deletes.length === 1 ? "file" : "files"}</span>
+                <span class="how">{deletionModeNames[plan.deletionMode]}</span>
+              </button>
+              {#if expanded === "deletes"}
+                <ScrollArea style="max-height: 180px">
+                  <ul class="detail">
+                    {#each deleteRows as row}
+                      <li>
+                        {row.label}
+                        <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, true)}><X size={12} /></button>
+                      </li>
+                    {/each}
+                  </ul>
+                </ScrollArea>
+              {/if}
+
+              <button
+                class="row"
+                disabled={plan.moves.length === 0}
+                onpointerdown={(e) => onRowPointerDown("moves", e)}
+                onpointerup={() => onRowPointerUp("moves")}
+                onpointercancel={resetHold}
+                onkeydown={(e) => onRowKeydown("moves", e)}
+                onkeyup={(e) => onRowKeyup("moves", e)}
+                onblur={resetHold}
+                title="Tap to expand · hold to move"
+              >
+                <span class="hold-fill" style="width: {fillOf('section:moves')}%"></span>
+                <span class="icon"><FolderInput size={16} /></span>
+                <span class="what">Move {plan.moves.length} {plan.moves.length === 1 ? "file" : "files"}</span>
+              </button>
+              {#if expanded === "moves"}
+                <ScrollArea style="max-height: 180px">
+                  <ul class="detail">
+                    {#each moveRows as row}
+                      <li>
+                        {row.label} → {row.dest}/
+                        <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, false)}><X size={12} /></button>
+                      </li>
+                    {/each}
+                  </ul>
+                </ScrollArea>
+              {/if}
+
+              <button
+                class="row"
+                disabled={plan.copies.length === 0}
+                onpointerdown={(e) => onRowPointerDown("copies", e)}
+                onpointerup={() => onRowPointerUp("copies")}
+                onpointercancel={resetHold}
+                onkeydown={(e) => onRowKeydown("copies", e)}
+                onkeyup={(e) => onRowKeyup("copies", e)}
+                onblur={resetHold}
+                title="Tap to expand · hold to copy"
+              >
+                <span class="hold-fill" style="width: {fillOf('section:copies')}%"></span>
+                <span class="icon"><Copy size={16} /></span>
+                <span class="what">Copy {plan.copies.length} {plan.copies.length === 1 ? "file" : "files"}</span>
+              </button>
+              {#if expanded === "copies"}
+                <ScrollArea style="max-height: 180px">
+                  <ul class="detail">
+                    {#each copyRows as row}
+                      <li>
+                        {row.label} → {row.dest}/
+                        <button class="unqueue" title="Remove from queue" onclick={() => unqueue(row, false)}><X size={12} /></button>
+                      </li>
+                    {/each}
+                  </ul>
+                </ScrollArea>
+              {/if}
+
+              <button
+                class="row"
+                disabled={plan.xmpCount === 0}
+                onpointerdown={(e) => onRowPointerDown("xmp", e)}
+                onpointerup={() => onRowPointerUp("xmp")}
+                onpointercancel={resetHold}
+                onkeydown={(e) => onRowKeydown("xmp", e)}
+                onkeyup={(e) => onRowKeyup("xmp", e)}
+                onblur={resetHold}
+                title="Hold to write sidecars"
+              >
+                <span class="hold-fill" style="width: {fillOf('section:xmp')}%"></span>
+                <span class="icon"><Tag size={16} /></span>
+                <span class="what">Write {plan.xmpCount} XMP {plan.xmpCount === 1 ? "sidecar" : "sidecars"}</span>
+                <span class="how">rating · flag · color label</span>
+              </button>
+            </div>
+
+            <div class="mode">
+              <label for="delmode">Deletion mode</label>
+              <select id="delmode" value={plan.deletionMode} onchange={changeMode}>
+                <option value="trash">Project _trash folder</option>
+                <option value="permanent">Permanent (no undo!)</option>
+              </select>
+            </div>
+
+            {#if error}
+              <p class="error">{error}</p>
+            {/if}
+
+            <footer>
+              <span class="summary">{total} {total === 1 ? "operation" : "operations"}</span>
+              <button class="primary" disabled={total === 0} onclick={executeAll}>
+                {#if plan.deletionMode === "permanent" && plan.deletes.length > 0}
+                  <TriangleAlert size={14} style="vertical-align: -2px" />
+                  Execute (deletes {plan.deletes.length} {plan.deletes.length === 1 ? "file" : "files"} permanently)
+                {:else}
+                  Execute
+                {/if}
+              </button>
+            </footer>
+          {/if}
+        {:else}
+          <p>Loading…</p>
+          {#if error}<p class="error">{error}</p>{/if}
+        {/if}
+      </div>
+    </ScrollArea>
   </div>
 </div>
 
@@ -919,8 +930,16 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    overflow-y: auto;
     outline: none;
+  }
+
+  /* The scroll area spans the dialog (negative margins), so its bar sits on
+     the dialog edge; this padding restores the dialog's own inset. */
+  .body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 0 20px 16px;
   }
 
   header {
@@ -1045,8 +1064,6 @@
     padding: 4px 12px 8px 34px;
     font-size: 12px;
     opacity: 0.85;
-    max-height: 180px;
-    overflow-y: auto;
   }
 
   .detail li {
@@ -1279,7 +1296,6 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-    overflow-y: auto;
   }
 
   .hrow {

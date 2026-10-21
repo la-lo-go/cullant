@@ -128,6 +128,7 @@
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import X from "@lucide/svelte/icons/x";
   import Plus from "@lucide/svelte/icons/plus";
+  import ScrollArea from "./ScrollArea.svelte";
 
   let {
     onclose,
@@ -599,277 +600,287 @@
   <div class="preferences" class:pointer-mode={pointerMode} class:touch-pointer={touchPointer}>
 
     {#if openPanel?.kind === "panel" && openPanel.panel === "filmstripBadges"}
-      <div class="content sub">
-        <p class="sub-intro">{openPanel.info}</p>
-        {#each FILMSTRIP_BADGES as badge (badge.label)}
-          <label class="check">
-            <span>{badge.label}</span>
-            <input
-              type="checkbox"
-              checked={badge.get()}
-              onchange={releasing((e) => badge.set(e.currentTarget.checked))}
-            />
-          </label>
-        {/each}
-        {@render panelReset("Reset filmstrip badges", () => openPanel?.reset())}
-      </div>
-    {:else if openPanel?.kind === "panel" && openPanel.panel === "colorLabelNames"}
-      <div class="content sub">
-        <p class="sub-intro">{openPanel.info}</p>
-        {#each COLOR_LABELS as label (label)}
-          <label class="label-name">
-            <span class="label-swatch" style:background={LABEL_COLORS[label]} title={label} aria-hidden="true"></span>
-            <input
-              type="text"
-              aria-label={`${label} label name`}
-              placeholder={label}
-              maxlength="40"
-              bind:value={colorNameDrafts[label]}
-              oninput={(e) => settings.setColorLabelName(label, e.currentTarget.value)}
-            />
-          </label>
-        {/each}
-        {@render panelReset("Reset color label names", () => {
-          colorNameDrafts = {};
-          settings.resetColorLabelNames();
-        })}
-      </div>
-    {:else if openPanel?.kind === "panel" && openPanel.panel === "touchBar"}
-      <div class="content sub">
-        <p class="sub-intro">{openPanel.info}</p>
-        <DragList
-          items={settings.bottomBarList}
-          keyOf={(it) => it.id}
-          itemLabel={(it) => it.label}
-          onMove={(from, to) => settings.moveBottomBarItem(from, to)}
-          onInteractionChange={setReorderHeld}
-          onPointerRelease={() => releaseFocus()}
-          ariaLabel="Bottom bar groups"
-        >
-          {#snippet row(it)}
+      <ScrollArea>
+        <div class="content sub">
+          <p class="sub-intro">{openPanel.info}</p>
+          {#each FILMSTRIP_BADGES as badge (badge.label)}
             <label class="check">
-              <span class="bar-label" class:off={it.hidden}>
-                {#if it.icon}<it.icon size={16} />{/if}
-                <span>{it.label}</span>
-              </span>
+              <span>{badge.label}</span>
               <input
                 type="checkbox"
-                checked={!it.hidden}
-                onchange={releasing(() => settings.toggleBottomBarHidden(it.id))}
+                checked={badge.get()}
+                onchange={releasing((e) => badge.set(e.currentTarget.checked))}
               />
             </label>
-          {/snippet}
-        </DragList>
-        {@render panelReset("Reset to default", () => settings.resetBottomBar())}
-      </div>
-    {:else if openPanel?.kind === "panel" && openPanel.panel === "radial"}
-      <div class="content sub">
-        <p class="sub-intro">{openPanel.info}</p>
-
-        <div class="radial-editor">
-          <!-- Beside the list on a wide dialog, above it when there is no room:
-               the ring is what is being edited, so it should be in view while
-               the rows are changed. -->
-          <RadialPreview
-            slots={settings.radialSlots}
-            highlight={radialHighlight}
-            onhighlight={(i) => (radialHighlight = i)}
-          />
-
-          <div class="radial-rows">
-            <DragList
-              items={settings.radialSlots.map((slot, i) => ({ slot, i }))}
-              keyOf={(it) => slotKey(it.slot)}
-              itemLabel={(it, i) => `sector ${i + 1}: ${slotLabel(it.slot)}`}
-              onMove={(from, to) => settings.moveRadialSlot(from, to)}
-              onInteractionChange={setReorderHeld}
-              onPointerRelease={() => releaseFocus()}
-              ariaLabel="Radial menu sectors"
-            >
-              {#snippet row(it)}
-                <div
-                  class="slot"
-                  class:on={radialHighlight === it.i}
-                  role="presentation"
-                  onpointerenter={(e) => { if (e.pointerType === "mouse") radialHighlight = it.i; }}
-                  onpointerleave={() => (radialHighlight = -1)}
-                >
-                  <!-- Every sector is the same control, `more` included: it is
-                       one of the things a sector can be, so making it a line of
-                       grey text was a special case with nothing behind it. -->
-                  <select
-                    aria-label={`Sector ${it.i + 1} action`}
-                    value={slotKey(it.slot)}
-                    onchange={releasing((e) => {
-                      const next = e.currentTarget.value;
-                      // A keyed row can move without Svelte updating its select value.
-                      e.currentTarget.value = slotKey(it.slot);
-                      assignSlot(it.i, next);
-                    })}
-                  >
-                    <option value="more">More… (the full command list)</option>
-                    <optgroup label="Groups">
-                      {#each RADIAL_GROUPS as g (g.id)}
-                        <option value={`group:${g.id}`}>{g.label}</option>
-                      {/each}
-                    </optgroup>
-                    <optgroup label="Commands">
-                      {#each ASSIGNABLE_COMMANDS as c (c.id)}
-                        <option value={`cmd:${c.id}`}>{c.title}</option>
-                      {/each}
-                    </optgroup>
-                  </select>
-                  <button
-                    class="drop"
-                    title={settings.radialSlots.length <= RADIAL_MIN_SECTORS ? "Keep at least two sectors." : `Remove sector ${it.i + 1}: ${slotLabel(it.slot)}`}
-                    aria-label={`Remove sector ${it.i + 1}: ${slotLabel(it.slot)}`}
-                    disabled={settings.radialSlots.length <= RADIAL_MIN_SECTORS}
-                    onclick={releasing(() => settings.removeRadialSlot(it.i))}
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              {/snippet}
-            </DragList>
-
-            <p class="hint">Keep at least two sectors. More opens the full command list and can be removed.</p>
-
-            <!-- Quiet, and left where the list ends: adding a sector is a step
-                 you take now and then, not the thing this panel is for. As a
-                 full-width bar it outweighed the sectors above it and split the
-                 options below off from them. -->
-            <button
-              class="add"
-              disabled={settings.radialSlots.length >= RADIAL_MAX_SECTORS}
-              onclick={openAddMenu}
-            >
-              <Plus size={12} />
-              <span>Add sector…</span>
-            </button>
-
-            <!-- Below the ring's own contents, and marked off from them: these
-                 are about the ring rather than in it. -->
-            <div class="slot ring-opt">
-              <span class="slot-label">Opens with</span>
-              <select
-                aria-label="Radial menu opens with"
-                value={settings.radialMouse}
-                onchange={releasing((e) =>
-                  settings.setRadialMouse(e.currentTarget.value as RadialMouse))}
-              >
-                <option value="left">Hold left button</option>
-                <option value="right">Right button</option>
-                <option value="both">Either button</option>
-              </select>
-            </div>
-
-            <div class="slot">
-              <span class="slot-label">Rotation</span>
-              <select
-                aria-label="Radial menu rotation"
-                value={settings.radialRotation}
-                onchange={releasing((e) =>
-                  settings.setRadialRotation(Number(e.currentTarget.value)))}
-              >
-                {#each RADIAL_ROTATION_CHOICES as deg (deg)}
-                  <option value={deg}>{deg}°</option>
-                {/each}
-              </select>
-            </div>
-          </div>
+          {/each}
+          {@render panelReset("Reset filmstrip badges", () => openPanel?.reset())}
         </div>
+      </ScrollArea>
+    {:else if openPanel?.kind === "panel" && openPanel.panel === "colorLabelNames"}
+      <ScrollArea>
+        <div class="content sub">
+          <p class="sub-intro">{openPanel.info}</p>
+          {#each COLOR_LABELS as label (label)}
+            <label class="label-name">
+              <span class="label-swatch" style:background={LABEL_COLORS[label]} title={label} aria-hidden="true"></span>
+              <input
+                type="text"
+                aria-label={`${label} label name`}
+                placeholder={label}
+                maxlength="40"
+                bind:value={colorNameDrafts[label]}
+                oninput={(e) => settings.setColorLabelName(label, e.currentTarget.value)}
+              />
+            </label>
+          {/each}
+          {@render panelReset("Reset color label names", () => {
+            colorNameDrafts = {};
+            settings.resetColorLabelNames();
+          })}
+        </div>
+      </ScrollArea>
+    {:else if openPanel?.kind === "panel" && openPanel.panel === "touchBar"}
+      <ScrollArea>
+        <div class="content sub">
+          <p class="sub-intro">{openPanel.info}</p>
+          <DragList
+            items={settings.bottomBarList}
+            keyOf={(it) => it.id}
+            itemLabel={(it) => it.label}
+            onMove={(from, to) => settings.moveBottomBarItem(from, to)}
+            onInteractionChange={setReorderHeld}
+            onPointerRelease={() => releaseFocus()}
+            ariaLabel="Bottom bar groups"
+          >
+            {#snippet row(it)}
+              <label class="check">
+                <span class="bar-label" class:off={it.hidden}>
+                  {#if it.icon}<it.icon size={16} />{/if}
+                  <span>{it.label}</span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={!it.hidden}
+                  onchange={releasing(() => settings.toggleBottomBarHidden(it.id))}
+                />
+              </label>
+            {/snippet}
+          </DragList>
+          {@render panelReset("Reset to default", () => settings.resetBottomBar())}
+        </div>
+      </ScrollArea>
+    {:else if openPanel?.kind === "panel" && openPanel.panel === "radial"}
+      <ScrollArea>
+        <div class="content sub">
+          <p class="sub-intro">{openPanel.info}</p>
 
-        {@render panelReset("Reset to default", () => settings.resetRadial())}
-      </div>
-    {:else}
-      <div class="content" bind:this={list} onscroll={() => (listScroll = list?.scrollTop ?? 0)}>
-        {#if visibleGroups.length === 0 && panelRows.length === 0 && destinations.length === 0 && elsewhere.length === 0 && !showSupport && !showReset && !showReimport}
-          <p class="empty">Nothing matches “{query}”.</p>
-        {:else if visibleGroups.length > 0}
-          <div class="cols">
-            <div class="col">
-              {#each columns[0] as g (g.id)}
-                {@render groupBlock(g)}
-              {/each}
-            </div>
-            <div class="col">
-              {#each columns[1] as g (g.id)}
-                {@render groupBlock(g)}
-              {/each}
-            </div>
-          </div>
-        {/if}
+          <div class="radial-editor">
+            <!-- Beside the list on a wide dialog, above it when there is no room:
+                 the ring is what is being edited, so it should be in view while
+                 the rows are changed. -->
+            <RadialPreview
+              slots={settings.radialSlots}
+              highlight={radialHighlight}
+              onhighlight={(i) => (radialHighlight = i)}
+            />
 
-        {#if panelRows.length > 0 || destinations.length > 0}
-          <div class="jump">
-            {#each panelRows as s (s.id)}
-              {@render settingRow(s)}
-            {/each}
-            {#each destinations as item (item.label)}
-              <button class="wide" onclick={releasing(item.go)}>
-                <item.icon size={14} />
-                <span>{item.label}</span>
-                <ChevronRight size={14} />
+            <div class="radial-rows">
+              <DragList
+                items={settings.radialSlots.map((slot, i) => ({ slot, i }))}
+                keyOf={(it) => slotKey(it.slot)}
+                itemLabel={(it, i) => `sector ${i + 1}: ${slotLabel(it.slot)}`}
+                onMove={(from, to) => settings.moveRadialSlot(from, to)}
+                onInteractionChange={setReorderHeld}
+                onPointerRelease={() => releaseFocus()}
+                ariaLabel="Radial menu sectors"
+              >
+                {#snippet row(it)}
+                  <div
+                    class="slot"
+                    class:on={radialHighlight === it.i}
+                    role="presentation"
+                    onpointerenter={(e) => { if (e.pointerType === "mouse") radialHighlight = it.i; }}
+                    onpointerleave={() => (radialHighlight = -1)}
+                  >
+                    <!-- Every sector is the same control, `more` included: it is
+                         one of the things a sector can be, so making it a line of
+                         grey text was a special case with nothing behind it. -->
+                    <select
+                      aria-label={`Sector ${it.i + 1} action`}
+                      value={slotKey(it.slot)}
+                      onchange={releasing((e) => {
+                        const next = e.currentTarget.value;
+                        // A keyed row can move without Svelte updating its select value.
+                        e.currentTarget.value = slotKey(it.slot);
+                        assignSlot(it.i, next);
+                      })}
+                    >
+                      <option value="more">More… (the full command list)</option>
+                      <optgroup label="Groups">
+                        {#each RADIAL_GROUPS as g (g.id)}
+                          <option value={`group:${g.id}`}>{g.label}</option>
+                        {/each}
+                      </optgroup>
+                      <optgroup label="Commands">
+                        {#each ASSIGNABLE_COMMANDS as c (c.id)}
+                          <option value={`cmd:${c.id}`}>{c.title}</option>
+                        {/each}
+                      </optgroup>
+                    </select>
+                    <button
+                      class="drop"
+                      title={settings.radialSlots.length <= RADIAL_MIN_SECTORS ? "Keep at least two sectors." : `Remove sector ${it.i + 1}: ${slotLabel(it.slot)}`}
+                      aria-label={`Remove sector ${it.i + 1}: ${slotLabel(it.slot)}`}
+                      disabled={settings.radialSlots.length <= RADIAL_MIN_SECTORS}
+                      onclick={releasing(() => settings.removeRadialSlot(it.i))}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                {/snippet}
+              </DragList>
+
+              <p class="hint">Keep at least two sectors. More opens the full command list and can be removed.</p>
+
+              <!-- Quiet, and left where the list ends: adding a sector is a step
+                   you take now and then, not the thing this panel is for. As a
+                   full-width bar it outweighed the sectors above it and split the
+                   options below off from them. -->
+              <button
+                class="add"
+                disabled={settings.radialSlots.length >= RADIAL_MAX_SECTORS}
+                onclick={openAddMenu}
+              >
+                <Plus size={12} />
+                <span>Add sector…</span>
               </button>
-            {/each}
+
+              <!-- Below the ring's own contents, and marked off from them: these
+                   are about the ring rather than in it. -->
+              <div class="slot ring-opt">
+                <span class="slot-label">Opens with</span>
+                <select
+                  aria-label="Radial menu opens with"
+                  value={settings.radialMouse}
+                  onchange={releasing((e) =>
+                    settings.setRadialMouse(e.currentTarget.value as RadialMouse))}
+                >
+                  <option value="left">Hold left button</option>
+                  <option value="right">Right button</option>
+                  <option value="both">Either button</option>
+                </select>
+              </div>
+
+              <div class="slot">
+                <span class="slot-label">Rotation</span>
+                <select
+                  aria-label="Radial menu rotation"
+                  value={settings.radialRotation}
+                  onchange={releasing((e) =>
+                    settings.setRadialRotation(Number(e.currentTarget.value)))}
+                >
+                  {#each RADIAL_ROTATION_CHOICES as deg (deg)}
+                    <option value={deg}>{deg}°</option>
+                  {/each}
+                </select>
+              </div>
+            </div>
           </div>
-        {/if}
 
-        {#if showSupport}
-          <!-- Deliberately not a third grey row like the two above. Nothing funds
-               this app, so the one ask it makes gets to be seen. -->
-          <button class="support" onclick={releasing(onshowsupport)}>
-            <Heart size={20} />
-            <span class="s-text">
-              <span class="s-title">Support Cullant</span>
-              <span class="s-note">
-                Support development with a donation or help with feedback.
-              </span>
-            </span>
-            <ChevronRight size={16} />
-          </button>
-        {/if}
+          {@render panelReset("Reset to default", () => settings.resetRadial())}
+        </div>
+      </ScrollArea>
+    {:else}
+      <ScrollArea bind:element={list} onscroll={() => (listScroll = list?.scrollTop ?? 0)}>
+        <div class="content">
+          {#if visibleGroups.length === 0 && panelRows.length === 0 && destinations.length === 0 && elsewhere.length === 0 && !showSupport && !showReset && !showReimport}
+            <p class="empty">Nothing matches “{query}”.</p>
+          {:else if visibleGroups.length > 0}
+            <div class="cols">
+              <div class="col">
+                {#each columns[0] as g (g.id)}
+                  {@render groupBlock(g)}
+                {/each}
+              </div>
+              <div class="col">
+                {#each columns[1] as g (g.id)}
+                  {@render groupBlock(g)}
+                {/each}
+              </div>
+            </div>
+          {/if}
 
-        {#if elsewhere.length > 0}
-            <section class="group elsewhere">
-              <header><span class="gname">Elsewhere</span></header>
-              {#each elsewhere as item (item.label)}
-                <button class="out" onclick={releasing(item.go)}>
-                  <span class="what">{item.info}</span>
-                  <span class="where">{item.label}<ArrowUpRight size={12} /></span>
+          {#if panelRows.length > 0 || destinations.length > 0}
+            <div class="jump">
+              {#each panelRows as s (s.id)}
+                {@render settingRow(s)}
+              {/each}
+              {#each destinations as item (item.label)}
+                <button class="wide" onclick={releasing(item.go)}>
+                  <item.icon size={14} />
+                  <span>{item.label}</span>
+                  <ChevronRight size={14} />
                 </button>
               {/each}
-            </section>
-        {/if}
+            </div>
+          {/if}
 
-        {#if !query && isTouch}
-          <p class="hint tail">
-            Pull down on the grid to rescan the project now.
-          </p>
-        {/if}
-
-          {#if showReset}
-            <button
-              class="reset-all"
-              onclick={releasing(() => (confirmResetAll = true))}
-            >
-              <RotateCcw size={13} />
-              <span>Reset all settings</span>
+          {#if showSupport}
+            <!-- Deliberately not a third grey row like the two above. Nothing funds
+                 this app, so the one ask it makes gets to be seen. -->
+            <button class="support" onclick={releasing(onshowsupport)}>
+              <Heart size={20} />
+              <span class="s-text">
+                <span class="s-title">Support Cullant</span>
+                <span class="s-note">
+                  Support development with a donation or help with feedback.
+                </span>
+              </span>
+              <ChevronRight size={16} />
             </button>
           {/if}
-          {#if showReimport}
-            <!-- The escape hatch for a project that has gone strange. Down here
-                 with the other reset, because it is one: it throws away what
-                 Cullant stored, not a preference. -->
-            <button class="reset-all" onclick={releasing(() => (confirmReimport = true))}>
-              <DatabaseBackup size={13} />
-              <span>Reimport this project…</span>
-            </button>
+
+          {#if elsewhere.length > 0}
+              <section class="group elsewhere">
+                <header><span class="gname">Elsewhere</span></header>
+                {#each elsewhere as item (item.label)}
+                  <button class="out" onclick={releasing(item.go)}>
+                    <span class="what">{item.info}</span>
+                    <span class="where">{item.label}<ArrowUpRight size={12} /></span>
+                  </button>
+                {/each}
+              </section>
           {/if}
-        {#if !query}
-          <p class="version">Cullant {appVersion || "…"}</p>
-        {/if}
-      </div>
+
+          {#if !query && isTouch}
+            <p class="hint tail">
+              Pull down on the grid to rescan the project now.
+            </p>
+          {/if}
+
+            {#if showReset}
+              <button
+                class="reset-all"
+                onclick={releasing(() => (confirmResetAll = true))}
+              >
+                <RotateCcw size={13} />
+                <span>Reset all settings</span>
+              </button>
+            {/if}
+            {#if showReimport}
+              <!-- The escape hatch for a project that has gone strange. Down here
+                   with the other reset, because it is one: it throws away what
+                   Cullant stored, not a preference. -->
+              <button class="reset-all" onclick={releasing(() => (confirmReimport = true))}>
+                <DatabaseBackup size={13} />
+                <span>Reimport this project…</span>
+              </button>
+            {/if}
+          {#if !query}
+            <p class="version">Cullant {appVersion || "…"}</p>
+          {/if}
+        </div>
+      </ScrollArea>
     {/if}
     {#if addMenu}
       <ContextMenu
@@ -1018,7 +1029,6 @@
      previous group's rows sliding through it. The breathing room goes on the
      first group instead, which scrolls away like content should. */
   .content {
-    overflow-y: auto;
     padding: 0 16px 22px;
   }
 

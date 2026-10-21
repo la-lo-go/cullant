@@ -2,6 +2,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
+  import ScrollArea from "./ScrollArea.svelte";
   import { FREE_WAYS, MONEY_WAYS, type SupportChannel } from "../support";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import Heart from "@lucide/svelte/icons/heart";
@@ -46,32 +47,34 @@
       </button>
     </header>
 
-    <div class="content">
-      <p class="intro">Help fund Cullant's development.</p>
+    <ScrollArea>
+      <div class="content">
+        <p class="intro">Help fund Cullant's development.</p>
 
-      <section class="block money">
-        <header>
-          <span class="h-title">Support development</span>
-        </header>
-        {#each MONEY_WAYS as c (c.id)}
-          {@render way(c)}
-        {/each}
-      </section>
+        <section class="block money">
+          <header>
+            <span class="h-title">Support development</span>
+          </header>
+          {#each MONEY_WAYS as c (c.id)}
+            {@render way(c)}
+          {/each}
+        </section>
 
-      <section class="block">
-        <header>
-          <span class="h-title">Other ways to help</span>
-        </header>
-        {#each FREE_WAYS as c (c.id)}
-          {@render way(c)}
-        {/each}
-      </section>
+        <section class="block">
+          <header>
+            <span class="h-title">Other ways to help</span>
+          </header>
+          {#each FREE_WAYS as c (c.id)}
+            {@render way(c)}
+          {/each}
+        </section>
 
-      <p class="intro">
-        Cullant is free and open source. No ads, no account, no subscription, and it
-        never sends your photos or anything about them anywhere.
-      </p>
-    </div>
+        <p class="intro">
+          Cullant is free and open source. No ads, no account, no subscription, and it
+          never sends your photos or anything about them anywhere.
+        </p>
+      </div>
+    </ScrollArea>
   </div>
 </div>
 
@@ -136,7 +139,6 @@
   }
 
   .content {
-    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 10px;

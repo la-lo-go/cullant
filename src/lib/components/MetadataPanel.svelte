@@ -4,6 +4,7 @@
   import { view } from "../stores/view.svelte";
   import X from "@lucide/svelte/icons/x";
   import MapPin from "@lucide/svelte/icons/map-pin";
+  import ScrollArea from "./ScrollArea.svelte";
 
   let { item }: { item: ItemLite } = $props();
 
@@ -85,30 +86,34 @@
 <svelte:window onpointerdown={handleOutsideClick} />
 
 <aside class="panel" bind:this={panelEl}>
-  <header>
-    <span>Metadata</span>
-    <button class="close" title="Close (I)" onclick={() => (view.infoOpen = false)}>
-      <X size={14} />
-    </button>
-  </header>
+  <ScrollArea>
+    <div class="pad">
+      <header>
+        <span>Metadata</span>
+        <button class="close" title="Close (I)" onclick={() => (view.infoOpen = false)}>
+          <X size={14} />
+        </button>
+      </header>
 
-  {#if loading && !meta}
-    <p class="muted">Reading…</p>
-  {:else if meta}
-    <dl>
-      {#each rows as [label, value]}
-        <dt>{label}</dt>
-        <dd>{value}</dd>
-      {/each}
-    </dl>
-    {#if gpsUrl}
-      <button class="gps" onclick={() => openUrl(gpsUrl)}>
-        <MapPin size={13} />
-        {meta.gpsLat!.toFixed(5)}, {meta.gpsLon!.toFixed(5)}
-      </button>
-    {/if}
-    <p class="path" title={meta.relPath}>{meta.relPath}</p>
-  {/if}
+      {#if loading && !meta}
+        <p class="muted">Reading…</p>
+      {:else if meta}
+        <dl>
+          {#each rows as [label, value]}
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          {/each}
+        </dl>
+        {#if gpsUrl}
+          <button class="gps" onclick={() => openUrl(gpsUrl)}>
+            <MapPin size={13} />
+            {meta.gpsLat!.toFixed(5)}, {meta.gpsLon!.toFixed(5)}
+          </button>
+        {/if}
+        <p class="path" title={meta.relPath}>{meta.relPath}</p>
+      {/if}
+    </div>
+  </ScrollArea>
 </aside>
 
 <style>
@@ -124,14 +129,18 @@
       100vw - 48px - var(--dialog-edge-margin) - var(--inset-left) - var(--inset-right)
     );
     max-height: calc(100% - 60px);
-    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
     border-radius: 8px;
-    padding: 10px 12px;
     z-index: 6;
     font-size: 12px;
     box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  .pad {
+    padding: 10px 12px;
   }
 
   header {

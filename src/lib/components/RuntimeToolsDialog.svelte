@@ -3,6 +3,7 @@
   import { runtimeTools } from "../stores/runtimeTools.svelte";
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
+  import ScrollArea from "./ScrollArea.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import X from "@lucide/svelte/icons/x";
   import ExternalLink from "@lucide/svelte/icons/external-link";
@@ -33,21 +34,23 @@
         <h2>Missing media tools</h2>
         <button class="close" aria-label="Close" onclick={() => runtimeTools.dismiss(false)}><X size={18} /></button>
       </header>
-      <div class="body">
-        {#each runtimeTools.pending as issue (issue.id)}
-          <section>
-            <h3>{issue.name}</h3>
-            <p class="lead">Without it, these do not work:</p>
-            <ul>
-              {#each issue.effects as effect (effect)}<li>{effect}</li>{/each}
-            </ul>
-            <p>{issue.detail}</p>
-            {#each issue.links as link (link.url)}
-              <button class="link" onclick={() => void openUrl(link.url)}><ExternalLink size={14} />{link.name}</button>
-            {/each}
-          </section>
-        {/each}
-      </div>
+      <ScrollArea>
+        <div class="body">
+          {#each runtimeTools.pending as issue (issue.id)}
+            <section>
+              <h3>{issue.name}</h3>
+              <p class="lead">Without it, these do not work:</p>
+              <ul>
+                {#each issue.effects as effect (effect)}<li>{effect}</li>{/each}
+              </ul>
+              <p>{issue.detail}</p>
+              {#each issue.links as link (link.url)}
+                <button class="link" onclick={() => void openUrl(link.url)}><ExternalLink size={14} />{link.name}</button>
+              {/each}
+            </section>
+          {/each}
+        </div>
+      </ScrollArea>
       <footer>
         <button data-action="suppress" onclick={() => runtimeTools.dismiss(true)}>Don't show again</button>
         <button class="primary" data-action="ok" onclick={() => runtimeTools.dismiss(false)}>OK</button>
@@ -63,7 +66,7 @@
   header { border-bottom: 1px solid var(--border); }
   h2 { flex: 1; margin: 0; font-size: 15px; }
   h3 { margin: 0 0 6px; font-size: 13px; }
-  .body { overflow-y: auto; padding: 16px; }
+  .body { padding: 16px; }
   section + section { margin-top: 20px; }
   p, li { color: #bbb; font-size: 12px; line-height: 1.5; margin: 0 0 8px; }
   .lead { margin-bottom: 4px; }

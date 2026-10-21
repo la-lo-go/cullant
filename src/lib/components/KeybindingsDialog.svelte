@@ -7,6 +7,7 @@
   import SettingsPanel from "./SettingsPanel.svelte";
   import { shortcutHint } from "../keyboard/hints";
   import { view } from "../stores/view.svelte";
+  import ScrollArea from "./ScrollArea.svelte";
 
   let { onclose, onback }: { onclose: () => void; onback?: () => void } = $props();
 
@@ -86,31 +87,33 @@
     <button class="show-shortcuts" onclick={() => { keymap.rebinding = null; view.shortcutsOpen = true; }}>
       {shortcutHint("Show configured shortcuts", "ui.toggleShortcuts")}
     </button>
-    <div class="list">
-      {#each visibleCommands as cmd (cmd.id)}
-        <span class="title">{commandTitle(cmd)}</span>
-        <button
-          class="key"
-          aria-label={`Change ${cmd.title} shortcut`}
-          class:waiting={keymap.rebinding === cmd.id}
-          onclick={() => (keymap.rebinding = cmd.id)}
-        >
-          {keymap.rebinding === cmd.id ? "press a key…" : currentKeys(cmd.id)}
-        </button>
-        {#if modifiedCommands.has(cmd.id) && keymap.overrides[cmd.id] !== undefined}
+    <ScrollArea>
+      <div class="list">
+        {#each visibleCommands as cmd (cmd.id)}
+          <span class="title">{commandTitle(cmd)}</span>
           <button
-            class="reset"
-            aria-label={`Reset ${cmd.title} shortcut`}
-            title={`Reset ${cmd.title} shortcut`}
-            onclick={() => keymap.resetCommand(cmd.id)}
-          ><RotateCcw size={13} /></button>
+            class="key"
+            aria-label={`Change ${cmd.title} shortcut`}
+            class:waiting={keymap.rebinding === cmd.id}
+            onclick={() => (keymap.rebinding = cmd.id)}
+          >
+            {keymap.rebinding === cmd.id ? "press a key…" : currentKeys(cmd.id)}
+          </button>
+          {#if modifiedCommands.has(cmd.id) && keymap.overrides[cmd.id] !== undefined}
+            <button
+              class="reset"
+              aria-label={`Reset ${cmd.title} shortcut`}
+              title={`Reset ${cmd.title} shortcut`}
+              onclick={() => keymap.resetCommand(cmd.id)}
+            ><RotateCcw size={13} /></button>
+          {:else}
+            <span aria-hidden="true"></span>
+          {/if}
         {:else}
-          <span aria-hidden="true"></span>
-        {/if}
-      {:else}
-        <p class="empty">No shortcuts match “{query}”.</p>
-      {/each}
-    </div>
+          <p class="empty">No shortcuts match “{query}”.</p>
+        {/each}
+      </div>
+    </ScrollArea>
   </div>
 </SettingsPanel>
 
@@ -139,7 +142,6 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 4px 8px;
-    overflow-y: auto;
     align-items: center;
   }
 
