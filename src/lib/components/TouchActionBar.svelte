@@ -388,7 +388,7 @@
   /* Only a bar with a grip needs the zone for it. The grid overlay bar has none. */
   .touchbar.dockable.top,
   .touchbar.dockable.bottom {
-    padding-inline: calc(6px + var(--safe-left)) calc(6px + var(--safe-right));
+    padding-inline: calc(6px + var(--safe-left)) var(--safe-right);
   }
 
   /* The bar comes first in the frame for top and left. */
@@ -415,7 +415,7 @@
 
   .touchbar.dockable.left,
   .touchbar.dockable.right {
-    padding-block: 6px calc(6px + var(--safe-bottom));
+    padding-block: 6px var(--safe-bottom);
   }
 
   .touchbar.left {
@@ -444,15 +444,19 @@
     scrollbar-width: none;
   }
 
-  /* The same inset at both ends, as wide as the grip zone: the groups centre on the
-     whole bar, and scrolled items stop at the edge of the zone. */
+  /* The same room at both ends, so the groups centre on the whole bar. At the
+     grip it is a margin: scrolled items stop before the grip. At the far end it
+     is padding inside the scroller: scrolled items run to the bar's edge. */
   .dockable .items {
-    margin-inline: var(--grip-zone);
+    margin-inline-start: var(--grip-zone);
+    padding-inline-end: calc(6px + var(--grip-zone));
   }
 
   .dockable.vertical .items {
-    margin-inline: 0;
-    margin-block: var(--grip-zone);
+    margin-inline-start: 0;
+    padding-inline-end: 0;
+    margin-block-start: var(--grip-zone);
+    padding-block-end: calc(6px + var(--grip-zone));
   }
 
   .vertical .items {
