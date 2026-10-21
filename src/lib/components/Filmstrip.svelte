@@ -362,7 +362,7 @@
        the focused cell at once instead of scrolling from a stale position. -->
   {#key side}
     <div
-      class="filmstrip {side}"
+      class="filmstrip dock-panel {side}"
       class:vertical
       class:preview={!!preview}
       class:pending-collapse={pendingCollapse}

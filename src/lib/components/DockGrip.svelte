@@ -184,20 +184,15 @@
 </script>
 
 <!-- The dots run across the row the grip sits in. -->
-{#snippet icon()}
-  {#if orientation === "horizontal"}
-    <GripVertical size={12} />
-  {:else}
-    <GripHorizontal size={12} />
-  {/if}
-{/snippet}
 {#snippet content()}
-  {#if children}
-    <span class="lead" aria-hidden="true">{@render icon()}</span>
-    {@render children()}
-  {:else}
-    {@render icon()}
-  {/if}
+  <span class="dots" aria-hidden="true">
+    {#if orientation === "horizontal"}
+      <GripVertical size={12} />
+    {:else}
+      <GripHorizontal size={12} />
+    {/if}
+  </span>
+  {@render children?.()}
 {/snippet}
 
 {#if still}
@@ -248,17 +243,16 @@
     border-radius: 4px;
     background: transparent;
     color: inherit;
-    opacity: 0.45;
     cursor: grab;
     touch-action: none;
+  }
+  .dock-grip.dragging {
+    cursor: grabbing;
   }
   .dock-grip:hover,
   .dock-grip:focus-visible,
   .dock-grip.dragging {
-    opacity: 1;
-  }
-  .dock-grip.dragging {
-    cursor: grabbing;
+    background: var(--hover);
   }
   @media (pointer: coarse) {
     .dock-grip {
@@ -284,32 +278,48 @@
     letter-spacing: inherit;
     text-transform: inherit;
     text-align: left;
-    opacity: 1;
     transition: background 120ms ease, color 120ms ease;
-  }
-  .lead {
-    display: inline-flex;
-    opacity: 0.45;
-    transition: opacity 120ms ease;
   }
   .dock-grip.labelled:hover,
   .dock-grip.labelled:focus-visible,
   .dock-grip.labelled.dragging {
-    background: var(--hover);
     color: #ccc;
   }
   .dock-grip.labelled.dragging {
     background: var(--accent-fill);
     color: #fff;
   }
-  .labelled:hover .lead,
-  .labelled:focus-visible .lead,
-  .labelled.dragging .lead {
+
+  /* Three levels for the dots, the same on every panel: faint at rest, stronger while
+     the pointer is over the panel (a host puts the class dock-panel on its root), full
+     on the grip. A touch screen has no hover, so it keeps one middle level. */
+  .dots {
+    display: inline-flex;
+    opacity: 0.28;
+    transition: opacity 120ms ease;
+  }
+  :global(.dock-panel:hover) .dots {
+    opacity: 0.55;
+  }
+  .dock-grip:hover .dots,
+  .dock-grip:focus-visible .dots,
+  .dock-grip.dragging .dots {
     opacity: 1;
+  }
+  @media (pointer: coarse) {
+    .dots,
+    :global(.dock-panel:hover) .dots,
+    .dock-grip:hover .dots {
+      opacity: 0.5;
+    }
+    .dock-grip:focus-visible .dots,
+    .dock-grip.dragging .dots {
+      opacity: 1;
+    }
   }
   @media (prefers-reduced-motion: reduce) {
     .dock-grip.labelled,
-    .lead {
+    .dots {
       transition: none;
     }
   }

@@ -207,7 +207,7 @@
   </DockGhost>
 {/if}
 <div
-  class="touchbar {side}"
+  class="touchbar dock-panel {side}"
   bind:this={bar}
   bind:offsetHeight={offsetH}
   bind:offsetWidth={offsetW}
@@ -372,13 +372,15 @@
   /* Hidden by default; a coarse (touch) pointer or the desktop opt-in toggle
      (`.forced`) reveals it. Layout lives here so both paths share it. */
   .touchbar {
+    --grip-zone: 14px;
+    position: relative;
     display: none;
     box-sizing: border-box;
     flex: none;
     align-items: center;
     gap: 8px;
-    padding: 4px calc(10px + var(--safe-right)) calc(4px + var(--safe-bottom))
-      calc(10px + var(--safe-left));
+    padding: 4px calc(6px + var(--safe-right)) calc(4px + var(--safe-bottom))
+      calc(6px + var(--safe-left));
     background: var(--surface);
     border-top: 1px solid var(--border-strong);
   }
@@ -401,7 +403,7 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0;
-    padding: 4px 4px calc(4px + var(--safe-bottom));
+    padding: 6px 4px calc(6px + var(--safe-bottom));
     border-top: none;
   }
 
@@ -425,6 +427,9 @@
     display: flex;
     align-items: center;
     justify-content: safe center;
+    /* The same inset at both ends, as wide as the grip zone: the groups centre on the
+       whole bar, and scrolled items stop at the edge of the zone. */
+    margin-inline: var(--grip-zone);
     gap: 8px;
     overflow-x: auto;
     flex-wrap: nowrap;
@@ -432,6 +437,8 @@
   }
 
   .vertical .items {
+    margin-inline: 0;
+    margin-block: var(--grip-zone);
     flex-direction: column;
     align-items: center;
     overflow-x: hidden;
@@ -446,24 +453,30 @@
     color: #8a8a93;
   }
 
-  /* The grip is a fixed cell before the scroll area: items scroll beside it and
-     never pass under it. */
+  /* The grip takes no flow space. It sits in the leading padding and the zone in front of
+     the items, and its hit area is the whole cell. */
   .gripcell {
-    flex: none;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: var(--safe-left);
+    z-index: 1;
     display: flex;
-    align-items: center;
-    justify-content: center;
-    align-self: stretch;
-    padding-right: 8px;
-    border-right: 1px solid var(--border);
+    width: calc(6px + var(--grip-zone));
   }
 
   .vertical .gripcell {
-    align-self: auto;
-    padding: 0 0 4px;
-    margin-bottom: 4px;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+    top: 0;
+    bottom: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    height: calc(6px + var(--grip-zone));
+  }
+
+  .gripcell :global(.dock-grip) {
+    width: 100%;
+    height: 100%;
   }
 
   /* On a drag, and on the way back after a cancel. The slot has an explicit size
@@ -508,6 +521,7 @@
 
   @media (pointer: coarse) {
     .touchbar {
+      --grip-zone: 28px;
       display: flex;
     }
   }

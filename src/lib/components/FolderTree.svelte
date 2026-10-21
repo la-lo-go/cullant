@@ -180,7 +180,7 @@
     </DockGhost>
   {/if}
   <aside
-    class="tree"
+    class="tree dock-panel"
     class:preview={!!preview}
     class:right
     class:pending-collapse={pendingCollapse}
