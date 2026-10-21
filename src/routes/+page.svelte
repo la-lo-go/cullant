@@ -1199,10 +1199,20 @@
     }
   }
 
-  /* App-styled scrollbars: a thin thumb in the app accent (mint) hugging
-     the content edge, a fully transparent track so no bar ever reads as its
-     own column. The 2px transparent border (clipped to content-box) insets the
-     thumb so the visible bar is only ~4px. */
+  /* Fallback for a native bar that a container forgot to replace. New scroll
+     areas must use ScrollArea: CSS alone cannot take the bar out of the layout
+     or show it only while scrolling (Chromium removed `overflow: overlay`).
+     This keeps a stray bar thin and quiet: the thumb shows only while the
+     container is hovered. */
+  :global(*) {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+
+  :global(*:hover) {
+    scrollbar-color: rgba(var(--accent-rgb), 0.5) transparent;
+  }
+
   :global(::-webkit-scrollbar) {
     width: 8px;
     height: 8px;
@@ -1213,10 +1223,14 @@
   }
 
   :global(::-webkit-scrollbar-thumb) {
-    background-color: rgba(var(--accent-rgb), 0.5);
+    background-color: transparent;
     border-radius: 8px;
     border: 2px solid transparent;
     background-clip: content-box;
+  }
+
+  :global(:hover::-webkit-scrollbar-thumb) {
+    background-color: rgba(var(--accent-rgb), 0.5);
   }
 
   :global(::-webkit-scrollbar-thumb:hover) {
