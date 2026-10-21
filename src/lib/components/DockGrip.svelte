@@ -38,9 +38,11 @@
     orientation: "horizontal" | "vertical";
     /** A label that becomes the handle. The grip dots stay visible before it, and the grip fills its row. */
     children?: Snippet;
+    /** A look-alike that does nothing: the grip of a ghost keeps the geometry of the real one. */
+    still?: boolean;
   }
 
-  const { panel, target, thicknessFor, orientation, children }: Props = $props();
+  const { panel, target, thicknessFor, orientation, children, still = false }: Props = $props();
 
   const describedBy = $derived(`dock-grip-help-${panel}`);
   const DRAG_THRESHOLD = 5;
@@ -181,39 +183,47 @@
   $effect(() => cancel);
 </script>
 
-<button
-  bind:this={button}
-  class="dock-grip"
-  class:dragging
-  class:labelled={!!children}
-  type="button"
-  aria-label={children ? undefined : `Move ${DOCK_LABELS[panel].toLowerCase()}`}
-  aria-describedby={children ? describedBy : undefined}
-  title="Drag to move. Click to choose a position."
-  {onpointerdown}
-  {onpointermove}
-  {onpointerup}
-  onpointercancel={cancel}
-  onlostpointercapture={cancel}
-  {onclick}
->
-  <!-- The dots run across the row the grip sits in. -->
-  {#snippet icon()}
-    {#if orientation === "horizontal"}
-      <GripVertical size={12} />
-    {:else}
-      <GripHorizontal size={12} />
-    {/if}
-  {/snippet}
+<!-- The dots run across the row the grip sits in. -->
+{#snippet icon()}
+  {#if orientation === "horizontal"}
+    <GripVertical size={12} />
+  {:else}
+    <GripHorizontal size={12} />
+  {/if}
+{/snippet}
+{#snippet content()}
   {#if children}
     <span class="lead" aria-hidden="true">{@render icon()}</span>
     {@render children()}
   {:else}
     {@render icon()}
   {/if}
-</button>
+{/snippet}
 
-{#if children}
+{#if still}
+  <span class="dock-grip" class:labelled={!!children}>{@render content()}</span>
+{:else}
+  <button
+    bind:this={button}
+    class="dock-grip"
+    class:dragging
+    class:labelled={!!children}
+    type="button"
+    aria-label={children ? undefined : `Move ${DOCK_LABELS[panel].toLowerCase()}`}
+    aria-describedby={children ? describedBy : undefined}
+    title="Drag to move. Click to choose a position."
+    {onpointerdown}
+    {onpointermove}
+    {onpointerup}
+    onpointercancel={cancel}
+    onlostpointercapture={cancel}
+    {onclick}
+  >
+    {@render content()}
+  </button>
+{/if}
+
+{#if children && !still}
   <!-- A hidden element can still describe the button. -->
   <span id={describedBy} hidden>
     Move {DOCK_LABELS[panel].toLowerCase()}. Click to choose a position.
