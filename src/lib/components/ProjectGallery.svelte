@@ -201,7 +201,7 @@
         { kind: "header", label: project.displayName },
         {
           kind: "item",
-          label: "Delete project…",
+          label: "Delete project",
           icon: Trash2,
           run: () => (deleteTarget = project),
         },
