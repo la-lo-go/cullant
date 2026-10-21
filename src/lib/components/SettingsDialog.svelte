@@ -149,6 +149,14 @@
 
   let panel = $state<HTMLDivElement | null>(null);
 
+  // A sub-panel replaces the list, so the list comes back at its top unless it
+  // is put back where the user left it.
+  let list = $state<HTMLDivElement | null>(null);
+  let listScroll = 0;
+  $effect(() => {
+    if (list) list.scrollTop = listScroll;
+  });
+
   // A sub-panel or an explanation left open would greet the next visit out of
   // context, so the dialog always opens at its top level.
   $effect(() => {
@@ -440,7 +448,14 @@
 {/snippet}
 
 {#snippet settingRow(s: Setting)}
-  {#if s.kind === "panel"}
+  {#if s.kind === "custom" && s.slot === "notificationSettings"}
+    <!-- Opens a system screen: a door, like the sub-panels, not a row. -->
+    <button class="wide door" onclick={releasing(() => void api.openNotificationSettings().catch(() => {}))}>
+      <BellRing size={14} />
+      <span>{s.label}</span>
+      <ArrowUpRight size={14} />
+    </button>
+  {:else if s.kind === "panel"}
     <!-- A door, drawn like the doors at the foot of the dialog rather than like
          a preference sitting next to its control. It leads somewhere with its
          own screenful of settings, and that was not visible when it was a row
@@ -523,10 +538,6 @@
           {:else}
             <DatabaseBackup size={13} /> Write now
           {/if}
-        </button>
-      {:else if s.slot === "notificationSettings"}
-        <button class="act" onclick={releasing(() => void api.openNotificationSettings().catch(() => {}))}>
-          <BellRing size={13} /> Open system settings
         </button>
       {/if}
     </svelte:element>
@@ -771,7 +782,7 @@
         {@render panelReset("Reset to default", () => settings.resetRadial())}
       </div>
     {:else}
-      <div class="content">
+      <div class="content" bind:this={list} onscroll={() => (listScroll = list?.scrollTop ?? 0)}>
         {#if visibleGroups.length === 0 && panelRows.length === 0 && destinations.length === 0 && elsewhere.length === 0 && !showSupport && !showReset && !showReimport}
           <p class="empty">Nothing matches “{query}”.</p>
         {:else if visibleGroups.length > 0}
