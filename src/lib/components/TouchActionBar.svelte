@@ -21,7 +21,6 @@
   import Eraser from "@lucide/svelte/icons/eraser";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import FolderInput from "@lucide/svelte/icons/folder-input";
-  import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Undo2 from "@lucide/svelte/icons/undo-2";
 
   // On touch devices the bar shows itself (coarse pointer). On desktop it is
@@ -264,8 +263,7 @@
       {#if itemId === "auto" && (view.mode === "viewer" || view.mode === "compare")}
         <div class="group recovery">
           <button class="btn task" class:active={session.autoAdvanceActive} disabled={session.capsLockActive} aria-label="Auto" aria-pressed={session.autoAdvanceActive} title={session.capsLockActive ? "Caps Lock enables keyboard auto-advance. Turn Caps Lock off to use Auto. Shift reverses keyboard auto-advance for one action." : "Auto: advance after classification. Shift reverses this setting for one action."} data-press="auto" onclick={act(toggleAutoAdvance, "auto")}>
-            <ArrowRight size={17} />
-            {#if !vertical}<span class="tasklabel">Auto</span>{/if}
+            <span class="tasklabel">Auto</span>
           </button>
         </div>
       {:else if itemId === "moveCopy"}
