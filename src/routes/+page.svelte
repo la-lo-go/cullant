@@ -887,11 +887,11 @@
               d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
             />
             <g class="folder-photo">
-              <rect x="8" y="2" width="10" height="12" rx="1.5" />
-              <path d="M9.5 12l2.5-3 1.5 1.5 1.5-2 1.5 3.5" stroke-width="1.5" />
-              <circle cx="15.5" cy="5" r="1" stroke-width="1.5" />
+              <rect x="10.5" y="3.5" width="8.5" height="12" rx="1.5" />
+              <path d="M12 10.5l2-2.5 1.2 1.5 1-1.2 1.6 2.2" stroke-width="1.3" />
+              <circle cx="16.5" cy="6.5" r="0.8" stroke-width="1.3" />
             </g>
-            <path class="folder-flap" d="M2 11h20v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2Z" />
+            <path class="folder-flap" d="M4 20L20 20L20 20L4 20Z" />
           </svg>
           <span>Open new project…</span>
         </button>
@@ -1789,27 +1789,26 @@
   }
 
   /* The flap and photo are filled with the button colour, so they hide the
-     lines behind them. The variable follows the button's own hover colour. */
+     lines behind them. The variable follows the button's own hover colour.
+     The closed flap is a flat line on the back panel's bottom edge, so the
+     closed folder is the plain folder. Both flap shapes share one command
+     structure, so `d` interpolates and the front tilts forward and down. */
   button.primary {
     --folder-bg: var(--control);
   }
 
-  .folder-flap,
+  .folder-flap {
+    fill: var(--folder-bg);
+    d: path("M4 20L20 20L20 20L4 20Z");
+    transition: d 220ms cubic-bezier(0.34, 1.1, 0.64, 1);
+  }
+
   .folder-photo {
     fill: var(--folder-bg);
     opacity: 0;
+    transform: translateY(9px);
     transform-box: fill-box;
     transform-origin: 50% 100%;
-  }
-
-  .folder-flap {
-    transition:
-      transform 220ms cubic-bezier(0.34, 1.1, 0.64, 1),
-      opacity 90ms linear;
-  }
-
-  .folder-photo {
-    transform: translateY(8px) scale(0.9);
     transition:
       transform 240ms cubic-bezier(0.34, 1.1, 0.64, 1) 30ms,
       opacity 120ms linear 30ms;
@@ -1818,13 +1817,12 @@
   /* No hover rule under reduced motion: the folder stays closed. */
   @media (prefers-reduced-motion: no-preference) {
     button.primary:is(:hover, :focus-visible) .folder-flap {
-      opacity: 1;
-      transform: scaleY(0.5);
+      d: path("M4 20L20 20L22.5 12.5L6.5 12.5Z");
     }
 
     button.primary:is(:hover, :focus-visible) .folder-photo {
       opacity: 1;
-      transform: rotate(5deg);
+      transform: rotate(6deg);
     }
   }
 
