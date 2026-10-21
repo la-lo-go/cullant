@@ -10,7 +10,9 @@
   import FolderTreeNode from "./FolderTreeNode.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import DockGrip from "./DockGrip.svelte";
-  import { dock } from "../stores/dock.svelte";
+  import DockGhost from "./DockGhost.svelte";
+  import FolderTree from "./FolderTree.svelte";
+  import { dock, type Side } from "../stores/dock.svelte";
   import { buildFolderTree, collectFolderPaths, hasCollapsedBranch, visibleFolderPaths, type TreeNode } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -18,6 +20,11 @@
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import EyeOff from "@lucide/svelte/icons/eye-off";
   import Eye from "@lucide/svelte/icons/eye";
+
+  // `preview` makes a ghost for a drag: the tree as it will look at that side and
+  // size, scrolled like the real one. It reads the stores and writes nothing.
+  // `previewScroll` is the scroll position of the real tree.
+  const { preview, previewScroll = 0 }: { preview?: { side: Side; size: number }; previewScroll?: number } = $props();
 
   const tree = $derived(buildFolderTree(catalog.items, (path) => folders.ignoredBy(path) !== undefined));
   const children = $derived([...tree.children.values()]);
@@ -94,8 +101,12 @@
 
   // Wait for the catalog and saved scope before removing missing folder paths.
   $effect(() => {
-    if (catalog.preloading || catalog.scanning || session.restoring) return;
+    if (preview || catalog.preloading || catalog.scanning || session.restoring) return;
     folders.reconcileScope(collectFolderPaths(tree));
+  });
+
+  $effect(() => {
+    if (preview && scroller) scroller.scrollTop = previewScroll;
   });
 
   // Drag-to-resize the panel. Dragging the inner edge past COLLAPSE_AT hides
@@ -104,7 +115,7 @@
   const MAX_W = 480;
   const COLLAPSE_AT = 120;
 
-  const right = $derived(dock.folderTree === "right");
+  const right = $derived((preview?.side ?? dock.folderTree) === "right");
 
   let aside = $state<HTMLElement | null>(null);
   let resizing = $state(false);
@@ -154,24 +165,32 @@
 </script>
 
 {#if children.length > 0}
+  {#if !preview}
+    <DockGhost panel="folderTree">
+      {#snippet ghost(side, size)}
+        <FolderTree preview={{ side, size }} previewScroll={scrollTop} />
+      {/snippet}
+    </DockGhost>
+  {/if}
   <aside
     class="tree"
+    class:preview={!!preview}
     class:right
     class:pending-collapse={pendingCollapse}
-    class:docking={dock.drag?.panel === "folderTree"}
-    class:dock-moving={dock.animating("folderTree")}
-    class:vacating={dock.vacating("folderTree")}
-    bind:this={aside} style="--tree-w: {session.folderTreeWidth}px">
+    class:docking={!preview && dock.drag?.panel === "folderTree"}
+    class:dock-moving={!preview && dock.animating("folderTree")}
+    class:vacating={!preview && dock.vacating("folderTree")}
+    bind:this={aside} style="--tree-w: {preview?.size ?? session.folderTreeWidth}px">
     <div
       class="scroll"
-      id="folder-tree-scroll"
+      id={preview ? undefined : "folder-tree-scroll"}
       bind:this={scroller}
       bind:clientHeight={viewportH}
       onscroll={() => scroller && (scrollTop = scroller.scrollTop)}
     >
       <div class="inner" bind:clientHeight={contentH}>
         <div class="header">
-          <DockGrip panel="folderTree" target={() => aside?.parentElement ?? null} thicknessFor={() => session.folderTreeWidth} orientation="horizontal">
+          <DockGrip panel="folderTree" still={!!preview} target={() => aside?.parentElement ?? null} thicknessFor={() => session.folderTreeWidth} orientation="horizontal">
             <span>Folders</span>
           </DockGrip>
         </div>
@@ -186,6 +205,7 @@
         {/each}
       </div>
     </div>
+    {#if !preview}
     <OverlayScrollbar
       orientation="vertical"
       viewport={viewportH}
@@ -219,6 +239,7 @@
     >
       {#if right}<ChevronRight size={16} />{:else}<ChevronLeft size={16} />{/if}
     </button>
+    {/if}
   </aside>
 {/if}
 
@@ -267,6 +288,16 @@
 
   .tree.docking.vacating .scroll {
     min-width: var(--tree-w);
+  }
+
+  /* A ghost fills the box that DockGhost gives it. */
+  .tree.preview {
+    position: relative;
+    inset: auto;
+    z-index: auto;
+    width: 100%;
+    height: 100%;
+    box-shadow: none;
   }
 
   .tree.right {

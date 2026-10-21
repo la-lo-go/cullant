@@ -1,44 +1,18 @@
 <script lang="ts">
-  /** Draws the state of a grip drag: compass buttons and preview rectangle. */
+  /** Draws the state of a grip drag: the compass buttons. The ghosts and frames come from `DockGhost`. */
   import PanelTop from "@lucide/svelte/icons/panel-top";
   import PanelRight from "@lucide/svelte/icons/panel-right";
   import PanelBottom from "@lucide/svelte/icons/panel-bottom";
   import PanelLeft from "@lucide/svelte/icons/panel-left";
-  import {
-    COMPASS_BUTTON,
-    DOCK_SIDES,
-    compassButtons,
-    dock,
-    previewRect,
-    type Side,
-  } from "../stores/dock.svelte";
+  import { COMPASS_BUTTON, DOCK_SIDES, compassButtons, dock } from "../stores/dock.svelte";
 
   const SIDE_ICONS = { top: PanelTop, right: PanelRight, bottom: PanelBottom, left: PanelLeft };
   const drag = $derived(dock.drag);
-  // Keeps the last side so the preview fades out where it was instead of jumping.
-  let lastSide = $state<Side>("bottom");
-  $effect(() => {
-    if (drag?.candidate) lastSide = drag.candidate;
-  });
-
-  const preview = $derived.by(() => {
-    if (!drag) return null;
-    const side = drag.candidate ?? lastSide;
-    return previewRect(drag.region, side, drag.thickness(side));
-  });
 </script>
 
-{#if drag && preview}
+{#if drag}
   {@const { region, candidate } = drag}
   <div class="layer" aria-hidden="true">
-    <div
-      class="preview"
-      class:on={candidate !== null}
-      style:left="{preview.left}px"
-      style:top="{preview.top}px"
-      style:width="{preview.width}px"
-      style:height="{preview.height}px"
-    ></div>
     <div
       class="compass"
       style:left="{region.left + region.width / 2}px"
@@ -67,23 +41,6 @@
     inset: 0;
     z-index: 200;
     pointer-events: none;
-  }
-  .preview {
-    position: absolute;
-    box-sizing: border-box;
-    border: 2px solid var(--accent);
-    border-radius: 6px;
-    background: rgba(var(--accent-rgb), 0.22);
-    opacity: 0;
-    transition:
-      left var(--dock-motion),
-      top var(--dock-motion),
-      width var(--dock-motion),
-      height var(--dock-motion),
-      opacity var(--dock-motion);
-  }
-  .preview.on {
-    opacity: 1;
   }
   .compass {
     position: absolute;

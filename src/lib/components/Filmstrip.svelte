@@ -6,6 +6,8 @@
   import { dock, isVertical, type Side } from "../stores/dock.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import DockGrip from "./DockGrip.svelte";
+  import DockGhost from "./DockGhost.svelte";
+  import Filmstrip from "./Filmstrip.svelte";
   import { gridThumb } from "../thumbLoader";
   import Scissors from "@lucide/svelte/icons/scissors";
   import ChevronUp from "@lucide/svelte/icons/chevron-up";
@@ -20,10 +22,17 @@
 
   // `companionIndex` is compare's second photo: marked too, but never as
   // strongly as the focused one, which is what the action bar acts on.
+  // `preview` makes a ghost for a drag: the strip as it will look at that side and
+  // size, with the focused cell centred. It reads the session and writes nothing.
   let {
     items,
     companionIndex = null,
-  }: { items: ItemLite[]; companionIndex?: number | null } = $props();
+    preview,
+  }: {
+    items: ItemLite[];
+    companionIndex?: number | null;
+    preview?: { side: Side; size: number };
+  } = $props();
 
   const labelColors: Record<string, string> = {
     Red: "#e05555",
@@ -38,7 +47,7 @@
 
   // The strip docks on any side. "Main" is the axis it scrolls along, "cross"
   // is its thickness. A vertical strip is a column: the main axis is Y.
-  const side = $derived(dock.filmstrip);
+  const side = $derived(preview?.side ?? dock.filmstrip);
   const vertical = $derived(isVertical(side));
   // The tab that hides the strip points to the outer edge, the peek tab inward.
   const HIDE_ICON = { bottom: ChevronDown, top: ChevronUp, left: ChevronLeft, right: ChevronRight };
@@ -114,7 +123,7 @@
     const preferred = v ? session.filmstripWidth : session.filmstripHeight;
     return Math.max(MIN_T, Math.min(preferred, contentMax(v)));
   }
-  const stripT = $derived(thicknessFor(side));
+  const stripT = $derived(preview?.size ?? thicknessFor(side));
   // Reactive: the strip is user-resizable (drag its inner edge), and unlike the
   // (square, fixed-size) grid cell, a filmstrip cell's cross size is the OTHER
   // free axis besides its length — object-fit: contain can bind on either one
@@ -123,10 +132,18 @@
   // from the image whenever the cross axis is the non-binding one.
   const availCross = $derived(Math.max(0, stripT - PAD_CROSS * 2));
 
-  const first = $derived(Math.max(0, Math.floor(scrollPos / CELL) - OVERSCAN));
-  const last = $derived(
-    Math.min(items.length, Math.ceil((scrollPos + viewLen) / CELL) + OVERSCAN)
+  // A ghost has no scroll: its canvas is shifted so the focused cell is centred.
+  const ghostPos = $derived(
+    Math.min(
+      Math.max(0, items.length * CELL - viewLen),
+      Math.max(0, session.focusedIndex * CELL - viewLen / 2 + CELL / 2),
+    ),
   );
+  const pos = $derived(preview ? ghostPos : scrollPos);
+  // A ghost never scrolls, so it draws no cell beyond its box.
+  const overscan = $derived(preview ? 0 : OVERSCAN);
+  const first = $derived(Math.max(0, Math.floor(pos / CELL) - overscan));
+  const last = $derived(Math.min(items.length, Math.ceil((pos + viewLen) / CELL) + overscan));
 
   // Keyed by file id in the template so each frame keeps a stable <img>:
   // scrolling adds/removes cells instead of reassigning `src` on reused nodes,
@@ -205,7 +222,7 @@
     settings.lockCarousel && performance.now() - lockScrollTs < 250;
   $effect(() => {
     // While the strip is dragged, the layout moves under it: recentre after the drop.
-    if (!strip || viewLen === 0 || draggingSelf) return;
+    if (preview || !strip || viewLen === 0 || draggingSelf) return;
     if (strip !== lastStripEl) {
       lastStripEl = strip;
       hasCentered = false;
@@ -334,19 +351,28 @@
 </script>
 
 {#if session.showFilmstrip}
+  {#if !preview}
+    <DockGhost panel="filmstrip">
+      {#snippet ghost(ghostSide, size)}
+        <Filmstrip {items} {companionIndex} preview={{ side: ghostSide, size }} />
+      {/snippet}
+    </DockGhost>
+  {/if}
   <!-- Keyed on the side: a side change remounts the strip, which then centres
        the focused cell at once instead of scrolling from a stale position. -->
   {#key side}
     <div
       class="filmstrip {side}"
       class:vertical
+      class:preview={!!preview}
       class:pending-collapse={pendingCollapse}
-      class:docking={dock.drag?.panel === "filmstrip"}
-      class:dock-moving={dock.animating("filmstrip")}
-      class:vacating={dock.vacating("filmstrip")}
+      class:docking={!preview && dock.drag?.panel === "filmstrip"}
+      class:dock-moving={!preview && dock.animating("filmstrip")}
+      class:vacating={!preview && dock.vacating("filmstrip")}
       bind:this={root}
       style="--thickness: {stripT}px"
     >
+      {#if !preview}
       <div
         class="resize-handle"
         class:resizing
@@ -378,15 +404,21 @@
           <HideIcon size={16} />
         </button>
       </div>
+      {/if}
       <div
         class="strip"
-        id="filmstrip-scroll"
+        id={preview ? undefined : "filmstrip-scroll"}
         bind:this={strip}
         bind:clientWidth={clientW}
         bind:clientHeight={clientH}
-        onscroll={onStripScroll}
+        onscroll={preview ? undefined : onStripScroll}
       >
-        <div class="canvas" style="{vertical ? 'height' : 'width'}:{items.length * CELL}px">
+        <div
+          class="canvas"
+          style="{vertical ? 'height' : 'width'}:{items.length * CELL}px{preview
+            ? `; transform: translate${vertical ? 'Y' : 'X'}(${-pos}px)`
+            : ''}"
+        >
           {#each visible as v (v.item.id)}
             {@const burst = session.burstPositionAt(v.index)}
             <div
@@ -394,9 +426,9 @@
               class:focused={v.index === session.focusedIndex}
               class:companion={v.index !== session.focusedIndex && v.index === companionIndex}
               style="transform: translate{vertical ? 'Y' : 'X'}({v.offset}px); {vertical ? 'height' : 'width'}:{CELL}px"
-              onpointerdown={(e) => onCellPointerDown(e, v.index)}
-              onpointerup={onCellPointerUp}
-              onpointercancel={resetTap}
+              onpointerdown={preview ? undefined : (e) => onCellPointerDown(e, v.index)}
+              onpointerup={preview ? undefined : onCellPointerUp}
+              onpointercancel={preview ? undefined : resetTap}
               role="button"
               tabindex="-1"
             >
@@ -505,6 +537,7 @@
       </div>
       <!-- Overlay scrollbar floating over the outer edge of the cells, aligned
            with the strip's safe-area box. -->
+      {#if !preview}
       <div class="strip-overlay">
         <OverlayScrollbar
           orientation={vertical ? "vertical" : "horizontal"}
@@ -517,6 +550,7 @@
           alwaysVisible
         />
       </div>
+      {/if}
     </div>
   {/key}
 {:else}
@@ -541,6 +575,16 @@
   .filmstrip.vertical {
     width: var(--thickness);
     height: auto;
+  }
+
+  /* A ghost fills the box that DockGhost gives it. */
+  .filmstrip.preview {
+    width: 100%;
+    height: 100%;
+  }
+
+  .preview .strip {
+    overflow: hidden;
   }
 
   /* The border is on the inner edge, towards the view. Top and left strips come

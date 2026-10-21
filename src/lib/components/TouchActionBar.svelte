@@ -10,6 +10,8 @@
   import { tooltips } from "$lib/tooltips";
   import { dock, isVertical, type Side } from "$lib/stores/dock.svelte";
   import DockGrip from "./DockGrip.svelte";
+  import DockGhost from "./DockGhost.svelte";
+  import TouchActionBar from "./TouchActionBar.svelte";
   import type { CommandId } from "$lib/keyboard/keymap";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -28,13 +30,22 @@
   // `side` is where the bar is docked. In the grid the bar is a fixed overlay at
   // the bottom: it has no grip and ignores the setting. `region` is the element
   // whose edges the bar can attach to.
+  // `preview` makes a ghost for a drag: the bar as it will look at that side and
+  // size. It acts on nothing and flashes nothing.
   let {
     forceShow = false,
     hidden = false,
-    side,
+    side: dockSide,
     region,
-  }: { forceShow?: boolean; hidden?: boolean; side: Side; region: () => HTMLElement | null } =
-    $props();
+    preview,
+  }: {
+    forceShow?: boolean;
+    hidden?: boolean;
+    side: Side;
+    region: () => HTMLElement | null;
+    preview?: { side: Side; size: number };
+  } = $props();
+  const side = $derived(preview?.side ?? dockSide);
 
   const dockable = $derived(view.mode !== "grid");
   const vertical = $derived(isVertical(side));
@@ -52,7 +63,7 @@
   const moving = $derived(dock.animating("actionBar"));
   $effect(() => {
     const size = vertical ? offsetW : offsetH;
-    if (dockable && !moving && size) ownSize = size;
+    if (!preview && dockable && !moving && size) ownSize = size;
   });
   // A column has no room for a tag name: a short form stands for it.
   function abbreviation(name: string): string {
@@ -166,7 +177,7 @@
   let bar: HTMLElement;
   $effect(() => {
     const { id, n } = pressed;
-    if (!n) return;
+    if (preview || !n) return;
     const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
     bar.querySelector(`[data-press="${CSS.escape(id)}"]`)?.animate(
       [{ backgroundColor: "rgba(255, 255, 255, 0.4)" }, {}],
@@ -186,6 +197,13 @@
   }
 </script>
 
+{#if !preview}
+  <DockGhost panel="actionBar">
+    {#snippet ghost(ghostSide, size)}
+      <TouchActionBar side={ghostSide} {region} {forceShow} {hidden} preview={{ side: ghostSide, size }} />
+    {/snippet}
+  </DockGhost>
+{/if}
 <div
   class="touchbar {side}"
   bind:this={bar}
@@ -194,16 +212,17 @@
   use:tooltips
   class:vertical
   class:forced={forceShow}
+  class:preview={!!preview}
   class:disabled={!focused && !hasSelection}
   class:hidden
-  class:docking={dockable && dock.drag?.panel === "actionBar"}
-  class:dock-moving={dockable && moving}
-  class:vacating={dockable && dock.vacating("actionBar")}
-  style={dockable && moving ? `--bar-size: ${thicknessFor(side)}px` : ""}
+  class:docking={!preview && dockable && dock.drag?.panel === "actionBar"}
+  class:dock-moving={!preview && dockable && moving}
+  class:vacating={!preview && dockable && dock.vacating("actionBar")}
+  style={preview ? `--bar-size: ${preview.size}px` : dockable && moving ? `--bar-size: ${thicknessFor(side)}px` : ""}
 >
   {#if dockable}
     <div class="gripcell">
-      <DockGrip panel="actionBar" target={region} {thicknessFor} {orientation} />
+      <DockGrip panel="actionBar" still={!!preview} target={region} {thicknessFor} {orientation} />
     </div>
   {/if}
   <div class="items">
@@ -497,6 +516,13 @@
 
   .touchbar.hidden {
     display: none;
+  }
+
+  /* A ghost fills the box that DockGhost gives it. */
+  .touchbar.preview {
+    display: flex;
+    width: 100%;
+    height: 100%;
   }
 
   .touchbar.disabled .group:not(.recovery) {
