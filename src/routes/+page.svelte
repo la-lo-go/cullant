@@ -867,10 +867,9 @@
           <p class="hint">Point Cullant at a folder of photos or videos to start.</p>
         {/if}
         <button class="primary" class:big={recent.list.length === 0} onclick={pickProject}>
-          <!-- Custom (not lucide) so the flap is its own path: both its closed
-               and hover `d` states share the same M/L/L/L/Z command structure,
-               which is what lets the browser smoothly interpolate the shape
-               instead of snapping — the folder visibly opens on hover. -->
+          <!-- Custom (not lucide): the folder needs a separate flap and photo to
+               animate. Both are filled with the button colour so they hide the
+               lines behind them. -->
           <svg
             class="folder-icon"
             width="17"
@@ -887,7 +886,12 @@
               class="folder-back"
               d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
             />
-            <path class="folder-flap" d="M6 19.5L18 19.5L18 19L6 19Z" />
+            <g class="folder-photo">
+              <rect x="8" y="2" width="10" height="12" rx="1.5" />
+              <path d="M9.5 12l2.5-3 1.5 1.5 1.5-2 1.5 3.5" stroke-width="1.5" />
+              <circle cx="15.5" cy="5" r="1" stroke-width="1.5" />
+            </g>
+            <path class="folder-flap" d="M2 11h20v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2Z" />
           </svg>
           <span>Open new project…</span>
         </button>
@@ -1784,24 +1788,50 @@
     font-size: 18px;
   }
 
-  /* The flap's `d` transitions between two shapes built from the SAME command
-     sequence (M L L L Z), so the browser can smoothly interpolate the points
-     instead of jump-cutting — the front panel visibly swings down and open.
-     The closed state is a thin sliver INSET well inside the back panel's own
-     outline (not flush with it): the back panel's edges sit at x=2/x=22, y=20
-     — a flap edge sitting right on/next to those doubles up with its 2px
-     stroke and reads as one fat border (the bug). Inset + thin keeps the two
-     strokes far enough apart that the closed folder shows a single clean
-     outline, same as it would with no flap at all.
-     The `d` SVG attribute above is only the no-hover / unsupported-browser
-     fallback; this CSS property (which wins when supported) drives it. */
-  .folder-flap {
-    d: path("M6 19.5L18 19.5L18 19L6 19Z");
-    transition: d 220ms cubic-bezier(0.34, 1.1, 0.64, 1);
+  /* The flap and photo are filled with the button colour, so they hide the
+     lines behind them. The variable follows the button's own hover colour. */
+  button.primary {
+    --folder-bg: var(--control);
   }
 
-  button.primary:hover .folder-flap {
-    d: path("M2 20.5L22 20.5L19 11L6 11Z");
+  .folder-flap,
+  .folder-photo {
+    fill: var(--folder-bg);
+    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+  }
+
+  .folder-flap {
+    transition:
+      transform 220ms cubic-bezier(0.34, 1.1, 0.64, 1),
+      opacity 90ms linear;
+  }
+
+  .folder-photo {
+    transform: translateY(8px) scale(0.9);
+    transition:
+      transform 240ms cubic-bezier(0.34, 1.1, 0.64, 1) 30ms,
+      opacity 120ms linear 30ms;
+  }
+
+  /* No hover rule under reduced motion: the folder stays closed. */
+  @media (prefers-reduced-motion: no-preference) {
+    button.primary:is(:hover, :focus-visible) .folder-flap {
+      opacity: 1;
+      transform: scaleY(0.5);
+    }
+
+    button.primary:is(:hover, :focus-visible) .folder-photo {
+      opacity: 1;
+      transform: rotate(5deg);
+    }
+  }
+
+  @media (hover: hover) {
+    button.primary:hover:not(:disabled) {
+      --folder-bg: var(--hover);
+    }
   }
 
   .welcome .hint {
