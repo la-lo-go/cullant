@@ -212,6 +212,7 @@
   bind:offsetWidth={offsetW}
   use:tip
   class:vertical
+  class:dockable
   class:forced={forceShow}
   class:preview={!!preview}
   class:disabled={!focused && !hasSelection}
@@ -377,10 +378,16 @@
     flex: none;
     align-items: center;
     gap: 8px;
-    padding: 4px calc(6px + var(--safe-right)) calc(4px + var(--safe-bottom))
-      calc(6px + var(--safe-left));
+    padding: 4px calc(10px + var(--safe-right)) calc(4px + var(--safe-bottom))
+      calc(10px + var(--safe-left));
     background: var(--surface);
     border-top: 1px solid var(--border-strong);
+  }
+
+  /* Only a bar with a grip needs the zone for it. The grid overlay bar has none. */
+  .touchbar.dockable.top,
+  .touchbar.dockable.bottom {
+    padding-inline: calc(6px + var(--safe-left)) calc(6px + var(--safe-right));
   }
 
   /* The bar comes first in the frame for top and left. */
@@ -401,8 +408,13 @@
     flex-direction: column;
     align-items: stretch;
     gap: 0;
-    padding: 6px 4px calc(6px + var(--safe-bottom));
+    padding: 4px 4px calc(4px + var(--safe-bottom));
     border-top: none;
+  }
+
+  .touchbar.dockable.left,
+  .touchbar.dockable.right {
+    padding-block: 6px calc(6px + var(--safe-bottom));
   }
 
   .touchbar.left {
@@ -425,18 +437,24 @@
     display: flex;
     align-items: center;
     justify-content: safe center;
-    /* The same inset at both ends, as wide as the grip zone: the groups centre on the
-       whole bar, and scrolled items stop at the edge of the zone. */
-    margin-inline: var(--grip-zone);
     gap: 8px;
     overflow-x: auto;
     flex-wrap: nowrap;
     scrollbar-width: none;
   }
 
-  .vertical .items {
+  /* The same inset at both ends, as wide as the grip zone: the groups centre on the
+     whole bar, and scrolled items stop at the edge of the zone. */
+  .dockable .items {
+    margin-inline: var(--grip-zone);
+  }
+
+  .dockable.vertical .items {
     margin-inline: 0;
     margin-block: var(--grip-zone);
+  }
+
+  .vertical .items {
     flex-direction: column;
     align-items: center;
     overflow-x: hidden;
