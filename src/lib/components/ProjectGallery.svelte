@@ -49,8 +49,12 @@
   import { flip } from "svelte/animate";
   import { recent } from "../stores/recent.svelte";
   import ConfirmDialog from "./ConfirmDialog.svelte";
+  import ContextMenu from "./ContextMenu.svelte";
+  import { folderContextMenu } from "../folderContextMenu";
+  import type { MenuNode } from "../menu";
   import ImageOff from "@lucide/svelte/icons/image-off";
   import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Ellipsis from "@lucide/svelte/icons/ellipsis";
   import Unplug from "@lucide/svelte/icons/unplug";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Usb from "@lucide/svelte/icons/usb";
@@ -134,6 +138,7 @@
   });
 
   let deleteTarget = $state<RecentProject | null>(null);
+  let menu = $state<{ x: number; y: number; items: MenuNode[] } | null>(null);
 
   $effect(() => {
     recent.refresh().catch((e) => console.error("recent refresh failed", e));
@@ -186,9 +191,26 @@
     return path.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "") || path;
   }
 
-  function askDeleteCard(e: Event, project: RecentProject) {
-    e.stopPropagation();
-    deleteTarget = project;
+  // Built on open, against the card it opened on, like the folder tree's menus.
+  function openMenu(project: RecentProject, x: number, y: number) {
+    menu = {
+      x,
+      y,
+      items: [
+        { kind: "header", label: project.displayName },
+        {
+          kind: "item",
+          label: "Delete Cullant data…",
+          icon: Trash2,
+          run: () => (deleteTarget = project),
+        },
+      ],
+    };
+  }
+
+  function openMenuFromButton(e: MouseEvent, project: RecentProject) {
+    const bounds = e.currentTarget instanceof HTMLElement ? e.currentTarget.getBoundingClientRect() : null;
+    if (bounds) openMenu(project, bounds.left, bounds.bottom);
   }
 
   function confirmDelete() {
@@ -204,7 +226,7 @@
       {#each recent.list as project (project.path)}
         {@const st = project.storage}
         {@const KindIcon = kindIcon[st.kind]}
-        <!-- The delete control is a sibling of the card button, not a child:
+        <!-- The menu button is a sibling of the card button, not a child:
              nesting an interactive element inside a <button> is invalid HTML and
              leaves it keyboard-unreachable. -->
         <div class="card-wrap" animate:flip={{ duration: reduceMotion ? 0 : 200 }}>
@@ -216,6 +238,7 @@
             title={st.state === "unknown"
               ? `${project.path}\nStorage status unavailable. Return to this window to retry.`
               : project.path}
+            use:folderContextMenu={(x, y) => openMenu(project, x, y)}
             onclick={() => openCard(project)}
           >
             <span class="kind-badge" title={st.volumeName ?? st.kind}>
@@ -292,12 +315,13 @@
             </span>
           </button>
           <button
-            class="delete"
-            title="Delete Cullant data for this project (your photos are kept)"
-            aria-label="Delete Cullant data for this project"
-            onclick={(e) => askDeleteCard(e, project)}
+            class="more"
+            title="More actions"
+            aria-label="More actions for {project.displayName}"
+            aria-haspopup="menu"
+            onclick={(e) => openMenuFromButton(e, project)}
           >
-            <Trash2 size={14} />
+            <Ellipsis size={16} />
           </button>
         </div>
       {/each}
@@ -313,6 +337,10 @@
     onconfirm={confirmDelete}
     oncancel={() => (deleteTarget = null)}
   />
+{/if}
+
+{#if menu}
+  <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
 {/if}
 
 <style>
@@ -357,9 +385,9 @@
   }
 
   /* Not a real `disabled` button: the card body no-ops on an unavailable
-     project (openCard checks availability), but the delete action must stay
-     clickable — a native `disabled` attribute would block all descendant
-     click handlers too, not just the card's own. */
+     project (openCard checks availability), but the menu must stay reachable —
+     delete is the way to clear a project whose folder is gone — and a native
+     `disabled` attribute would block the card's context menu too. */
   .card.unavailable {
     cursor: default;
     opacity: 0.55;
@@ -508,7 +536,7 @@
   }
 
   /* Always-on storage-kind badge (internal / removable / network), kept subtle
-     and in the opposite corner from the delete action. */
+     and in the opposite corner from the menu button. */
   .kind-badge {
     position: absolute;
     top: 8px;
@@ -519,11 +547,9 @@
     pointer-events: none;
   }
 
-  /* The only per-card action: deletes Cullant's own data (DB + thumb cache)
-     for this project. Turns red on hover since it's destructive. Sized like the
-     app's other icon buttons (36px, 44px on touch) so it is easy to hit, with a
-     chip background because it sits over the photo stack once the card fans out. */
-  .delete {
+  /* Opens the card's menu. Quiet on purpose: a bare icon, because the menu's
+     only item today is destructive and a chip would draw the eye to it. */
+  .more {
     position: absolute;
     top: 4px;
     right: 4px;
@@ -544,32 +570,29 @@
     cursor: pointer;
   }
 
-  .card-wrap:hover .delete,
-  .delete:focus-visible {
+  .card-wrap:hover .more,
+  .more:focus-visible {
     opacity: 1;
     pointer-events: auto;
   }
 
-  /* Touch has no hover: leave the button always visible there instead of
-     requiring a tap-and-hold just to reveal it, and give it the full 44px
-     target the rest of the app uses on coarse pointers. */
-  @media (pointer: coarse) {
-    .delete {
-      width: 44px;
-      height: 44px;
-      opacity: 1;
-      pointer-events: auto;
-    }
-    /* The desktop icon is sized for a 26px button; keep it legible in the 44px
-       touch target rather than leaving it adrift in the middle. */
-    .delete :global(svg) {
-      width: 18px;
-      height: 18px;
-    }
+  .more:hover {
+    background: var(--hover);
   }
 
-  .delete:hover {
-    background: #a04040;
-    color: #fff;
+  /* Touch has no hover: leave the button always visible there, dimmed so it does
+     not compete with the photos, with the full 44px target the rest of the app
+     uses on coarse pointers. */
+  @media (pointer: coarse) {
+    .more {
+      width: 44px;
+      height: 44px;
+      opacity: 0.55;
+      pointer-events: auto;
+    }
+    .more :global(svg) {
+      width: 20px;
+      height: 20px;
+    }
   }
 </style>
