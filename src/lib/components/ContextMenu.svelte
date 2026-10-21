@@ -223,6 +223,7 @@
 {#snippet level(nodes: MenuNode[], path: number[])}
   <!-- Submenus are placed against their row's viewport rect, so scrolling a long
        panel would leave one floating beside nothing. Close it instead. -->
+  {@const hasIcons = nodes.some((n) => n.kind !== "sep" && n.kind !== "header" && n.icon)}
   <ul class="menu" onscroll={() => (activePath = activePath.slice(0, path.length + 1))}>
     {#each nodes as node, i (i)}
       {#if node.kind === "sep"}
@@ -241,18 +242,21 @@
             onpointerdown={() => armRow([...path, i])}
             onclick={(e) => clickRow(e, [...path, i])}
           >
-            <span class="ico">
-              {#if node.icon}
-                {@const Icon = node.icon}
-                <Icon size={13} />
-              {:else if node.kind === "item" && node.checked}
-                <Check size={13} />
-              {/if}
-            </span>
+            {#if hasIcons}
+              <span class="ico">
+                {#if node.icon}
+                  {@const Icon = node.icon}
+                  <Icon size={13} />
+                {/if}
+              </span>
+            {/if}
             <span class="label"
               >{#if node.kind === "item" && node.value}<span class="type">{node.label}:</span>
                 <span class="value">{node.value}</span>{:else}{node.label}{/if}</span
             >
+            {#if node.kind === "item" && node.checked}
+              <Check size={13} class="tick" />
+            {/if}
             {#if node.kind === "submenu"}
               <ChevronRight size={13} class="chev" />
             {:else if node.hint}
@@ -351,12 +355,14 @@
     cursor: default;
   }
 
+  /* A filled row, not only a tinted label: the current choice has to read at a
+     glance in a list of look-alike values. */
   .row.checked {
-    color: var(--accent);
+    background: var(--accent-fill);
+    color: #fff;
   }
 
-  /* Reserve the icon column on every row so labels line up whether or not a
-     row carries an icon or a check. */
+  /* A level with any icon reserves the column on every row, so labels line up. */
   .ico {
     display: inline-flex;
     align-items: center;
@@ -367,7 +373,11 @@
   }
 
   .row.checked .ico {
-    color: var(--accent);
+    color: #fff;
+  }
+
+  .row :global(.tick) {
+    flex: none;
   }
 
   .label {

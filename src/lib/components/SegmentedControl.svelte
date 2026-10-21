@@ -100,8 +100,8 @@
   }
 
   button.selected {
-    background: color-mix(in srgb, var(--accent) 24%, transparent);
-    color: var(--accent);
+    background: var(--accent-fill);
+    color: #fff;
     opacity: 1;
   }
 
