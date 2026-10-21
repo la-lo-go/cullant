@@ -789,13 +789,6 @@
       <div class="view-frame" class:grid={view.mode === "grid"} class:vertical={isVertical(dock.actionBar)} bind:this={viewFrame}>
         {#if view.mode === "grid"}
           <div class="grid-area">
-            {#if session.selectedIds.size > 0}
-              <!-- Rendered as an overlay inside the (positioned) grid area, NOT in
-                   flow: the bar appearing/disappearing mid-marquee would otherwise
-                   shift every thumbnail, re-map the pointer's row hit-testing, and
-                   oscillate the selection it just created. -->
-              <SelectionBar />
-            {/if}
             {#if session.folderTreeVisible}
               <FolderTree />
             {:else if hasSubfolders}
@@ -810,6 +803,13 @@
               </button>
             {/if}
             <div class="grid-content" class:dock-moving={dock.animating("folderTree")} style={dock.reserveStyle("folderTree")}>
+              {#if session.selectedIds.size > 0}
+                <!-- An overlay inside the (positioned) grid content, NOT in flow: the bar
+                     appearing/disappearing mid-marquee would otherwise shift every thumbnail,
+                     re-map the pointer's row hit-testing, and oscillate the selection it just
+                     created. It spans the grid only, so a docked tree keeps its header. -->
+                <SelectionBar />
+              {/if}
               {#if session.filtered.length === 0 && catalog.items.length > 0}
                 <!-- The active tab has photos/videos, but every filter combined
                      leaves nothing — a blank grid otherwise reads as a bug/empty
@@ -1630,6 +1630,7 @@
 
   /* Holds the grid, and makes room for the tree while it is dragged to another side. */
   .grid-content {
+    position: relative;
     flex: 1;
     display: flex;
     min-width: 0;

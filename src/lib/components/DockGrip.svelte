@@ -131,8 +131,9 @@
   function end() {
     const held = press;
     press = null;
+    const was = dragging;
     dragging = false;
-    dock.onCancel(null);
+    if (was) dock.onCancel(null);
     listen(false);
     if (held && button?.hasPointerCapture(held.id)) button.releasePointerCapture(held.id);
     // Read before the drag ends. A drop on a new side no longer vacates (the panel is

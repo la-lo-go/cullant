@@ -454,7 +454,7 @@
   }
 
   /* The whole header row is the grip, so the grip carries the padding. */
-  .header :global(.dock-grip.labelled) {
+  .tree .header :global(.dock-grip.labelled) {
     padding: 8px 10px;
   }
 
