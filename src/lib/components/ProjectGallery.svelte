@@ -201,7 +201,7 @@
         { kind: "header", label: project.displayName },
         {
           kind: "item",
-          label: "Delete Cullant data…",
+          label: "Delete project…",
           icon: Trash2,
           run: () => (deleteTarget = project),
         },
@@ -336,9 +336,9 @@
 
 {#if deleteTarget}
   <ConfirmDialog
-    title="Delete Cullant data?"
-    message={`This deletes Cullant's culling database and thumbnail cache for “${deleteTarget.displayName}” and removes it from recents. Your photos are NOT touched — only Cullant's own data is removed.`}
-    confirmLabel="Delete Cullant data"
+    title="Delete project?"
+    message={`Cullant removes “${deleteTarget.displayName}” from the list and deletes its culling data: ratings, flags, labels, tags and thumbnails. Your photos stay in their folder. Cullant does not delete, move or change them.`}
+    confirmLabel="Delete project"
     onconfirm={confirmDelete}
     oncancel={() => (deleteTarget = null)}
   />
