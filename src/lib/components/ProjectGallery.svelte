@@ -48,6 +48,7 @@
   import { recentThumbUrl, type RecentProject, type StorageKind } from "../api";
   import { flip } from "svelte/animate";
   import { recent } from "../stores/recent.svelte";
+  import { IS_ANDROID } from "../platform";
   import ConfirmDialog from "./ConfirmDialog.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import { folderContextMenu } from "../folderContextMenu";
@@ -301,7 +302,11 @@
               {/if}
             </div>
             <span class="name">{project.displayName}</span>
-            <span class="project-path">{parentPath(project.path)}</span>
+            <!-- A SAF project's path is a content:// URI, which means nothing
+                 to the user. -->
+            {#if !IS_ANDROID}
+              <span class="project-path">{parentPath(project.path)}</span>
+            {/if}
             <span class="meta">
               {#if st.state === "ok"}
                 Opened {relativeTime(project.lastOpened)}
