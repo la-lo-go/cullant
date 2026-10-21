@@ -1,29 +1,35 @@
 /**
  * Shows a path cut in the middle, so both where a folder starts and where it
- * ends stay readable: `C:\Users\me\…\2024\Trip`. Whole segments are dropped
- * from the middle until the text fits the node's width.
+ * ends stay readable: `C:\Users\me\…\2024\Trip`. Of all the cuts that fit the
+ * node's width, the one that keeps the most text wins, so a long segment in
+ * the middle does not cost the short ones around it.
  */
 export function middleEllipsis(node: HTMLElement, path: string) {
   const ctx = document.createElement("canvas").getContext("2d");
 
   function fit() {
     const width = node.clientWidth;
-    if (!ctx || width === 0) return void (node.textContent = path);
+    node.textContent = path;
+    if (!ctx || width === 0) return;
     ctx.font = getComputedStyle(node).font;
+    if (ctx.measureText(path).width <= width) return;
     const sep = path.includes("\\") ? "\\" : "/";
     const parts = path.split(sep);
-    let text = path;
-    let head = Math.ceil(parts.length / 2);
-    let tail = parts.length - head;
-    // Drop the segment nearest the middle, one at a time, keeping the first and
-    // the last segment whatever happens.
-    while (ctx.measureText(text).width > width && head + tail > 2) {
-      if (head > tail && head > 1) head--;
-      else if (tail > 1) tail--;
-      else head--;
-      text = [...parts.slice(0, head), "…", ...parts.slice(parts.length - tail)].join(sep);
+    // Fallback when even the first and last segment overflow: CSS clips it.
+    let best = [parts[0], "…", parts[parts.length - 1]].join(sep);
+    let bestScore = 0;
+    for (let head = 1; head < parts.length - 1; head++) {
+      for (let tail = 1; head + tail < parts.length; tail++) {
+        const text = [...parts.slice(0, head), "…", ...parts.slice(-tail)].join(sep);
+        // More text wins; on a tie, the cut that keeps more of the end.
+        const score = text.length * 2 + (tail >= head ? 1 : 0);
+        if (score > bestScore && ctx.measureText(text).width <= width) {
+          best = text;
+          bestScore = score;
+        }
+      }
     }
-    node.textContent = text;
+    node.textContent = best;
   }
 
   const observer = new ResizeObserver(fit);

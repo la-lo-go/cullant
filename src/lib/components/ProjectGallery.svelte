@@ -487,11 +487,15 @@
     white-space: nowrap;
   }
 
+  /* Stretched to the card, so its width is the room the path has and not the
+     width of the text it holds: the middle cut measures against it. */
   .project-path {
+    align-self: stretch;
     font-size: 11px;
     opacity: 0.6;
-    max-width: 100%;
+    text-align: center;
     overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
