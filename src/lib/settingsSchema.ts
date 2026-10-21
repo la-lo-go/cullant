@@ -89,7 +89,7 @@ export interface ToggleSetting extends SettingBase {
 
 export interface ChoiceSetting extends SettingBase {
   kind: "choice";
-  options: { value: string; label: string; icon?: typeof Zap }[];
+  options: { value: string; label: string; icon?: typeof Zap; hint?: string }[];
   /** How the dialog draws the choice. This is the one rule for it: a list of
    *  2 to 4 short options declares "segments", and every other list is a menu. */
   display?: "segments";
@@ -395,8 +395,8 @@ export const SETTINGS: Setting[] = [
     keywords: "adaptive automatic fixed gap",
     display: "segments",
     options: [
-      { value: "fixed", label: "Fixed" },
-      { value: "adaptive", label: "Adaptive" },
+      { value: "fixed", label: "Fixed", hint: "Use the fixed gap below. Shots closer together than the gap form a burst." },
+      { value: "adaptive", label: "Adaptive", hint: "Find the gap from the shoot's own rhythm. Use the fixed gap when the rhythm shows no clear split." },
     ],
     get: () => settings.burstMode,
     set: (v) => settings.setBurstMode(v as BurstMode),

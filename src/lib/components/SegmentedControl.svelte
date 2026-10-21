@@ -5,11 +5,14 @@
    * accessible name and the tooltip.
    */
   import type Zap from "@lucide/svelte/icons/zap";
+  import { tooltips } from "../tooltips";
 
   interface Option {
     value: string;
     label: string;
     icon?: typeof Zap;
+    /** What the option does, in its tooltip. */
+    hint?: string;
   }
 
   interface Props {
@@ -34,7 +37,7 @@
   }
 </script>
 
-<div class="segments" role="radiogroup" aria-label={label}>
+<div class="segments" role="radiogroup" aria-label={label} use:tooltips>
   {#each options as o, i (o.value)}
     {@const selected = o.value === value}
     <button
@@ -45,7 +48,7 @@
       class:icon={!!o.icon}
       aria-checked={selected}
       aria-label={o.icon ? o.label : undefined}
-      title={o.icon ? o.label : undefined}
+      title={o.hint ?? (o.icon ? o.label : undefined)}
       tabindex={selected ? 0 : -1}
       onclick={(e) => onselect(o.value, e)}
       onkeydown={(e) => onKeydown(e, i)}
