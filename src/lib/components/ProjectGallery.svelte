@@ -61,6 +61,7 @@
   import Usb from "@lucide/svelte/icons/usb";
   import Network from "@lucide/svelte/icons/network";
   import CircleHelp from "@lucide/svelte/icons/circle-help";
+  import { middleEllipsis } from "../middleEllipsis";
 
   let { onopen }: { onopen: (path: string) => void } = $props();
 
@@ -139,7 +140,7 @@
   });
 
   let deleteTarget = $state<RecentProject | null>(null);
-  let menu = $state<{ x: number; y: number; items: MenuNode[] } | null>(null);
+  let menu = $state<{ path: string; x: number; y: number; items: MenuNode[] } | null>(null);
 
   $effect(() => {
     recent.refresh().catch((e) => console.error("recent refresh failed", e));
@@ -195,10 +196,10 @@
   // Built on open, against the card it opened on, like the folder tree's menus.
   function openMenu(project: RecentProject, x: number, y: number) {
     menu = {
+      path: project.path,
       x,
       y,
       items: [
-        { kind: "header", label: project.displayName },
         {
           kind: "item",
           label: "Delete project",
@@ -305,7 +306,7 @@
             <!-- A SAF project's path is a content:// URI, which means nothing
                  to the user. -->
             {#if !IS_ANDROID}
-              <span class="project-path">{parentPath(project.path)}</span>
+              <span class="project-path" use:middleEllipsis={parentPath(project.path)}></span>
             {/if}
             <span class="meta">
               {#if st.state === "ok"}
@@ -321,6 +322,7 @@
           </button>
           <button
             class="more"
+            class:open={menu?.path === project.path}
             title="More actions"
             aria-label="More actions for {project.displayName}"
             aria-haspopup="menu"
@@ -490,10 +492,7 @@
     opacity: 0.6;
     max-width: 100%;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
-    direction: rtl;
-    text-align: left;
   }
 
   .peek::after {
@@ -576,12 +575,14 @@
   }
 
   .card-wrap:hover .more,
-  .more:focus-visible {
+  .more:focus-visible,
+  .more.open {
     opacity: 1;
     pointer-events: auto;
   }
 
-  .more:hover {
+  .more:hover,
+  .more.open {
     background: var(--hover);
   }
 
