@@ -12,7 +12,7 @@
   import DockGrip from "./DockGrip.svelte";
   import DockGhost from "./DockGhost.svelte";
   import FolderTree from "./FolderTree.svelte";
-  import { dock, NARROW, type Side } from "../stores/dock.svelte";
+  import { DOCK_IDLE, dock, NARROW, type Side } from "../stores/dock.svelte";
   import { buildFolderTree, collectFolderPaths, hasCollapsedBranch, visibleFolderPaths, type TreeNode } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -131,11 +131,14 @@
   let viewportH = $state(0);
   let contentH = $state(0);
 
-  // On a narrow screen the tree floats over the grid, at the width its media rule gives it.
+  // On a narrow screen the tree floats over the grid, at this width (`--float-w` in the style).
+  const FLOAT_PERCENT = 75;
+  const FLOAT_MAX = 240;
+  const ds = $derived(preview ? DOCK_IDLE : dock.state("folderTree"));
   const narrow = () => window.matchMedia(NARROW).matches;
   function thicknessFor(): number {
     if (!narrow()) return session.folderTreeWidth;
-    return Math.min(0.75 * (aside?.parentElement?.clientWidth ?? 0), 240);
+    return Math.min((FLOAT_PERCENT / 100) * (aside?.parentElement?.clientWidth ?? 0), FLOAT_MAX);
   }
 
   function startResize(e: PointerEvent) {
@@ -184,10 +187,10 @@
     class:preview={!!preview}
     class:right
     class:pending-collapse={pendingCollapse}
-    class:docking={!preview && dock.drag?.panel === "folderTree"}
-    class:dock-moving={!preview && dock.animating("folderTree")}
-    class:vacating={!preview && dock.vacating("folderTree")}
-    bind:this={aside} style="--tree-w: {preview?.size ?? session.folderTreeWidth}px">
+    class:docking={ds.docking}
+    class:dock-moving={ds.moving}
+    class:vacating={ds.vacating}
+    bind:this={aside} style="--tree-w: {preview?.size ?? session.folderTreeWidth}px; --float-w: min({FLOAT_PERCENT}%, {FLOAT_MAX}px)">
     <div
       class="scroll"
       id={preview ? undefined : "folder-tree-scroll"}
@@ -382,7 +385,7 @@
       left: 0;
       /* Above the grid's overlay scrollbar (26), which ends under this edge. */
       z-index: 27;
-      width: min(75%, 240px);
+      width: var(--float-w);
       box-shadow: 4px 0 18px rgba(0, 0, 0, 0.55);
     }
 

@@ -218,6 +218,10 @@
    *      dialog hits rule 1.
    */
   function goBack() {
+    if (dock.drag) {
+      dock.cancelDrag();
+      return;
+    }
     if (runtimeTools.pending.length > 0) {
       runtimeTools.dismiss(false);
       return;

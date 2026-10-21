@@ -8,7 +8,7 @@
   import { shortcutHint } from "$lib/keyboard/hints";
   import { formatColorLabel } from "$lib/colorLabels";
   import { tooltips } from "$lib/tooltips";
-  import { dock, isVertical, type Side } from "$lib/stores/dock.svelte";
+  import { DOCK_IDLE, dock, isVertical, type Side } from "$lib/stores/dock.svelte";
   import DockGrip from "./DockGrip.svelte";
   import DockGhost from "./DockGhost.svelte";
   import TouchActionBar from "./TouchActionBar.svelte";
@@ -61,6 +61,7 @@
   let ownSize = 0;
   let offsetH = $state(0);
   let offsetW = $state(0);
+  const ds = $derived(!preview && dockable ? dock.state("actionBar") : DOCK_IDLE);
   const moving = $derived(dock.animating("actionBar"));
   $effect(() => {
     const size = vertical ? offsetW : offsetH;
@@ -217,9 +218,9 @@
   class:preview={!!preview}
   class:disabled={!focused && !hasSelection}
   class:hidden
-  class:docking={!preview && dockable && dock.drag?.panel === "actionBar"}
-  class:dock-moving={!preview && dockable && moving}
-  class:vacating={!preview && dockable && dock.vacating("actionBar")}
+  class:docking={ds.docking}
+  class:dock-moving={ds.moving}
+  class:vacating={ds.vacating}
   style={preview ? `--bar-size: ${preview.size}px` : dockable && moving ? `--bar-size: ${thicknessFor(side)}px` : ""}
 >
   {#if dockable}
@@ -490,7 +491,7 @@
     height: calc(6px + var(--grip-zone));
   }
 
-  .gripcell :global(.dock-grip) {
+  .touchbar .gripcell :global(.dock-grip) {
     width: 100%;
     height: 100%;
   }
@@ -641,7 +642,7 @@
     font-size: 12px;
   }
 
-  /* In a column a task shows its icon only. The button keeps its title. */
+  /* In a column a task shows its icon only, except Auto, which is a word. The button keeps its title. */
   .vertical .task {
     gap: 0;
     padding: 0;

@@ -3,7 +3,7 @@
   import { describeHalf, session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
   import { tags } from "../stores/tags.svelte";
-  import { dock, isVertical, type Side } from "../stores/dock.svelte";
+  import { DOCK_IDLE, dock, isVertical, type Side } from "../stores/dock.svelte";
   import OverlayScrollbar from "./OverlayScrollbar.svelte";
   import DockGrip from "./DockGrip.svelte";
   import DockGhost from "./DockGhost.svelte";
@@ -217,6 +217,7 @@
   // before, and starts from a zero scroll position.
   let lastStripEl: HTMLDivElement | null = null;
   // Derived, so another panel's drag does not rerun the effect on each pointer move.
+  const ds = $derived(preview ? DOCK_IDLE : dock.state("filmstrip"));
   const draggingSelf = $derived(dock.drag?.panel === "filmstrip");
   const scrolledByUserJustNow = () =>
     settings.lockCarousel && performance.now() - lockScrollTs < 250;
@@ -366,9 +367,9 @@
       class:vertical
       class:preview={!!preview}
       class:pending-collapse={pendingCollapse}
-      class:docking={!preview && dock.drag?.panel === "filmstrip"}
-      class:dock-moving={!preview && dock.animating("filmstrip")}
-      class:vacating={!preview && dock.vacating("filmstrip")}
+      class:docking={ds.docking}
+      class:dock-moving={ds.moving}
+      class:vacating={ds.vacating}
       bind:this={root}
       style="--thickness: {stripT}px"
     >
@@ -895,14 +896,14 @@
     border-radius: 0 6px 6px 0;
   }
 
-  .strip-tab :global(.dock-grip) {
+  .filmstrip .strip-tab :global(.dock-grip) {
     width: 20px;
     height: auto;
     border-radius: 0;
     color: #8a8a93;
   }
 
-  .vertical .strip-tab :global(.dock-grip) {
+  .filmstrip.vertical .strip-tab :global(.dock-grip) {
     width: auto;
     height: 20px;
   }

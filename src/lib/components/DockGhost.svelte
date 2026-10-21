@@ -28,8 +28,7 @@
     else if (!shown) last = null;
   });
   const geometry = $derived(drag ?? last);
-  const active = $derived(drag !== null || dock.returning === panel);
-  const shown = $derived(active);
+  const shown = $derived(drag !== null || dock.returning === panel);
 
   // The ghosts of the other sides mount one frame after another, after the first paint of
   // the drag, so no single frame pays for all of them. The candidate side always shows its own.

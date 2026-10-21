@@ -1,7 +1,8 @@
 <script lang="ts">
   /**
-   * The handle of a dockable panel. Drag it to move the panel (the drag state
-   * goes to `dock.drag`, which `DockGuides` draws). Click it for a position menu.
+   * The handle of a dockable panel. Drag it to move the panel. The drag state goes to
+   * `dock.drag`: `DockGuides` draws the compass, and `DockGhost` draws the ghost and the
+   * frame. Click it for a position menu.
    *
    * The host places the grip and styles it through the class `dock-grip`.
    * Pointer capture keeps every move event on this button, so the hosts under the
@@ -103,8 +104,6 @@
     dock.drag = {
       panel,
       region,
-      x: e.clientX,
-      y: e.clientY,
       candidate: pickSide(region, e.clientX, e.clientY, DOCK_SIDES[panel]),
       // The size the panel lands with, which the gap and the ghost use too. Only the region caps it.
       thickness: (side) => Math.min(thicknessFor(side), isVertical(side) ? region.width : region.height),
@@ -133,6 +132,7 @@
     const held = press;
     press = null;
     dragging = false;
+    dock.onCancel(null);
     listen(false);
     if (held && button?.hasPointerCapture(held.id)) button.releasePointerCapture(held.id);
     // Read before the drag ends. A drop on a new side no longer vacates (the panel is
@@ -161,6 +161,7 @@
     if (!dragging) {
       if (Math.hypot(e.clientX - press.x, e.clientY - press.y) <= DRAG_THRESHOLD) return;
       dragging = true;
+      dock.onCancel(cancel);
       dock.endReturn(panel);
     }
     track(e);

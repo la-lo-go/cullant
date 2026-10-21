@@ -31,13 +31,19 @@ export function isVertical(side: Side): boolean {
   return side === "left" || side === "right";
 }
 
+/** The drag flags of one panel, for the classes of its host. */
+export interface DockState {
+  docking: boolean;
+  moving: boolean;
+  vacating: boolean;
+}
+
+export const DOCK_IDLE: DockState = { docking: false, moving: false, vacating: false };
+
 export interface DockDrag {
   panel: DockPanel;
   /** Re-read on every pointer move. */
   region: DOMRect;
-  /** Pointer position, client coordinates. */
-  x: number;
-  y: number;
   candidate: Side | null;
   /** Size in px of the panel if it is docked at that side. */
   thickness: (side: Side) => number;
@@ -173,6 +179,8 @@ class DockStore {
   /** The panel that moves back to its place after a cancelled drag, for one motion. */
   returning = $state<DockPanel | null>(null);
   private returnTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Registered by the grip that holds the drag. */
+  private cancelHook: (() => void) | null = null;
 
   constructor() {
     Object.assign(this, load());
@@ -187,6 +195,25 @@ class DockStore {
   /** True while the panel or its content moves because of a drag, and on the way back after a cancel. */
   animating(panel: DockPanel): boolean {
     return this.drag?.panel === panel || this.returning === panel;
+  }
+
+  /** The drag flags of `panel`. */
+  state(panel: DockPanel): DockState {
+    return {
+      docking: this.drag?.panel === panel,
+      moving: this.animating(panel),
+      vacating: this.vacating(panel),
+    };
+  }
+
+  /** The grip that holds a drag registers its cancel here, and clears it when the drag ends. */
+  onCancel(hook: (() => void) | null) {
+    this.cancelHook = hook;
+  }
+
+  /** Cancels the active drag, if any. */
+  cancelDrag() {
+    this.cancelHook?.();
   }
 
   /** Keeps `animating` on for one motion, so the slot and the gap return together. */
@@ -204,7 +231,7 @@ class DockStore {
   }
 
   /** The gap the content keeps for a vacating panel: the preview's side and size. */
-  reserve(panel: DockPanel): { side: Side; size: number } | null {
+  private reserve(panel: DockPanel): { side: Side; size: number } | null {
     const drag = this.drag;
     if (!drag?.candidate || !this.vacating(panel)) return null;
     if (panel === "folderTree" && window.matchMedia(NARROW).matches) return null;
