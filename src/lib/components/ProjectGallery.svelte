@@ -140,7 +140,7 @@
   });
 
   let deleteTarget = $state<RecentProject | null>(null);
-  let menu = $state<{ path: string; x: number; y: number; items: MenuNode[] } | null>(null);
+  let menu = $state<{ path: string; x: number; y: number; alignEnd: boolean; items: MenuNode[] } | null>(null);
 
   $effect(() => {
     recent.refresh().catch((e) => console.error("recent refresh failed", e));
@@ -194,11 +194,12 @@
   }
 
   // Built on open, against the card it opened on, like the folder tree's menus.
-  function openMenu(project: RecentProject, x: number, y: number) {
+  function openMenu(project: RecentProject, x: number, y: number, alignEnd = false) {
     menu = {
       path: project.path,
       x,
       y,
+      alignEnd,
       items: [
         {
           kind: "item",
@@ -212,7 +213,7 @@
 
   function openMenuFromButton(e: MouseEvent, project: RecentProject) {
     const bounds = e.currentTarget instanceof HTMLElement ? e.currentTarget.getBoundingClientRect() : null;
-    if (bounds) openMenu(project, bounds.left, bounds.bottom);
+    if (bounds) openMenu(project, bounds.right, bounds.bottom + 4, true);
   }
 
   function confirmDelete() {
@@ -347,7 +348,7 @@
 {/if}
 
 {#if menu}
-  <ContextMenu x={menu.x} y={menu.y} items={menu.items} onclose={() => (menu = null)} />
+  <ContextMenu x={menu.x} y={menu.y} alignEnd={menu.alignEnd} items={menu.items} onclose={() => (menu = null)} />
 {/if}
 
 <style>

@@ -27,9 +27,12 @@
     y: number;
     items: MenuNode[];
     onclose: () => void;
+    /** Opened from a button: `x` is the button's right edge, the panel's right
+     *  edge lines up with it, and the panel is only as wide as its rows. */
+    alignEnd?: boolean;
   }
 
-  const { x, y, items, onclose }: Props = $props();
+  const { x, y, items, onclose, alignEnd = false }: Props = $props();
 
   /** Gap kept from the viewport edge, matching the dialog edge margin. */
   const EDGE = 8;
@@ -60,7 +63,7 @@
     if (!el) return;
     activePath = [];
     pressedRow = null;
-    place(el, x, y);
+    place(el, alignEnd ? x - el.getBoundingClientRect().width : x, y);
   });
 
   /** Put a fixed panel at a point, flipping past it rather than sliding along
@@ -272,6 +275,7 @@
 
 <div
   class="root"
+  class:fit={alignEnd}
   bind:this={rootEl}
   role="menu"
   tabindex="-1"
@@ -283,6 +287,10 @@
 </div>
 
 <style>
+  .root.fit > :global(.menu) {
+    min-width: 0;
+  }
+
   .backdrop {
     position: fixed;
     inset: 0;
