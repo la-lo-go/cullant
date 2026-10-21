@@ -140,7 +140,7 @@ export function previewRect(region: DOMRect, side: Side, thickness: number) {
 }
 
 /** The folder tree floats over the grid at this width, so it reserves no room. */
-const NARROW = "(max-width: 720px)";
+export const NARROW = "(max-width: 720px)";
 /** Equal to --dock-motion in the `:global(:root)` block of +page.svelte (0 in its reduced-motion override). */
 const MOTION_MS = 160;
 

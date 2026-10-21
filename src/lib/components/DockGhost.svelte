@@ -18,7 +18,6 @@
     type Side,
   } from "../stores/dock.svelte";
 
-  const LINGER_MS = 120;
   const { panel, ghost }: { panel: DockPanel; ghost: Snippet<[Side, number]> } = $props();
 
   const drag = $derived(dock.drag?.panel === panel ? dock.drag : null);
@@ -26,27 +25,11 @@
   let last = $state.raw<DockDrag | null>(null);
   $effect(() => {
     if (drag) last = drag;
+    else if (!shown) last = null;
   });
   const geometry = $derived(drag ?? last);
   const active = $derived(drag !== null || dock.returning === panel);
-  // After a drop the layer hides at once and is removed later, so tearing the ghosts
-  // down does not share a frame with the landing of the real panel.
-  let lingering = $state(false);
-  $effect(() => {
-    if (active) {
-      lingering = true;
-      return;
-    }
-    const timer = setTimeout(() => (lingering = false), LINGER_MS);
-    return () => clearTimeout(timer);
-  });
-  const shown = $derived(active || lingering);
-  // The side the panel had when the drag began. A drop moves the panel in the same frame the
-  // layer hides, and the ghost of the new side must not be torn down in that frame.
-  let own = $state<Side>(untrack(() => dock[panel]));
-  $effect(() => {
-    if (!shown) own = dock[panel];
-  });
+  const shown = $derived(active);
 
   // The ghosts of the other sides mount one frame after another, after the first paint of
   // the drag, so no single frame pays for all of them. The candidate side always shows its own.
@@ -56,7 +39,7 @@
       ready = [];
       return;
     }
-    const todo = DOCK_SIDES[panel].filter((side) => side !== untrack(() => own));
+    const todo = DOCK_SIDES[panel].filter((side) => side !== untrack(() => dock[panel]));
     let frame = 0;
     const next = () => {
       const side = todo.shift();
@@ -78,9 +61,10 @@
   function slotStyle(region: DOMRect, side: Side, size: number, on: boolean): string {
     const r = previewRect(region, side, size);
     const grown = isVertical(side) ? `width:${on ? r.width : 0}px;height:${r.height}px` : `width:${r.width}px;height:${on ? r.height : 0}px`;
+    const origin = `left:${r.left}px;top:${r.top}px`;
     const anchor = {
-      left: `left:${r.left}px;top:${r.top}px`,
-      top: `left:${r.left}px;top:${r.top}px`,
+      left: origin,
+      top: origin,
       right: `right:calc(100% - ${r.left + r.width}px);top:${r.top}px`,
       bottom: `left:${r.left}px;bottom:calc(100% - ${r.top + r.height}px)`,
     }[side];
@@ -96,12 +80,12 @@
 
 {#if shown && geometry}
   {@const region = geometry.region}
-  <div class="ghosts" class:hidden={!active} aria-hidden="true" inert use:toBody>
+  <div class="ghosts" aria-hidden="true" inert use:toBody>
     {#each DOCK_SIDES[panel] as side (side)}
       {@const size = geometry.thickness(side)}
       {@const on = drag?.candidate === side}
       <div class="slot" class:on style={slotStyle(region, side, size, on)}>
-        {#if side !== own && (on || ready.includes(side))}
+        {#if side !== dock[panel] && (on || ready.includes(side))}
           <div class="ghost" style={ghostStyle(side, size, region)}>
             {@render ghost(side, size)}
           </div>
@@ -120,9 +104,6 @@
     z-index: 199;
     pointer-events: none;
   }
-  .ghosts.hidden {
-    visibility: hidden;
-  }
   .slot {
     position: absolute;
     overflow: hidden;
@@ -133,8 +114,10 @@
   .ghost {
     position: absolute;
     display: flex;
-    pointer-events: none;
-    user-select: none;
+  }
+  /* Parts such as the scrollbar track set their own pointer-events. */
+  .ghost :global(*) {
+    pointer-events: none !important;
   }
   .frame {
     position: absolute;

@@ -12,7 +12,7 @@
   import DockGrip from "./DockGrip.svelte";
   import DockGhost from "./DockGhost.svelte";
   import FolderTree from "./FolderTree.svelte";
-  import { dock, type Side } from "../stores/dock.svelte";
+  import { dock, NARROW, type Side } from "../stores/dock.svelte";
   import { buildFolderTree, collectFolderPaths, hasCollapsedBranch, visibleFolderPaths, type TreeNode } from "./folderTree";
   import Images from "@lucide/svelte/icons/images";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -131,6 +131,13 @@
   let viewportH = $state(0);
   let contentH = $state(0);
 
+  // On a narrow screen the tree floats over the grid, at the width its media rule gives it.
+  const narrow = () => window.matchMedia(NARROW).matches;
+  function thicknessFor(): number {
+    if (!narrow()) return session.folderTreeWidth;
+    return Math.min(0.75 * (aside?.parentElement?.clientWidth ?? 0), 240);
+  }
+
   function startResize(e: PointerEvent) {
     e.preventDefault();
     resizing = true;
@@ -190,7 +197,7 @@
     >
       <div class="inner" bind:clientHeight={contentH}>
         <div class="header">
-          <DockGrip panel="folderTree" still={!!preview} target={() => aside?.parentElement ?? null} thicknessFor={() => session.folderTreeWidth} orientation="horizontal">
+          <DockGrip panel="folderTree" still={!!preview} floats={narrow} target={() => aside?.parentElement ?? null} {thicknessFor} orientation="horizontal">
             <span>Folders</span>
           </DockGrip>
         </div>
@@ -228,17 +235,23 @@
       onpointerup={endResize}
       onpointercancel={endResize}
     ></div>
+    {/if}
     <!-- Hide tab on the panel's inner edge, pointing to the outer edge to collapse.
          Overlaid (absolute) so it costs no layout width; sits above the resize
          handle and overlay scrollbar (higher z-index) so it stays clickable. -->
-    <button
-      class="tree-hide"
-      title={shortcutHint("Hide folder tree", "ui.toggleFolderTree")}
-      aria-label="Hide folder tree"
-      onclick={() => (session.folderTreeVisible = false)}
-    >
-      {#if right}<ChevronRight size={16} />{:else}<ChevronLeft size={16} />{/if}
-    </button>
+    {#if preview}
+      <span class="tree-hide">
+        {#if right}<ChevronRight size={16} />{:else}<ChevronLeft size={16} />{/if}
+      </span>
+    {:else}
+      <button
+        class="tree-hide"
+        title={shortcutHint("Hide folder tree", "ui.toggleFolderTree")}
+        aria-label="Hide folder tree"
+        onclick={() => (session.folderTreeVisible = false)}
+      >
+        {#if right}<ChevronRight size={16} />{:else}<ChevronLeft size={16} />{/if}
+      </button>
     {/if}
   </aside>
 {/if}

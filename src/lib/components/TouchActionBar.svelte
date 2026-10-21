@@ -47,6 +47,8 @@
   } = $props();
   const side = $derived(preview?.side ?? dockSide);
 
+  // A ghost is inert: no tooltip listeners.
+  const tip = (node: HTMLElement) => (preview ? undefined : tooltips(node));
   const dockable = $derived(view.mode !== "grid");
   const vertical = $derived(isVertical(side));
   const orientation = $derived(vertical ? "vertical" : "horizontal");
@@ -209,7 +211,7 @@
   bind:this={bar}
   bind:offsetHeight={offsetH}
   bind:offsetWidth={offsetW}
-  use:tooltips
+  use:tip
   class:vertical
   class:forced={forceShow}
   class:preview={!!preview}

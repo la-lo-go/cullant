@@ -38,15 +38,16 @@
     orientation: "horizontal" | "vertical";
     /** A label that becomes the handle. The grip dots stay visible before it, and the grip fills its row. */
     children?: Snippet;
+    /** True while the panel floats over the region, so the region is its whole box, padding included. */
+    floats?: () => boolean;
     /** A look-alike that does nothing: the grip of a ghost keeps the geometry of the real one. */
     still?: boolean;
   }
 
-  const { panel, target, thicknessFor, orientation, children, still = false }: Props = $props();
+  const { panel, target, thicknessFor, orientation, children, still = false, floats }: Props = $props();
 
   const describedBy = $derived(`dock-grip-help-${panel}`);
   const DRAG_THRESHOLD = 5;
-  const MAX_SHARE = 0.5;
   // Rough height of the menu, to open it above a grip in the lower half of the window.
   const MENU_ROW = 28;
   const MENU_CHROME = 44;
@@ -98,16 +99,15 @@
   function track(e: PointerEvent) {
     const el = target();
     if (!el) return cancel();
-    const region = contentBox(el);
+    const region = floats?.() ? el.getBoundingClientRect() : contentBox(el);
     dock.drag = {
       panel,
       region,
       x: e.clientX,
       y: e.clientY,
       candidate: pickSide(region, e.clientX, e.clientY, DOCK_SIDES[panel]),
-      // The preview and the compass never promise more than half of the region.
-      thickness: (side) =>
-        Math.min(thicknessFor(side), MAX_SHARE * (isVertical(side) ? region.width : region.height)),
+      // The size the panel lands with, which the gap and the ghost use too. Only the region caps it.
+      thickness: (side) => Math.min(thicknessFor(side), isVertical(side) ? region.width : region.height),
     };
   }
 

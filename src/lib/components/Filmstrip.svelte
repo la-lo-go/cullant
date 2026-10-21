@@ -384,6 +384,7 @@
         onpointerup={endResize}
         onpointercancel={endResize}
       ></div>
+      {/if}
       <!-- Hide tab on the inner edge: the grip, then the arrow towards the
            outer edge. Overlaid above the thumbnails (high z-index) instead of
            taking layout space — the same overlay pattern as the folder tree's
@@ -391,20 +392,24 @@
       <div class="strip-tab">
         <DockGrip
           panel="filmstrip"
+          still={!!preview}
           target={() => root?.parentElement ?? null}
           {thicknessFor}
           orientation={vertical ? "vertical" : "horizontal"}
         />
-        <button
-          class="strip-hide"
-          title="Hide filmstrip"
-          aria-label="Hide filmstrip"
-          onclick={() => session.setShowFilmstrip(false)}
-        >
-          <HideIcon size={16} />
-        </button>
+        {#if preview}
+          <span class="strip-hide"><HideIcon size={16} /></span>
+        {:else}
+          <button
+            class="strip-hide"
+            title="Hide filmstrip"
+            aria-label="Hide filmstrip"
+            onclick={() => session.setShowFilmstrip(false)}
+          >
+            <HideIcon size={16} />
+          </button>
+        {/if}
       </div>
-      {/if}
       <div
         class="strip"
         id={preview ? undefined : "filmstrip-scroll"}
@@ -537,20 +542,18 @@
       </div>
       <!-- Overlay scrollbar floating over the outer edge of the cells, aligned
            with the strip's safe-area box. -->
-      {#if !preview}
       <div class="strip-overlay">
         <OverlayScrollbar
           orientation={vertical ? "vertical" : "horizontal"}
           edge={side === "top" || side === "left" ? "start" : "end"}
           viewport={viewLen}
           content={items.length * CELL}
-          position={scrollPos}
-          controls="filmstrip-scroll"
-          onSeek={(pos) => scrollMain(pos)}
+          position={pos}
+          controls={preview ? "" : "filmstrip-scroll"}
+          onSeek={(to) => !preview && scrollMain(to)}
           alwaysVisible
         />
       </div>
-      {/if}
     </div>
   {/key}
 {:else}
