@@ -804,8 +804,8 @@
       <ScrollArea bind:element={list} onscroll={() => (listScroll = list?.scrollTop ?? 0)}>
         <div class="content">
           {#if showSupport}
-            <!-- Deliberately not a grey row like the ones above. Nothing funds
-                 this app, so the one ask it makes comes first and gets to be seen. -->
+            <!-- Nothing funds this app, so the one ask it makes comes first. Its
+                 place and the coloured heart carry it, not an accent fill. -->
             <button class="support" onclick={releasing(onshowsupport)}>
               <Heart size={20} />
               <span class="s-text">
@@ -1268,9 +1268,9 @@
     width: 100%;
     margin-top: 14px;
     padding: 12px 14px;
-    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border: 1px solid var(--border);
     border-radius: 10px;
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--surface);
     color: inherit;
     text-align: left;
     cursor: pointer;
