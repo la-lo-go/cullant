@@ -1,5 +1,6 @@
 const RELEASES_URL = "https://api.github.com/repos/la-lo-go/cullant/releases?per_page=10";
-const NOTES_PREFIX = "https://github.com/la-lo-go/cullant/releases/";
+const NOTES_ORIGIN = "https://github.com";
+const NOTES_PATH = "/la-lo-go/cullant/releases/";
 
 // This list must match `.github/workflows/release.yml` and `cullant-site/src/lib/Downloads.ts`.
 // The workflow publishes a release first and attaches the files about 30 minutes later.
@@ -37,10 +38,15 @@ export interface NewestRelease {
   notesUrl: string | null;
 }
 
-// The URL comes from the network and is opened outside the app, so only our own releases pass.
+// The URL comes from the network and is opened outside the app. Parse it first:
+// the parser resolves "../" and "%2e%2e", so the check sees the path that is really opened.
 function notesUrlOf(release: GitHubRelease): string | null {
-  const url = release.html_url;
-  return url?.startsWith(NOTES_PREFIX) ? url : null;
+  try {
+    const url = new URL(release.html_url ?? "");
+    return url.origin === NOTES_ORIGIN && url.pathname.startsWith(NOTES_PATH) ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The newest published release that has all its files, or null. */
