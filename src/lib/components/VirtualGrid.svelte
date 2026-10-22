@@ -1465,7 +1465,7 @@
                 >
                   <span class="type-name">
                     {#if v.item.decoupled}
-                      <Scissors size={10} /><span>SPLIT</span>
+                      <Scissors size={10} /><span class="split-label">SPLIT</span>
                     {:else if pair?.diverged}
                       <!-- Halves shown separately only once they disagree, so the
                            ordinary pair keeps drawing exactly as it always has. -->
@@ -2382,6 +2382,13 @@
 
     .pair-halves + .pair-count {
       display: inline;
+    }
+  }
+
+  /* The SPLIT word needs about 54 px; the scissors icon stays. */
+  @container (max-width: 54px) {
+    .split-label {
+      display: none;
     }
   }
 
