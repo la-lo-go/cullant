@@ -915,12 +915,6 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .surface-flash {
-      animation-duration: 0.01s;
-    }
-  }
-
   /* Done converting: still true, no longer news. */
   .remuxing.settled {
     opacity: 0.55;

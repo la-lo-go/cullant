@@ -203,7 +203,4 @@
   .reordering { user-select: none; }
   .drow.dragging .handle { cursor: grabbing; color: #ddd; }
   .content { flex: 1; min-width: 0; }
-  @media (prefers-reduced-motion: reduce) {
-    .drow { animation-duration: 0s !important; }
-  }
 </style>

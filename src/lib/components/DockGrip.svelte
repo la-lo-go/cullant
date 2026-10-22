@@ -319,10 +319,4 @@
       opacity: 1;
     }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .dock-grip.labelled,
-    .dots {
-      transition: none;
-    }
-  }
 </style>
