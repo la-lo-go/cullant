@@ -2438,9 +2438,22 @@
     }
   }
 
+  /* A stack with its icon needs about 60 px beside a flag; the count alone fits
+     down to 48 px. Below that the flag keeps the row and the burst badge drops. */
+  @container (max-width: 60px) {
+    .burst :global(svg) {
+      display: none;
+    }
+  }
+
+  @container (max-width: 48px) {
+    .info-top:has(> .badge) > .burst {
+      display: none;
+    }
+  }
+
   /* A position such as 123/456 needs about 46 px of row; the bare position fits. */
   @container (max-width: 56px) {
-    .position :global(svg),
     .burst-total {
       display: none;
     }
