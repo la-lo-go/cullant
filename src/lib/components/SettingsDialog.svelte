@@ -1385,12 +1385,27 @@
     cursor: pointer;
   }
 
+  /* The columns meet at the midline, so the gap sits on the same center line as the version above. */
   .update-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     align-items: center;
-    justify-content: center;
-    gap: 8px;
+    column-gap: 8px;
     margin-top: 6px;
+  }
+
+  .update-row .update {
+    justify-self: end;
+  }
+
+  .update-row .notes {
+    justify-self: start;
+  }
+
+  /* Without a notes link the lone button stays centered. */
+  .update-row .update:only-child {
+    grid-column: 1 / -1;
+    justify-self: center;
   }
 
   .update {
