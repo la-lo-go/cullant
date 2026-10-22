@@ -180,6 +180,10 @@
     border-radius: var(--r-md);
   }
 
+  .find:focus-within {
+    border-color: var(--accent);
+  }
+
   .find input {
     flex: 1;
     min-width: 0;
