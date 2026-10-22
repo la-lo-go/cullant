@@ -166,6 +166,7 @@
   // A single step scrolls smoothly; while stepping fast (holding an arrow key)
   // we fall back to instant so recentring never lags behind the selection.
   const RAPID_STEP_MS = 180;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let lastRecentre = 0;
   let hasCentered = false;
   // Lock-carousel: `performance.now()` of the last scroll the user drove while
@@ -239,7 +240,7 @@
     // intermediate frames whose centered cell reads as an earlier index, driving
     // the focus (and thus the loupe) briefly backwards — the "previous image
     // glitch" — before it lands. A jump has no intermediate frames.
-    const instant = !hasCentered || rapid || settings.lockCarousel;
+    const instant = !hasCentered || rapid || settings.lockCarousel || reduceMotion;
     selfScroll = true;
     scrollMain(target, instant ? "auto" : "smooth");
     // A recentre that changes nothing (already there, or clamped to the same
