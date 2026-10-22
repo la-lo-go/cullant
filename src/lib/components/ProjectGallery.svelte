@@ -56,7 +56,7 @@
   import type { MenuNode } from "../menu";
   import ImageOff from "@lucide/svelte/icons/image-off";
   import Trash2 from "@lucide/svelte/icons/trash-2";
-  import Ellipsis from "@lucide/svelte/icons/ellipsis";
+  import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
   import Unplug from "@lucide/svelte/icons/unplug";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
   import Usb from "@lucide/svelte/icons/usb";
@@ -331,7 +331,7 @@
               aria-haspopup="menu"
               onclick={(e) => openMenuFromButton(e, project)}
             >
-              <Ellipsis size={16} />
+              <EllipsisVertical size={16} />
             </button>
           </div>
         {/each}
