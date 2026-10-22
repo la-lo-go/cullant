@@ -21,22 +21,26 @@ class UpdateStore {
   private skipped = $state<string | null>(skippedVersion());
   private dismissed = $state(false);
   private started = false;
+  private atStartup = $state(false);
 
   available = $derived(
     this.current !== null && this.latest !== null && isNewer(this.latest, this.current),
   );
-  prompt = $derived(this.available && this.latest !== this.skipped && !this.dismissed);
+  prompt = $derived(this.available && this.atStartup && this.latest !== this.skipped && !this.dismissed);
 
-  /** One request per launch, however many callers ask. */
-  async check() {
+  /**
+   * One request per launch, however many callers ask. Only the startup call may
+   * arm the prompt: Settings shows the result inline and must not open a modal.
+   */
+  async check(atStartup = false) {
+    if (atStartup) this.atStartup = true;
     if (this.started) return;
     this.started = true;
+    // The version shows even when the release lookup fails.
+    this.current = await getVersion().catch(() => "unknown");
     try {
-      const [current, source, latest] = await Promise.all([
-        getVersion(), api.installSource(), newestCompleteRelease(),
-      ]);
+      const [source, latest] = await Promise.all([api.installSource(), newestCompleteRelease()]);
       this.url = updateUrl(source);
-      this.current = current;
       this.latest = latest;
     } catch {
       // The check is optional. A failure shows nothing.

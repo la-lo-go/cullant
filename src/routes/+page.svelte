@@ -193,7 +193,7 @@
   });
 
   $effect(() => {
-    if (settings.checkUpdatesAtStartup) void update.check();
+    if (settings.checkUpdatesAtStartup) void update.check(true);
   });
 
   $effect(() => {
