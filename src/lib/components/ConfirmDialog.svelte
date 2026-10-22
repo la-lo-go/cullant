@@ -1,4 +1,5 @@
 <script lang="ts">
+  const uid = $props.id();
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
   import X from "@lucide/svelte/icons/x";
@@ -60,13 +61,13 @@
     onkeydown={onKeydown}
     role="dialog"
     aria-modal="true"
-    aria-labelledby="confirm-dialog-title"
+    aria-labelledby="{uid}-title"
     tabindex="-1"
   >
     {#if choice}
       <button class="close-x" onclick={oncancel} aria-label="Close" title="Close"><X size={18} /></button>
     {/if}
-    <h2 id="confirm-dialog-title">{title}</h2>
+    <h2 id="{uid}-title">{title}</h2>
     <p>{message}</p>
     <div class="actions">
       {#if linkLabel && onlink}

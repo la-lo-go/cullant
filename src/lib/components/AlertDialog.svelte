@@ -1,4 +1,5 @@
 <script lang="ts">
+  const uid = $props.id();
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
 
@@ -26,10 +27,10 @@
     onkeydown={onKeydown}
     role="alertdialog"
     aria-modal="true"
-    aria-labelledby="alert-dialog-title"
+    aria-labelledby="{uid}-title"
     tabindex="-1"
   >
-    <h2 id="alert-dialog-title">{title}</h2>
+    <h2 id="{uid}-title">{title}</h2>
     <p>{message}</p>
     <div class="actions">
       <button class="ok" onclick={onclose}>OK</button>
