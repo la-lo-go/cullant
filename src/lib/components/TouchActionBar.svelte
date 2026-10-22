@@ -466,6 +466,10 @@
     overflow-y: auto;
   }
 
+  .items :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .items::-webkit-scrollbar {
     display: none;
   }

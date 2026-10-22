@@ -858,6 +858,10 @@
     background: var(--surface);
   }
 
+  .strip-tab :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .strip-tab:hover {
     background: var(--hover);
     border-color: var(--accent);
