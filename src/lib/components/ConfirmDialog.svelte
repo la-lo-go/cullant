@@ -174,13 +174,13 @@
 
   button.confirm {
     border-color: transparent;
-    background: #a04040;
+    background: var(--danger-fill);
     color: #fff;
   }
 
   button.confirm:hover {
     border-color: transparent;
-    background: #b84a4a;
+    background: var(--danger-fill-hover);
   }
 
   button.confirm.accent {

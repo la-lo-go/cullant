@@ -671,7 +671,7 @@
   }
 
   .reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .active-pick {
@@ -680,7 +680,7 @@
   }
 
   .active-reject {
-    border-color: #ff6b6b;
+    border-color: var(--danger);
     background: rgba(255, 107, 107, 0.14);
   }
 

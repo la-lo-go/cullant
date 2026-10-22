@@ -266,7 +266,7 @@
   }
 
   .btn.reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .btn.active-pick {
@@ -275,14 +275,14 @@
   }
 
   .btn.active-reject {
-    border-color: #ff6b6b;
+    border-color: var(--danger);
     background: rgba(255, 107, 107, 0.14);
   }
 
   .star {
     background: none;
     border: none;
-    color: #6a6a72;
+    color: var(--text-faint);
     font-size: 16px;
     cursor: pointer;
     padding: 0 1px;

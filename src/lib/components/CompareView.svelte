@@ -518,7 +518,7 @@
   .reject {
     display: inline-flex;
     align-items: center;
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .burst {

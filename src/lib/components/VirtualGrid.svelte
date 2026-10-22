@@ -1740,7 +1740,7 @@
   }
 
   .gh-count {
-    color: #6a6a72;
+    color: var(--text-faint);
     font-weight: 500;
   }
 
@@ -1822,7 +1822,7 @@
   }
 
   .sg-count {
-    color: #6a6a72;
+    color: var(--text-faint);
     font-weight: 500;
   }
 
@@ -2062,7 +2062,7 @@
     align-items: center;
     justify-content: center;
     gap: 4px;
-    color: #6a6a72;
+    color: var(--text-faint);
     user-select: none;
   }
 
@@ -2189,11 +2189,11 @@
   }
 
   .badge.reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .badge.pending {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   /* Pick/reject tallies on a collapsed burst, in the single badge's place. */
@@ -2215,7 +2215,7 @@
   }
 
   .badge.counts .reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   /* bottom: 9px (not flush) — clears the label-bar below it (see .label-bar;

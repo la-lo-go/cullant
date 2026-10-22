@@ -440,7 +440,7 @@
   }
 
   .ctl.close:hover {
-    background: #e04343;
+    background: var(--danger-solid);
     color: #ffffff;
   }
 </style>

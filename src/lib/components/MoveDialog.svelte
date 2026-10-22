@@ -192,7 +192,7 @@
   }
 
   .error {
-    color: #ff6b6b;
+    color: var(--danger);
     font-size: 13px;
     margin: 0;
   }

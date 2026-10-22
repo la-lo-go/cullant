@@ -130,7 +130,7 @@
   }
 
   input::placeholder {
-    color: #6a6a72;
+    color: var(--text-faint);
   }
 
   .count {

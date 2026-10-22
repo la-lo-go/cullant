@@ -529,7 +529,7 @@
   }
 
   .card.unavailable .meta {
-    color: #ff8f8f;
+    color: var(--danger);
     opacity: 0.85;
   }
 

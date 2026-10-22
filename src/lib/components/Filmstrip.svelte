@@ -1137,7 +1137,7 @@
   }
 
   .flagbadge.reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   /* Cell-width rows stay readable when a portrait photo is narrower than its badges. */

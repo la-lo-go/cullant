@@ -345,7 +345,7 @@
 
   .hint {
     margin: 0;
-    color: #6a6a72;
+    color: var(--text-faint);
   }
 
   .row {

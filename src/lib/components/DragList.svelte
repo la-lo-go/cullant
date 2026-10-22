@@ -192,7 +192,7 @@
     background: none;
     border: none;
     border-radius: 4px;
-    color: #6a6a72;
+    color: var(--text-faint);
     cursor: grab;
     touch-action: none;
   }

@@ -1017,7 +1017,7 @@
   }
 
   .preferences.touch-pointer :global(.draglist:not(.reordering) .handle:hover) {
-    color: #6a6a72;
+    color: var(--text-faint);
   }
 
   .preferences.touch-pointer :global(.tip:not(.open):hover) {

@@ -1033,7 +1033,7 @@
   }
 
   .hold-fill.danger {
-    background: #b3352e;
+    background: var(--danger-fill);
     opacity: 0.6;
   }
 
@@ -1084,7 +1084,7 @@
   }
 
   .unqueue:hover {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .mode {
@@ -1247,7 +1247,7 @@
   }
 
   .error {
-    color: #ff6b6b;
+    color: var(--danger);
     font-size: 13px;
     margin: 0;
   }
@@ -1364,7 +1364,7 @@
   }
 
   .hbadge.err {
-    color: #ff8f8f;
+    color: var(--danger);
     border-color: #6b3030;
   }
 
