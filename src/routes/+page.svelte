@@ -11,6 +11,7 @@
   import { settings } from "$lib/stores/settings.svelte";
   import { recent } from "$lib/stores/recent.svelte";
   import { runtimeTools } from "$lib/stores/runtimeTools.svelte";
+  import { update } from "$lib/stores/update.svelte";
   import { tags } from "$lib/stores/tags.svelte";
   import { view } from "$lib/stores/view.svelte";
   import { dock, isVertical } from "$lib/stores/dock.svelte";
@@ -42,6 +43,7 @@
   import SearchOverlay from "$lib/components/SearchOverlay.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
   import RuntimeToolsDialog from "$lib/components/RuntimeToolsDialog.svelte";
+  import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { modalFocus } from "$lib/modal";
   import { tooltips } from "$lib/tooltips";
   import TitleBar from "$lib/components/TitleBar.svelte";
@@ -222,6 +224,11 @@
       dock.cancelDrag();
       return;
     }
+    // Mounted after the media-tools dialog, so it stacks above it.
+    if (update.prompt) {
+      update.later();
+      return;
+    }
     if (runtimeTools.pending.length > 0) {
       runtimeTools.dismiss(false);
       return;
@@ -325,6 +332,10 @@
   // straight to us and never consults history. `__cullantBack` is the second
   // native route, for the case where Tauri's handler is gone entirely — see the
   // callback in `src-tauri/gen/android/.../MainActivity.kt`.
+  $effect(() => {
+    if (settings.checkUpdatesAtStartup) void update.check();
+  });
+
   $effect(() => {
     const win = window as unknown as Record<string, unknown>;
     win.__cullantBack = goBack;
@@ -945,6 +956,7 @@
        raises its explanation here. -->
   <InfoOverlay />
   <RuntimeToolsDialog />
+  <UpdateDialog />
 
   {#if session.searchOpen}
     <SearchOverlay />
