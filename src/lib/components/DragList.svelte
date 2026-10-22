@@ -26,6 +26,7 @@
   const heldKeys = new Set<string>();
   let interacting = false;
   let keyboardMoving = false;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function updateInteraction() {
     const active = activePointer !== -1 || heldKeys.size > 0;
@@ -147,7 +148,7 @@
   {#each items as item, i (keyOf(item, i))}
     <li class="drow" class:dragging={dragIndex === i}
       style:translate={dragIndex === i ? `0 ${dragOffset}px` : null}
-      animate:flip={{ duration: dragIndex === i ? 0 : 140 }}>
+      animate:flip={{ duration: reduceMotion || dragIndex === i ? 0 : 140 }}>
       <button class="handle" type="button" aria-label={itemLabel ? `Reorder ${itemLabel(item, i)}` : "Drag to reorder"}
         title="Drag to reorder. Use Up or Down when the handle has focus."
         onpointerdown={(e) => startDrag(e, i)} onkeydown={(e) => void moveByKeyboard(e, i)}
