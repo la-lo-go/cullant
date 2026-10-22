@@ -2463,6 +2463,55 @@
     }
   }
 
+  /* A short photo has no room for a second top line above the stars. Keep one
+     line and drop what ranks lowest first: the tags, then the pair chip, then
+     the burst badge. The flag and the stars never drop. */
+  @container (max-height: 66px) and (max-width: 180px) {
+    .info-top {
+      flex-wrap: nowrap;
+    }
+
+    .burst ~ .chip,
+    .info-top:has(> .badge) .split-label,
+    .info-top:has(> .badge) .pair-halves {
+      display: none;
+    }
+
+    .info-top:has(> .badge) .pair-count {
+      display: inline;
+    }
+  }
+
+  @container (max-height: 66px) and (max-width: 90px) {
+    .info-top:has(> .badge) .burst-total,
+    .info-top:has(> .badge) .burst :global(svg) {
+      display: none;
+    }
+
+    .info-top:has(> .badge) .burst-short {
+      display: inline;
+    }
+  }
+
+  @container (max-height: 66px) and (max-width: 94px) {
+    .counts :global(svg) {
+      display: none;
+    }
+  }
+
+  @container (max-height: 66px) and (max-width: 58px) {
+    .info-top:has(> .counts) > .burst {
+      display: none;
+    }
+  }
+
+  @container (max-height: 66px) and (max-width: 53px) {
+    .info-top:has(> .badge) > .chip,
+    .info-top:has(> .badge) > .burst {
+      display: none;
+    }
+  }
+
   @container (max-height: 44px) {
     .info-bottom {
       display: none;
