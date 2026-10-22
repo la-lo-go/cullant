@@ -268,7 +268,7 @@
   input,
   select,
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 4px 8px;
     font-size: 13px;

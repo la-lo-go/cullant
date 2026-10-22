@@ -318,7 +318,7 @@
     scrollbar-width: none;
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     font-size: 12px;
   }
@@ -339,7 +339,7 @@
     padding: 5px 8px;
     background: none;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: inherit;
     font: inherit;
     text-align: left;

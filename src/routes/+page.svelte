@@ -1129,7 +1129,7 @@
     background-position: right 9px center;
     color: #e0e0e0;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 6px 28px 6px 10px;
     font-family: inherit;
     font-size: 13px;
@@ -1393,7 +1393,7 @@
 
 
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 4px 10px;
     font-size: 13px;
@@ -1555,7 +1555,7 @@
 
   .segmented button {
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: transparent;
     /* 3px vertical (not 4px) to match .media-btn's rhythm — with the .segmented
        container's own 2px padding + 1px border, this lands the pill at the same
@@ -1593,7 +1593,7 @@
 
   .media-btn {
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: transparent;
     padding: 0 10px;
     font-weight: 600;
@@ -1733,7 +1733,7 @@
     gap: 6px;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #ddd;
     padding: 6px 12px;
     cursor: pointer;
@@ -1789,7 +1789,7 @@
     padding: 0;
     border: 1px solid var(--border);
     border-left: none;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--r-md) var(--r-md) 0;
     background: var(--surface);
     color: var(--accent);
     cursor: pointer;
@@ -1802,7 +1802,7 @@
     z-index: 27;
     border-left: 1px solid var(--border);
     border-right: none;
-    border-radius: 6px 0 0 6px;
+    border-radius: var(--r-md) 0 0 var(--r-md);
   }
 
   .tree-peek:hover {
@@ -1915,7 +1915,7 @@
   .fl-panel {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 18px 22px;
     width: 400px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
@@ -1944,7 +1944,7 @@
   }
 
   .fl-close {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid transparent;
     background: var(--danger-solid);
     color: #fff;

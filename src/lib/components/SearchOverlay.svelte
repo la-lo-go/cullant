@@ -111,7 +111,7 @@
     padding: 8px 10px;
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     color: #8a8a93;
     font-size: 12px;
@@ -153,7 +153,7 @@
     height: 24px;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #bbb;
     cursor: pointer;
     padding: 0;

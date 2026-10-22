@@ -70,7 +70,7 @@
     gap: 2px;
     padding: 2px;
     border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: var(--r-md);
     background: var(--surface);
   }
 
@@ -82,7 +82,7 @@
     height: 22px;
     padding: 0 9px;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--r-md);
     background: none;
     color: inherit;
     font-size: var(--fs-sm);

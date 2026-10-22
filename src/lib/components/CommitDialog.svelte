@@ -922,7 +922,7 @@
   .dialog {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 16px 20px;
     width: 520px;
     max-width: 100%;
@@ -956,7 +956,7 @@
   .conflicts {
     background: #3a2e1e;
     border: 1px solid #7a5c2e;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 8px 10px;
     font-size: 12px;
   }
@@ -1005,7 +1005,7 @@
     padding: 8px 10px;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #e8e8e8;
     font-size: 13px;
     font-family: inherit;
@@ -1096,7 +1096,7 @@
 
   select,
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 5px 10px;
     font-size: 13px;
@@ -1264,7 +1264,7 @@
     gap: 4px;
     background: var(--control);
     border: 1px solid transparent;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     color: #bbb;
     padding: 4px 10px;
     cursor: pointer;
@@ -1307,7 +1307,7 @@
     overflow: hidden;
     background: var(--control);
     border: 1px solid transparent;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     color: #ddd;
     padding: 7px 10px;
     cursor: pointer;
@@ -1437,7 +1437,7 @@
     height: 20px;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     color: #bbb;
     cursor: pointer;
     padding: 0;

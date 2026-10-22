@@ -802,13 +802,13 @@
   .strip-peek.bottom {
     bottom: var(--safe-bottom);
     border-bottom: none;
-    border-radius: 6px 6px 0 0;
+    border-radius: var(--r-md) var(--r-md) 0 0;
   }
 
   .strip-peek.top {
     top: 0;
     border-top: none;
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 var(--r-md) var(--r-md);
   }
 
   .strip-peek.left,
@@ -822,13 +822,13 @@
   .strip-peek.left {
     left: var(--safe-left);
     border-left: none;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--r-md) var(--r-md) 0;
   }
 
   .strip-peek.right {
     right: var(--safe-right);
     border-right: none;
-    border-radius: 6px 0 0 6px;
+    border-radius: var(--r-md) 0 0 var(--r-md);
   }
 
   .strip-peek:hover {
@@ -867,13 +867,13 @@
   .bottom .strip-tab {
     top: 0;
     border-top: none;
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 var(--r-md) var(--r-md);
   }
 
   .top .strip-tab {
     bottom: 0;
     border-bottom: none;
-    border-radius: 6px 6px 0 0;
+    border-radius: var(--r-md) var(--r-md) 0 0;
   }
 
   .vertical .strip-tab {
@@ -887,13 +887,13 @@
   .left .strip-tab {
     right: 0;
     border-right: none;
-    border-radius: 6px 0 0 6px;
+    border-radius: var(--r-md) 0 0 var(--r-md);
   }
 
   .right .strip-tab {
     left: 0;
     border-left: none;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--r-md) var(--r-md) 0;
   }
 
   .filmstrip .strip-tab :global(.dock-grip) {
@@ -949,7 +949,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
+    border-radius: var(--r-md);
   }
 
   /* Transposed: the cell is a row of the column, so its padding swaps too. */
@@ -979,7 +979,7 @@
   .photo {
     position: relative;
     overflow: hidden;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
   }
 
   img {
@@ -1077,7 +1077,7 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 4px;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
     color: #8fd0ff;
     pointer-events: none;
@@ -1196,7 +1196,7 @@
   .info-top > .flagbadge {
     margin-left: auto;
     padding: 1px;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
   }
 

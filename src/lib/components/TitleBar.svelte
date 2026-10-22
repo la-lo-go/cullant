@@ -287,7 +287,7 @@
     max-width: 100%;
     padding: 0 7px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: transparent;
     color: #e8e8e8;
     font-family: inherit;
@@ -344,7 +344,7 @@
     width: 100%;
     padding: 7px 9px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--r-md);
     background: transparent;
     color: #e8e8e8;
     font-family: inherit;

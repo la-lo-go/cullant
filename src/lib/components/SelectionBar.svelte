@@ -210,7 +210,7 @@
     color: var(--accent);
     cursor: pointer;
     padding: 1px 2px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
   }
 
   .clear:hover {
@@ -239,7 +239,7 @@
     border: 1px solid var(--border-strong);
     background: var(--control);
     color: #bbb;
-    border-radius: 5px;
+    border-radius: var(--r-md);
     cursor: pointer;
   }
 
@@ -334,7 +334,7 @@
     background: var(--control);
     color: #bbb;
     padding: 3px 8px;
-    border-radius: 5px;
+    border-radius: var(--r-md);
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;

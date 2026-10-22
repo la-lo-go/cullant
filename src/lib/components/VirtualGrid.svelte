@@ -1764,7 +1764,7 @@
     padding: 0;
     background: none;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     color: inherit;
     cursor: pointer;
     pointer-events: auto;
@@ -1873,7 +1873,7 @@
        .frame — see below) and the gap while a thumbnail is still decoding just
        show the grid's own dark background instead of a distinct gray box. */
     background: transparent;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -1946,7 +1946,7 @@
     right: 8px;
     bottom: 0;
     left: 0;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--surface-2);
     overflow: hidden;
   }
@@ -2111,7 +2111,7 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
     color: #ddd;
   }
@@ -2180,7 +2180,7 @@
     align-items: center;
     font-size: 12px;
     padding: 2px 4px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
   }
 

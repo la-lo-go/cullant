@@ -215,7 +215,7 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
     color: #8fd0ff;
   }
@@ -235,7 +235,7 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     font-size: 14px;
     font-family: inherit;
@@ -287,7 +287,7 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 6px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     border: 1px solid;
     /* Border color and a ~18% alpha tint (2e suffix) are set inline from the
        tag's #rrggbb color. */
@@ -329,7 +329,7 @@
     gap: 8px;
     padding: 10px 16px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--surface);
     color: var(--accent);
     font: inherit;

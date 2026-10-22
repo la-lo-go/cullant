@@ -976,7 +976,7 @@
   .label-swatch {
     width: 16px;
     height: 16px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     flex: none;
   }
 
@@ -985,7 +985,7 @@
     flex: 1;
     padding: 7px 9px;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--control);
     color: inherit;
     font: inherit;
@@ -1108,7 +1108,7 @@
     height: 14px;
     padding: 0;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: none;
     color: inherit;
     opacity: 0.6;
@@ -1121,7 +1121,7 @@
     gap: 8px;
     min-height: 32px;
     padding: 2px 4px 2px 6px;
-    border-radius: 6px;
+    border-radius: var(--r-md);
   }
 
   .name {
@@ -1198,7 +1198,7 @@
     max-width: 46%;
     padding: 3px 28px 3px 8px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background-color: var(--surface);
     color: inherit;
     font-size: var(--fs-sm);
@@ -1281,7 +1281,7 @@
     margin: 14px 0 8px;
     padding: 12px 14px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     background: var(--surface);
     color: inherit;
     text-align: left;
@@ -1330,7 +1330,7 @@
     width: 100%;
     padding: 6px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: none;
     color: inherit;
     font-size: 12px;
@@ -1447,7 +1447,7 @@
     gap: 10px;
     min-height: 38px;
     padding: 0 6px;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     font-size: var(--fs-sm);
     cursor: pointer;
   }
@@ -1579,7 +1579,7 @@
     gap: 6px;
     width: 100%;
     padding: 2px 4px;
-    border-radius: 6px;
+    border-radius: var(--r-md);
   }
 
   .slot.on {
@@ -1614,7 +1614,7 @@
     padding: 0;
     background: none;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #9aa0a0;
     cursor: pointer;
   }
@@ -1644,7 +1644,7 @@
     padding: 3px 8px;
     background: none;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #9aa0a0;
     font-size: 11px;
     cursor: pointer;
@@ -1756,7 +1756,7 @@
     min-height: 32px;
     padding: 0 10px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--surface);
     color: inherit;
     font-size: var(--fs-sm);

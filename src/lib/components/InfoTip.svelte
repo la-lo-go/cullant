@@ -48,7 +48,7 @@
     flex: none;
     padding: 3px;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: none;
     color: inherit;
     opacity: 0.35;

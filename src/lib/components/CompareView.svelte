@@ -398,7 +398,7 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     font-size: 14px;
     font-family: inherit;
@@ -465,7 +465,7 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     font-family: inherit;
     background: rgba(0, 0, 0, 0.45);
@@ -502,7 +502,7 @@
     opacity: 0.7;
     background: rgba(0, 0, 0, 0.5);
     padding: 2px 8px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     pointer-events: none;
   }
 
@@ -536,7 +536,7 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 6px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     border: 1px solid;
     /* Border color and a ~18% alpha tint (2e suffix) are set inline from the
        tag's #rrggbb color. */

@@ -130,7 +130,7 @@
     max-width: none;
     max-height: calc(100dvh - var(--dialog-edge-margin) * 2);
     border-width: 1px 0 0;
-    border-radius: 14px 14px 0 0;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
   }
 
   .text {

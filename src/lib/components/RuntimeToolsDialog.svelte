@@ -61,7 +61,7 @@
 
 <style>
   .backdrop { position: fixed; inset: 0; z-index: 110; display: flex; align-items: center; justify-content: center; background: #0008; padding: var(--dialog-edge-margin); padding-top: calc(var(--inset-top) + var(--dialog-edge-margin)); padding-bottom: calc(var(--inset-bottom) + var(--dialog-edge-margin)); }
-  .dialog { outline: none; width: 460px; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; background: #232329; border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 18px 50px #0008; }
+  .dialog { outline: none; width: 460px; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; background: #232329; border: 1px solid var(--border-strong); border-radius: var(--r-xl); box-shadow: 0 18px 50px #0008; }
   header, footer { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
   header { border-bottom: 1px solid var(--border); }
   h2 { flex: 1; margin: 0; font-size: 15px; }
@@ -72,7 +72,7 @@
   .lead { margin-bottom: 4px; }
   ul { margin: 0 0 8px; padding-left: 18px; }
   li { margin: 0 0 2px; }
-  button { font: inherit; cursor: pointer; border: 1px solid var(--border); background: var(--control); color: inherit; padding: 7px 12px; border-radius: 6px; font-size: 12px; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--border); background: var(--control); color: inherit; padding: 7px 12px; border-radius: var(--r-md); font-size: 12px; }
   .close, .link { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; }
   .close { padding: 5px; }
   .link { color: var(--accent); padding: 4px 0; margin-right: 12px; }

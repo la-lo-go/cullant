@@ -190,7 +190,7 @@
     width: 100%;
     justify-content: center;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--control);
     color: #8fd0ff;
     font-family: inherit;

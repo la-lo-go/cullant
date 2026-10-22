@@ -53,7 +53,7 @@
   .dialog {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 16px 20px;
     width: 380px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
@@ -79,7 +79,7 @@
   }
 
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 8px 14px;
     font-size: 13px;

@@ -101,7 +101,7 @@
     max-height: 100%;
     background: #232329;
     border: 1px solid var(--border-strong);
-    border-radius: 12px;
+    border-radius: var(--r-xl);
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
   }
 
@@ -131,7 +131,7 @@
     width: 40px;
     height: 32px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: none;
     color: inherit;
     opacity: 0.6;
@@ -160,7 +160,7 @@
     gap: 5px;
     padding: 12px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     background: rgba(0, 0, 0, 0.16);
   }
 

@@ -123,7 +123,7 @@
     inset: 0;
     box-sizing: border-box;
     border: 2px solid var(--accent);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: rgba(var(--accent-rgb), 0.08);
   }
 </style>

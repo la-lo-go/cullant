@@ -173,7 +173,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    border-radius: 6px;
+    border-radius: var(--r-md);
   }
   .drow.dragging {
     position: relative;
@@ -191,7 +191,7 @@
     padding: 0;
     background: none;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     color: var(--text-faint);
     cursor: grab;
     touch-action: none;

@@ -193,7 +193,7 @@
     color: #ddd;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     font: inherit;
     cursor: pointer;
   }
@@ -219,7 +219,7 @@
     height: 24px;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #bbb;
     cursor: pointer;
     padding: 0;
@@ -268,7 +268,7 @@
     justify-content: center;
     background: none;
     border: 2px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     cursor: pointer;
     overflow: hidden;

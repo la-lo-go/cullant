@@ -418,7 +418,7 @@
     padding: 0;
     border: 1px solid var(--border);
     border-right: none;
-    border-radius: 6px 0 0 6px;
+    border-radius: var(--r-md) 0 0 var(--r-md);
     background: var(--surface);
     color: var(--accent);
     cursor: pointer;
@@ -433,7 +433,7 @@
     left: 0;
     border-right: 1px solid var(--border);
     border-left: none;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--r-md) var(--r-md) 0;
   }
 
   .header {

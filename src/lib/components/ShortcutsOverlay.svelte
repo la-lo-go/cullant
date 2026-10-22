@@ -151,7 +151,7 @@
   .dialog {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 16px 20px;
     width: 720px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
@@ -236,7 +236,7 @@
     text-align: center;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 5px;
+    border-radius: var(--r-md);
     padding: 4px 6px;
     color: #e8e8e8;
   }
