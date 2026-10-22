@@ -1460,7 +1460,7 @@
                   class="burst"
                   title="Shot {burstAt.position} of a burst of {burstAt.total}"
                 >
-                  <Layers size={10} />{burstAt.position}/{burstAt.total}
+                  <Layers size={10} /><span class="burst-total">{burstAt.position}/{burstAt.total}</span><span class="burst-short">{burstAt.position}</span>
                 </span>
               {/if}
               {#if session.mirrorMode && v.item.groupSize > 1}
@@ -1516,7 +1516,7 @@
               {#if rating > 0}
                 <span class="stars" title={summary ? "Best rating in this burst" : undefined}>
                   <span class="rating-full">{"★".repeat(rating)}</span>
-                  <span class="rating-compact">★{rating}</span>
+                  <span class="rating-compact">{rating}★</span>
                 </span>
               {/if}
               {#if v.item.tagIds.length > 0}
@@ -2251,6 +2251,7 @@
 
   .info-top {
     top: 4px;
+    flex-wrap: wrap;
   }
 
   .info-bottom {
@@ -2271,6 +2272,7 @@
   .info-top > .chip {
     order: -1;
     min-width: 0;
+    flex-shrink: 0;
     overflow: hidden;
     white-space: nowrap;
   }
@@ -2296,19 +2298,12 @@
   }
 
   .rating-compact,
-  .type-short {
+  .type-short,
+  .burst-short {
     display: none;
   }
 
   @container (max-width: 120px) {
-    .info-top {
-      flex-wrap: wrap;
-    }
-
-    .info-top > .chip {
-      flex-shrink: 0;
-    }
-
     .info-top,
     .info-bottom {
       gap: 2px;
@@ -2321,14 +2316,6 @@
       gap: 2px;
     }
 
-    .rating-full {
-      display: none;
-    }
-
-    .rating-compact {
-      display: inline;
-    }
-
     .tags {
       gap: 2px;
     }
@@ -2336,6 +2323,21 @@
     .tagdot {
       width: 6px;
       height: 6px;
+    }
+
+    .tagdot:nth-child(n + 3) {
+      display: none;
+    }
+  }
+
+  /* Below this width five stars and the tag dots no longer share a row. */
+  @container (max-width: 76px) {
+    .rating-full {
+      display: none;
+    }
+
+    .rating-compact {
+      display: inline;
     }
   }
 
@@ -2352,8 +2354,7 @@
       display: inline;
     }
 
-    .counts :global(svg),
-    .tagdot:nth-child(n + 3) {
+    .counts :global(svg) {
       display: none;
     }
 
@@ -2370,6 +2371,18 @@
   @container (max-width: 48px) {
     .tagdot:nth-child(n + 2) {
       display: none;
+    }
+  }
+
+  /* A position such as 123/456 needs about 46 px of row; the count alone fits. */
+  @container (max-width: 56px) {
+    .burst :global(svg),
+    .burst-total {
+      display: none;
+    }
+
+    .burst-short {
+      display: inline;
     }
   }
 
