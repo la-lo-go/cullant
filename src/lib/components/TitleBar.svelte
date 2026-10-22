@@ -348,7 +348,7 @@
     background: transparent;
     color: #e8e8e8;
     font-family: inherit;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     text-align: left;
     cursor: pointer;
   }
@@ -392,7 +392,7 @@
 
   .menu-label {
     padding: 4px 9px 2px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -400,7 +400,7 @@
   }
 
   .recent-path {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     opacity: 0.6;
     direction: rtl;
     text-align: left;

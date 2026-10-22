@@ -1895,7 +1895,7 @@
 
   .welcome .hint {
     margin: 0 0 4px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     opacity: 0.6;
   }
 

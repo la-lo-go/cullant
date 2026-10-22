@@ -147,7 +147,7 @@
 
   .intro {
     margin: 0 2px 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     line-height: 1.55;
     opacity: 0.75;
   }
@@ -178,7 +178,7 @@
   }
 
   .h-title {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -230,7 +230,7 @@
   }
 
   .label {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
 
   .note {

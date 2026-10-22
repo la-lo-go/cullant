@@ -82,7 +82,7 @@
     border-radius: 6px;
     background: none;
     color: inherit;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 

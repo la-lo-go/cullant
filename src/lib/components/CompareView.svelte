@@ -533,7 +533,7 @@
   }
 
   .tagpill {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 4px;

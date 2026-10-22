@@ -1093,7 +1093,7 @@
   }
 
   .gname {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -1134,7 +1134,7 @@
 
   .label {
     position: relative;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1201,7 +1201,7 @@
     border-radius: 6px;
     background-color: var(--surface);
     color: inherit;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
   }
 
   .jump {
@@ -1221,7 +1221,7 @@
     border-radius: 8px;
     background: var(--surface);
     color: inherit;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 
@@ -1254,11 +1254,11 @@
   }
 
   .t-title {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
 
   .t-note {
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     line-height: 1.4;
     opacity: 0.6;
   }
@@ -1312,7 +1312,7 @@
   }
 
   .s-note {
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     line-height: 1.4;
     opacity: 0.7;
   }
@@ -1365,7 +1365,7 @@
   .version {
     margin: 12px 0 0;
     color: #74747d;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     text-align: center;
   }
 
@@ -1420,7 +1420,7 @@
   .empty {
     margin: 24px 0;
     text-align: center;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     opacity: 0.6;
   }
 
@@ -1448,7 +1448,7 @@
     min-height: 38px;
     padding: 0 6px;
     border-radius: 6px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 
@@ -1759,7 +1759,7 @@
     border-radius: 6px;
     background: var(--surface);
     color: inherit;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 

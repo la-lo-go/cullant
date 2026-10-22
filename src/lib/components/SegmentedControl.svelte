@@ -85,7 +85,7 @@
     border-radius: 5px;
     background: none;
     color: inherit;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     opacity: 0.7;
     cursor: pointer;
   }

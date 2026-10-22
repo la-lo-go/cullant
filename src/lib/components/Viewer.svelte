@@ -212,7 +212,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 5px;
     border-radius: 4px;
@@ -284,7 +284,7 @@
   }
 
   .tagpill {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 4px;

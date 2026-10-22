@@ -480,7 +480,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     color: #fff;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.01em;
     white-space: nowrap;

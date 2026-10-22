@@ -1036,7 +1036,7 @@
   }
 
   .no-poster span {
-    font-size: 8px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.03em;
   }
@@ -1074,7 +1074,7 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    font-size: 8px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 4px;
     border-radius: 3px;
@@ -1110,7 +1110,7 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    font-size: 8px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     padding: 1px 4px;
@@ -1209,7 +1209,7 @@
     bottom: 7px;
     left: 4px;
     color: #ffd166;
-    font-size: 8px;
+    font-size: var(--fs-xs);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     pointer-events: none;
   }

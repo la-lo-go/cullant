@@ -2067,7 +2067,7 @@
   }
 
   .unreadable span {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.03em;
   }
@@ -2089,7 +2089,7 @@
   }
 
   .no-poster span {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.03em;
   }
@@ -2108,7 +2108,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 5px;
     border-radius: 4px;
@@ -2158,7 +2158,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     padding: 1px 6px;
@@ -2199,7 +2199,7 @@
   /* Pick/reject tallies on a collapsed burst, in the single badge's place. */
   .badge.counts {
     gap: 5px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
@@ -2317,7 +2317,6 @@
     .chip,
     .burst,
     .badge.counts {
-      font-size: 9px;
       padding: 1px 3px;
       gap: 2px;
     }
@@ -2342,7 +2341,6 @@
 
   @container (max-width: 88px) {
     .chip {
-      font-size: 8px;
       padding: 1px 2px;
     }
 
@@ -2364,7 +2362,6 @@
     }
 
     .burst {
-      font-size: 8px;
       padding: 1px 2px;
       gap: 1px;
     }
