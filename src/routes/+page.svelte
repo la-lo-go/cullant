@@ -1199,8 +1199,6 @@
 
     --fs-xs: 11px;
     --fs-sm: 12px;
-    --fs-md: 13px;
-    --fs-lg: 15px;
 
     /* One motion for a panel that leaves its slot, the gap that the content
        keeps for it, and the preview rectangle, so they read as one movement. */
