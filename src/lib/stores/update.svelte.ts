@@ -18,6 +18,7 @@ class UpdateStore {
   current = $state<string | null>(null);
   latest = $state<string | null>(null);
   url = $state<string | null>(null);
+  notesUrl = $state<string | null>(null);
   private skipped = $state<string | null>(skippedVersion());
   private dismissed = $state(false);
   private started = false;
@@ -41,7 +42,8 @@ class UpdateStore {
     try {
       const [source, latest] = await Promise.all([api.installSource(), newestCompleteRelease()]);
       this.url = updateUrl(source);
-      this.latest = latest;
+      this.latest = latest?.version ?? null;
+      this.notesUrl = latest?.notesUrl ?? null;
     } catch {
       // The check is optional. A failure shows nothing.
     }
@@ -56,6 +58,11 @@ class UpdateStore {
 
   later() {
     this.dismissed = true;
+  }
+
+  /** Does not dismiss the prompt: the user reads the notes, then decides. */
+  openNotes() {
+    if (this.notesUrl) void openUrl(this.notesUrl);
   }
 
   open() {

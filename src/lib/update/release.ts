@@ -1,4 +1,5 @@
 const RELEASES_URL = "https://api.github.com/repos/la-lo-go/cullant/releases?per_page=10";
+const NOTES_PREFIX = "https://github.com/la-lo-go/cullant/releases/";
 
 // This list must match `.github/workflows/release.yml` and `cullant-site/src/lib/Downloads.ts`.
 // The workflow publishes a release first and attaches the files about 30 minutes later.
@@ -16,6 +17,7 @@ interface GitHubRelease {
   tag_name?: string;
   draft?: boolean;
   prerelease?: boolean;
+  html_url?: string;
   assets?: Array<{ name?: string }>;
 }
 
@@ -29,8 +31,20 @@ function isComplete(release: GitHubRelease, version: string): boolean {
   return ASSET_TEMPLATES.every((template) => names.has(template.replace("{v}", version)));
 }
 
-/** Version of the newest published release that has all its files, or null. */
-export async function newestCompleteRelease(): Promise<string | null> {
+export interface NewestRelease {
+  version: string;
+  /** Release page with the notes, or null when the API gave no trusted URL. */
+  notesUrl: string | null;
+}
+
+// The URL comes from the network and is opened outside the app, so only our own releases pass.
+function notesUrlOf(release: GitHubRelease): string | null {
+  const url = release.html_url;
+  return url?.startsWith(NOTES_PREFIX) ? url : null;
+}
+
+/** The newest published release that has all its files, or null. */
+export async function newestCompleteRelease(): Promise<NewestRelease | null> {
   try {
     const response = await fetch(RELEASES_URL, { headers: { Accept: "application/vnd.github+json" } });
     if (!response.ok) return null;
@@ -38,7 +52,7 @@ export async function newestCompleteRelease(): Promise<string | null> {
     for (const release of releases) {
       if (release.draft || release.prerelease) continue;
       const version = versionOf(release);
-      if (version && isComplete(release, version)) return version;
+      if (version && isComplete(release, version)) return { version, notesUrl: notesUrlOf(release) };
     }
     return null;
   } catch {

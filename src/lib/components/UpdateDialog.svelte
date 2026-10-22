@@ -23,6 +23,9 @@
       </header>
       <p>You have {update.current}.</p>
       <footer>
+        {#if update.notesUrl}
+          <button class="link" data-action="notes" onclick={() => update.openNotes()}>What's new</button>
+        {/if}
         <button data-action="skip" onclick={() => update.skip()}>Skip this version</button>
         <button class="primary" data-action="update" onclick={() => update.open()}>Update</button>
       </footer>
@@ -40,5 +43,7 @@
   button { font: inherit; cursor: pointer; border: 1px solid var(--border); background: var(--control); color: inherit; padding: 7px 12px; border-radius: 6px; font-size: 12px; }
   .close { display: inline-flex; align-items: center; border: none; background: none; padding: 5px; }
   footer { justify-content: flex-end; border-top: 1px solid var(--border); }
+  .link { margin-right: auto; border: none; background: none; padding: 7px 0; color: var(--accent); }
+  .link:hover { text-decoration: underline; }
   .primary { background: var(--accent-fill); color: #fff; }
 </style>

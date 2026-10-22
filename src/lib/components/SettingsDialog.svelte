@@ -904,6 +904,9 @@
                   <CircleAlert size={12} />
                   Update to {update.latest}
                 </button>
+                {#if update.notesUrl}
+                  <button class="notes" onclick={releasing(() => update.openNotes())}>What's new</button>
+                {/if}
               {:else if update.current !== "unknown" && update.latest}
                 · Latest version
               {/if}
@@ -1382,6 +1385,20 @@
 
   .update:hover {
     background: color-mix(in srgb, var(--accent) 15%, transparent);
+  }
+
+  .notes {
+    margin-left: 8px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .notes:hover {
+    text-decoration: underline;
   }
 
   .empty {
