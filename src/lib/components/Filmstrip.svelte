@@ -498,12 +498,13 @@
                         {#if v.item.decoupled}
                           <Scissors size={8} /><span>SPLIT</span>
                         {:else if pair?.diverged}
-                          <span class="pair-halves">
+                          <span class="pair-halves" class:many={pair.halves.length > 2}>
                             {#each pair.halves as h, hi (h.id)}
                               {#if hi > 0}<span class="half-sep"></span>{/if}
                               <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
                             {/each}
                           </span>
+                          <span class="pair-count">{pair.halves.length}</span>
                         {:else}
                           <span class="type-full">RAW+JPG</span>
                           <span class="type-short">R+J</span>
@@ -1210,7 +1211,8 @@
     gap: 2px;
   }
 
-  .type-short {
+  .type-short,
+  .pair-count {
     display: none;
   }
 
@@ -1222,6 +1224,28 @@
     }
 
     .type-short {
+      display: inline;
+    }
+  }
+
+  /* Half names need about 56 px of row for two halves and 80 px for three. Below
+     that the chip shows how many halves the shot has. */
+  @container (max-width: 94px) {
+    .pair-halves.many {
+      display: none;
+    }
+
+    .pair-halves.many + .pair-count {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 74px) {
+    .pair-halves {
+      display: none;
+    }
+
+    .pair-halves + .pair-count {
       display: inline;
     }
   }

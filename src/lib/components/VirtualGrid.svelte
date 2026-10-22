@@ -1469,12 +1469,13 @@
                     {:else if pair?.diverged}
                       <!-- Halves shown separately only once they disagree, so the
                            ordinary pair keeps drawing exactly as it always has. -->
-                      <span class="pair-halves">
+                      <span class="pair-halves" class:many={pair.halves.length > 2}>
                         {#each pair.halves as h, hi (h.id)}
                           {#if hi > 0}<span class="half-sep"></span>{/if}
                           <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
                         {/each}
                       </span>
+                      <span class="pair-count">{pair.halves.length}</span>
                     {:else}
                       <span class="type-full">RAW+JPG</span>
                       <span class="type-short">R+J</span>
@@ -2292,6 +2293,7 @@
 
   .rating-compact,
   .type-short,
+  .pair-count,
   .burst-short {
     display: none;
   }
@@ -2358,6 +2360,28 @@
     .burst {
       padding: 1px 2px;
       gap: 1px;
+    }
+  }
+
+  /* The half names need about 66 px for two halves and 88 px for three. Below
+     that the chip shows how many halves the shot has. */
+  @container (max-width: 88px) {
+    .pair-halves.many {
+      display: none;
+    }
+
+    .pair-halves.many + .pair-count {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 66px) {
+    .pair-halves {
+      display: none;
+    }
+
+    .pair-halves + .pair-count {
+      display: inline;
     }
   }
 
