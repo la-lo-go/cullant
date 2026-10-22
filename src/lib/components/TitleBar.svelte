@@ -242,6 +242,10 @@
 </div>
 
 <style>
+  .titlebar button:focus-visible {
+    outline-offset: -2px;
+  }
+
   .titlebar {
     display: flex;
     align-items: center;

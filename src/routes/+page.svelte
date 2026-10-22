@@ -1408,6 +1408,10 @@
     }
   }
 
+  .toolbar button:focus-visible {
+    outline-offset: -2px;
+  }
+
   .toolbar button {
     padding: 3px 8px;
     font-size: 12px;
