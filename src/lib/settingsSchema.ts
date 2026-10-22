@@ -439,6 +439,16 @@ export const SETTINGS: Setting[] = [
     set: (v) => settings.setRememberSession(v),
     def: DEFAULTS.rememberSession,
   }),
+  toggle({
+    id: "checkUpdatesAtStartup",
+    group: "project",
+    label: "Check for updates at startup",
+    info: "Asks GitHub once per launch for a newer version. The Settings version line checks once even when this is off.",
+    keywords: "update version startup release upgrade",
+    get: () => settings.checkUpdatesAtStartup,
+    set: (v) => settings.setCheckUpdatesAtStartup(v),
+    def: DEFAULTS.checkUpdatesAtStartup,
+  }),
 
   toggle({
     id: "copyMetadataOnLeave",
