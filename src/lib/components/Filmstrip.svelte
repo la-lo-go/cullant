@@ -500,16 +500,21 @@
                       class:split={v.item.decoupled}
                       title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
                     >
-                      {#if v.item.decoupled}
-                        <Scissors size={8} /><span>SPLIT</span>
-                      {:else if pair?.diverged}
-                        {#each pair.halves as h, hi (h.id)}
-                          {#if hi > 0}<span class="half-sep"></span>{/if}
-                          <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
-                        {/each}
-                      {:else}
-                        RAW+JPG
-                      {/if}
+                      <span class="type-name">
+                        {#if v.item.decoupled}
+                          <Scissors size={8} /><span>SPLIT</span>
+                        {:else if pair?.diverged}
+                          <span class="pair-halves">
+                            {#each pair.halves as h, hi (h.id)}
+                              {#if hi > 0}<span class="half-sep"></span>{/if}
+                              <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
+                            {/each}
+                          </span>
+                        {:else}
+                          <span class="type-full">RAW+JPG</span>
+                          <span class="type-short">R+J</span>
+                        {/if}
+                      </span>
                     </span>
                   {:else if v.item.kind === 0}
                     <span class="chip">RAW</span>
@@ -946,6 +951,7 @@
        that leaves, via the flex centering below. */
     padding: 8px 3px;
     box-sizing: border-box;
+    container-type: inline-size;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1193,9 +1199,32 @@
     white-space: nowrap;
   }
 
-  /* The RAW+JPG label must fit the 72 px minimum vertical cell. */
-  .vertical .info-top > .chip {
-    padding: 1px 2px;
+  .info-top > .chip .type-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pair-halves {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .type-short {
+    display: none;
+  }
+
+  /* The full RAW+JPG label needs about 62 px of row, whatever the font. */
+  @container (max-width: 90px) {
+    .type-full {
+      display: none;
+    }
+
+    .type-short {
+      display: inline;
+    }
   }
 
   .info-top > .flagbadge {
