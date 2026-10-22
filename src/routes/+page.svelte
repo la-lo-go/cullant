@@ -1244,6 +1244,18 @@
     }
   }
 
+  /* Not `none`: a 0.01ms run still fires transitionend and animationend. */
+  @media (prefers-reduced-motion: reduce) {
+    :global(*),
+    :global(*::before),
+    :global(*::after) {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
   /* Fallback for a native bar that a container forgot to replace. New scroll
      areas must use ScrollArea: CSS alone cannot take the bar out of the layout
      or show it only while scrolling (Chromium removed `overflow: overlay`).
