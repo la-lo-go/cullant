@@ -322,8 +322,7 @@
     border-left: 1px solid var(--border);
   }
 
-  .scroll :global(button:focus-visible),
-  .header :global(button:focus-visible) {
+  .scroll :global(button:focus-visible) {
     outline-offset: -2px;
   }
 
