@@ -1190,7 +1190,7 @@
     --danger-fill: #a8403a;
     --danger-fill-hover: #b84a4a;
     --danger-solid: #e04343;
-    --text-faint: #8c8c95;
+    --text-faint: #9898a1;
 
     --r-sm: 4px;
     --r-md: 6px;
