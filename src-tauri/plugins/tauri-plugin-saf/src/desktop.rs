@@ -71,6 +71,9 @@ impl<R: Runtime> Saf<R> {
     ) -> Result<(Vec<u8>, u32, u32)> {
         Err(Error::Unsupported)
     }
+    pub fn installer_package(&self) -> Result<Option<String>> {
+        Ok(None)
+    }
     pub fn heif_supported(&self) -> Result<bool> {
         Err(Error::Unsupported)
     }

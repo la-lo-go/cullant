@@ -679,6 +679,27 @@ class SafPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
+    // Tells the frontend which store to send the user to for an update.
+    // getInstallSourceInfo needs API 30; the old call covers 24-29.
+    @Command
+    fun installerPackage(invoke: Invoke) {
+        val installer = try {
+            val pm = activity.packageManager
+            val name = activity.packageName
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                pm.getInstallSourceInfo(name).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstallerPackageName(name)
+            }
+        } catch (_: Exception) {
+            null
+        }
+        val res = JSObject()
+        res.put("installer", installer)
+        invoke.resolve(res)
+    }
+
     // Whether this device can decode HEIF at all. ImageDecoder reads it from
     // API 28; the app supports 24, so the Rust side must ask rather than assume.
     @Command

@@ -153,6 +153,12 @@ export interface MediaCounts {
   videos: number;
 }
 
+export interface InstallSource {
+  os: string;
+  // Android installer package (Google Play is "com.android.vending"); null elsewhere.
+  installer: string | null;
+}
+
 export interface RuntimeToolStatus {
   platform: string;
   ffmpegPresent: boolean;
@@ -312,6 +318,7 @@ export interface CullState {
 }
 
 export const api = {
+  installSource: () => invoke<InstallSource>("install_source"),
   runtimeTools: () => invoke<RuntimeToolStatus>("runtime_tools"),
   openProject: (path: string) => invoke<ProjectInfo>("open_project", { path }),
   // Android 13+: asks POST_NOTIFICATIONS. Resolves true when granted, and always

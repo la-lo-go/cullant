@@ -212,6 +212,11 @@ pub(crate) struct HeifStillResponse {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct InstallerPackageResponse {
+    pub installer: Option<String>,
+}
+
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HeifSupportedResponse {
     pub supported: bool,

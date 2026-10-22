@@ -377,6 +377,7 @@ pub fn run() {
             commands::recent::delete_project_data,
             commands::catalog::query_items,
             commands::runtime_tools::runtime_tools,
+            commands::install_source::install_source,
             commands::catalog::media_counts,
             commands::catalog::preview_ready_ids,
             commands::culling::set_rating,

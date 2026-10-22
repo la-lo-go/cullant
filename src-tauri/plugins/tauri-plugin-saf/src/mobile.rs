@@ -254,6 +254,13 @@ impl<R: Runtime> Saf<R> {
             .map_err(Into::into)
     }
 
+    /// Package name of the app that installed this one (Google Play is
+    /// `com.android.vending`), or `None` for a sideload.
+    pub fn installer_package(&self) -> Result<Option<String>> {
+        let res: InstallerPackageResponse = self.0.run_mobile_plugin("installerPackage", ())?;
+        Ok(res.installer)
+    }
+
     /// Whether this device decodes HEIF. `ImageDecoder` reads it from API 28 and
     /// the app supports 24, so this is a runtime question, not a build one.
     pub fn heif_supported(&self) -> Result<bool> {
