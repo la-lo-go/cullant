@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LABEL_COLORS } from "../labels";
+  import { LABEL_COLORS } from "$lib/labels";
   import { session } from "$lib/stores/session.svelte";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { settings } from "$lib/stores/settings.svelte";
