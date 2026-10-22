@@ -72,7 +72,7 @@
   {#if narrow}
     <div class="dim" aria-hidden="true"></div>
   {/if}
-  <div class="pop" class:sheet={narrow} bind:this={popEl} role="tooltip">
+  <div class="pop" class:sheet={narrow} bind:this={popEl} role={narrow ? "dialog" : "tooltip"} aria-modal={narrow ? "true" : undefined} aria-label={narrow ? view.infoTip.title : undefined}>
     <ScrollArea>
       <div class="text">
         {#if narrow}

@@ -25,9 +25,11 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
+    aria-modal="true"
+    aria-labelledby="pair-sync-dialog-title"
     tabindex="-1"
   >
-    <h2>Recouple RAW+JPEG pair</h2>
+    <h2 id="pair-sync-dialog-title">Recouple RAW+JPEG pair</h2>
     <p>
       The two files may have diverged while decoupled. Which state should the
       reunited pair keep?

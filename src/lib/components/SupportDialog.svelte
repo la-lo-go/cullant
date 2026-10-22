@@ -36,12 +36,13 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-label="Support Cullant"
+    aria-modal="true"
+    aria-labelledby="support-dialog-title"
     tabindex="-1"
   >
     <header>
       <Heart size={16} />
-      <h2>Support Cullant</h2>
+      <h2 id="support-dialog-title">Support Cullant</h2>
       <button class="close-x" onclick={onclose} aria-label="Close" title="Close">
         <X size={18} />
       </button>

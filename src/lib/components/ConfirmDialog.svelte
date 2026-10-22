@@ -59,12 +59,14 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
+    aria-modal="true"
+    aria-labelledby="confirm-dialog-title"
     tabindex="-1"
   >
     {#if choice}
       <button class="close-x" onclick={oncancel} aria-label="Close" title="Close"><X size={18} /></button>
     {/if}
-    <h2>{title}</h2>
+    <h2 id="confirm-dialog-title">{title}</h2>
     <p>{message}</p>
     <div class="actions">
       {#if linkLabel && onlink}

@@ -86,11 +86,12 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-label="Queue move / copy"
+    aria-modal="true"
+    aria-labelledby="move-dialog-title"
     tabindex="-1"
     use:modalFocus={{ initialFocus: "input" }}
   >
-    <h2>Queue move / copy</h2>
+    <h2 id="move-dialog-title">Queue move / copy</h2>
     <p class="targets">{photoCount} {catalog.media === "videos" ? (photoCount === 1 ? "video" : "videos") : (photoCount === 1 ? "photo" : "photos")} · {fileCount} {fileCount === 1 ? "file" : "files"}</p>
     <p class="hint">
       Destination subfolder inside the project (created when you execute reviewed changes).

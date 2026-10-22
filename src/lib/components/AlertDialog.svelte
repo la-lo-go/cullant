@@ -26,9 +26,10 @@
     onkeydown={onKeydown}
     role="alertdialog"
     aria-modal="true"
+    aria-labelledby="alert-dialog-title"
     tabindex="-1"
   >
-    <h2>{title}</h2>
+    <h2 id="alert-dialog-title">{title}</h2>
     <p>{message}</p>
     <div class="actions">
       <button class="ok" onclick={onclose}>OK</button>

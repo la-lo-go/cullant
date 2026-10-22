@@ -94,11 +94,12 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-label="Keyboard shortcuts"
+    aria-modal="true"
+    aria-labelledby="shortcuts-overlay-title"
     tabindex="-1"
   >
     <header>
-      <h2>Keyboard shortcuts</h2>
+      <h2 id="shortcuts-overlay-title">Keyboard shortcuts</h2>
       <button class="close-x" onclick={onclose} aria-label="Close" title="Close">
         <X size={18} />
       </button>
