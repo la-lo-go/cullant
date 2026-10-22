@@ -1457,7 +1457,7 @@
                 </span>
               {:else if burstAt}
                 <span
-                  class="burst"
+                  class="burst position"
                   title="Shot {burstAt.position} of a burst of {burstAt.total}"
                 >
                   <Layers size={10} /><span class="burst-total">{burstAt.position}/{burstAt.total}</span><span class="burst-short">{burstAt.position}</span>
@@ -2376,7 +2376,7 @@
 
   /* A position such as 123/456 needs about 46 px of row; the count alone fits. */
   @container (max-width: 56px) {
-    .burst :global(svg),
+    .position :global(svg),
     .burst-total {
       display: none;
     }
