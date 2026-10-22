@@ -2331,7 +2331,7 @@
   }
 
   /* Below this width five stars and the tag dots no longer share a row. */
-  @container (max-width: 76px) {
+  @container (max-width: 84px) {
     .rating-full {
       display: none;
     }
