@@ -1067,7 +1067,7 @@
   <!-- Hidden while the media-tools dialog is open: two modals at once leave the older one inert. -->
   {#if update.prompt && runtimeTools.pending.length === 0}
     <ConfirmDialog
-      title="Cullant {update.latest} is here"
+      title="Cullant {update.latest} is here!"
       message="A new version is ready. Update whenever it suits you."
       confirmLabel="Update"
       altLabel="Skip this version"

@@ -900,13 +900,15 @@
             <p class="version">
               Cullant {update.current ?? "…"}
               {#if update.available}
-                <button class="update" onclick={releasing(() => update.open())}>
-                  <CircleAlert size={12} />
-                  Update to {update.latest}
-                </button>
-                {#if update.notesUrl}
-                  <button class="notes" onclick={releasing(() => update.openNotes())}>What's new</button>
-                {/if}
+                <span class="update-row">
+                  <button class="update" onclick={releasing(() => update.open())}>
+                    <CircleAlert size={12} />
+                    Update to {update.latest}
+                  </button>
+                  {#if update.notesUrl}
+                    <button class="notes" onclick={releasing(() => update.openNotes())}>What's new</button>
+                  {/if}
+                </span>
               {:else if update.current !== "unknown" && update.latest}
                 · Latest version
               {/if}
@@ -1373,7 +1375,6 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    margin-left: 6px;
     padding: 2px 8px;
     border: 1px solid var(--accent);
     border-radius: 999px;
@@ -1387,9 +1388,16 @@
     background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
 
+  .update-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 6px;
+  }
+
   .notes {
-    margin-left: 8px;
-    padding: 0;
+    padding: 2px 0;
     border: none;
     background: none;
     color: var(--accent);
