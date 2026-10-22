@@ -1,8 +1,8 @@
 <script lang="ts">
-  const uid = $props.id();
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
   import X from "@lucide/svelte/icons/x";
+  const uid = $props.id();
 
   let {
     title,

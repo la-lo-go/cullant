@@ -1,7 +1,7 @@
 <script lang="ts">
-  const uid = $props.id();
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
+  const uid = $props.id();
 
   let { title = "Notice", message, onclose }: { title?: string; message: string; onclose: () => void } =
     $props();
