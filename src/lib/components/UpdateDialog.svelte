@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { runtimeTools } from "../stores/runtimeTools.svelte";
   import { update } from "../stores/update.svelte";
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
@@ -12,7 +13,8 @@
   }
 </script>
 
-{#if update.prompt}
+<!-- Two open dialogs make the older one inert, so this one waits for the media-tools dialog. -->
+{#if update.prompt && runtimeTools.pending.length === 0}
   <div class="backdrop" role="presentation" {...dismiss}>
     <div class="dialog" role="dialog" aria-modal="true" aria-label="Update available" tabindex="-1" use:modalFocus={{ initialFocus: "[data-action=update]" }} {onkeydown}>
       <header>

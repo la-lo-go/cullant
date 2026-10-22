@@ -46,7 +46,7 @@ export async function newestCompleteRelease(): Promise<string | null> {
   }
 }
 
-/** True when version `a` is newer than `b`. Both are `major.minor.patch`. */
+/** True when version `a` is newer than `b`. Both are `major.minor.patch`. A malformed version never counts as newer. */
 export function isNewer(a: string, b: string): boolean {
   const left = a.split(".").map(Number);
   const right = b.split(".").map(Number);

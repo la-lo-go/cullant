@@ -193,6 +193,10 @@
   });
 
   $effect(() => {
+    if (settings.checkUpdatesAtStartup) void update.check();
+  });
+
+  $effect(() => {
     if (catalog.project) {
       void tags.refresh();
       void session.refreshPending();
@@ -224,13 +228,13 @@
       dock.cancelDrag();
       return;
     }
-    // Mounted after the media-tools dialog, so it stacks above it.
-    if (update.prompt) {
-      update.later();
-      return;
-    }
     if (runtimeTools.pending.length > 0) {
       runtimeTools.dismiss(false);
+      return;
+    }
+    // UpdateDialog stays hidden while the media-tools dialog is open, so this order matches what is visible.
+    if (update.prompt) {
+      update.later();
       return;
     }
     // Top-most first, matching the visual stacking order of the dialogs below.
@@ -332,10 +336,6 @@
   // straight to us and never consults history. `__cullantBack` is the second
   // native route, for the case where Tauri's handler is gone entirely — see the
   // callback in `src-tauri/gen/android/.../MainActivity.kt`.
-  $effect(() => {
-    if (settings.checkUpdatesAtStartup) void update.check();
-  });
-
   $effect(() => {
     const win = window as unknown as Record<string, unknown>;
     win.__cullantBack = goBack;
