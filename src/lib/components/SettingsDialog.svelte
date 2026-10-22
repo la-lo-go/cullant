@@ -32,7 +32,7 @@
   import { api } from "../api";
   import { LABEL_COLORS } from "../labels";
   import { IS_TOUCH } from "../platform";
-  import { getVersion } from "@tauri-apps/api/app";
+  import { update } from "../stores/update.svelte";
   import DragList from "./DragList.svelte";
   import RadialPreview from "./RadialPreview.svelte";
   import ContextMenu from "./ContextMenu.svelte";
@@ -130,6 +130,7 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import X from "@lucide/svelte/icons/x";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Plus from "@lucide/svelte/icons/plus";
   import ScrollArea from "./ScrollArea.svelte";
 
@@ -286,12 +287,10 @@
   let pendingQuality = $state<number | null>(null);
   let previewBusy = $state(false);
   let previewMsg = $state("");
-  let appVersion = $state("");
 
+  // Memoized: with the startup check off, this is the only request of the session.
   $effect(() => {
-    void getVersion()
-      .then((version) => (appVersion = version))
-      .catch(() => (appVersion = "unknown"));
+    void update.check();
   });
 
   function requestPreviewQuality(next: number) {
@@ -898,7 +897,17 @@
           {/if}
 
           {#if !query}
-            <p class="version">Cullant {appVersion || "…"}</p>
+            <p class="version">
+              Cullant {update.current ?? "…"}
+              {#if update.available}
+                <button class="update" onclick={releasing(() => update.open())}>
+                  <CircleAlert size={12} />
+                  Update to {update.latest}
+                </button>
+              {:else if update.current && update.latest}
+                · Latest version
+              {/if}
+            </p>
           {/if}
         </div>
       </ScrollArea>
@@ -1355,6 +1364,24 @@
     color: #74747d;
     font-size: 10.5px;
     text-align: center;
+  }
+
+  .update {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .update:hover {
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
 
   .empty {
