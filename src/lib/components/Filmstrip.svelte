@@ -1228,6 +1228,19 @@
     }
   }
 
+  /* A burst badge, a pair chip and a flag share one line of a 96 px cell when
+     the badge has no icon and the chip is short. */
+  @container (max-width: 100px) {
+    .burst :global(svg),
+    .burst ~ .chip .type-full {
+      display: none;
+    }
+
+    .burst ~ .chip .type-short {
+      display: inline;
+    }
+  }
+
   /* Half names need about 56 px of row for two halves and 80 px for three. Below
      that the chip shows how many halves the shot has. */
   @container (max-width: 94px) {
