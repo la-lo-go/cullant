@@ -192,8 +192,10 @@
     void api.setPreviewQuality(settings.previewQuality);
   });
 
+  // Untracked: only the launch may arm the prompt. Turning the switch on later
+  // must not open a modal over Settings.
   $effect(() => {
-    if (settings.checkUpdatesAtStartup) void update.check(true);
+    if (untrack(() => settings.checkUpdatesAtStartup)) void update.check(true);
   });
 
   $effect(() => {

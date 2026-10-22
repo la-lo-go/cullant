@@ -904,7 +904,7 @@
                   <CircleAlert size={12} />
                   Update to {update.latest}
                 </button>
-              {:else if update.current && update.latest}
+              {:else if update.current !== "unknown" && update.latest}
                 · Latest version
               {/if}
             </p>
