@@ -130,7 +130,6 @@
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import X from "@lucide/svelte/icons/x";
-  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Plus from "@lucide/svelte/icons/plus";
   import ScrollArea from "./ScrollArea.svelte";
 
@@ -902,7 +901,6 @@
               {#if update.available}
                 <span class="update-row">
                   <button class="update" onclick={releasing(() => update.open())}>
-                    <CircleAlert size={12} />
                     Update to {update.latest}
                   </button>
                   {#if update.notesUrl}
@@ -1373,9 +1371,6 @@
 
   .update,
   .notes {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
     padding: 2px 8px;
     border: 1px solid var(--accent);
     border-radius: 999px;
