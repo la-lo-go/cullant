@@ -43,7 +43,6 @@
   import SearchOverlay from "$lib/components/SearchOverlay.svelte";
   import AlertDialog from "$lib/components/AlertDialog.svelte";
   import RuntimeToolsDialog from "$lib/components/RuntimeToolsDialog.svelte";
-  import UpdateDialog from "$lib/components/UpdateDialog.svelte";
   import { modalFocus } from "$lib/modal";
   import { tooltips } from "$lib/tooltips";
   import TitleBar from "$lib/components/TitleBar.svelte";
@@ -234,7 +233,7 @@
       runtimeTools.dismiss(false);
       return;
     }
-    // UpdateDialog stays hidden while the media-tools dialog is open, so this order matches what is visible.
+    // The update prompt stays hidden while the media-tools dialog is open, so this order matches what is visible.
     if (update.prompt) {
       update.later();
       return;
@@ -958,7 +957,6 @@
        raises its explanation here. -->
   <InfoOverlay />
   <RuntimeToolsDialog />
-  <UpdateDialog />
 
   {#if session.searchOpen}
     <SearchOverlay />
@@ -1063,6 +1061,23 @@
         void catalog.close();
       }}
       oncancel={() => (showCloseConfirm = false)}
+    />
+  {/if}
+
+  <!-- Hidden while the media-tools dialog is open: two modals at once leave the older one inert. -->
+  {#if update.prompt && runtimeTools.pending.length === 0}
+    <ConfirmDialog
+      title="Cullant {update.latest} is here"
+      message="A new version is ready. Update whenever it suits you."
+      confirmLabel="Update"
+      altLabel="Skip this version"
+      linkLabel={update.notesUrl ? "What's new" : undefined}
+      choice
+      initialFocus=".confirm"
+      onconfirm={() => update.open()}
+      onalt={() => update.skip()}
+      onlink={() => update.openNotes()}
+      oncancel={() => update.later()}
     />
   {/if}
   <DockGuides />

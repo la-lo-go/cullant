@@ -9,6 +9,8 @@
     confirmLabel = "Confirm",
     altLabel,
     onalt,
+    linkLabel,
+    onlink,
     enterConfirms = true,
     initialFocus,
     choice = false,
@@ -21,6 +23,9 @@
     /** A second way forward, next to Cancel and the confirm button. */
     altLabel?: string;
     onalt?: () => void;
+    /** A text link on the left of the actions. It does not close the dialog. */
+    linkLabel?: string;
+    onlink?: () => void;
     /** False makes the confirm button click-only, for an action that replaces data. */
     enterConfirms?: boolean;
     /** Selector of the button that gets focus first. */
@@ -62,6 +67,9 @@
     <h2>{title}</h2>
     <p>{message}</p>
     <div class="actions">
+      {#if linkLabel && onlink}
+        <button class="link" onclick={onlink}>{linkLabel}</button>
+      {/if}
       {#if !choice}<button onclick={oncancel}>Cancel</button>{/if}
       {#if altLabel && onalt}
         <button class="alt" onclick={onalt}>{altLabel}</button>
@@ -150,6 +158,18 @@
 
   button:hover {
     border-color: var(--accent);
+  }
+
+  button.link {
+    margin-right: auto;
+    padding-left: 0;
+    border-color: transparent;
+    background: none;
+    color: var(--accent);
+  }
+
+  button.link:hover {
+    text-decoration: underline;
   }
 
   button.confirm {
