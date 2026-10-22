@@ -481,14 +481,20 @@
   class:hide-cursor={!uiVisible}
   class:tabbed-in={tabbedIn}
   bind:this={wrap}
-  onfocus={() => (tabbedIn = tabPressed)}
+  onfocus={() => {
+    tabbedIn = tabPressed;
+    tabPressed = false;
+  }}
   onblur={() => (tabbedIn = false)}
   tabindex="0"
   role="application"
   aria-label="Video player"
   onkeydown={onKeydown}
   onpointermove={revealUi}
-  onpointerdown={revealUi}
+  onpointerdown={() => {
+    tabbedIn = false;
+    revealUi();
+  }}
 >
   <!-- svelte-ignore a11y_media_has_caption -->
   {#key nativeSrc}
