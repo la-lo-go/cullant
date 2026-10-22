@@ -23,6 +23,9 @@
 
   let video = $state<HTMLVideoElement | null>(null);
   let wrap = $state<HTMLElement | null>(null);
+  // The ring shows only when the user tabbed in; code focus on open must not frame the video.
+  let tabbedIn = $state(false);
+  let tabPressed = false;
 
   // Two-way bindings to the media element. Svelte keeps these live as the video
   // plays and seeks, so the transport UI is a pure reflection of element state.
@@ -465,14 +468,21 @@
   }
 </script>
 
-<svelte:window onfullscreenchange={onFullscreenChange} />
+<svelte:window
+  onfullscreenchange={onFullscreenChange}
+  onkeydowncapture={(e) => (tabPressed = e.key === "Tab")}
+  onpointerdowncapture={() => (tabPressed = false)}
+/>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="video-wrap"
   class:hide-cursor={!uiVisible}
+  class:tabbed-in={tabbedIn}
   bind:this={wrap}
+  onfocus={() => (tabbedIn = tabPressed)}
+  onblur={() => (tabbedIn = false)}
   tabindex="0"
   role="application"
   aria-label="Video player"
@@ -696,6 +706,11 @@
     position: relative;
     display: flex;
     outline: none;
+  }
+
+  .video-wrap.tabbed-in:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .player {
