@@ -1371,7 +1371,8 @@
     text-align: center;
   }
 
-  .update {
+  .update,
+  .notes {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -1384,29 +1385,26 @@
     cursor: pointer;
   }
 
-  .update:hover {
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
-  }
-
   .update-row {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: 8px;
     margin-top: 6px;
   }
 
-  .notes {
-    padding: 2px 0;
-    border: none;
-    background: none;
-    color: var(--accent);
-    font: inherit;
-    cursor: pointer;
+  .update {
+    background: var(--accent-fill);
+    border-color: var(--accent-fill);
+    color: #fff;
+  }
+
+  .update:hover {
+    filter: brightness(1.15);
   }
 
   .notes:hover {
-    text-decoration: underline;
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
   }
 
   .empty {
