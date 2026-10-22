@@ -228,7 +228,7 @@
   });
 
   function onKeydown(e: KeyboardEvent) {
-    clearPointerMode();
+    noteKey(e);
     e.stopPropagation();
     if (e.key !== "Escape") return;
     // Same order the app's back ladder uses: shed the innermost layer first.
@@ -248,9 +248,9 @@
   }
 
   // Typing in a text field is not keyboard navigation: it must not bring back the focus border.
-  function onModalKey(e: KeyboardEvent) {
-    if (e.key !== "Tab" && e.target instanceof HTMLInputElement && e.target.type === "text") return;
-    clearPointerMode();
+  function noteKey(e: KeyboardEvent) {
+    const typing = e.target instanceof HTMLInputElement && e.target.type === "text";
+    if (!typing || e.key === "Tab" || e.key === "Escape") clearPointerMode();
   }
 
   function onPointerPress(e: PointerEvent) {
@@ -590,7 +590,7 @@
   {onclose}
   onback={openPanel ? () => { view.settingsPanel = null; releaseFocus(); } : undefined}
   bind:panel
-  modalOptions={{ onKeyboardInteraction: onModalKey }}
+  modalOptions={{ onKeyboardInteraction: noteKey }}
   {pointerMode}
   {touchPointer}
   onclick={releaseClickedControl}
