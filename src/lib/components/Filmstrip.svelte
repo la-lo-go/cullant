@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { thumbUrl, displayDims, containFit, type ItemLite } from "../api";
   import { describeHalf, session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
@@ -33,14 +34,6 @@
     companionIndex?: number | null;
     preview?: { side: Side; size: number };
   } = $props();
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   const CELL = 96;
   const OVERSCAN = 6;
@@ -483,7 +476,7 @@
                   />
                 {/if}
                 {#if settings.filmstripShowLabel && v.item.label}
-                  <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
+                  <span class="label-bar" style:border-color={LABEL_COLORS[v.item.label]}></span>
                 {/if}
               </div>
               <div class="info-top">

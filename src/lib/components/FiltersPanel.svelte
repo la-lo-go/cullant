@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { catalog } from "../stores/catalog.svelte";
   import { backdropDismiss } from "../backdrop";
   import { keepClamped } from "../popover";
@@ -43,14 +44,6 @@
     { value: "anyflag", label: "Any flag", icon: Flag },
     { value: "notrejected", label: "Not rejected", icon: ShieldCheck },
   ];
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   // Only tags that apply to the current media type (photos vs videos).
   const scopedTags = $derived(
@@ -502,7 +495,7 @@
           <button
             class="dot"
             class:active={session.labelFilter === label}
-            style="--c: {labelColors[label]}"
+            style="--c: {LABEL_COLORS[label]}"
             aria-label={formatColorLabel(label)}
             title={formatColorLabel(label)}
             onclick={() => {

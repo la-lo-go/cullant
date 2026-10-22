@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
   import { dock, isVertical } from "../stores/dock.svelte";
@@ -21,14 +22,6 @@
   import { formatColorLabel } from "../colorLabels";
 
   const item = $derived(session.focused);
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   // Warm the neighbours so arrowing doesn't wait on a cold decode. Both the
   // window and the dwell used to be small because the pool had no bound: a
@@ -119,7 +112,7 @@
       {/if}
       {#if !view.fullscreen}
         <div class="info">
-          <span class="filename" style:color={item.label ? labelColors[item.label] : null} title={item.label ? formatColorLabel(item.label) : undefined}>{item.relPath}</span>
+          <span class="filename" style:color={item.label ? LABEL_COLORS[item.label] : null} title={item.label ? formatColorLabel(item.label) : undefined}>{item.relPath}</span>
           {#if session.mirrorMode && item.groupSize > 1}
             <span class="chip" class:split={item.decoupled}>
               {#if item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}

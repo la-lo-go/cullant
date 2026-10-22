@@ -9,6 +9,7 @@
 </script>
 
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { onDestroy, tick, untrack } from "svelte";
   import { api, previewUrl, thumbUrl, knownDims, type ItemLite } from "../api";
   import { SvelteMap } from "svelte/reactivity";
@@ -125,14 +126,6 @@
     if (v.total > 0) return `Video thumbnails ${v.done} / ${v.total}`;
     return null;
   });
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   // Video ids whose pregenerated poster couldn't be served (no frame extractor
   // on this platform, or the clip was undecodable → 404). Those cells fall back
@@ -1448,7 +1441,7 @@
               {/if}
             {/if}
             {#if v.item.label}
-              <span class="label-bar" title={formatColorLabel(v.item.label)} style:border-color={labelColors[v.item.label]}></span>
+              <span class="label-bar" title={formatColorLabel(v.item.label)} style:border-color={LABEL_COLORS[v.item.label]}></span>
             {/if}
             <div class="info-top">
               {#if stacked}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { untrack } from "svelte";
   import { previewUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
@@ -24,14 +25,6 @@
   import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   let panes = $state<HTMLElement | null>(null);
   // Bounce the panes when stepping past the first/last photo. Track the
@@ -268,7 +261,7 @@
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(left.id)}
           <span class="caption" class:focused-caption={focusedSide === "left"}>
-            <span style:color={left.label ? labelColors[left.label] : null} title={left.label ? formatColorLabel(left.label) : undefined}>{left.name}.{left.ext}</span>
+            <span style:color={left.label ? LABEL_COLORS[left.label] : null} title={left.label ? formatColorLabel(left.label) : undefined}>{left.name}.{left.ext}</span>
             {#if left.flag === 1}<span class="pick" title="Picked"><Check size={13} /></span>{/if}
             {#if left.flag === -1}<span class="reject" title="Rejected"><X size={13} /></span>{/if}
             {#if b}
@@ -326,7 +319,7 @@
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(right.id)}
           <span class="caption" class:focused-caption={focusedSide === "right"}>
-            <span style:color={right.label ? labelColors[right.label] : null} title={right.label ? formatColorLabel(right.label) : undefined}>{right.name}.{right.ext}</span>
+            <span style:color={right.label ? LABEL_COLORS[right.label] : null} title={right.label ? formatColorLabel(right.label) : undefined}>{right.name}.{right.ext}</span>
             {#if right.flag === 1}<span class="pick" title="Picked"><Check size={13} /></span>{/if}
             {#if right.flag === -1}<span class="reject" title="Rejected"><X size={13} /></span>{/if}
             {#if b}

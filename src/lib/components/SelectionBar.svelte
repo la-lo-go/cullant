@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { catalog } from "../stores/catalog.svelte";
   import { session, LABELS } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
@@ -14,14 +15,6 @@
   const surveyKeys = $derived([...keymap.bindings]
     .filter(([, command]) => command === "view.survey")
     .map(([binding]) => formatKey(binding)).join(" / "));
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   const scopedTags = $derived(
     tags.all.filter(
@@ -130,7 +123,7 @@
       <button
         class="dot"
         class:active={summary.label === l}
-        style="--c: {labelColors[l]}"
+        style="--c: {LABEL_COLORS[l]}"
         aria-label={`Label ${formatColorLabel(l)}`}
         title={formatColorLabel(l)}
         onclick={act(() => label(l))}
