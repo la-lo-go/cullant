@@ -1102,7 +1102,7 @@
     color: #ffb86b;
   }
 
-  /* Burst badge: the grid's pill, sized down for a filmstrip cell. */
+  /* Burst badge: the grid's pill, placed for a filmstrip cell. */
   .burst {
     position: absolute;
     top: 4px;
@@ -1191,6 +1191,11 @@
     order: 2;
     overflow: hidden;
     white-space: nowrap;
+  }
+
+  /* The RAW+JPG label must fit the 72 px minimum vertical cell. */
+  .vertical .info-top > .chip {
+    padding: 1px 2px;
   }
 
   .info-top > .flagbadge {
