@@ -247,6 +247,12 @@
     touchPointer = false;
   }
 
+  // Typing in a text field is not keyboard navigation: it must not bring back the focus border.
+  function onModalKey(e: KeyboardEvent) {
+    if (e.key !== "Tab" && e.target instanceof HTMLInputElement && e.target.type === "text") return;
+    clearPointerMode();
+  }
+
   function onPointerPress(e: PointerEvent) {
     pointerPress = true;
     pointerMode = true;
@@ -584,7 +590,7 @@
   {onclose}
   onback={openPanel ? () => { view.settingsPanel = null; releaseFocus(); } : undefined}
   bind:panel
-  modalOptions={{ onKeyboardInteraction: clearPointerMode }}
+  modalOptions={{ onKeyboardInteraction: onModalKey }}
   {pointerMode}
   {touchPointer}
   onclick={releaseClickedControl}
@@ -1003,6 +1009,7 @@
     overflow: hidden;
   }
 
+  .preferences.pointer-mode .label-name input:focus,
   .preferences.pointer-mode :global(select:focus) {
     outline: none;
     border-color: var(--border-strong);
