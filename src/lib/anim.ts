@@ -6,6 +6,7 @@
 const running = new WeakMap<HTMLElement, Animation>();
 
 export function edgeBounce(node: HTMLElement, dir: number, axis: "x" | "y") {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   // Resist the direction of travel: pressing "next" (dir=+1) at the last item
   // pulls the content toward the start (negative), the opposite of how a
   // successful forward transition would slide it — so it reads as a wall.
