@@ -1514,7 +1514,11 @@
                 </span>
               {/if}
               {#if v.item.tagIds.length > 0}
-                <span class="tags">
+                <span
+                  class="tags"
+                  class:over2={v.item.tagIds.length > 2}
+                  class:over4={v.item.tagIds.length > 4}
+                >
                   {#each v.item.tagIds.slice(0, 4) as tagId}
                     <span
                       class="tagdot"
@@ -1522,6 +1526,7 @@
                       title={tags.byId.get(tagId)?.name}
                     ></span>
                   {/each}
+                  {#if v.item.tagIds.length > 1}<span class="tag-more">+</span>{/if}
                 </span>
               {/if}
             </div>
@@ -2228,6 +2233,7 @@
     bottom: 9px;
     right: 6px;
     display: flex;
+    align-items: center;
     gap: 3px;
   }
 
@@ -2291,6 +2297,21 @@
     margin-left: auto;
   }
 
+  /* Tells that more tags exist than the dots show. Each width rule below shows
+     it only when it hides a dot. */
+  .tag-more {
+    display: none;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    line-height: 8px;
+    color: #ddd;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  }
+
+  .over4 .tag-more {
+    display: inline;
+  }
+
   .rating-compact,
   .type-short,
   .pair-count,
@@ -2322,6 +2343,14 @@
 
     .tagdot:nth-child(n + 3) {
       display: none;
+    }
+
+    .over2 .tagdot:nth-child(2) {
+      display: none;
+    }
+
+    .over2 .tag-more {
+      display: inline;
     }
   }
 
@@ -2394,6 +2423,17 @@
 
   @container (max-width: 48px) {
     .tagdot:nth-child(n + 2) {
+      display: none;
+    }
+
+    .tag-more {
+      display: inline;
+    }
+  }
+
+  /* Below this width the hint no longer fits beside the compact stars. */
+  @container (max-width: 44px) {
+    .tags .tag-more {
       display: none;
     }
   }
