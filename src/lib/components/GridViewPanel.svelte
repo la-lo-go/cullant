@@ -406,7 +406,7 @@
     position: relative;
     width: 34px;
     height: 18px;
-    border-radius: var(--r-lg);
+    border-radius: 999px;
     background: var(--control);
     transition: background 0.15s ease;
   }
