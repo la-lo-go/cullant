@@ -2367,7 +2367,7 @@
     }
   }
 
-  /* A position such as 123/456 needs about 46 px of row; the count alone fits. */
+  /* A position such as 123/456 needs about 46 px of row; the bare position fits. */
   @container (max-width: 56px) {
     .position :global(svg),
     .burst-total {
