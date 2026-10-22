@@ -373,8 +373,11 @@ only move between channels if all of them sign with this one key.
 The file has no backup in the repo, by design. After the first user installs
 an APK, a lost keystore means every user must uninstall to move on.
 
-### Release assets and the update check
+## Release assets and the update check
 
-The app finds updates from the file names in a GitHub Release. If you rename
-an installer or add a new one, update the asset list in
-`src/lib/update/release.ts`. If you do not, no app sees a new release again.
+This section applies to every platform. Each app finds updates from the file
+names in a GitHub Release. Each installed app carries its own copy of the
+asset list in `src/lib/update/release.ts`. Keep the existing asset names.
+Never rename or remove one: every installed app would stop seeing updates,
+and a new build cannot fix them. When you add an installer, add its name to
+the list. Then the prompt waits for the new file too.
