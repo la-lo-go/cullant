@@ -171,6 +171,10 @@
      unmounting mid-marquee would otherwise push every thumbnail down/up, which
      re-maps the pointer's row hit-testing and oscillates the selection it just
      created. A subtle shadow separates it from the thumbnails it floats over. */
+  .selbar :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .selbar {
     position: absolute;
     top: 0;

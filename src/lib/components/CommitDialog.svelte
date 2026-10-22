@@ -993,6 +993,14 @@
     gap: 4px;
   }
 
+  .row :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
+  .hrow :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .row {
     /* `position: relative` + `overflow: hidden` clip the hold-fill to the row's
        rounded rectangle; its contents sit above the fill via z-index. */

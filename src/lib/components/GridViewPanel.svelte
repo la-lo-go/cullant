@@ -242,6 +242,10 @@
     z-index: 40;
   }
 
+  .panel :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .panel {
     outline: none;
     position: absolute;

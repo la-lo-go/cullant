@@ -832,6 +832,10 @@
     z-index: 40;
   }
 
+  .panel :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .panel {
     /* The panel takes focus on open (so Escape works); it is not a text field,
        so suppress the focus ring the browser would draw around it. */
