@@ -1216,8 +1216,9 @@
     display: none;
   }
 
-  /* The full RAW+JPG label needs about 62 px of row, whatever the font. */
-  @container (max-width: 90px) {
+  /* The full RAW+JPG label and a flag need about 77 px of row, whatever the font.
+     A horizontal cell has 90 px, so it always keeps the full label. */
+  @container (max-width: 80px) {
     .type-full {
       display: none;
     }
