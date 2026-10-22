@@ -372,3 +372,9 @@ only move between channels if all of them sign with this one key.
 **Keep a copy of the keystore and of both passwords away from this machine.**
 The file has no backup in the repo, by design. After the first user installs
 an APK, a lost keystore means every user must uninstall to move on.
+
+### Release assets and the update check
+
+The app finds updates from the file names in a GitHub Release. If you rename
+an installer or add a new one, update the asset list in
+`src/lib/update/release.ts`. If you do not, no app sees a new release again.
