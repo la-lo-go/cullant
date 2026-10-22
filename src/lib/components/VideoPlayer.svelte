@@ -471,6 +471,7 @@
 <svelte:window
   onfullscreenchange={onFullscreenChange}
   onkeydowncapture={(e) => (tabPressed = e.key === "Tab")}
+  onkeyupcapture={() => (tabPressed = false)}
   onpointerdowncapture={() => (tabPressed = false)}
 />
 
