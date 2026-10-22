@@ -1501,6 +1501,15 @@
     }
   }
 
+  /* A still 40% sliver reads as progress; a dim full track reads as waiting. */
+  @media (prefers-reduced-motion: reduce) {
+    .preload .pbar.indeterminate .pbar-fill {
+      width: 100%;
+      opacity: 0.35;
+      animation: none;
+    }
+  }
+
   button.active {
     background: var(--accent-fill);
     border-color: transparent;
