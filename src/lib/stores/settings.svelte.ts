@@ -50,6 +50,7 @@ const GRID_PHOTO_FIT_KEY = "cullant.gridPhotoFit";
 const FOCAL_EXACT_KEY = "cullant.focalExact";
 const COPY_METADATA_ON_LEAVE_KEY = "cullant.copyMetadataOnLeave";
 const COPY_METADATA_MINUTES_KEY = "cullant.copyMetadataMinutes";
+const CHECK_UPDATES_KEY = "cullant.checkUpdatesAtStartup";
 
 export const COLOR_LABELS = ["Red", "Yellow", "Green", "Blue", "Purple"] as const;
 export type ColorLabel = (typeof COLOR_LABELS)[number];
@@ -108,6 +109,7 @@ export const DEFAULTS: {
   burstGapSeconds: number;
   copyMetadataOnLeave: boolean;
   copyMetadataMinutes: number;
+  checkUpdatesAtStartup: boolean;
 } = {
   progressiveLoupe: true,
   rememberSession: true,
@@ -130,6 +132,7 @@ export const DEFAULTS: {
   burstGapSeconds: 2,
   copyMetadataOnLeave: true,
   copyMetadataMinutes: 0,
+  checkUpdatesAtStartup: true,
 };
 
 function loadBool(key: string, fallback: boolean): boolean {
@@ -378,6 +381,14 @@ class SettingsStore {
   setBurstGapSeconds(seconds: number) {
     this.burstGapSeconds = seconds;
     save(BURST_GAP_KEY, seconds);
+  }
+
+  /** Ask GitHub for a newer release when the app starts. */
+  checkUpdatesAtStartup = $state<boolean>(loadBool(CHECK_UPDATES_KEY, DEFAULTS.checkUpdatesAtStartup));
+
+  setCheckUpdatesAtStartup(on: boolean) {
+    this.checkUpdatesAtStartup = on;
+    save(CHECK_UPDATES_KEY, on);
   }
 
   setProgressiveLoupe(on: boolean) {
