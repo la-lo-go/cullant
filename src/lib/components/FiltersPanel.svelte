@@ -1003,7 +1003,7 @@
   }
 
   .namefield::placeholder {
-    color: var(--text-faint);
+    color: #a8a8b1;
   }
 
   .namefield:focus {
