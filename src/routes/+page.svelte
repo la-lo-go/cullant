@@ -233,8 +233,8 @@
       runtimeTools.dismiss(false);
       return;
     }
-    // The update prompt stays hidden while the media-tools dialog is open, so this order matches what is visible.
-    if (update.prompt) {
+    // updatePromptShown holds the prompt back while another modal is open, so this order matches what is visible.
+    if (updatePromptShown) {
       update.later();
       return;
     }
@@ -590,6 +590,9 @@
     null,
   );
   let inspecting = false;
+
+  // Two modals at once leave the older one inert but still painted, so the prompt waits for the others.
+  const updatePromptShown = $derived(update.prompt && runtimeTools.pending.length === 0 && !folderChoice);
 
   /** Open a project folder. Thumbnails fill in progressively, so this returns to
    *  the grid as soon as the folder's photo metadata has been read. */
@@ -1064,8 +1067,7 @@
     />
   {/if}
 
-  <!-- Hidden while the media-tools dialog is open: two modals at once leave the older one inert. -->
-  {#if update.prompt && runtimeTools.pending.length === 0}
+  {#if updatePromptShown}
     <ConfirmDialog
       title="Cullant {update.latest} is here!"
       message="A new version is ready. Update whenever it suits you."
