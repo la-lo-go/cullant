@@ -60,7 +60,6 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-modal="true"
     aria-labelledby="{uid}-title"
     tabindex="-1"
   >

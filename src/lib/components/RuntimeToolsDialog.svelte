@@ -29,7 +29,7 @@
 
 {#if runtimeTools.pending.length > 0}
   <div class="backdrop" role="presentation" {...dismiss}>
-    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="runtime-tools-title" tabindex="-1" use:modalFocus {onkeydown}>
+    <div class="dialog" role="dialog" aria-labelledby="runtime-tools-title" tabindex="-1" use:modalFocus {onkeydown}>
       <header>
         <h2 id="runtime-tools-title">Missing media tools</h2>
         <button class="close" aria-label="Close" onclick={() => runtimeTools.dismiss(false)}><X size={18} /></button>

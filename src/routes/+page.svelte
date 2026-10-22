@@ -934,7 +934,7 @@
     <!-- Blocking: you can't keep working while the project's folder/volume is
          gone. Reconnecting auto-dismisses this (the watcher clears the message);
          otherwise the only way out is to close the project. -->
-    <div class="folder-lost" role="alertdialog" aria-modal="true" aria-label="Project folder unavailable" use:modalFocus>
+    <div class="folder-lost" role="alertdialog" aria-label="Project folder unavailable" use:modalFocus>
       <div class="fl-panel">
         <h2>Project folder unavailable</h2>
         <p>{folderLostMsg}</p>

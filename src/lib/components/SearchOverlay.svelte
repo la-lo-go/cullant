@@ -55,7 +55,6 @@
   class="panel"
   use:modalFocus={{ initialFocus: "input" }}
   role="dialog"
-  aria-modal="true"
   aria-label="Search by file name"
   tabindex="-1"
   onkeydown={onKeydown}

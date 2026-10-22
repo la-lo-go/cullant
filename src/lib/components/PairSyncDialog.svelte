@@ -25,7 +25,6 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-modal="true"
     aria-labelledby="pair-sync-dialog-title"
     tabindex="-1"
   >

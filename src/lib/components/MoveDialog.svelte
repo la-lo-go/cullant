@@ -86,7 +86,6 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-modal="true"
     aria-labelledby="move-dialog-title"
     tabindex="-1"
     use:modalFocus={{ initialFocus: "input" }}

@@ -611,7 +611,6 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-modal="true"
     aria-labelledby="review-changes-heading"
     tabindex="-1"
   >

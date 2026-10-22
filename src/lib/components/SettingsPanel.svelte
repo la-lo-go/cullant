@@ -64,7 +64,6 @@
     {onpointerdowncapture}
     {onpointermovecapture}
     role="dialog"
-    aria-modal="true"
     aria-label={ariaLabel}
     tabindex="-1"
   >
