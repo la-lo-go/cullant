@@ -2581,7 +2581,7 @@
   }
 
   @container (width < 87px) {
-    .has-burst.has-flag > .chip.raw {
+    .has-flag.long-burst > .chip.raw {
       display: none;
     }
   }
@@ -2598,6 +2598,12 @@
     }
   }
 
+  @container (width < 80px) {
+    .has-burst.has-flag > .chip.raw {
+      display: none;
+    }
+  }
+
   @container (width < 75px) {
     .has-burst.has-flag > .chip.pair:not(.split, .diverged) {
       display: none;
@@ -2606,6 +2612,12 @@
 
   @container (width < 71px) {
     .has-flag.long-burst > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (width < 67px) {
+    .has-flag.long-burst > .chip.diverged {
       display: none;
     }
   }
