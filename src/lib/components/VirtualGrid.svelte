@@ -2604,6 +2604,18 @@
     }
   }
 
+  @container (width < 71px) {
+    .has-flag.long-burst > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (width < 65px) {
+    .has-burst.has-flag > .chip.split {
+      display: none;
+    }
+  }
+
   @container (max-width: 66px) {
     .pair-halves {
       display: none;
@@ -2647,13 +2659,6 @@
 
   @container (width < 59px) {
     .has-burst.long-burst > .chip {
-      display: none;
-    }
-  }
-
-  /* A real 58.44 px cell keeps the scissors chip with 0.24 px to spare. */
-  @container (width < 58.2px) {
-    .has-burst.has-flag > .chip.split {
       display: none;
     }
   }
