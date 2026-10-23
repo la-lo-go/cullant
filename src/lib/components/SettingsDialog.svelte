@@ -1793,4 +1793,20 @@
     text-align: right;
     text-align-last: right;
   }
+
+  /* A fingertip needs about 40px. The desktop rows stay as they are. */
+  @media (pointer: coarse) {
+    .slot select {
+      min-height: 36px;
+    }
+
+    .label-name input {
+      box-sizing: border-box;
+      min-height: 40px;
+    }
+
+    .jump .wide {
+      min-height: 44px;
+    }
+  }
 </style>
