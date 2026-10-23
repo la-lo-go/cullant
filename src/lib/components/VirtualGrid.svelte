@@ -2673,7 +2673,6 @@
     .burst-short {
       display: inline;
     }
-
   }
 
   @container (width < 57px) {
