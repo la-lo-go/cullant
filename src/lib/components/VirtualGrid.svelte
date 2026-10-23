@@ -1443,7 +1443,13 @@
             {#if v.item.label}
               <span class="label-bar" title={formatColorLabel(v.item.label)} style:border-color={LABEL_COLORS[v.item.label]}></span>
             {/if}
-            <div class="info-top">
+            <div
+              class="info-top"
+              class:has-burst={stacked || burstAt}
+              class:has-chip={(session.mirrorMode && v.item.groupSize > 1) || v.item.kind === 0}
+              class:has-flag={!summary && (v.item.flag !== 0 || session.pendingDeleteIds.has(v.item.id))}
+              class:has-tally={summary && (summary.picks > 0 || summary.rejects > 0)}
+            >
               {#if stacked}
                 <span class="burst" title="Burst of {v.span} photos">
                   <Layers size={10} />{v.span}
@@ -2319,6 +2325,71 @@
     display: none;
   }
 
+  /* The top row never wraps. Each width rule below switches a badge to a shorter
+     form first. A badge drops only where its shortest form does not fit beside
+     the others. The rank, highest first: the flag or tally, the stars, the burst
+     badge, the pair chip, the tags. The .has-* classes name the badges in the row. */
+
+  /* A burst badge shares the row with the pair chip, so the chip is short. */
+  @container (max-width: 178px) {
+    .has-burst.has-tally .type-full {
+      display: none;
+    }
+
+    .has-burst.has-tally .type-short {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 174px) {
+    .has-burst .pair-halves.many {
+      display: none;
+    }
+
+    .has-burst .pair-halves.many + .pair-count {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 168px) {
+    .has-burst .type-full {
+      display: none;
+    }
+
+    .has-burst .type-short {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 140px) {
+    .has-burst.has-tally .counts :global(svg) {
+      display: none;
+    }
+  }
+
+  /* A burst position drops to the bare number, without the icon, when the chip
+     and a flag or tally share the row. */
+  @container (max-width: 136px) {
+    .has-burst.has-chip:is(.has-flag, .has-tally) .burst-total,
+    .has-burst.has-chip:is(.has-flag, .has-tally) .burst :global(svg) {
+      display: none;
+    }
+
+    .has-burst.has-chip:is(.has-flag, .has-tally) .burst-short {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 130px) {
+    .has-flag .pair-halves.many {
+      display: none;
+    }
+
+    .has-flag .pair-halves.many + .pair-count {
+      display: inline;
+    }
+  }
+
   @container (max-width: 120px) {
     .info-top,
     .info-bottom {
@@ -2345,26 +2416,68 @@
       display: none;
     }
 
-    .over2 .tagdot:nth-child(2) {
-      display: none;
-    }
-
     .over2 .tag-more {
       display: inline;
     }
   }
 
-  /* Below this width five stars and the tag dots no longer share a row. */
-  @container (max-width: 84px) {
-    .rating-full {
+  @container (max-width: 112px) {
+    .has-burst.has-flag .split-label,
+    .has-burst.has-tally .split-label {
+      display: none;
+    }
+  }
+
+  @container (max-width: 100px) {
+    .has-burst .pair-halves:not(.many),
+    .has-flag .pair-halves:not(.many) {
       display: none;
     }
 
-    .rating-compact {
+    .has-burst .pair-halves:not(.many) + .pair-count,
+    .has-flag .pair-halves:not(.many) + .pair-count {
       display: inline;
     }
   }
 
+  @container (max-width: 96px) {
+    .has-burst.has-chip .burst-total,
+    .has-burst.has-chip .burst :global(svg) {
+      display: none;
+    }
+
+    .has-burst.has-chip .burst-short {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 92px) {
+    .has-flag .type-full {
+      display: none;
+    }
+
+    .has-flag .type-short {
+      display: inline;
+    }
+
+    .has-burst.has-flag > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (max-width: 90px) {
+    .has-burst:is(.has-flag, .has-tally) .burst-total,
+    .has-burst:is(.has-flag, .has-tally) .burst :global(svg) {
+      display: none;
+    }
+
+    .has-burst:is(.has-flag, .has-tally) .burst-short {
+      display: inline;
+    }
+  }
+
+  /* The half names need about 66 px for two halves and 88 px for three. Below
+     that the chip shows how many halves the shot has. */
   @container (max-width: 88px) {
     .chip {
       padding: 1px 2px;
@@ -2390,17 +2503,50 @@
       padding: 1px 2px;
       gap: 1px;
     }
-  }
 
-  /* The half names need about 66 px for two halves and 88 px for three. Below
-     that the chip shows how many halves the shot has. */
-  @container (max-width: 88px) {
     .pair-halves.many {
       display: none;
     }
 
     .pair-halves.many + .pair-count {
       display: inline;
+    }
+
+    .has-burst.has-tally > .chip {
+      display: none;
+    }
+  }
+
+  /* Two dots and the plus sign fit beside the full stars except in this band. */
+  @container (min-width: 85px) and (max-width: 87px) {
+    .over2 .tagdot:nth-child(2) {
+      display: none;
+    }
+  }
+
+  /* A flag, a tally or a burst badge leaves no room for the SPLIT word. */
+  @container (max-width: 86px) {
+    .has-flag .split-label,
+    .has-tally .split-label,
+    .has-burst .split-label {
+      display: none;
+    }
+  }
+
+  /* Below this width five stars and the tag dots no longer share a row. */
+  @container (max-width: 84px) {
+    .rating-full {
+      display: none;
+    }
+
+    .rating-compact {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 80px) {
+    .has-burst.has-flag > .chip {
+      display: none;
     }
   }
 
@@ -2414,40 +2560,21 @@
     }
   }
 
-  /* The SPLIT word needs about 54 px; the scissors icon stays. */
-  @container (max-width: 54px) {
-    .split-label {
-      display: none;
-    }
-  }
-
-  @container (max-width: 48px) {
-    .tagdot:nth-child(n + 2) {
-      display: none;
-    }
-
-    .tag-more {
-      display: inline;
-    }
-  }
-
-  /* Below this width the hint no longer fits beside the compact stars. */
-  @container (max-width: 44px) {
-    .tags .tag-more {
-      display: none;
-    }
-  }
-
-  /* A stack with its icon needs about 60 px beside a flag; the count alone fits
-     down to 48 px. Below that the flag keeps the row and the burst badge drops. */
+  /* A stack with its icon needs about 60 px; the count alone fits down to 48 px. */
   @container (max-width: 60px) {
     .burst :global(svg) {
       display: none;
     }
+
+    .has-flag > .chip {
+      display: none;
+    }
   }
 
-  @container (max-width: 48px) {
-    .info-top:has(> .badge) > .burst {
+  /* The flag keeps the row; the burst badge drops when even its bare form
+     does not fit. The pair chip dropped earlier. */
+  @container (max-width: 58px) {
+    .has-tally > .burst {
       display: none;
     }
   }
@@ -2463,52 +2590,45 @@
     }
   }
 
-  /* A short photo has no room for a second top line above the stars. Keep one
-     line and drop what ranks lowest first: the tags, then the pair chip, then
-     the burst badge. The flag and the stars never drop. */
-  @container (max-height: 66px) and (max-width: 180px) {
-    .info-top {
-      flex-wrap: nowrap;
+  @container (max-width: 55px) {
+    .over2 .tagdot:nth-child(2) {
+      display: none;
     }
+  }
 
-    .burst ~ .chip,
-    .info-top:has(> .badge) .split-label,
-    .info-top:has(> .badge) .pair-halves {
+  /* The SPLIT word needs about 54 px; the scissors icon stays. */
+  @container (max-width: 54px) {
+    .split-label {
       display: none;
     }
 
-    .info-top:has(> .badge) .pair-count {
+    .has-flag > .burst,
+    .has-burst > .chip {
+      display: none;
+    }
+  }
+
+  @container (max-width: 48px) {
+    .tagdot:nth-child(n + 2) {
+      display: none;
+    }
+
+    .tag-more {
       display: inline;
     }
   }
 
-  @container (max-height: 66px) and (max-width: 90px) {
-    .info-top:has(> .badge) .burst-total,
-    .info-top:has(> .badge) .burst :global(svg) {
-      display: none;
-    }
-
-    .info-top:has(> .badge) .burst-short {
-      display: inline;
-    }
-  }
-
-  @container (max-height: 66px) and (max-width: 94px) {
-    .counts :global(svg) {
+  /* Below this width the plus sign no longer fits beside the compact stars. */
+  @container (max-width: 44px) {
+    .tags .tag-more {
       display: none;
     }
   }
 
-  @container (max-height: 66px) and (max-width: 58px) {
-    .info-top:has(> .counts) > .burst {
-      display: none;
-    }
-  }
-
-  @container (max-height: 66px) and (max-width: 53px) {
-    .info-top:has(> .badge) > .chip,
-    .info-top:has(> .badge) > .burst {
-      display: none;
+  /* A short photo moves the stars row down to the label bar so the top row clears it. */
+  @container (max-height: 50px) {
+    .info-bottom {
+      bottom: 5px;
     }
   }
 
