@@ -247,9 +247,10 @@
     touchPointer = false;
   }
 
-  // Typing in a text field is not keyboard navigation: it must not bring back the focus border.
+  // Typing in a text or search field is not keyboard navigation: it must not bring back the focus border.
   function noteKey(e: KeyboardEvent) {
-    const typing = e.target instanceof HTMLInputElement && e.target.type === "text";
+    const typing =
+      e.target instanceof HTMLInputElement && (e.target.type === "text" || e.target.type === "search");
     if (!typing || e.key === "Tab" || e.key === "Escape") clearPointerMode();
   }
 
