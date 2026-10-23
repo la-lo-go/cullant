@@ -1672,6 +1672,11 @@
     border-radius: 0;
   }
 
+  /* The same 44 px row pitch as the sector rows above: a 28 px row and a 6 px gap, plus 10 px. */
+  .slot.ring-opt + .slot {
+    margin-top: 10px;
+  }
+
   /* Whole-row toggling: the row is the checkbox's label. */
   .row.whole-row {
     cursor: pointer;
@@ -1798,6 +1803,10 @@
   @media (pointer: coarse) {
     .slot select {
       min-height: 36px;
+    }
+
+    .slot.ring-opt + .slot {
+      margin-top: -2px;
     }
 
     .label-name input {
