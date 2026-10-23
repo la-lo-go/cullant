@@ -2727,7 +2727,7 @@
       display: none;
     }
 
-    .has-flag > .burst {
+    .has-flag.long-burst > .burst {
       display: none;
     }
   }
@@ -2745,7 +2745,8 @@
   }
 
   @container (width < 49px) {
-    .has-burst.long-burst > .chip.split {
+    .has-burst.long-burst > .chip.split,
+    .has-flag > .burst {
       display: none;
     }
   }
