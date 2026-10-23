@@ -1457,7 +1457,7 @@
                 </span>
               {:else if burstAt}
                 <span
-                  class="burst position"
+                  class="burst"
                   title="Shot {burstAt.position} of a burst of {burstAt.total}"
                 >
                   <Layers size={10} /><span class="burst-total">{burstAt.position}/{burstAt.total}</span><span class="burst-short">{burstAt.position}</span>
