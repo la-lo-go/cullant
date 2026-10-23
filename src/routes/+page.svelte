@@ -1428,16 +1428,10 @@
   }
 
   /* Very narrow phones: the pill and the view-mode selector share one row, so
-     drop the pill's icons and the sort hint, and tighten the padding, to keep the bar at two rows. */
+     drop the pill's icons and the sort hint to keep the bar at two rows. */
   @media (max-width: 360px) {
-    .media-btn {
-      padding: 0 6px;
-    }
     .media-btn :global(svg) {
       display: none;
-    }
-    .segmented button {
-      padding: 0 6px;
     }
     .toolbar .sort-hint {
       display: none;
