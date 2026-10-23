@@ -2330,8 +2330,9 @@
   /* The top row fits on one line at the metrics of Segoe UI and Arial. Each
      width rule below switches a badge to a shorter form first. A badge drops only
      where its shortest form does not fit beside the others. The rank, highest
-     first: the flag or tally, the stars, the burst badge, the pair chip. The
-     .has-* classes name the badges in the row. The row keeps flex-wrap as a
+     first: the flag or tally, the burst badge, the pair chip. The stars are not
+     in this row: they live in .info-bottom. The .has-* classes name the badges
+     in the row. The row keeps flex-wrap as a
      fallback: a wider font wraps it to a second line instead of clipping a badge. */
 
   /* A burst badge shares the row with the pair chip, so the chip is short. */
