@@ -99,6 +99,28 @@
   // A single toolbar row is 30px; the right zone is taller only when it wraps.
   let toolbarRightH = $state(0);
   const toolbarStacked = $derived(toolbarRightH > 48);
+  // Two-level bar: the side zones have equal width, so the selector sits at the
+  // window centre. Shift it by half the difference of the zone contents, so the
+  // gaps on both sides are equal. A transform never changes the layout.
+  function balanceCenter(bar: HTMLElement) {
+    const apply = () => {
+      const center = bar.querySelector<HTMLElement>(".toolbar-center");
+      const pill = bar.querySelector(".media-toggle");
+      const zone = bar.querySelector(".toolbar-right");
+      const items = [".filters-anchor", ".toolbar-actions"].map((q) => bar.querySelector(q));
+      if (!center || !pill || !zone) return;
+      if (!bar.classList.contains("stacked")) return void (center.style.transform = "");
+      const rightWidth = zone.getBoundingClientRect().right - Math.min(...items.map((e) => e?.getBoundingClientRect().left ?? Infinity));
+      center.style.transform = `translateX(${(pill.getBoundingClientRect().width - rightWidth) / 2}px)`;
+    };
+    const resize = new ResizeObserver(apply);
+    const watched = [bar, ".media-toggle", ".filters-anchor", ".toolbar-actions"];
+    for (const w of watched) resize.observe(typeof w === "string" ? bar.querySelector(w)! : w);
+    const mutation = new MutationObserver(apply);
+    mutation.observe(bar, { attributes: true, attributeFilter: ["class"] });
+    apply();
+    return { destroy: () => (resize.disconnect(), mutation.disconnect()) };
+  }
   // The region of the action bar outside the grid: the view and the bar.
   let viewFrame = $state<HTMLElement | null>(null);
   const BAR_ICONS = { top: PanelTop, right: PanelRight, bottom: PanelBottom, left: PanelLeft };
@@ -682,7 +704,7 @@
   {/if}
   {#if catalog.project}
     {#if !view.fullscreen}
-    <header class="toolbar" class:stacked={toolbarStacked} class:has-toggle={view.mode !== "grid" && !IS_TOUCH} use:tooltips>
+    <header class="toolbar" class:stacked={toolbarStacked} class:has-toggle={view.mode !== "grid" && !IS_TOUCH} use:tooltips use:balanceCenter>
       <div class="toolbar-left">
         <div class="media-toggle">
           <button
