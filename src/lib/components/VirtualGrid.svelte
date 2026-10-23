@@ -2686,7 +2686,7 @@
   }
 
   @container (width < 59px) {
-    .has-burst.long-burst > .chip {
+    .has-burst.long-burst > .chip.pair:not(.split, .diverged) {
       display: none;
     }
   }
@@ -2739,7 +2739,13 @@
   }
 
   @container (width < 53px) {
-    .has-burst > .chip {
+    .has-burst > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 49px) {
+    .has-burst.long-burst > .chip.split {
       display: none;
     }
   }
@@ -2751,6 +2757,12 @@
 
     .tag-more {
       display: inline;
+    }
+  }
+
+  @container (width < 45px) {
+    .has-burst.long-burst > .chip.diverged {
+      display: none;
     }
   }
 
@@ -2767,8 +2779,20 @@
     }
   }
 
+  @container (width < 43px) {
+    .has-burst > .chip.split {
+      display: none;
+    }
+  }
+
   @container (width < 41px) {
     .has-flag > .chip.diverged {
+      display: none;
+    }
+  }
+
+  @container (width < 39px) {
+    .has-burst > .chip.diverged {
       display: none;
     }
   }
