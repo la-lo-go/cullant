@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "$lib/labels";
   import { session } from "$lib/stores/session.svelte";
   import { catalog } from "$lib/stores/catalog.svelte";
   import { settings } from "$lib/stores/settings.svelte";
@@ -91,14 +92,6 @@
   const visibleBarItems = $derived(
     settings.bottomBarOrder.filter((id) => !settings.bottomBarHidden.includes(id)),
   );
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   const scopedTags = $derived(
     tags.all.filter(
@@ -315,7 +308,7 @@
           </div>
         {:else if itemId === "labels"}
           <div class="group labels">
-            {#each Object.entries(labelColors) as [name, color] (name)}
+            {#each Object.entries(LABEL_COLORS) as [name, color] (name)}
               <button
                 class="btn swatchbtn"
                 class:active={labelActive(name)}
@@ -471,6 +464,10 @@
 
   .vertical .groups {
     flex-direction: column;
+  }
+
+  .items :global(button:focus-visible) {
+    outline-offset: -2px;
   }
 
   .items::-webkit-scrollbar {
@@ -669,7 +666,7 @@
   }
 
   .reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .active-pick {
@@ -678,7 +675,7 @@
   }
 
   .active-reject {
-    border-color: #ff6b6b;
+    border-color: var(--danger);
     background: rgba(255, 107, 107, 0.14);
   }
 

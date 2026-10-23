@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
   import { dock, isVertical } from "../stores/dock.svelte";
@@ -21,14 +22,6 @@
   import { formatColorLabel } from "../colorLabels";
 
   const item = $derived(session.focused);
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   // Warm the neighbours so arrowing doesn't wait on a cold decode. Both the
   // window and the dwell used to be small because the pool had no bound: a
@@ -119,7 +112,7 @@
       {/if}
       {#if !view.fullscreen}
         <div class="info">
-          <span class="filename" style:color={item.label ? labelColors[item.label] : null} title={item.label ? formatColorLabel(item.label) : undefined}>{item.relPath}</span>
+          <span class="filename" style:color={item.label ? LABEL_COLORS[item.label] : null} title={item.label ? formatColorLabel(item.label) : undefined}>{item.relPath}</span>
           {#if session.mirrorMode && item.groupSize > 1}
             <span class="chip" class:split={item.decoupled}>
               {#if item.decoupled}<Scissors size={10} /><span>SPLIT</span>{:else}RAW+JPG{/if}
@@ -212,10 +205,10 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
     color: #8fd0ff;
   }
@@ -235,7 +228,7 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     font-size: 14px;
     font-family: inherit;
@@ -280,14 +273,14 @@
   .reject {
     display: inline-flex;
     align-items: center;
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .tagpill {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 6px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     border: 1px solid;
     /* Border color and a ~18% alpha tint (2e suffix) are set inline from the
        tag's #rrggbb color. */
@@ -329,7 +322,7 @@
     gap: 8px;
     padding: 10px 16px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--surface);
     color: var(--accent);
     font: inherit;

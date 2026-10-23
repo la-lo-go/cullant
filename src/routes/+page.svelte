@@ -96,6 +96,32 @@
   // as --bottom-bar-h so overlays inside the grid — the background-status pill —
   // can sit above it instead of being buried by it in selection mode.
   let bottomBarH = $state(0);
+  // A single toolbar row is 30px; the right zone is taller only when it wraps.
+  let toolbarRightH = $state(0);
+  const toolbarStacked = $derived(toolbarRightH > 48);
+  const countDigits = $derived(String(Math.max(catalog.mediaCounts.photos, catalog.mediaCounts.videos)).length);
+  // Two-level bar: the side zones have equal width, so the selector sits at the
+  // window centre. Shift it by half the difference of the zone contents, so the
+  // gaps on both sides are equal. A transform never changes the layout.
+  function balanceCenter(bar: HTMLElement) {
+    const apply = () => {
+      const center = bar.querySelector<HTMLElement>(".toolbar-center");
+      const pill = bar.querySelector(".media-toggle");
+      const zone = bar.querySelector(".toolbar-right");
+      const items = [".filters-anchor", ".toolbar-actions"].map((q) => bar.querySelector(q));
+      if (!center || !pill || !zone) return;
+      if (!bar.classList.contains("stacked")) return void (center.style.transform = "");
+      const rightWidth = zone.getBoundingClientRect().right - Math.min(...items.map((e) => e?.getBoundingClientRect().left ?? Infinity));
+      center.style.transform = `translateX(${(pill.getBoundingClientRect().width - rightWidth) / 2}px)`;
+    };
+    const resize = new ResizeObserver(apply);
+    const watched = [bar, ".media-toggle", ".filters-anchor", ".toolbar-actions"];
+    for (const w of watched) resize.observe(typeof w === "string" ? bar.querySelector(w)! : w);
+    const mutation = new MutationObserver(apply);
+    mutation.observe(bar, { attributes: true, attributeFilter: ["class"] });
+    apply();
+    return { destroy: () => (resize.disconnect(), mutation.disconnect()) };
+  }
   // The region of the action bar outside the grid: the view and the bar.
   let viewFrame = $state<HTMLElement | null>(null);
   const BAR_ICONS = { top: PanelTop, right: PanelRight, bottom: PanelBottom, left: PanelLeft };
@@ -679,9 +705,9 @@
   {/if}
   {#if catalog.project}
     {#if !view.fullscreen}
-    <header class="toolbar" use:tooltips>
+    <header class="toolbar" class:stacked={toolbarStacked} class:has-toggle={view.mode !== "grid" && !IS_TOUCH} use:tooltips use:balanceCenter>
       <div class="toolbar-left">
-        <div class="media-toggle">
+        <div class="media-toggle" class:digits4={countDigits === 4} class:digits5={countDigits >= 5}>
           <button
             class="media-btn"
             class:active={catalog.media === "photos"}
@@ -692,7 +718,7 @@
           >
             <ImageIcon size={14} />
             <span>Photos</span>
-            <span class="count">{catalog.mediaCounts.photos} {catalog.mediaCounts.photos === 1 ? "file" : "files"}</span>
+            <span class="count">{catalog.mediaCounts.photos}<span class="count-unit">{catalog.mediaCounts.photos === 1 ? " file" : " files"}</span></span>
           </button>
           <button
             class="media-btn"
@@ -704,7 +730,7 @@
           >
             <VideoIcon size={14} />
             <span>Videos</span>
-            <span class="count">{catalog.mediaCounts.videos} {catalog.mediaCounts.videos === 1 ? "file" : "files"}</span>
+            <span class="count">{catalog.mediaCounts.videos}<span class="count-unit">{catalog.mediaCounts.videos === 1 ? " file" : " files"}</span></span>
           </button>
         </div>
       </div>
@@ -715,7 +741,8 @@
           <button class:active={view.mode === "compare"} aria-label="Compare" title={shortcutHint("Compare", "view.compare")} onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
         </div>
       </div>
-      <div class="toolbar-right">
+      <div class="toolbar-right" bind:clientHeight={toolbarRightH}>
+        <div class="toolbar-fit">
         <div class="filters-anchor">
           <button
             class:active={session.filtersPanelOpen}
@@ -744,45 +771,48 @@
             <FiltersPanel />
           {/if}
         </div>
-        <div class="view-anchor">
-          <button
-            class:active={session.viewPanelOpen}
-            class:haswork={hasCustomView}
-            aria-label="View"
-            title={hasCustomView
-              ? "View — settings changed. Thumbnail size, grouping and RAW+JPEG pairing."
-              : "View. Thumbnail size, grouping and RAW+JPEG pairing."}
-            aria-pressed={hasCustomView}
-            onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
-          >
-            <LayoutGrid size={14} />
-            <span>View</span>
-          </button>
-          {#if session.viewPanelOpen}
-            <GridViewPanel />
+        <div class="toolbar-actions">
+          <div class="view-anchor">
+            <button
+              class:active={session.viewPanelOpen}
+              class:haswork={hasCustomView}
+              aria-label="View"
+              title={hasCustomView
+                ? "View — settings changed. Thumbnail size, grouping and RAW+JPEG pairing."
+                : "View. Thumbnail size, grouping and RAW+JPEG pairing."}
+              aria-pressed={hasCustomView}
+              onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
+            >
+              <LayoutGrid size={14} />
+              <span>View</span>
+            </button>
+            {#if session.viewPanelOpen}
+              <GridViewPanel />
+            {/if}
+          </div>
+          {#if view.mode !== "grid"}
+            <button
+              class="touchbar-toggle"
+              class:active={touchBarVisible}
+              title="Show/hide the action bar"
+              aria-label="Show/hide the action bar"
+              onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
+            >
+              <BarIcon size={14} />
+            </button>
           {/if}
-        </div>
-        {#if view.mode !== "grid"}
+          <button title="Settings" aria-label="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
           <button
-            class="touchbar-toggle"
-            class:active={touchBarVisible}
-            title="Show/hide the action bar"
-            aria-label="Show/hide the action bar"
-            onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
+            class="commit"
+            class:haswork={session.hasCommitWork}
+            aria-label="Review changes"
+            title={shortcutHint(session.hasCommitWork ? "Review changes — actions are queued" : "Review changes", "commit.open")}
+            onclick={blurring(() => (session.commitDialogOpen = true))}
           >
-            <BarIcon size={14} />
+            <CheckCheck size={14} /><span>Review</span>
           </button>
-        {/if}
-        <button title="Settings" aria-label="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
-        <button
-          class="commit"
-          class:haswork={session.hasCommitWork}
-          aria-label="Review changes"
-          title={shortcutHint(session.hasCommitWork ? "Review changes — actions are queued" : "Review changes", "commit.open")}
-          onclick={blurring(() => (session.commitDialogOpen = true))}
-        >
-          <CheckCheck size={14} /><span>Review changes</span>
-        </button>
+        </div>
+        </div>
       </div>
     </header>
     {/if}
@@ -934,7 +964,7 @@
     <!-- Blocking: you can't keep working while the project's folder/volume is
          gone. Reconnecting auto-dismisses this (the watcher clears the message);
          otherwise the only way out is to close the project. -->
-    <div class="folder-lost" role="alertdialog" aria-modal="true" aria-label="Project folder unavailable" use:modalFocus>
+    <div class="folder-lost" role="alertdialog" aria-label="Project folder unavailable" use:modalFocus>
       <div class="fl-panel">
         <h2>Project folder unavailable</h2>
         <p>{folderLostMsg}</p>
@@ -1129,7 +1159,7 @@
     background-position: right 9px center;
     color: #e0e0e0;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 6px 28px 6px 10px;
     font-family: inherit;
     font-size: 13px;
@@ -1186,6 +1216,21 @@
     --accent-rgb: 63, 223, 202;
     --accent-fill: #227268;
 
+    --danger: #ff6b6b;
+    --danger-fill: #a8403a;
+    --danger-fill-hover: #b84a4a;
+    --danger-solid: #e04343;
+    --text-faint: #9898a1;
+    --text-placeholder: #b0b0ba;
+
+    --r-sm: 4px;
+    --r-md: 6px;
+    --r-lg: 10px;
+    --r-xl: 12px;
+
+    --fs-xs: 11px;
+    --fs-sm: 12px;
+
     /* One motion for a panel that leaves its slot, the gap that the content
        keeps for it, and the preview rectangle, so they read as one movement. */
     --dock-motion: 160ms cubic-bezier(0.2, 0, 0, 1);
@@ -1227,6 +1272,18 @@
   @media (prefers-reduced-motion: reduce) {
     :global(:root) {
       --dock-motion: 0ms;
+    }
+  }
+
+  /* Not `none`: a 0.01ms run still fires transitionend and animationend. */
+  @media (prefers-reduced-motion: reduce) {
+    :global(*),
+    :global(*::before),
+    :global(*::after) {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
     }
   }
 
@@ -1328,8 +1385,57 @@
     row-gap: 6px;
   }
 
+  /* The zone is sized by flex (basis 0), so the query below reads the space it
+     gets, not the width of the pill. */
+  .toolbar-left {
+    container-type: inline-size;
+  }
+
+  /* The word "files" goes first when the pill no longer fits beside the view
+     selector on a phone. Each limit is the pill's width with the word, for that
+     many digits. From 600 px the pill is stacked and always has room. */
+  @media (max-width: 599px) {
+    @container (width < 244px) {
+      .media-toggle .count-unit {
+        display: none;
+      }
+    }
+    @container (width < 256px) {
+      .media-toggle.digits4 .count-unit {
+        display: none;
+      }
+    }
+    @container (width < 268px) {
+      .media-toggle.digits5 .count-unit {
+        display: none;
+      }
+    }
+  }
+
   .toolbar-right {
     justify-content: flex-end;
+    /* Lets the container query below read the zone width. The zone is sized by
+       flex (basis 0), so its width never depends on its content. */
+    container-type: inline-size;
+  }
+
+  /* Invisible by default: Sort & Filter and the action group are plain flex
+     items of the zone. */
+  .toolbar-fit {
+    display: contents;
+  }
+
+  /* View, toggle, Settings and Review move as one unit. When the zone is too
+     narrow for everything, the unit drops below Sort & Filter, so the two rows
+     stay balanced. Phones lay the buttons out one by one instead. */
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
   }
 
   .toolbar-center {
@@ -1348,21 +1454,33 @@
      center sit after left rather than truly mid-viewport, but there's no
      third zone competing for that row's space); the right zone claims a full
      row of its own (flex-basis 100% forces the wrap) and wraps its own
-     buttons across as many further rows as it needs. `space-between` then
-     spreads those buttons edge-to-edge, filling the row's free space as the
-     gaps between them (with `gap` as the minimum floor) — one row when they
-     fit, every wrapped row likewise balanced when they don't. */
-  @media (max-width: 720px) {
+     buttons across as many further rows as it needs. */
+  @media (max-width: 599px) {
+    .toolbar-actions {
+      display: contents;
+    }
     .toolbar {
       flex-wrap: wrap;
       row-gap: 6px;
     }
     .toolbar-right {
       flex: 1 1 100%;
-      justify-content: space-between;
       gap: 4px;
     }
-    .toolbar .toolbar-right > button,
+    /* Sort & Filter takes the width the other buttons leave, so the row reads
+       as one even group. Its basis is its natural width, so the wrap point does
+       not move. */
+    .toolbar-right .filters-anchor {
+      flex: 1 1 auto;
+    }
+    .toolbar-right .filters-anchor > button {
+      flex: 1;
+      justify-content: flex-start;
+    }
+    .toolbar .sort-hint {
+      margin-left: auto;
+    }
+    .toolbar .toolbar-actions > button,
     .toolbar-right .filters-anchor > button,
     .toolbar-right .view-anchor > button {
       padding-inline: 6px;
@@ -1375,9 +1493,96 @@
     }
   }
 
+  /* Wider phones: a stretched Sort & Filter grows too long, so the four buttons
+     keep their natural width and sit together under the view selector. */
+  @media (min-width: 470px) and (max-width: 599px) {
+    .toolbar-right {
+      justify-content: flex-end;
+    }
+    .toolbar-right .filters-anchor,
+    .toolbar-right .filters-anchor > button {
+      flex: 0 0 auto;
+    }
+  }
+
+
+  /* Tablet width, zone too narrow for one row: Sort & Filter stretches to the
+     width of the action group below it, and both stay right-aligned. The limit
+     is the natural one-row width of both (measured at 152.8 + 8 + 184 px, or
+     224 px with the action bar toggle) plus 7 px for the wider "Name" hint.
+     It reads the zone width and never the stretched button, so the layout
+     cannot flip back and forth. Past the limit the zone wraps by itself. */
+  @media (min-width: 600px) {
+    @container (max-width: 351px) {
+      .toolbar:not(.has-toggle) .toolbar-fit {
+        display: grid;
+        grid-template-columns: minmax(0, max-content);
+        justify-content: end;
+        row-gap: 6px;
+      }
+      .toolbar:not(.has-toggle) .filters-anchor {
+        display: grid;
+      }
+      .toolbar:not(.has-toggle) .filters-anchor > button {
+        justify-content: flex-start;
+      }
+      .toolbar:not(.has-toggle) .sort-hint {
+        margin-left: auto;
+      }
+    }
+    @container (max-width: 391px) {
+      .toolbar.has-toggle .toolbar-fit {
+        display: grid;
+        grid-template-columns: minmax(0, max-content);
+        justify-content: end;
+        row-gap: 6px;
+      }
+      .toolbar.has-toggle .filters-anchor {
+        display: grid;
+      }
+      .toolbar.has-toggle .filters-anchor > button {
+        justify-content: flex-start;
+      }
+      .toolbar.has-toggle .sort-hint {
+        margin-left: auto;
+      }
+    }
+  }
+
+  /* Tablet width: the right zone wraps to two levels while the left zone has
+     room to spare. Stack Photos above Videos so the selector spans both levels.
+     Phones keep the horizontal pill: there the zones already sit on separate rows. */
+  @media (min-width: 600px) {
+    .toolbar.stacked .toolbar-left {
+      align-self: stretch;
+      align-items: stretch;
+    }
+    .toolbar.stacked .media-toggle {
+      flex-direction: column;
+    }
+    .toolbar.stacked .media-btn {
+      flex: 1 1 0;
+      height: auto;
+      justify-content: flex-start;
+    }
+    .toolbar.stacked .media-btn .count {
+      margin-left: auto;
+    }
+  }
+
+  /* Very narrow phones: the pill and the view-mode selector share one row, so
+     drop the pill's icons and the sort hint to keep the bar at two rows. */
+  @media (max-width: 360px) {
+    .media-btn :global(svg) {
+      display: none;
+    }
+    .toolbar .sort-hint {
+      display: none;
+    }
+  }
 
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 4px 10px;
     font-size: 13px;
@@ -1392,6 +1597,10 @@
     .toolbar button:hover:not(:disabled) {
       background-color: var(--hover);
     }
+  }
+
+  .toolbar button:focus-visible {
+    outline-offset: -2px;
   }
 
   .toolbar button {
@@ -1471,6 +1680,15 @@
     }
   }
 
+  /* A still 40% sliver reads as progress; a dim full track reads as waiting. */
+  @media (prefers-reduced-motion: reduce) {
+    .preload .pbar.indeterminate .pbar-fill {
+      width: 100%;
+      opacity: 0.35;
+      animation: none;
+    }
+  }
+
   button.active {
     background: var(--accent-fill);
     border-color: transparent;
@@ -1539,7 +1757,7 @@
 
   .segmented button {
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: transparent;
     /* 3px vertical (not 4px) to match .media-btn's rhythm — with the .segmented
        container's own 2px padding + 1px border, this lands the pill at the same
@@ -1577,7 +1795,7 @@
 
   .media-btn {
     border: 1px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: transparent;
     padding: 0 10px;
     font-weight: 600;
@@ -1604,6 +1822,7 @@
     display: inline-block;
     min-width: 3ch;
     text-align: right;
+    white-space: nowrap;
   }
 
   .media-btn:disabled {
@@ -1639,7 +1858,7 @@
      resolves to ~0 — the grid otherwise ran cells edge to edge. A modest fixed
      margin (matching the toolbar's own 10px) reads far less cramped, and still
      grows past that for an actual cutout via max(). */
-  @media (max-width: 720px) {
+  @media (max-width: 599px) {
     .grid-area {
       padding-left: max(4px, var(--safe-left));
       padding-right: max(4px, var(--safe-right));
@@ -1701,7 +1920,7 @@
     align-items: center;
     justify-content: center;
     gap: 10px;
-    color: #6a6a72;
+    color: var(--text-faint);
     text-align: center;
     padding: 24px;
   }
@@ -1717,7 +1936,7 @@
     gap: 6px;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #ddd;
     padding: 6px 12px;
     cursor: pointer;
@@ -1773,7 +1992,7 @@
     padding: 0;
     border: 1px solid var(--border);
     border-left: none;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--r-md) var(--r-md) 0;
     background: var(--surface);
     color: var(--accent);
     cursor: pointer;
@@ -1786,7 +2005,7 @@
     z-index: 27;
     border-left: 1px solid var(--border);
     border-right: none;
-    border-radius: 6px 0 0 6px;
+    border-radius: var(--r-md) 0 0 var(--r-md);
   }
 
   .tree-peek:hover {
@@ -1879,7 +2098,7 @@
 
   .welcome .hint {
     margin: 0 0 4px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     opacity: 0.6;
   }
 
@@ -1899,7 +2118,7 @@
   .fl-panel {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 18px 22px;
     width: 400px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
@@ -1928,9 +2147,9 @@
   }
 
   .fl-close {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid transparent;
-    background: #e04343;
+    background: var(--danger-solid);
     color: #fff;
     padding: 8px 16px;
     font-size: 13px;

@@ -9,6 +9,7 @@
 </script>
 
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { onDestroy, tick, untrack } from "svelte";
   import { api, previewUrl, thumbUrl, knownDims, type ItemLite } from "../api";
   import { SvelteMap } from "svelte/reactivity";
@@ -125,14 +126,6 @@
     if (v.total > 0) return `Video thumbnails ${v.done} / ${v.total}`;
     return null;
   });
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   // Video ids whose pregenerated poster couldn't be served (no frame extractor
   // on this platform, or the clip was undecodable → 404). Those cells fall back
@@ -1448,9 +1441,17 @@
               {/if}
             {/if}
             {#if v.item.label}
-              <span class="label-bar" title={formatColorLabel(v.item.label)} style:border-color={labelColors[v.item.label]}></span>
+              <span class="label-bar" title={formatColorLabel(v.item.label)} style:border-color={LABEL_COLORS[v.item.label]}></span>
             {/if}
-            <div class="info-top">
+            <div
+              class="info-top"
+              class:has-burst={stacked || burstAt}
+              class:has-chip={(session.mirrorMode && v.item.groupSize > 1) || v.item.kind === 0}
+              class:has-flag={!summary && (v.item.flag !== 0 || session.pendingDeleteIds.has(v.item.id))}
+              class:has-tally={summary && (summary.picks > 0 || summary.rejects > 0)}
+              class:tally-s={summary && (summary.picks > 0) !== (summary.rejects > 0) && summary.picks + summary.rejects < 10}
+              class:long-burst={stacked ? v.span > 99 : burstAt && burstAt.position > 99}
+            >
               {#if stacked}
                 <span class="burst" title="Burst of {v.span} photos">
                   <Layers size={10} />{v.span}
@@ -1460,7 +1461,7 @@
                   class="burst"
                   title="Shot {burstAt.position} of a burst of {burstAt.total}"
                 >
-                  <Layers size={10} />{burstAt.position}/{burstAt.total}
+                  <Layers size={10} /><span class="burst-total">{burstAt.position}/{burstAt.total}</span><span class="burst-short">{burstAt.position}</span>
                 </span>
               {/if}
               {#if session.mirrorMode && v.item.groupSize > 1}
@@ -1468,20 +1469,22 @@
                 <span
                   class="chip pair"
                   class:split={v.item.decoupled}
+                  class:diverged={!v.item.decoupled && pair?.diverged}
                   title={pair ? pair.halves.map(describeHalf).join(" · ") : "RAW+JPG"}
                 >
                   <span class="type-name">
                     {#if v.item.decoupled}
-                      <Scissors size={10} /><span>SPLIT</span>
+                      <Scissors size={10} /><span class="split-label">SPLIT</span>
                     {:else if pair?.diverged}
                       <!-- Halves shown separately only once they disagree, so the
                            ordinary pair keeps drawing exactly as it always has. -->
-                      <span class="pair-halves">
+                      <span class="pair-halves" class:many={pair.halves.length > 2}>
                         {#each pair.halves as h, hi (h.id)}
                           {#if hi > 0}<span class="half-sep"></span>{/if}
                           <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
                         {/each}
                       </span>
+                      <span class="pair-count">{pair.halves.length}</span>
                     {:else}
                       <span class="type-full">RAW+JPG</span>
                       <span class="type-short">R+J</span>
@@ -1516,11 +1519,15 @@
               {#if rating > 0}
                 <span class="stars" title={summary ? "Best rating in this burst" : undefined}>
                   <span class="rating-full">{"★".repeat(rating)}</span>
-                  <span class="rating-compact">★{rating}</span>
+                  <span class="rating-compact">{rating}★</span>
                 </span>
               {/if}
               {#if v.item.tagIds.length > 0}
-                <span class="tags">
+                <span
+                  class="tags"
+                  class:over2={v.item.tagIds.length > 2}
+                  class:over4={v.item.tagIds.length > 4}
+                >
                   {#each v.item.tagIds.slice(0, 4) as tagId}
                     <span
                       class="tagdot"
@@ -1528,6 +1535,7 @@
                       title={tags.byId.get(tagId)?.name}
                     ></span>
                   {/each}
+                  {#if v.item.tagIds.length > 1}<span class="tag-more">+</span>{/if}
                 </span>
               {/if}
             </div>
@@ -1740,7 +1748,7 @@
   }
 
   .gh-count {
-    color: #6a6a72;
+    color: var(--text-faint);
     font-weight: 500;
   }
 
@@ -1764,7 +1772,7 @@
     padding: 0;
     background: none;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     color: inherit;
     cursor: pointer;
     pointer-events: auto;
@@ -1822,7 +1830,7 @@
   }
 
   .sg-count {
-    color: #6a6a72;
+    color: var(--text-faint);
     font-weight: 500;
   }
 
@@ -1873,7 +1881,7 @@
        .frame — see below) and the gap while a thumbnail is still decoding just
        show the grid's own dark background instead of a distinct gray box. */
     background: transparent;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     overflow: hidden;
     display: flex;
     align-items: center;
@@ -1946,7 +1954,7 @@
     right: 8px;
     bottom: 0;
     left: 0;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--surface-2);
     overflow: hidden;
   }
@@ -2062,12 +2070,12 @@
     align-items: center;
     justify-content: center;
     gap: 4px;
-    color: #6a6a72;
+    color: var(--text-faint);
     user-select: none;
   }
 
   .unreadable span {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.03em;
   }
@@ -2089,7 +2097,7 @@
   }
 
   .no-poster span {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.03em;
   }
@@ -2108,10 +2116,10 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 5px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
     color: #ddd;
   }
@@ -2158,7 +2166,7 @@
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     padding: 1px 6px;
@@ -2180,7 +2188,7 @@
     align-items: center;
     font-size: 12px;
     padding: 2px 4px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
   }
 
@@ -2189,17 +2197,17 @@
   }
 
   .badge.reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .badge.pending {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   /* Pick/reject tallies on a collapsed burst, in the single badge's place. */
   .badge.counts {
     gap: 5px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
@@ -2215,7 +2223,7 @@
   }
 
   .badge.counts .reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   /* bottom: 9px (not flush) — clears the label-bar below it (see .label-bar;
@@ -2234,6 +2242,7 @@
     bottom: 9px;
     right: 6px;
     display: flex;
+    align-items: center;
     gap: 3px;
   }
 
@@ -2251,6 +2260,7 @@
 
   .info-top {
     top: 4px;
+    flex-wrap: wrap;
   }
 
   .info-bottom {
@@ -2271,6 +2281,7 @@
   .info-top > .chip {
     order: -1;
     min-width: 0;
+    flex-shrink: 0;
     overflow: hidden;
     white-space: nowrap;
   }
@@ -2295,20 +2306,121 @@
     margin-left: auto;
   }
 
+  /* Tells that more tags exist than the dots show. Each width rule below shows
+     it only when it hides a dot. */
+  .tag-more {
+    display: none;
+    font-size: var(--fs-xs);
+    font-weight: 700;
+    line-height: 8px;
+    color: #ddd;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  }
+
+  .over4 .tag-more {
+    display: inline;
+  }
+
   .rating-compact,
-  .type-short {
+  .type-short,
+  .pair-count,
+  .burst-short {
     display: none;
   }
 
+  /* The top row fits on one line at the metrics of Segoe UI and Arial. Each
+     width rule below switches a badge to a shorter form first. A badge drops only
+     where its shortest form does not fit beside the others. The rank, highest
+     first: the flag or tally, the burst badge, the pair chip. The stars are not
+     in this row: they live in .info-bottom. The .has-* classes name the badges
+     in the row. The row keeps flex-wrap as a
+     fallback: a wider font wraps it to a second line instead of clipping a badge. */
+
+  /* A burst badge shares the row with the pair chip, so the chip is short. */
+  @container (max-width: 178px) {
+    .has-burst.has-tally .type-full {
+      display: none;
+    }
+
+    .has-burst.has-tally .type-short {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 174px) {
+    .has-burst .pair-halves.many {
+      display: none;
+    }
+
+    .has-burst .pair-halves.many + .pair-count {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 168px) {
+    .has-burst .type-full {
+      display: none;
+    }
+
+    .has-burst .type-short {
+      display: inline;
+    }
+  }
+
+  /* A stack of 100 or more photos has a wider burst badge, and the RAW chip is
+     wider than R+J. The .long-burst and .chip.raw rules give each its own limits. */
+  @container (width < 151px) {
+    .has-tally.long-burst > .chip.raw ~ .counts :global(svg) {
+      display: none;
+    }
+  }
+
+  @container (width < 146px) {
+    .has-chip.has-tally.long-burst .counts :global(svg),
+    .has-tally > .chip.raw ~ .counts :global(svg) {
+      display: none;
+    }
+  }
+
+  @container (max-width: 140px) {
+    .has-burst.has-tally:not(.tally-s) .counts :global(svg),
+    .has-burst.has-tally.tally-s > .chip.diverged ~ .counts :global(svg) {
+      display: none;
+    }
+  }
+
+  /* A tally with one group and one digit is narrow, so its icon fits far below
+     the width the two-group tally needs. */
+  @container (width < 100px) {
+    .has-burst.has-tally.tally-s .counts :global(svg) {
+      display: none;
+    }
+  }
+
+  /* A burst position drops to the bare number, without the icon, when the chip
+     and a flag or tally share the row. */
+  @container (width < 137px) {
+    .has-burst.has-chip:is(.has-flag, .has-tally) .burst-total,
+    .has-burst.has-chip:is(.has-flag, .has-tally) .burst :global(svg) {
+      display: none;
+    }
+
+    .has-burst.has-chip:is(.has-flag, .has-tally) .burst-short {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 130px) {
+    .has-flag .pair-halves.many {
+      display: none;
+    }
+
+    .has-flag .pair-halves.many + .pair-count {
+      display: inline;
+    }
+  }
+
   @container (max-width: 120px) {
-    .info-top {
-      flex-wrap: wrap;
-    }
-
-    .info-top > .chip {
-      flex-shrink: 0;
-    }
-
     .info-top,
     .info-bottom {
       gap: 2px;
@@ -2317,17 +2429,8 @@
     .chip,
     .burst,
     .badge.counts {
-      font-size: 9px;
       padding: 1px 3px;
       gap: 2px;
-    }
-
-    .rating-full {
-      display: none;
-    }
-
-    .rating-compact {
-      display: inline;
     }
 
     .tags {
@@ -2338,11 +2441,75 @@
       width: 6px;
       height: 6px;
     }
+
+    .tagdot:nth-child(n + 3) {
+      display: none;
+    }
+
+    .over2 .tag-more {
+      display: inline;
+    }
   }
 
-  @container (max-width: 88px) {
+  @container (max-width: 112px) {
+    .has-burst.has-flag .split-label,
+    .has-burst.has-tally .split-label {
+      display: none;
+    }
+  }
+
+  @container (max-width: 100px) {
+    .has-burst .pair-halves:not(.many),
+    .has-flag .pair-halves:not(.many) {
+      display: none;
+    }
+
+    .has-burst .pair-halves:not(.many) + .pair-count,
+    .has-flag .pair-halves:not(.many) + .pair-count {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 96px) {
+    .has-burst.has-chip .burst-total,
+    .has-burst.has-chip .burst :global(svg) {
+      display: none;
+    }
+
+    .has-burst.has-chip .burst-short {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 92px) {
+    .has-flag .type-full {
+      display: none;
+    }
+
+    .has-flag .type-short {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 90px) {
+    .has-burst.has-flag .chip {
+      padding: 1px 2px;
+    }
+
+    .has-burst:is(.has-flag, .has-tally) .burst-total,
+    .has-burst:is(.has-flag, .has-tally) .burst :global(svg) {
+      display: none;
+    }
+
+    .has-burst:is(.has-flag, .has-tally) .burst-short {
+      display: inline;
+    }
+  }
+
+  /* The half names need about 66 px for two halves and 88 px for three. Below
+     that the chip shows how many halves the shot has. */
+  @container (width < 89px) {
     .chip {
-      font-size: 8px;
       padding: 1px 2px;
     }
 
@@ -2354,8 +2521,7 @@
       display: inline;
     }
 
-    .counts :global(svg),
-    .tagdot:nth-child(n + 3) {
+    .counts :global(svg) {
       display: none;
     }
 
@@ -2364,15 +2530,288 @@
     }
 
     .burst {
-      font-size: 8px;
       padding: 1px 2px;
       gap: 1px;
+    }
+
+    .pair-halves.many {
+      display: none;
+    }
+
+    .pair-halves.many + .pair-count {
+      display: inline;
+    }
+  }
+
+  /* Two dots and the plus sign fit beside the full stars except in this band. */
+  @container (min-width: 85px) and (max-width: 87px) {
+    .over2 .tagdot:nth-child(2) {
+      display: none;
+    }
+  }
+
+  /* A flag, a tally or a burst badge leaves no room for the SPLIT word, so the
+     scissors icon stands alone. */
+  @container (max-width: 86px) {
+    .has-flag .split-label,
+    .has-tally .split-label,
+    .has-burst .split-label {
+      display: none;
+    }
+  }
+
+  /* Below this width five stars and the tag dots no longer share a row. */
+  @container (max-width: 84px) {
+    .rating-full {
+      display: none;
+    }
+
+    .rating-compact {
+      display: inline;
+    }
+  }
+
+  /* Each chip form (R+J, RAW, split, diverged) has its own drop limit beside
+     the burst badge and the flag or tally. A limit is the last width where the
+     shortest form wraps in Arial, rounded up to the next whole pixel. It is
+     sized for a two-digit burst, or a three-digit one with .long-burst. The
+     margin is less than 1 px, and a one-digit burst gets more. Segoe UI needs
+     up to 2 px less, so there a chip can drop in a cell where it fits. */
+  @container (width < 97px) {
+    .has-tally.long-burst > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 92px) {
+    .has-tally.long-burst > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 91px) {
+    .has-tally > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 87px) {
+    .has-flag.long-burst > .chip.raw {
+      display: none;
+    }
+  }
+
+  /* A long stack can have a tally such as 40 and 110, so the split and
+     diverged chips keep the 84 px limit beside it. */
+  @container (width < 84px) {
+    .has-burst.has-tally > .chip.pair:not(.split, .diverged),
+    .has-tally.long-burst > .chip.split,
+    .has-tally.long-burst > .chip.diverged {
+      display: none;
+    }
+  }
+
+  @container (width < 81px) {
+    .has-flag.long-burst > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 80px) {
+    .has-burst.has-flag > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 75px) {
+    .has-burst.has-flag > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 73px) {
+    .has-tally > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (width < 71px) {
+    .has-flag.long-burst > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (width < 69px) {
+    .has-tally > .chip.diverged {
+      display: none;
+    }
+  }
+
+  @container (width < 67px) {
+    .has-flag.long-burst > .chip.diverged {
+      display: none;
+    }
+  }
+
+  @container (width < 65px) {
+    .has-burst.has-flag > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (max-width: 66px) {
+    .pair-halves {
+      display: none;
+    }
+
+    .pair-halves + .pair-count {
+      display: inline;
+    }
+  }
+
+  /* A burst icon needs about 60 px of row. Below that the badge shows its count alone. */
+  @container (max-width: 60px) {
+    .burst :global(svg) {
+      display: none;
+    }
+  }
+
+  @container (max-width: 64px) {
+    .has-burst.long-burst > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 63px) {
+    .has-tally.long-burst > .burst {
+      display: none;
+    }
+  }
+
+  @container (width < 61px) {
+    .has-burst.has-flag > .chip.diverged {
+      display: none;
+    }
+  }
+
+  @container (width < 60px) {
+    .has-flag > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 59px) {
+    .has-burst.long-burst > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 58px) {
+    .has-burst > .chip.raw {
+      display: none;
+    }
+  }
+
+  /* A position such as 123/456 needs about 46 px of row; the bare position fits. */
+  @container (max-width: 56px) {
+    .burst-total {
+      display: none;
+    }
+
+    .burst-short {
+      display: inline;
+    }
+  }
+
+  @container (width < 57px) {
+    .has-tally > .burst {
+      display: none;
+    }
+  }
+
+  @container (max-width: 55px) {
+    .over2 .tagdot:nth-child(2) {
+      display: none;
+    }
+  }
+
+  /* The SPLIT word needs about 54 px; the scissors icon stays. The flag keeps
+     the row, so a burst badge drops when even its bare count does not fit. */
+  @container (width < 55px) {
+    .split-label {
+      display: none;
+    }
+
+    .has-flag.long-burst > .burst,
+    .has-flag > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 53px) {
+    .has-burst > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 49px) {
+    .has-burst.long-burst > .chip.split,
+    .has-flag > .burst {
+      display: none;
     }
   }
 
   @container (max-width: 48px) {
     .tagdot:nth-child(n + 2) {
       display: none;
+    }
+
+    .tag-more {
+      display: inline;
+    }
+  }
+
+  @container (width < 45px) {
+    .has-burst.long-burst > .chip.diverged {
+      display: none;
+    }
+  }
+
+  /* Below this width the plus sign no longer fits beside the compact stars. */
+  @container (max-width: 44px) {
+    .tags .tag-more {
+      display: none;
+    }
+  }
+
+  @container (width < 44px) {
+    .has-flag > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (width < 43px) {
+    .has-burst > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (width < 41px) {
+    .has-flag > .chip.diverged {
+      display: none;
+    }
+  }
+
+  @container (width < 39px) {
+    .has-burst > .chip.diverged {
+      display: none;
+    }
+  }
+
+  /* A short photo moves the stars row down to the label bar so the top row clears it. */
+  @container (max-height: 50px) {
+    .info-bottom {
+      bottom: 5px;
     }
   }
 

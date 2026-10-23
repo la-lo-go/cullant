@@ -1,14 +1,14 @@
 interface ModalOptions {
   initialFocus?: string;
   isRecording?: () => boolean;
-  onKeyboardInteraction?: () => void;
+  onKeyboardInteraction?: (e: KeyboardEvent) => void;
 }
 
 interface ModalEntry {
   panel: HTMLElement;
   restoreFocus: HTMLElement | null;
   isRecording?: () => boolean;
-  onKeyboardInteraction?: () => void;
+  onKeyboardInteraction?: (e: KeyboardEvent) => void;
 }
 
 const modals: ModalEntry[] = [];
@@ -54,7 +54,7 @@ function containFocus(e: FocusEvent) {
 function containKeys(e: KeyboardEvent) {
   const modal = activeModal();
   if (!modal) return;
-  modal.onKeyboardInteraction?.();
+  modal.onKeyboardInteraction?.(e);
   if (!(e.target instanceof Node && modal.panel.contains(e.target))) {
     e.preventDefault();
     e.stopImmediatePropagation();

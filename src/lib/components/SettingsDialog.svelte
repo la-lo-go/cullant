@@ -228,7 +228,7 @@
   });
 
   function onKeydown(e: KeyboardEvent) {
-    clearPointerMode();
+    noteKey(e);
     e.stopPropagation();
     if (e.key !== "Escape") return;
     // Same order the app's back ladder uses: shed the innermost layer first.
@@ -245,6 +245,13 @@
     pointerPress = false;
     pointerMode = false;
     touchPointer = false;
+  }
+
+  // Typing in a text or search field is not keyboard navigation: it must not bring back the focus border.
+  function noteKey(e: KeyboardEvent) {
+    const typing =
+      e.target instanceof HTMLInputElement && (e.target.type === "text" || e.target.type === "search");
+    if (!typing || e.key === "Tab" || e.key === "Escape") clearPointerMode();
   }
 
   function onPointerPress(e: PointerEvent) {
@@ -584,7 +591,7 @@
   {onclose}
   onback={openPanel ? () => { view.settingsPanel = null; releaseFocus(); } : undefined}
   bind:panel
-  modalOptions={{ onKeyboardInteraction: clearPointerMode }}
+  modalOptions={{ onKeyboardInteraction: noteKey }}
   {pointerMode}
   {touchPointer}
   onclick={releaseClickedControl}
@@ -976,7 +983,7 @@
   .label-swatch {
     width: 16px;
     height: 16px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     flex: none;
   }
 
@@ -985,7 +992,7 @@
     flex: 1;
     padding: 7px 9px;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--control);
     color: inherit;
     font: inherit;
@@ -1003,6 +1010,7 @@
     overflow: hidden;
   }
 
+  .preferences.pointer-mode .label-name input:focus,
   .preferences.pointer-mode :global(select:focus) {
     outline: none;
     border-color: var(--border-strong);
@@ -1017,7 +1025,7 @@
   }
 
   .preferences.touch-pointer :global(.draglist:not(.reordering) .handle:hover) {
-    color: #6a6a72;
+    color: var(--text-faint);
   }
 
   .preferences.touch-pointer :global(.tip:not(.open):hover) {
@@ -1093,7 +1101,7 @@
   }
 
   .gname {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -1108,7 +1116,7 @@
     height: 14px;
     padding: 0;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: none;
     color: inherit;
     opacity: 0.6;
@@ -1121,7 +1129,7 @@
     gap: 8px;
     min-height: 32px;
     padding: 2px 4px 2px 6px;
-    border-radius: 6px;
+    border-radius: var(--r-md);
   }
 
   .name {
@@ -1134,7 +1142,7 @@
 
   .label {
     position: relative;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1198,10 +1206,10 @@
     max-width: 46%;
     padding: 3px 28px 3px 8px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background-color: var(--surface);
     color: inherit;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
   }
 
   .jump {
@@ -1221,7 +1229,7 @@
     border-radius: 8px;
     background: var(--surface);
     color: inherit;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 
@@ -1254,11 +1262,11 @@
   }
 
   .t-title {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
 
   .t-note {
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     line-height: 1.4;
     opacity: 0.6;
   }
@@ -1281,7 +1289,7 @@
     margin: 14px 0 8px;
     padding: 12px 14px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     background: var(--surface);
     color: inherit;
     text-align: left;
@@ -1312,7 +1320,7 @@
   }
 
   .s-note {
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     line-height: 1.4;
     opacity: 0.7;
   }
@@ -1330,7 +1338,7 @@
     width: 100%;
     padding: 6px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: none;
     color: inherit;
     font-size: 12px;
@@ -1365,7 +1373,7 @@
   .version {
     margin: 12px 0 0;
     color: #74747d;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     text-align: center;
   }
 
@@ -1420,7 +1428,7 @@
   .empty {
     margin: 24px 0;
     text-align: center;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     opacity: 0.6;
   }
 
@@ -1447,8 +1455,8 @@
     gap: 10px;
     min-height: 38px;
     padding: 0 6px;
-    border-radius: 6px;
-    font-size: 12.5px;
+    border-radius: var(--r-md);
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 
@@ -1579,7 +1587,7 @@
     gap: 6px;
     width: 100%;
     padding: 2px 4px;
-    border-radius: 6px;
+    border-radius: var(--r-md);
   }
 
   .slot.on {
@@ -1614,7 +1622,7 @@
     padding: 0;
     background: none;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #9aa0a0;
     cursor: pointer;
   }
@@ -1644,7 +1652,7 @@
     padding: 3px 8px;
     background: none;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #9aa0a0;
     font-size: 11px;
     cursor: pointer;
@@ -1662,6 +1670,11 @@
     padding-top: 10px;
     border-top: 1px solid var(--border);
     border-radius: 0;
+  }
+
+  /* The same 44 px row pitch as the sector rows above: a 28 px row and a 6 px gap, plus 10 px. */
+  .slot.ring-opt + .slot {
+    margin-top: 10px;
   }
 
   /* Whole-row toggling: the row is the checkbox's label. */
@@ -1756,10 +1769,10 @@
     min-height: 32px;
     padding: 0 10px;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: var(--surface);
     color: inherit;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 
@@ -1784,5 +1797,25 @@
   .row select {
     text-align: right;
     text-align-last: right;
+  }
+
+  /* A fingertip needs about 40px. The desktop rows stay as they are. */
+  @media (pointer: coarse) {
+    .slot select {
+      min-height: 36px;
+    }
+
+    .slot.ring-opt + .slot {
+      margin-top: -2px;
+    }
+
+    .label-name input {
+      box-sizing: border-box;
+      min-height: 40px;
+    }
+
+    .jump .wide {
+      min-height: 44px;
+    }
   }
 </style>

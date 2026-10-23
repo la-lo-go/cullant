@@ -242,6 +242,10 @@
     z-index: 40;
   }
 
+  .panel :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .panel {
     outline: none;
     position: absolute;
@@ -264,7 +268,7 @@
     padding: 12px 14px;
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     font-size: 12px;
   }
@@ -292,7 +296,7 @@
     height: 24px;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #bbb;
     cursor: pointer;
     padding: 0;
@@ -335,7 +339,7 @@
     letter-spacing: 0;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #bbb;
     padding: 2px 8px;
     cursor: pointer;
@@ -345,7 +349,7 @@
 
   .hint {
     margin: 0;
-    color: #6a6a72;
+    color: var(--text-faint);
   }
 
   .row {
@@ -363,7 +367,7 @@
     background: var(--control);
     color: #bbb;
     padding: 5px 9px;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
@@ -406,7 +410,7 @@
     position: relative;
     width: 34px;
     height: 18px;
-    border-radius: 9px;
+    border-radius: 999px;
     background: var(--control);
     transition: background 0.15s ease;
   }
@@ -454,7 +458,7 @@
     height: 26px;
     background: var(--control);
     border: 1px solid transparent;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     color: #bbb;
     cursor: pointer;
   }

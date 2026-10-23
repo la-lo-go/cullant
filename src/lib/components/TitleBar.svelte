@@ -242,6 +242,10 @@
 </div>
 
 <style>
+  .titlebar button:focus-visible {
+    outline-offset: -2px;
+  }
+
   .titlebar {
     display: flex;
     align-items: center;
@@ -287,7 +291,7 @@
     max-width: 100%;
     padding: 0 7px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: transparent;
     color: #e8e8e8;
     font-family: inherit;
@@ -344,11 +348,11 @@
     width: 100%;
     padding: 7px 9px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--r-md);
     background: transparent;
     color: #e8e8e8;
     font-family: inherit;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     text-align: left;
     cursor: pointer;
   }
@@ -392,7 +396,7 @@
 
   .menu-label {
     padding: 4px 9px 2px;
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -400,7 +404,7 @@
   }
 
   .recent-path {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     opacity: 0.6;
     direction: rtl;
     text-align: left;
@@ -440,7 +444,7 @@
   }
 
   .ctl.close:hover {
-    background: #e04343;
+    background: var(--danger-solid);
     color: #ffffff;
   }
 </style>

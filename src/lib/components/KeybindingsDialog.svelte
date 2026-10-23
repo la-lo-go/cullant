@@ -158,7 +158,7 @@
     text-align: center;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 5px;
+    border-radius: var(--r-md);
     padding: 3px 8px;
     color: #e8e8e8;
     cursor: pointer;
@@ -177,7 +177,11 @@
     padding: 6px 8px;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
+  }
+
+  .find:focus-within {
+    border-color: var(--accent);
   }
 
   .find input {
@@ -202,7 +206,7 @@
   }
 
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 4px 10px;
     font-size: 12px;

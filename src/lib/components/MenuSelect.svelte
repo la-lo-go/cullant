@@ -79,10 +79,10 @@
     max-width: 52%;
     padding: 3px 6px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: none;
     color: inherit;
-    font-size: 11.5px;
+    font-size: var(--fs-sm);
     cursor: pointer;
   }
 

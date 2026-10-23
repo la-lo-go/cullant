@@ -55,7 +55,7 @@ export function tooltips(root: HTMLElement) {
     tooltip.id = `button-tooltip-${++nextId}`;
     tooltip.setAttribute("role", "tooltip");
     tooltip.textContent = text;
-    tooltip.style.cssText = "position:fixed;z-index:1000;pointer-events:none;max-width:min(320px,calc(100vw - 24px));padding:7px 10px;border:1px solid var(--border-strong);border-radius:6px;background:var(--surface-2);color:inherit;font-family:inherit;font-size:12px;line-height:1.4;box-shadow:0 3px 12px var(--bg-stage);overflow-wrap:anywhere;";
+    tooltip.style.cssText = "position:fixed;z-index:1000;pointer-events:none;max-width:min(320px,calc(100vw - 24px));padding:7px 10px;border:1px solid var(--border-strong);border-radius:var(--r-md);background:var(--surface-2);color:inherit;font-family:inherit;font-size:12px;line-height:1.4;box-shadow:0 3px 12px var(--bg-stage);overflow-wrap:anywhere;";
     document.body.append(tooltip);
     const description = target.getAttribute("aria-describedby");
     target.setAttribute("aria-describedby", [description, tooltip.id].filter(Boolean).join(" "));

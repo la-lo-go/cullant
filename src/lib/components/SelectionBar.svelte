@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { catalog } from "../stores/catalog.svelte";
   import { session, LABELS } from "../stores/session.svelte";
   import { tags } from "../stores/tags.svelte";
@@ -14,14 +15,6 @@
   const surveyKeys = $derived([...keymap.bindings]
     .filter(([, command]) => command === "view.survey")
     .map(([binding]) => formatKey(binding)).join(" / "));
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   const scopedTags = $derived(
     tags.all.filter(
@@ -130,7 +123,7 @@
       <button
         class="dot"
         class:active={summary.label === l}
-        style="--c: {labelColors[l]}"
+        style="--c: {LABEL_COLORS[l]}"
         aria-label={`Label ${formatColorLabel(l)}`}
         title={formatColorLabel(l)}
         onclick={act(() => label(l))}
@@ -190,6 +183,10 @@
     white-space: nowrap;
   }
 
+  .selbar :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .head {
     display: inline-flex;
     align-items: center;
@@ -210,7 +207,7 @@
     color: var(--accent);
     cursor: pointer;
     padding: 1px 2px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
   }
 
   .clear:hover {
@@ -239,7 +236,7 @@
     border: 1px solid var(--border-strong);
     background: var(--control);
     color: #bbb;
-    border-radius: 5px;
+    border-radius: var(--r-md);
     cursor: pointer;
   }
 
@@ -266,7 +263,7 @@
   }
 
   .btn.reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .btn.active-pick {
@@ -275,14 +272,14 @@
   }
 
   .btn.active-reject {
-    border-color: #ff6b6b;
+    border-color: var(--danger);
     background: rgba(255, 107, 107, 0.14);
   }
 
   .star {
     background: none;
     border: none;
-    color: #6a6a72;
+    color: var(--text-faint);
     font-size: 16px;
     cursor: pointer;
     padding: 0 1px;
@@ -334,7 +331,7 @@
     background: var(--control);
     color: #bbb;
     padding: 3px 8px;
-    border-radius: 5px;
+    border-radius: var(--r-md);
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;

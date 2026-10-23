@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { previewUrl } from "../api";
   import { session } from "../stores/session.svelte";
   import { view } from "../stores/view.svelte";
@@ -13,14 +14,6 @@
   import Search from "@lucide/svelte/icons/search";
   import Maximize from "@lucide/svelte/icons/maximize";
   import Minimize from "@lucide/svelte/icons/minimize";
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   const items = $derived(session.surveyItems);
   const detail = $derived(items.find((item) => item.id === session.focused?.id));
@@ -127,7 +120,7 @@
           {#if item.rating > 0}<span class="stars">{"★".repeat(item.rating)}</span>{/if}
           {#if item.flag === 1}<span class="pick"><Check size={12} /></span>{/if}
           {#if item.label}
-            <span class="dot" style="background: {labelColors[item.label] ?? '#888'}"></span>
+            <span class="dot" style="background: {LABEL_COLORS[item.label] ?? '#888'}"></span>
           {/if}
           <span class="name">{item.name}</span>
         </span>
@@ -193,7 +186,7 @@
     color: #ddd;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     font: inherit;
     cursor: pointer;
   }
@@ -219,7 +212,7 @@
     height: 24px;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #bbb;
     cursor: pointer;
     padding: 0;
@@ -268,7 +261,7 @@
     justify-content: center;
     background: none;
     border: 2px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     cursor: pointer;
     overflow: hidden;

@@ -2,6 +2,7 @@
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
   import X from "@lucide/svelte/icons/x";
+  const uid = $props.id();
 
   let {
     title,
@@ -59,12 +60,13 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
+    aria-labelledby="{uid}-title"
     tabindex="-1"
   >
     {#if choice}
       <button class="close-x" onclick={oncancel} aria-label="Close" title="Close"><X size={18} /></button>
     {/if}
-    <h2>{title}</h2>
+    <h2 id="{uid}-title">{title}</h2>
     <p>{message}</p>
     <div class="actions">
       {#if linkLabel && onlink}
@@ -101,7 +103,7 @@
   .dialog {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 16px 20px;
     width: 380px;
     max-width: 100%;
@@ -146,7 +148,7 @@
   }
 
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 8px 12px;
     font-size: 13px;
@@ -174,13 +176,13 @@
 
   button.confirm {
     border-color: transparent;
-    background: #a04040;
+    background: var(--danger-fill);
     color: #fff;
   }
 
   button.confirm:hover {
     border-color: transparent;
-    background: #b84a4a;
+    background: var(--danger-fill-hover);
   }
 
   button.confirm.accent {

@@ -75,12 +75,4 @@
       transform: scale(0.85);
     }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .target {
-      transition: none;
-    }
-    .compass {
-      animation: none;
-    }
-  }
 </style>

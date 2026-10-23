@@ -1,6 +1,7 @@
 <script lang="ts">
   import { backdropDismiss } from "../backdrop";
   import { modalFocus } from "../modal";
+  const uid = $props.id();
 
   let { title = "Notice", message, onclose }: { title?: string; message: string; onclose: () => void } =
     $props();
@@ -25,10 +26,10 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="alertdialog"
-    aria-modal="true"
+    aria-labelledby="{uid}-title"
     tabindex="-1"
   >
-    <h2>{title}</h2>
+    <h2 id="{uid}-title">{title}</h2>
     <p>{message}</p>
     <div class="actions">
       <button class="ok" onclick={onclose}>OK</button>
@@ -53,7 +54,7 @@
   .dialog {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 16px 20px;
     width: 380px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
@@ -79,7 +80,7 @@
   }
 
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 8px 14px;
     font-size: 13px;

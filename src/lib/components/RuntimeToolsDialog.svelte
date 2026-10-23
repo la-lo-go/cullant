@@ -29,9 +29,9 @@
 
 {#if runtimeTools.pending.length > 0}
   <div class="backdrop" role="presentation" {...dismiss}>
-    <div class="dialog" role="dialog" aria-modal="true" aria-label="Missing media tools" tabindex="-1" use:modalFocus {onkeydown}>
+    <div class="dialog" role="dialog" aria-labelledby="runtime-tools-title" tabindex="-1" use:modalFocus {onkeydown}>
       <header>
-        <h2>Missing media tools</h2>
+        <h2 id="runtime-tools-title">Missing media tools</h2>
         <button class="close" aria-label="Close" onclick={() => runtimeTools.dismiss(false)}><X size={18} /></button>
       </header>
       <ScrollArea>
@@ -60,22 +60,104 @@
 {/if}
 
 <style>
-  .backdrop { position: fixed; inset: 0; z-index: 110; display: flex; align-items: center; justify-content: center; background: #0008; padding: var(--dialog-edge-margin); padding-top: calc(var(--inset-top) + var(--dialog-edge-margin)); padding-bottom: calc(var(--inset-bottom) + var(--dialog-edge-margin)); }
-  .dialog { outline: none; width: 460px; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; background: #232329; border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: 0 18px 50px #0008; }
-  header, footer { display: flex; align-items: center; gap: 12px; padding: 14px 16px; }
-  header { border-bottom: 1px solid var(--border); }
-  h2 { flex: 1; margin: 0; font-size: 15px; }
-  h3 { margin: 0 0 6px; font-size: 13px; }
-  .body { padding: 16px; }
-  section + section { margin-top: 20px; }
-  p, li { color: #bbb; font-size: 12px; line-height: 1.5; margin: 0 0 8px; }
-  .lead { margin-bottom: 4px; }
-  ul { margin: 0 0 8px; padding-left: 18px; }
-  li { margin: 0 0 2px; }
-  button { font: inherit; cursor: pointer; border: 1px solid var(--border); background: var(--control); color: inherit; padding: 7px 12px; border-radius: 6px; font-size: 12px; }
-  .close, .link { display: inline-flex; align-items: center; gap: 6px; border: none; background: none; }
-  .close { padding: 5px; }
-  .link { color: var(--accent); padding: 4px 0; margin-right: 12px; }
-  footer { justify-content: flex-end; border-top: 1px solid var(--border); }
-  .primary { background: var(--accent-fill); color: #fff; }
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 110;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0008;
+    padding: var(--dialog-edge-margin);
+    padding-top: calc(var(--inset-top) + var(--dialog-edge-margin));
+    padding-bottom: calc(var(--inset-bottom) + var(--dialog-edge-margin));
+  }
+  .dialog {
+    outline: none;
+    width: 460px;
+    max-width: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #232329;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-xl);
+    box-shadow: 0 18px 50px #0008;
+  }
+  header,
+  footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+  }
+  header {
+    border-bottom: 1px solid var(--border);
+  }
+  h2 {
+    flex: 1;
+    margin: 0;
+    font-size: 15px;
+  }
+  h3 {
+    margin: 0 0 6px;
+    font-size: 13px;
+  }
+  .body {
+    padding: 16px;
+  }
+  section + section {
+    margin-top: 20px;
+  }
+  p,
+  li {
+    color: #bbb;
+    font-size: 12px;
+    line-height: 1.5;
+    margin: 0 0 8px;
+  }
+  .lead {
+    margin-bottom: 4px;
+  }
+  ul {
+    margin: 0 0 8px;
+    padding-left: 18px;
+  }
+  li {
+    margin: 0 0 2px;
+  }
+  button {
+    font: inherit;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--control);
+    color: inherit;
+    padding: 7px 12px;
+    border-radius: var(--r-md);
+    font-size: 12px;
+  }
+  .close,
+  .link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: none;
+    background: none;
+  }
+  .close {
+    padding: 5px;
+  }
+  .link {
+    color: var(--accent);
+    padding: 4px 0;
+    margin-right: 12px;
+  }
+  footer {
+    justify-content: flex-end;
+    border-top: 1px solid var(--border);
+  }
+  .primary {
+    background: var(--accent-fill);
+    color: #fff;
+  }
 </style>

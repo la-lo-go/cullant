@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { thumbUrl, displayDims, containFit, type ItemLite } from "../api";
   import { describeHalf, session } from "../stores/session.svelte";
   import { settings } from "../stores/settings.svelte";
@@ -33,14 +34,6 @@
     companionIndex?: number | null;
     preview?: { side: Side; size: number };
   } = $props();
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   const CELL = 96;
   const OVERSCAN = 6;
@@ -173,6 +166,7 @@
   // A single step scrolls smoothly; while stepping fast (holding an arrow key)
   // we fall back to instant so recentring never lags behind the selection.
   const RAPID_STEP_MS = 180;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let lastRecentre = 0;
   let hasCentered = false;
   // Lock-carousel: `performance.now()` of the last scroll the user drove while
@@ -246,7 +240,7 @@
     // intermediate frames whose centered cell reads as an earlier index, driving
     // the focus (and thus the loupe) briefly backwards — the "previous image
     // glitch" — before it lands. A jump has no intermediate frames.
-    const instant = !hasCentered || rapid || settings.lockCarousel;
+    const instant = !hasCentered || rapid || settings.lockCarousel || reduceMotion;
     selfScroll = true;
     scrollMain(target, instant ? "auto" : "smooth");
     // A recentre that changes nothing (already there, or clamped to the same
@@ -483,13 +477,21 @@
                   />
                 {/if}
                 {#if settings.filmstripShowLabel && v.item.label}
-                  <span class="label-bar" style:border-color={labelColors[v.item.label]}></span>
+                  <span class="label-bar" style:border-color={LABEL_COLORS[v.item.label]}></span>
                 {/if}
               </div>
-              <div class="info-top">
+              <div
+                class="info-top"
+                class:has-chip={settings.filmstripShowType &&
+                  ((session.mirrorMode && v.item.groupSize > 1) || v.item.kind === 0)}
+              >
                 {#if burst}
-                  <span class="burst" title="Shot {burst.position} of a burst of {burst.total}">
-                    <Layers size={8} />{burst.position}/{burst.total}
+                  <span
+                    class="burst"
+                    class:long={burst.total > 99}
+                    title="Shot {burst.position} of a burst of {burst.total}"
+                  >
+                    <Layers size={8} />{burst.position}<span class="burst-total">/{burst.total}</span>
                   </span>
                 {/if}
                 {#if settings.filmstripShowType}
@@ -500,16 +502,22 @@
                       class:split={v.item.decoupled}
                       title={pair ? pair.halves.map(describeHalf).join(" · ") : undefined}
                     >
-                      {#if v.item.decoupled}
-                        <Scissors size={8} /><span>SPLIT</span>
-                      {:else if pair?.diverged}
-                        {#each pair.halves as h, hi (h.id)}
-                          {#if hi > 0}<span class="half-sep"></span>{/if}
-                          <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
-                        {/each}
-                      {:else}
-                        RAW+JPG
-                      {/if}
+                      <span class="type-name">
+                        {#if v.item.decoupled}
+                          <Scissors size={8} /><span class="split-label">SPLIT</span>
+                        {:else if pair?.diverged}
+                          <span class="pair-halves" class:many={pair.halves.length > 2}>
+                            {#each pair.halves as h, hi (h.id)}
+                              {#if hi > 0}<span class="half-sep"></span>{/if}
+                              <span class="half" class:struck={h.queuedDelete}>{h.name}</span>
+                            {/each}
+                          </span>
+                          <span class="pair-count">{pair.halves.length}</span>
+                        {:else}
+                          <span class="type-full">RAW+JPG</span>
+                          <span class="type-short">R+J</span>
+                        {/if}
+                      </span>
                     </span>
                   {:else if v.item.kind === 0}
                     <span class="chip">RAW</span>
@@ -802,13 +810,13 @@
   .strip-peek.bottom {
     bottom: var(--safe-bottom);
     border-bottom: none;
-    border-radius: 6px 6px 0 0;
+    border-radius: var(--r-md) var(--r-md) 0 0;
   }
 
   .strip-peek.top {
     top: 0;
     border-top: none;
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 var(--r-md) var(--r-md);
   }
 
   .strip-peek.left,
@@ -822,13 +830,13 @@
   .strip-peek.left {
     left: var(--safe-left);
     border-left: none;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--r-md) var(--r-md) 0;
   }
 
   .strip-peek.right {
     right: var(--safe-right);
     border-right: none;
-    border-radius: 6px 0 0 6px;
+    border-radius: var(--r-md) 0 0 var(--r-md);
   }
 
   .strip-peek:hover {
@@ -853,6 +861,10 @@
     background: var(--surface);
   }
 
+  .strip-tab :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .strip-tab:hover {
     background: var(--hover);
     border-color: var(--accent);
@@ -867,13 +879,13 @@
   .bottom .strip-tab {
     top: 0;
     border-top: none;
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 var(--r-md) var(--r-md);
   }
 
   .top .strip-tab {
     bottom: 0;
     border-bottom: none;
-    border-radius: 6px 6px 0 0;
+    border-radius: var(--r-md) var(--r-md) 0 0;
   }
 
   .vertical .strip-tab {
@@ -887,13 +899,13 @@
   .left .strip-tab {
     right: 0;
     border-right: none;
-    border-radius: 6px 0 0 6px;
+    border-radius: var(--r-md) 0 0 var(--r-md);
   }
 
   .right .strip-tab {
     left: 0;
     border-left: none;
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--r-md) var(--r-md) 0;
   }
 
   .filmstrip .strip-tab :global(.dock-grip) {
@@ -946,10 +958,11 @@
        that leaves, via the flex centering below. */
     padding: 8px 3px;
     box-sizing: border-box;
+    container-type: inline-size;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
+    border-radius: var(--r-md);
   }
 
   /* Transposed: the cell is a row of the column, so its padding swaps too. */
@@ -979,7 +992,7 @@
   .photo {
     position: relative;
     overflow: hidden;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
   }
 
   img {
@@ -1036,7 +1049,7 @@
   }
 
   .no-poster span {
-    font-size: 8px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.03em;
   }
@@ -1074,10 +1087,10 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    font-size: 8px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 4px;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
     color: #8fd0ff;
     pointer-events: none;
@@ -1102,7 +1115,7 @@
     color: #ffb86b;
   }
 
-  /* Burst badge: the grid's pill, sized down for a filmstrip cell. */
+  /* Burst badge: the grid's pill, placed for a filmstrip cell. */
   .burst {
     position: absolute;
     top: 4px;
@@ -1110,7 +1123,7 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
-    font-size: 8px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     padding: 1px 4px;
@@ -1137,7 +1150,7 @@
   }
 
   .flagbadge.reject {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   /* Cell-width rows stay readable when a portrait photo is narrower than its badges. */
@@ -1193,10 +1206,84 @@
     white-space: nowrap;
   }
 
+  .info-top > .chip .type-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pair-halves {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .type-short,
+  .pair-count {
+    display: none;
+  }
+
+  /* The container queries below measure the cell content box: the cell width
+     minus 6 px in a horizontal strip (90 px for a 96 px cell) and minus 16 px
+     in a vertical strip. The full RAW+JPG label and a flag need about 77 px of
+     row, so a horizontal cell keeps the full label unless a burst badge comes first. */
+  @container (max-width: 80px) {
+    .type-full {
+      display: none;
+    }
+
+    .type-short {
+      display: inline;
+    }
+  }
+
+  /* A burst badge, a pair chip and a flag share one line of a 96 px cell when
+     the badge has no icon and no total above 99, and the chip is short. */
+  @container (max-width: 100px) {
+    .burst :global(svg),
+    .burst ~ .chip .type-full,
+    .burst ~ .chip .split-label {
+      display: none;
+    }
+
+    .has-chip .burst.long .burst-total,
+    .burst ~ .chip .pair-halves {
+      display: none;
+    }
+
+    .burst ~ .chip .type-short,
+    .burst ~ .chip .pair-halves + .pair-count {
+      display: inline;
+    }
+  }
+
+  /* The half names need a content box of about 74 px for two halves and 94 px
+     for three. Below that the chip shows how many halves the shot has. */
+  @container (max-width: 94px) {
+    .pair-halves.many {
+      display: none;
+    }
+
+    .pair-halves.many + .pair-count {
+      display: inline;
+    }
+  }
+
+  @container (max-width: 74px) {
+    .pair-halves {
+      display: none;
+    }
+
+    .pair-halves + .pair-count {
+      display: inline;
+    }
+  }
+
   .info-top > .flagbadge {
     margin-left: auto;
     padding: 1px;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     background: rgba(0, 0, 0, 0.55);
   }
 
@@ -1209,7 +1296,7 @@
     bottom: 7px;
     left: 4px;
     color: #ffd166;
-    font-size: 8px;
+    font-size: var(--fs-xs);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
     pointer-events: none;
   }

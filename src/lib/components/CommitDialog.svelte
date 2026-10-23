@@ -922,7 +922,7 @@
   .dialog {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 16px 20px;
     width: 520px;
     max-width: 100%;
@@ -956,7 +956,7 @@
   .conflicts {
     background: #3a2e1e;
     border: 1px solid #7a5c2e;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 8px 10px;
     font-size: 12px;
   }
@@ -993,6 +993,14 @@
     gap: 4px;
   }
 
+  .row :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
+  .hrow :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .row {
     /* `position: relative` + `overflow: hidden` clip the hold-fill to the row's
        rounded rectangle; its contents sit above the fill via z-index. */
@@ -1005,7 +1013,7 @@
     padding: 8px 10px;
     background: var(--control);
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #e8e8e8;
     font-size: 13px;
     font-family: inherit;
@@ -1033,7 +1041,7 @@
   }
 
   .hold-fill.danger {
-    background: #b3352e;
+    background: var(--danger-fill);
     opacity: 0.6;
   }
 
@@ -1084,7 +1092,7 @@
   }
 
   .unqueue:hover {
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .mode {
@@ -1096,7 +1104,7 @@
 
   select,
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 5px 10px;
     font-size: 13px;
@@ -1247,7 +1255,7 @@
   }
 
   .error {
-    color: #ff6b6b;
+    color: var(--danger);
     font-size: 13px;
     margin: 0;
   }
@@ -1264,7 +1272,7 @@
     gap: 4px;
     background: var(--control);
     border: 1px solid transparent;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     color: #bbb;
     padding: 4px 10px;
     cursor: pointer;
@@ -1307,7 +1315,7 @@
     overflow: hidden;
     background: var(--control);
     border: 1px solid transparent;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     color: #ddd;
     padding: 7px 10px;
     cursor: pointer;
@@ -1364,7 +1372,7 @@
   }
 
   .hbadge.err {
-    color: #ff8f8f;
+    color: var(--danger);
     border-color: #6b3030;
   }
 
@@ -1437,7 +1445,7 @@
     height: 20px;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     color: #bbb;
     cursor: pointer;
     padding: 0;

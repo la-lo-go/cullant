@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { untrack } from "svelte";
   import { previewUrl, type ItemLite } from "../api";
   import { session } from "../stores/session.svelte";
@@ -24,14 +25,6 @@
   import { edgeBounce } from "../anim";
 
   type Side = "left" | "right";
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   let panes = $state<HTMLElement | null>(null);
   // Bounce the panes when stepping past the first/last photo. Track the
@@ -268,7 +261,7 @@
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(left.id)}
           <span class="caption" class:focused-caption={focusedSide === "left"}>
-            <span style:color={left.label ? labelColors[left.label] : null} title={left.label ? formatColorLabel(left.label) : undefined}>{left.name}.{left.ext}</span>
+            <span style:color={left.label ? LABEL_COLORS[left.label] : null} title={left.label ? formatColorLabel(left.label) : undefined}>{left.name}.{left.ext}</span>
             {#if left.flag === 1}<span class="pick" title="Picked"><Check size={13} /></span>{/if}
             {#if left.flag === -1}<span class="reject" title="Rejected"><X size={13} /></span>{/if}
             {#if b}
@@ -326,7 +319,7 @@
         {#if !view.fullscreen}
           {@const b = session.burstPositionOf(right.id)}
           <span class="caption" class:focused-caption={focusedSide === "right"}>
-            <span style:color={right.label ? labelColors[right.label] : null} title={right.label ? formatColorLabel(right.label) : undefined}>{right.name}.{right.ext}</span>
+            <span style:color={right.label ? LABEL_COLORS[right.label] : null} title={right.label ? formatColorLabel(right.label) : undefined}>{right.name}.{right.ext}</span>
             {#if right.flag === 1}<span class="pick" title="Picked"><Check size={13} /></span>{/if}
             {#if right.flag === -1}<span class="reject" title="Rejected"><X size={13} /></span>{/if}
             {#if b}
@@ -398,7 +391,7 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     font-size: 14px;
     font-family: inherit;
@@ -465,7 +458,7 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     font-family: inherit;
     background: rgba(0, 0, 0, 0.45);
@@ -502,7 +495,7 @@
     opacity: 0.7;
     background: rgba(0, 0, 0, 0.5);
     padding: 2px 8px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     pointer-events: none;
   }
 
@@ -518,7 +511,7 @@
   .reject {
     display: inline-flex;
     align-items: center;
-    color: #ff6b6b;
+    color: var(--danger);
   }
 
   .burst {
@@ -533,10 +526,10 @@
   }
 
   .tagpill {
-    font-size: 10px;
+    font-size: var(--fs-xs);
     font-weight: 600;
     padding: 1px 6px;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     border: 1px solid;
     /* Border color and a ~18% alpha tint (2e suffix) are set inline from the
        tag's #rrggbb color. */

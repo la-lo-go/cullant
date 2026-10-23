@@ -380,7 +380,7 @@
     gap: 2px;
     width: 100%;
     padding: 14px 10px 10px;
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     border: 1px solid var(--border);
     background: var(--surface);
     color: inherit;
@@ -418,7 +418,7 @@
     width: 84px;
     height: 84px;
     overflow: hidden;
-    border-radius: 5px;
+    border-radius: var(--r-md);
     box-shadow: 0 3px 8px rgba(0, 0, 0, 0.35);
     transition: transform 180ms ease-out;
   }
@@ -529,7 +529,7 @@
   }
 
   .card.unavailable .meta {
-    color: #ff8f8f;
+    color: var(--danger);
     opacity: 0.85;
   }
 
@@ -570,7 +570,7 @@
     height: 26px;
     border: none;
     background: none;
-    border-radius: 7px;
+    border-radius: var(--r-md);
     color: #d8d8de;
     opacity: 0;
     /* Hidden means inert. Without this the invisible button still takes the

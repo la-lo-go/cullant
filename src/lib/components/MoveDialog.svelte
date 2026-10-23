@@ -86,11 +86,11 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-label="Queue move / copy"
+    aria-labelledby="move-dialog-title"
     tabindex="-1"
     use:modalFocus={{ initialFocus: "input" }}
   >
-    <h2>Queue move / copy</h2>
+    <h2 id="move-dialog-title">Queue move / copy</h2>
     <p class="targets">{photoCount} {catalog.media === "videos" ? (photoCount === 1 ? "video" : "videos") : (photoCount === 1 ? "photo" : "photos")} · {fileCount} {fileCount === 1 ? "file" : "files"}</p>
     <p class="hint">
       Destination subfolder inside the project (created when you execute reviewed changes).
@@ -125,7 +125,7 @@
   .dialog {
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     padding: 16px 20px;
     width: 360px;
     max-width: calc(100vw - var(--dialog-edge-margin) * 2);
@@ -158,7 +158,7 @@
 
   input,
   button {
-    border-radius: 6px;
+    border-radius: var(--r-md);
     border: 1px solid var(--border-strong);
     padding: 7px 10px;
     font-size: 13px;
@@ -192,7 +192,7 @@
   }
 
   .error {
-    color: #ff6b6b;
+    color: var(--danger);
     font-size: 13px;
     margin: 0;
   }

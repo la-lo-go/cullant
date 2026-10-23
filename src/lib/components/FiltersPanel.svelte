@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { LABEL_COLORS } from "../labels";
   import { catalog } from "../stores/catalog.svelte";
   import { backdropDismiss } from "../backdrop";
   import { keepClamped } from "../popover";
@@ -43,14 +44,6 @@
     { value: "anyflag", label: "Any flag", icon: Flag },
     { value: "notrejected", label: "Not rejected", icon: ShieldCheck },
   ];
-
-  const labelColors: Record<string, string> = {
-    Red: "#e05555",
-    Yellow: "#e0c34f",
-    Green: "#59b85e",
-    Blue: "#5588e0",
-    Purple: "#9a66d6",
-  };
 
   // Only tags that apply to the current media type (photos vs videos).
   const scopedTags = $derived(
@@ -502,7 +495,7 @@
           <button
             class="dot"
             class:active={session.labelFilter === label}
-            style="--c: {labelColors[label]}"
+            style="--c: {LABEL_COLORS[label]}"
             aria-label={formatColorLabel(label)}
             title={formatColorLabel(label)}
             onclick={() => {
@@ -832,6 +825,10 @@
     z-index: 40;
   }
 
+  .panel :global(button:focus-visible) {
+    outline-offset: -2px;
+  }
+
   .panel {
     /* The panel takes focus on open (so Escape works); it is not a text field,
        so suppress the focus ring the browser would draw around it. */
@@ -866,7 +863,7 @@
     padding: 12px 14px;
     background: var(--surface-2);
     border: 1px solid var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
     font-size: 12px;
   }
@@ -900,7 +897,7 @@
     height: 24px;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #bbb;
     cursor: pointer;
     padding: 0;
@@ -917,7 +914,7 @@
     gap: 4px;
     background: none;
     border: 1px solid var(--border-strong);
-    border-radius: 6px;
+    border-radius: var(--r-md);
     color: #bbb;
     padding: 3px 8px;
     cursor: pointer;
@@ -995,7 +992,7 @@
     box-sizing: border-box;
     background: var(--control);
     border: 1px solid transparent;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     color: #eee;
     padding: 5px 8px;
     font-size: 12px;
@@ -1003,7 +1000,7 @@
   }
 
   .namefield::placeholder {
-    color: #6a6a72;
+    color: var(--text-placeholder);
   }
 
   .namefield:focus {
@@ -1021,7 +1018,7 @@
     box-sizing: border-box;
     min-height: 26px;
     padding: 0 9px;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;
@@ -1093,7 +1090,7 @@
     box-sizing: border-box;
     min-height: 26px;
     padding: 0 9px;
-    border-radius: 3px;
+    border-radius: var(--r-sm);
     cursor: pointer;
     font-size: 12px;
     font-family: inherit;

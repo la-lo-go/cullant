@@ -36,12 +36,12 @@
     onclick={(e) => e.stopPropagation()}
     onkeydown={onKeydown}
     role="dialog"
-    aria-label="Support Cullant"
+    aria-labelledby="support-dialog-title"
     tabindex="-1"
   >
     <header>
       <Heart size={16} />
-      <h2>Support Cullant</h2>
+      <h2 id="support-dialog-title">Support Cullant</h2>
       <button class="close-x" onclick={onclose} aria-label="Close" title="Close">
         <X size={18} />
       </button>
@@ -101,7 +101,7 @@
     max-height: 100%;
     background: #232329;
     border: 1px solid var(--border-strong);
-    border-radius: 12px;
+    border-radius: var(--r-xl);
     box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
   }
 
@@ -131,7 +131,7 @@
     width: 40px;
     height: 32px;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: none;
     color: inherit;
     opacity: 0.6;
@@ -147,7 +147,7 @@
 
   .intro {
     margin: 0 2px 8px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     line-height: 1.55;
     opacity: 0.75;
   }
@@ -160,7 +160,7 @@
     gap: 5px;
     padding: 12px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     background: rgba(0, 0, 0, 0.16);
   }
 
@@ -178,7 +178,7 @@
   }
 
   .h-title {
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -230,7 +230,7 @@
   }
 
   .label {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
 
   .note {

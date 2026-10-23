@@ -26,6 +26,7 @@
   const heldKeys = new Set<string>();
   let interacting = false;
   let keyboardMoving = false;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function updateInteraction() {
     const active = activePointer !== -1 || heldKeys.size > 0;
@@ -147,7 +148,7 @@
   {#each items as item, i (keyOf(item, i))}
     <li class="drow" class:dragging={dragIndex === i}
       style:translate={dragIndex === i ? `0 ${dragOffset}px` : null}
-      animate:flip={{ duration: dragIndex === i ? 0 : 140 }}>
+      animate:flip={{ duration: reduceMotion || dragIndex === i ? 0 : 140 }}>
       <button class="handle" type="button" aria-label={itemLabel ? `Reorder ${itemLabel(item, i)}` : "Drag to reorder"}
         title="Drag to reorder. Use Up or Down when the handle has focus."
         onpointerdown={(e) => startDrag(e, i)} onkeydown={(e) => void moveByKeyboard(e, i)}
@@ -173,7 +174,7 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    border-radius: 6px;
+    border-radius: var(--r-md);
   }
   .drow.dragging {
     position: relative;
@@ -191,8 +192,8 @@
     padding: 0;
     background: none;
     border: none;
-    border-radius: 4px;
-    color: #6a6a72;
+    border-radius: var(--r-sm);
+    color: var(--text-faint);
     cursor: grab;
     touch-action: none;
   }
@@ -203,7 +204,4 @@
   .reordering { user-select: none; }
   .drow.dragging .handle { cursor: grabbing; color: #ddd; }
   .content { flex: 1; min-width: 0; }
-  @media (prefers-reduced-motion: reduce) {
-    .drow { animation-duration: 0s !important; }
-  }
 </style>

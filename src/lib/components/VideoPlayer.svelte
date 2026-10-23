@@ -23,6 +23,9 @@
 
   let video = $state<HTMLVideoElement | null>(null);
   let wrap = $state<HTMLElement | null>(null);
+  // The ring shows only when the user tabbed in; code focus on open must not frame the video.
+  let tabbedIn = $state(false);
+  let tabPressed = false;
 
   // Two-way bindings to the media element. Svelte keeps these live as the video
   // plays and seeks, so the transport UI is a pure reflection of element state.
@@ -465,20 +468,34 @@
   }
 </script>
 
-<svelte:window onfullscreenchange={onFullscreenChange} />
+<svelte:window
+  onfullscreenchange={onFullscreenChange}
+  onkeydowncapture={(e) => (tabPressed = e.key === "Tab")}
+  onkeyupcapture={() => (tabPressed = false)}
+  onpointerdowncapture={() => (tabPressed = false)}
+/>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <div
   class="video-wrap"
   class:hide-cursor={!uiVisible}
+  class:tabbed-in={tabbedIn}
   bind:this={wrap}
+  onfocus={() => {
+    tabbedIn = tabPressed;
+    tabPressed = false;
+  }}
+  onblur={() => (tabbedIn = false)}
   tabindex="0"
   role="application"
   aria-label="Video player"
   onkeydown={onKeydown}
   onpointermove={revealUi}
-  onpointerdown={revealUi}
+  onpointerdown={() => {
+    tabbedIn = false;
+    revealUi();
+  }}
 >
   <!-- svelte-ignore a11y_media_has_caption -->
   {#key nativeSrc}
@@ -698,6 +715,11 @@
     outline: none;
   }
 
+  .video-wrap.tabbed-in:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
   .player {
     flex: 1;
     min-width: 0;
@@ -722,7 +744,7 @@
     flex-wrap: wrap;
     gap: 12px;
     padding: 10px 12px;
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     color: rgba(255, 255, 255, 0.85);
     background: rgba(0, 0, 0, 0.8);
   }
@@ -804,7 +826,7 @@
     display: inline-flex;
     padding: 3px;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--r-sm);
     background: none;
     color: inherit;
     cursor: pointer;
@@ -830,7 +852,7 @@
     gap: 6px;
     padding: 6px 12px;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     background: rgba(255, 255, 255, 0.12);
     color: #fff;
     font-size: 12px;
@@ -894,12 +916,6 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .surface-flash {
-      animation-duration: 0.01s;
-    }
-  }
-
   /* Done converting: still true, no longer news. */
   .remuxing.settled {
     opacity: 0.55;
@@ -944,7 +960,7 @@
     align-items: center;
     gap: 10px;
     padding: 6px 12px;
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     background: rgba(0, 0, 0, 0.55);
     backdrop-filter: blur(6px);
     transition:
@@ -981,7 +997,7 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--r-md);
     padding: 0;
     background: rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.85);
@@ -1086,7 +1102,7 @@
     align-items: center;
     gap: 8px;
     padding: 10px 8px;
-    border-radius: 10px;
+    border-radius: var(--r-lg);
     background: rgba(0, 0, 0, 0.85);
     backdrop-filter: blur(6px);
   }
