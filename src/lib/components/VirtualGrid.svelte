@@ -2569,7 +2569,7 @@
   }
 
   @container (width < 92px) {
-    .has-tally.long-burst > .chip {
+    .has-tally.long-burst > .chip.pair:not(.split, .diverged) {
       display: none;
     }
   }
@@ -2586,8 +2586,12 @@
     }
   }
 
+  /* A long stack can have a tally such as 40 and 110, so the split and
+     diverged chips keep the 84 px limit beside it. */
   @container (width < 84px) {
-    .has-burst.has-tally > .chip {
+    .has-burst.has-tally > .chip.pair:not(.split, .diverged),
+    .has-tally.long-burst > .chip.split,
+    .has-tally.long-burst > .chip.diverged {
       display: none;
     }
   }
@@ -2610,8 +2614,20 @@
     }
   }
 
+  @container (width < 73px) {
+    .has-tally > .chip.split {
+      display: none;
+    }
+  }
+
   @container (width < 71px) {
     .has-flag.long-burst > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (width < 69px) {
+    .has-tally > .chip.diverged {
       display: none;
     }
   }
