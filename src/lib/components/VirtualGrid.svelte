@@ -2388,7 +2388,7 @@
 
   /* A burst position drops to the bare number, without the icon, when the chip
      and a flag or tally share the row. */
-  @container (max-width: 136px) {
+  @container (width < 137px) {
     .has-burst.has-chip:is(.has-flag, .has-tally) .burst-total,
     .has-burst.has-chip:is(.has-flag, .has-tally) .burst :global(svg) {
       display: none;
@@ -2497,7 +2497,7 @@
 
   /* The half names need about 66 px for two halves and 88 px for three. Below
      that the chip shows how many halves the shot has. */
-  @container (max-width: 88px) {
+  @container (width < 89px) {
     .chip {
       padding: 1px 2px;
     }
@@ -2690,7 +2690,7 @@
 
   /* The SPLIT word needs about 54 px; the scissors icon stays. The flag keeps
      the row, so a burst badge drops when even its bare count does not fit. */
-  @container (max-width: 54px) {
+  @container (width < 55px) {
     .split-label {
       display: none;
     }
