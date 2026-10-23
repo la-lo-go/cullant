@@ -1465,6 +1465,18 @@
     }
   }
 
+  /* Wider phones: a stretched Sort & Filter grows too long, so the four buttons
+     keep their natural width and sit together under the view selector. */
+  @media (min-width: 470px) and (max-width: 639px) {
+    .toolbar-right {
+      justify-content: flex-end;
+    }
+    .toolbar-right .filters-anchor,
+    .toolbar-right .filters-anchor > button {
+      flex: 0 0 auto;
+    }
+  }
+
 
   /* Tablet width, zone too narrow for one row: Sort & Filter stretches to the
      width of the action group below it, and both stay right-aligned. The limit
