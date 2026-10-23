@@ -99,6 +99,7 @@
   // A single toolbar row is 30px; the right zone is taller only when it wraps.
   let toolbarRightH = $state(0);
   const toolbarStacked = $derived(toolbarRightH > 48);
+  const countDigits = $derived(String(Math.max(catalog.mediaCounts.photos, catalog.mediaCounts.videos)).length);
   // Two-level bar: the side zones have equal width, so the selector sits at the
   // window centre. Shift it by half the difference of the zone contents, so the
   // gaps on both sides are equal. A transform never changes the layout.
@@ -706,7 +707,7 @@
     {#if !view.fullscreen}
     <header class="toolbar" class:stacked={toolbarStacked} class:has-toggle={view.mode !== "grid" && !IS_TOUCH} use:tooltips use:balanceCenter>
       <div class="toolbar-left">
-        <div class="media-toggle">
+        <div class="media-toggle" class:digits4={countDigits === 4} class:digits5={countDigits >= 5}>
           <button
             class="media-btn"
             class:active={catalog.media === "photos"}
@@ -717,7 +718,7 @@
           >
             <ImageIcon size={14} />
             <span>Photos</span>
-            <span class="count">{catalog.mediaCounts.photos} {catalog.mediaCounts.photos === 1 ? "file" : "files"}</span>
+            <span class="count">{catalog.mediaCounts.photos}<span class="count-unit">{catalog.mediaCounts.photos === 1 ? " file" : " files"}</span></span>
           </button>
           <button
             class="media-btn"
@@ -729,7 +730,7 @@
           >
             <VideoIcon size={14} />
             <span>Videos</span>
-            <span class="count">{catalog.mediaCounts.videos} {catalog.mediaCounts.videos === 1 ? "file" : "files"}</span>
+            <span class="count">{catalog.mediaCounts.videos}<span class="count-unit">{catalog.mediaCounts.videos === 1 ? " file" : " files"}</span></span>
           </button>
         </div>
       </div>
@@ -1382,6 +1383,33 @@
     min-width: 0;
     flex-wrap: wrap;
     row-gap: 6px;
+  }
+
+  /* The zone is sized by flex (basis 0), so the query below reads the space it
+     gets, not the width of the pill. */
+  .toolbar-left {
+    container-type: inline-size;
+  }
+
+  /* The word "files" goes first when the pill no longer fits beside the view
+     selector on a phone. Each limit is the pill's width with the word, for that
+     many digits. From 600 px the pill is stacked and always has room. */
+  @media (max-width: 599px) {
+    @container (width < 244px) {
+      .media-toggle .count-unit {
+        display: none;
+      }
+    }
+    @container (width < 256px) {
+      .media-toggle.digits4 .count-unit {
+        display: none;
+      }
+    }
+    @container (width < 268px) {
+      .media-toggle.digits5 .count-unit {
+        display: none;
+      }
+    }
   }
 
   .toolbar-right {
