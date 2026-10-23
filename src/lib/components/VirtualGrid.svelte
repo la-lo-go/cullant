@@ -1449,6 +1449,7 @@
               class:has-chip={(session.mirrorMode && v.item.groupSize > 1) || v.item.kind === 0}
               class:has-flag={!summary && (v.item.flag !== 0 || session.pendingDeleteIds.has(v.item.id))}
               class:has-tally={summary && (summary.picks > 0 || summary.rejects > 0)}
+              class:tally-s={summary && (summary.picks > 0) !== (summary.rejects > 0) && summary.picks + summary.rejects < 10}
               class:long-burst={stacked ? v.span > 99 : burstAt && burstAt.position > 99}
             >
               {#if stacked}
@@ -2382,7 +2383,16 @@
   }
 
   @container (max-width: 140px) {
-    .has-burst.has-tally .counts :global(svg) {
+    .has-burst.has-tally:not(.tally-s) .counts :global(svg),
+    .has-burst.has-tally.tally-s > .chip.diverged ~ .counts :global(svg) {
+      display: none;
+    }
+  }
+
+  /* A tally with one group and one digit is narrow, so its icon fits far below
+     the width the two-group tally needs. */
+  @container (width < 100px) {
+    .has-burst.has-tally.tally-s .counts :global(svg) {
       display: none;
     }
   }
