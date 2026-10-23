@@ -1404,10 +1404,7 @@
      center sit after left rather than truly mid-viewport, but there's no
      third zone competing for that row's space); the right zone claims a full
      row of its own (flex-basis 100% forces the wrap) and wraps its own
-     buttons across as many further rows as it needs. `space-between` then
-     spreads those buttons edge-to-edge, filling the row's free space as the
-     gaps between them (with `gap` as the minimum floor) — one row when they
-     fit, every wrapped row likewise balanced when they don't. */
+     buttons across as many further rows as it needs. */
   @media (max-width: 720px) {
     .toolbar-actions {
       display: contents;
@@ -1418,8 +1415,20 @@
     }
     .toolbar-right {
       flex: 1 1 100%;
-      justify-content: space-between;
       gap: 4px;
+    }
+    /* Sort & Filter takes the width the other buttons leave, so the row reads
+       as one even group. Its basis is its natural width, so the wrap point does
+       not move. */
+    .toolbar-right .filters-anchor {
+      flex: 1 1 auto;
+    }
+    .toolbar-right .filters-anchor > button {
+      flex: 1;
+      justify-content: flex-start;
+    }
+    .toolbar .sort-hint {
+      margin-left: auto;
     }
     .toolbar .toolbar-actions > button,
     .toolbar-right .filters-anchor > button,
