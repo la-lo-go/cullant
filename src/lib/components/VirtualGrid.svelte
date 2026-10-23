@@ -2560,8 +2560,12 @@
     }
   }
 
-  /* A chip drops only where its shortest form does not fit beside the burst
-     badge and the flag or tally. Each chip form has its own width. */
+  /* Each chip form (R+J, RAW, split, diverged) has its own drop limit beside
+     the burst badge and the flag or tally. A limit is the last width where the
+     shortest form wraps in Arial, rounded up to the next whole pixel. It is
+     sized for a two-digit burst, or a three-digit one with .long-burst. The
+     margin is less than 1 px, and a one-digit burst gets more. Segoe UI needs
+     up to 2 px less, so there a chip can drop in a cell where it fits. */
   @container (width < 97px) {
     .has-tally.long-burst > .chip.raw {
       display: none;
@@ -2727,12 +2731,7 @@
       display: none;
     }
 
-    .has-flag.long-burst > .burst {
-      display: none;
-    }
-  }
-
-  @container (width < 55px) {
+    .has-flag.long-burst > .burst,
     .has-flag > .chip.pair:not(.split, .diverged) {
       display: none;
     }
