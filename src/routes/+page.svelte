@@ -682,7 +682,7 @@
   {/if}
   {#if catalog.project}
     {#if !view.fullscreen}
-    <header class="toolbar" class:stacked={toolbarStacked} class:has-toggle={view.mode !== "grid"} use:tooltips>
+    <header class="toolbar" class:stacked={toolbarStacked} class:has-toggle={view.mode !== "grid" && !IS_TOUCH} use:tooltips>
       <div class="toolbar-left">
         <div class="media-toggle">
           <button
