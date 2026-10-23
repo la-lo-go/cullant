@@ -96,6 +96,9 @@
   // as --bottom-bar-h so overlays inside the grid — the background-status pill —
   // can sit above it instead of being buried by it in selection mode.
   let bottomBarH = $state(0);
+  // A single toolbar row is 30px; the right zone is taller only when it wraps.
+  let toolbarRightH = $state(0);
+  const toolbarStacked = $derived(toolbarRightH > 48);
   // The region of the action bar outside the grid: the view and the bar.
   let viewFrame = $state<HTMLElement | null>(null);
   const BAR_ICONS = { top: PanelTop, right: PanelRight, bottom: PanelBottom, left: PanelLeft };
@@ -679,7 +682,7 @@
   {/if}
   {#if catalog.project}
     {#if !view.fullscreen}
-    <header class="toolbar" use:tooltips>
+    <header class="toolbar" class:stacked={toolbarStacked} use:tooltips>
       <div class="toolbar-left">
         <div class="media-toggle">
           <button
@@ -715,7 +718,7 @@
           <button class:active={view.mode === "compare"} aria-label="Compare" title={shortcutHint("Compare", "view.compare")} onclick={blurring(() => { session.ensureFocus(); view.mode = "compare"; })}><Columns2 size={14} /></button>
         </div>
       </div>
-      <div class="toolbar-right">
+      <div class="toolbar-right" bind:clientHeight={toolbarRightH}>
         <div class="filters-anchor">
           <button
             class:active={session.filtersPanelOpen}
@@ -1402,6 +1405,27 @@
     }
   }
 
+
+  /* Tablet width: the right zone wraps to two levels while the left zone has
+     room to spare. Stack Photos above Videos so the selector spans both levels.
+     Phones keep the horizontal pill: there the zones already sit on separate rows. */
+  @media (min-width: 721px) {
+    .toolbar.stacked .toolbar-left {
+      align-self: stretch;
+      align-items: stretch;
+    }
+    .toolbar.stacked .media-toggle {
+      flex-direction: column;
+    }
+    .toolbar.stacked .media-btn {
+      flex: 1 1 0;
+      height: auto;
+      justify-content: flex-start;
+    }
+    .toolbar.stacked .media-btn .count {
+      margin-left: auto;
+    }
+  }
 
   button {
     border-radius: var(--r-md);
