@@ -1449,6 +1449,7 @@
               class:has-chip={(session.mirrorMode && v.item.groupSize > 1) || v.item.kind === 0}
               class:has-flag={!summary && (v.item.flag !== 0 || session.pendingDeleteIds.has(v.item.id))}
               class:has-tally={summary && (summary.picks > 0 || summary.rejects > 0)}
+              class:long-burst={stacked ? v.span > 99 : burstAt && burstAt.position > 99}
             >
               {#if stacked}
                 <span class="burst" title="Burst of {v.span} photos">
@@ -1467,6 +1468,7 @@
                 <span
                   class="chip pair"
                   class:split={v.item.decoupled}
+                  class:diverged={!v.item.decoupled && pair?.diverged}
                   title={pair ? pair.halves.map(describeHalf).join(" · ") : "RAW+JPG"}
                 >
                   <span class="type-name">
@@ -2325,10 +2327,12 @@
     display: none;
   }
 
-  /* The top row never wraps. Each width rule below switches a badge to a shorter
-     form first. A badge drops only where its shortest form does not fit beside
-     the others. The rank, highest first: the flag or tally, the stars, the burst
-     badge, the pair chip, the tags. The .has-* classes name the badges in the row. */
+  /* The top row fits on one line at the metrics of Segoe UI and Arial. Each
+     width rule below switches a badge to a shorter form first. A badge drops only
+     where its shortest form does not fit beside the others. The rank, highest
+     first: the flag or tally, the stars, the burst badge, the pair chip. The
+     .has-* classes name the badges in the row. The row keeps flex-wrap as a
+     fallback: a wider font wraps it to a second line instead of clipping a badge. */
 
   /* A burst badge shares the row with the pair chip, so the chip is short. */
   @container (max-width: 178px) {
@@ -2459,13 +2463,13 @@
     .has-flag .type-short {
       display: inline;
     }
-
-    .has-burst.has-flag > .chip.raw {
-      display: none;
-    }
   }
 
   @container (max-width: 90px) {
+    .has-burst.has-flag .chip {
+      padding: 1px 2px;
+    }
+
     .has-burst:is(.has-flag, .has-tally) .burst-total,
     .has-burst:is(.has-flag, .has-tally) .burst :global(svg) {
       display: none;
@@ -2511,10 +2515,6 @@
     .pair-halves.many + .pair-count {
       display: inline;
     }
-
-    .has-burst.has-tally > .chip {
-      display: none;
-    }
   }
 
   /* Two dots and the plus sign fit beside the full stars except in this band. */
@@ -2524,7 +2524,8 @@
     }
   }
 
-  /* A flag, a tally or a burst badge leaves no room for the SPLIT word. */
+  /* A flag, a tally or a burst badge leaves no room for the SPLIT word, so the
+     scissors icon stands alone. */
   @container (max-width: 86px) {
     .has-flag .split-label,
     .has-tally .split-label,
@@ -2544,8 +2545,28 @@
     }
   }
 
-  @container (max-width: 80px) {
-    .has-burst.has-flag > .chip {
+  /* A chip drops only where its shortest form does not fit beside the burst
+     badge and the flag or tally. Each chip form has its own width. */
+  @container (width < 87px) {
+    .has-burst.has-flag > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 84px) {
+    .has-burst.has-tally > .chip {
+      display: none;
+    }
+  }
+
+  @container (width < 81px) {
+    .has-flag.long-burst > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 75px) {
+    .has-burst.has-flag > .chip.pair:not(.split, .diverged) {
       display: none;
     }
   }
@@ -2560,21 +2581,27 @@
     }
   }
 
-  /* A stack with its icon needs about 60 px; the count alone fits down to 48 px. */
+  /* A burst icon needs about 60 px of row. Below that the badge shows its count alone. */
   @container (max-width: 60px) {
     .burst :global(svg) {
       display: none;
     }
+  }
 
-    .has-flag > .chip {
+  @container (width < 61px) {
+    .has-burst.has-flag > .chip.diverged {
       display: none;
     }
   }
 
-  /* The flag keeps the row; the burst badge drops when even its bare form
-     does not fit. The pair chip dropped earlier. */
-  @container (max-width: 58px) {
-    .has-tally > .burst {
+  @container (width < 60px) {
+    .has-flag > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 59px) {
+    .has-burst.has-flag > .chip.split {
       display: none;
     }
   }
@@ -2588,6 +2615,13 @@
     .burst-short {
       display: inline;
     }
+
+  }
+
+  @container (width < 57px) {
+    .has-tally > .burst {
+      display: none;
+    }
   }
 
   @container (max-width: 55px) {
@@ -2596,13 +2630,25 @@
     }
   }
 
-  /* The SPLIT word needs about 54 px; the scissors icon stays. */
+  /* The SPLIT word needs about 54 px; the scissors icon stays. The flag keeps
+     the row, so a burst badge drops when even its bare count does not fit. */
   @container (max-width: 54px) {
     .split-label {
       display: none;
     }
 
-    .has-flag > .burst,
+    .has-flag > .burst {
+      display: none;
+    }
+  }
+
+  @container (width < 55px) {
+    .has-flag > .chip.pair:not(.split, .diverged) {
+      display: none;
+    }
+  }
+
+  @container (width < 53px) {
     .has-burst > .chip {
       display: none;
     }
@@ -2621,6 +2667,18 @@
   /* Below this width the plus sign no longer fits beside the compact stars. */
   @container (max-width: 44px) {
     .tags .tag-more {
+      display: none;
+    }
+  }
+
+  @container (width < 44px) {
+    .has-flag > .chip.split {
+      display: none;
+    }
+  }
+
+  @container (width < 41px) {
+    .has-flag > .chip.diverged {
       display: none;
     }
   }
