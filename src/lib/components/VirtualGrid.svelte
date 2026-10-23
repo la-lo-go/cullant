@@ -2365,6 +2365,20 @@
     }
   }
 
+  /* A stack of 100 or more photos has a wider burst badge. The .long-burst
+     rules give that badge its own limits. */
+  @container (width < 151px) {
+    .has-tally.long-burst > .chip.raw ~ .counts :global(svg) {
+      display: none;
+    }
+  }
+
+  @container (width < 146px) {
+    .has-chip.has-tally.long-burst .counts :global(svg) {
+      display: none;
+    }
+  }
+
   @container (max-width: 140px) {
     .has-burst.has-tally .counts :global(svg) {
       display: none;
@@ -2547,6 +2561,18 @@
 
   /* A chip drops only where its shortest form does not fit beside the burst
      badge and the flag or tally. Each chip form has its own width. */
+  @container (width < 97px) {
+    .has-tally.long-burst > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 92px) {
+    .has-tally.long-burst > .chip {
+      display: none;
+    }
+  }
+
   @container (width < 87px) {
     .has-burst.has-flag > .chip.raw {
       display: none;
@@ -2588,6 +2614,18 @@
     }
   }
 
+  @container (max-width: 64px) {
+    .has-burst.long-burst > .chip.raw {
+      display: none;
+    }
+  }
+
+  @container (width < 63px) {
+    .has-tally.long-burst > .burst {
+      display: none;
+    }
+  }
+
   @container (width < 61px) {
     .has-burst.has-flag > .chip.diverged {
       display: none;
@@ -2601,7 +2639,8 @@
   }
 
   @container (width < 59px) {
-    .has-burst.has-flag > .chip.split {
+    .has-burst.has-flag > .chip.split,
+    .has-burst.long-burst > .chip {
       display: none;
     }
   }
