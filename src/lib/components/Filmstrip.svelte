@@ -482,8 +482,12 @@
               </div>
               <div class="info-top">
                 {#if burst}
-                  <span class="burst" title="Shot {burst.position} of a burst of {burst.total}">
-                    <Layers size={8} />{burst.position}/{burst.total}
+                  <span
+                    class="burst"
+                    class:long={burst.total > 99}
+                    title="Shot {burst.position} of a burst of {burst.total}"
+                  >
+                    <Layers size={8} />{burst.position}<span class="burst-total">/{burst.total}</span>
                   </span>
                 {/if}
                 {#if settings.filmstripShowType}
@@ -496,7 +500,7 @@
                     >
                       <span class="type-name">
                         {#if v.item.decoupled}
-                          <Scissors size={8} /><span>SPLIT</span>
+                          <Scissors size={8} /><span class="split-label">SPLIT</span>
                         {:else if pair?.diverged}
                           <span class="pair-halves" class:many={pair.halves.length > 2}>
                             {#each pair.halves as h, hi (h.id)}
@@ -1229,20 +1233,27 @@
   }
 
   /* A burst badge, a pair chip and a flag share one line of a 96 px cell when
-     the badge has no icon and the chip is short. */
+     the badge has no icon and no total above 99, and the chip is short. */
   @container (max-width: 100px) {
     .burst :global(svg),
-    .burst ~ .chip .type-full {
+    .burst ~ .chip .type-full,
+    .burst ~ .chip .split-label {
       display: none;
     }
 
-    .burst ~ .chip .type-short {
+    .burst.long .burst-total,
+    .burst ~ .chip .pair-halves {
+      display: none;
+    }
+
+    .burst ~ .chip .type-short,
+    .burst ~ .chip .pair-halves + .pair-count {
       display: inline;
     }
   }
 
-  /* Half names need about 56 px of row for two halves and 80 px for three. Below
-     that the chip shows how many halves the shot has. */
+  /* The half names need a cell of about 74 px for two halves and 94 px for
+     three. Below that the chip shows how many halves the shot has. */
   @container (max-width: 94px) {
     .pair-halves.many {
       display: none;
