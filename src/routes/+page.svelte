@@ -747,45 +747,47 @@
             <FiltersPanel />
           {/if}
         </div>
-        <div class="view-anchor">
-          <button
-            class:active={session.viewPanelOpen}
-            class:haswork={hasCustomView}
-            aria-label="View"
-            title={hasCustomView
-              ? "View — settings changed. Thumbnail size, grouping and RAW+JPEG pairing."
-              : "View. Thumbnail size, grouping and RAW+JPEG pairing."}
-            aria-pressed={hasCustomView}
-            onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
-          >
-            <LayoutGrid size={14} />
-            <span>View</span>
-          </button>
-          {#if session.viewPanelOpen}
-            <GridViewPanel />
+        <div class="toolbar-actions">
+          <div class="view-anchor">
+            <button
+              class:active={session.viewPanelOpen}
+              class:haswork={hasCustomView}
+              aria-label="View"
+              title={hasCustomView
+                ? "View — settings changed. Thumbnail size, grouping and RAW+JPEG pairing."
+                : "View. Thumbnail size, grouping and RAW+JPEG pairing."}
+              aria-pressed={hasCustomView}
+              onclick={blurring(() => (session.viewPanelOpen = !session.viewPanelOpen))}
+            >
+              <LayoutGrid size={14} />
+              <span>View</span>
+            </button>
+            {#if session.viewPanelOpen}
+              <GridViewPanel />
+            {/if}
+          </div>
+          {#if view.mode !== "grid"}
+            <button
+              class="touchbar-toggle"
+              class:active={touchBarVisible}
+              title="Show/hide the action bar"
+              aria-label="Show/hide the action bar"
+              onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
+            >
+              <BarIcon size={14} />
+            </button>
           {/if}
-        </div>
-        {#if view.mode !== "grid"}
+          <button title="Settings" aria-label="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
           <button
-            class="touchbar-toggle"
-            class:active={touchBarVisible}
-            title="Show/hide the action bar"
-            aria-label="Show/hide the action bar"
-            onclick={blurring(() => (touchBarVisible = !touchBarVisible))}
+            class="commit"
+            class:haswork={session.hasCommitWork}
+            aria-label="Review changes"
+            title={shortcutHint(session.hasCommitWork ? "Review changes — actions are queued" : "Review changes", "commit.open")}
+            onclick={blurring(() => (session.commitDialogOpen = true))}
           >
-            <BarIcon size={14} />
+            <CheckCheck size={14} /><span>Review</span>
           </button>
-        {/if}
-        <button title="Settings" aria-label="Settings" onclick={blurring(() => (showSettings = true))}><SettingsIcon size={14} /></button>
-        <button
-          class="commit"
-          class:haswork={session.hasCommitWork}
-          aria-label="Review changes"
-          title={shortcutHint(session.hasCommitWork ? "Review changes — actions are queued" : "Review changes", "commit.open")}
-          onclick={blurring(() => (session.commitDialogOpen = true))}
-        >
-          <CheckCheck size={14} /><span>Review</span>
-        </button>
+        </div>
       </div>
     </header>
     {/if}
@@ -1362,6 +1364,19 @@
     justify-content: flex-end;
   }
 
+  /* View, toggle, Settings and Review move as one unit. When the zone is too
+     narrow for everything, the unit drops below Sort & Filter, so the two rows
+     stay balanced. Phones lay the buttons out one by one instead. */
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 6px;
+  }
+
   .toolbar-center {
     flex: 0 0 auto;
   }
@@ -1383,6 +1398,9 @@
      gaps between them (with `gap` as the minimum floor) — one row when they
      fit, every wrapped row likewise balanced when they don't. */
   @media (max-width: 720px) {
+    .toolbar-actions {
+      display: contents;
+    }
     .toolbar {
       flex-wrap: wrap;
       row-gap: 6px;
@@ -1392,7 +1410,7 @@
       justify-content: space-between;
       gap: 4px;
     }
-    .toolbar .toolbar-right > button,
+    .toolbar .toolbar-actions > button,
     .toolbar-right .filters-anchor > button,
     .toolbar-right .view-anchor > button {
       padding-inline: 6px;
