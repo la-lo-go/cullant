@@ -781,7 +781,7 @@
           title={shortcutHint(session.hasCommitWork ? "Review changes — actions are queued" : "Review changes", "commit.open")}
           onclick={blurring(() => (session.commitDialogOpen = true))}
         >
-          <CheckCheck size={14} /><span>Review changes</span>
+          <CheckCheck size={14} /><span>Review</span>
         </button>
       </div>
     </header>
