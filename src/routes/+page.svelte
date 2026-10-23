@@ -1405,7 +1405,7 @@
      third zone competing for that row's space); the right zone claims a full
      row of its own (flex-basis 100% forces the wrap) and wraps its own
      buttons across as many further rows as it needs. */
-  @media (max-width: 720px) {
+  @media (max-width: 639px) {
     .toolbar-actions {
       display: contents;
     }
@@ -1450,7 +1450,7 @@
      224 px with the action bar toggle) plus 7 px for the wider "Name" hint.
      It reads the zone width and never the stretched button, so the layout
      cannot flip back and forth. Past the limit the zone wraps by itself. */
-  @media (min-width: 721px) {
+  @media (min-width: 640px) {
     @container (max-width: 351px) {
       .toolbar:not(.has-toggle) .toolbar-fit {
         display: grid;
@@ -1490,7 +1490,7 @@
   /* Tablet width: the right zone wraps to two levels while the left zone has
      room to spare. Stack Photos above Videos so the selector spans both levels.
      Phones keep the horizontal pill: there the zones already sit on separate rows. */
-  @media (min-width: 721px) {
+  @media (min-width: 640px) {
     .toolbar.stacked .toolbar-left {
       align-self: stretch;
       align-items: stretch;
@@ -1796,7 +1796,7 @@
      resolves to ~0 — the grid otherwise ran cells edge to edge. A modest fixed
      margin (matching the toolbar's own 10px) reads far less cramped, and still
      grows past that for an actual cutout via max(). */
-  @media (max-width: 720px) {
+  @media (max-width: 639px) {
     .grid-area {
       padding-left: max(4px, var(--safe-left));
       padding-right: max(4px, var(--safe-right));
