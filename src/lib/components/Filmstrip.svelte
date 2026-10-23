@@ -480,7 +480,11 @@
                   <span class="label-bar" style:border-color={LABEL_COLORS[v.item.label]}></span>
                 {/if}
               </div>
-              <div class="info-top">
+              <div
+                class="info-top"
+                class:has-chip={settings.filmstripShowType &&
+                  ((session.mirrorMode && v.item.groupSize > 1) || v.item.kind === 0)}
+              >
                 {#if burst}
                   <span
                     class="burst"
@@ -1220,8 +1224,10 @@
     display: none;
   }
 
-  /* The full RAW+JPG label and a flag need about 77 px of row, whatever the font.
-     A horizontal cell has 90 px, so it always keeps the full label. */
+  /* The container queries below measure the cell content box: the cell width
+     minus 6 px in a horizontal strip (90 px for a 96 px cell) and minus 16 px
+     in a vertical strip. The full RAW+JPG label and a flag need about 77 px of
+     row, so a horizontal cell keeps the full label unless a burst badge comes first. */
   @container (max-width: 80px) {
     .type-full {
       display: none;
@@ -1241,7 +1247,7 @@
       display: none;
     }
 
-    .burst.long .burst-total,
+    .has-chip .burst.long .burst-total,
     .burst ~ .chip .pair-halves {
       display: none;
     }
@@ -1252,8 +1258,8 @@
     }
   }
 
-  /* The half names need a cell of about 74 px for two halves and 94 px for
-     three. Below that the chip shows how many halves the shot has. */
+  /* The half names need a content box of about 74 px for two halves and 94 px
+     for three. Below that the chip shows how many halves the shot has. */
   @container (max-width: 94px) {
     .pair-halves.many {
       display: none;
