@@ -682,7 +682,7 @@
   {/if}
   {#if catalog.project}
     {#if !view.fullscreen}
-    <header class="toolbar" class:stacked={toolbarStacked} use:tooltips>
+    <header class="toolbar" class:stacked={toolbarStacked} class:has-toggle={view.mode !== "grid"} use:tooltips>
       <div class="toolbar-left">
         <div class="media-toggle">
           <button
@@ -719,6 +719,7 @@
         </div>
       </div>
       <div class="toolbar-right" bind:clientHeight={toolbarRightH}>
+        <div class="toolbar-fit">
         <div class="filters-anchor">
           <button
             class:active={session.filtersPanelOpen}
@@ -787,6 +788,7 @@
           >
             <CheckCheck size={14} /><span>Review</span>
           </button>
+        </div>
         </div>
       </div>
     </header>
@@ -1362,6 +1364,15 @@
 
   .toolbar-right {
     justify-content: flex-end;
+    /* Lets the container query below read the zone width. The zone is sized by
+       flex (basis 0), so its width never depends on its content. */
+    container-type: inline-size;
+  }
+
+  /* Invisible by default: Sort & Filter and the action group are plain flex
+     items of the zone. */
+  .toolbar-fit {
+    display: contents;
   }
 
   /* View, toggle, Settings and Review move as one unit. When the zone is too
@@ -1423,6 +1434,49 @@
     }
   }
 
+
+  /* Tablet width, zone too narrow for one row: Sort & Filter stretches to the
+     width of the action group below it, and both stay right-aligned. The limit
+     is the natural one-row width of both (measured at 152.8 + 8 + 184 px, or
+     224 px with the action bar toggle) plus 7 px for the wider "Name" hint.
+     It reads the zone width and never the stretched button, so the layout
+     cannot flip back and forth. Past the limit the zone wraps by itself. */
+  @media (min-width: 721px) {
+    @container (max-width: 351px) {
+      .toolbar:not(.has-toggle) .toolbar-fit {
+        display: grid;
+        grid-template-columns: minmax(0, max-content);
+        justify-content: end;
+        row-gap: 6px;
+      }
+      .toolbar:not(.has-toggle) .filters-anchor {
+        display: grid;
+      }
+      .toolbar:not(.has-toggle) .filters-anchor > button {
+        justify-content: flex-start;
+      }
+      .toolbar:not(.has-toggle) .sort-hint {
+        margin-left: auto;
+      }
+    }
+    @container (max-width: 391px) {
+      .toolbar.has-toggle .toolbar-fit {
+        display: grid;
+        grid-template-columns: minmax(0, max-content);
+        justify-content: end;
+        row-gap: 6px;
+      }
+      .toolbar.has-toggle .filters-anchor {
+        display: grid;
+      }
+      .toolbar.has-toggle .filters-anchor > button {
+        justify-content: flex-start;
+      }
+      .toolbar.has-toggle .sort-hint {
+        margin-left: auto;
+      }
+    }
+  }
 
   /* Tablet width: the right zone wraps to two levels while the left zone has
      room to spare. Stack Photos above Videos so the selector spans both levels.
