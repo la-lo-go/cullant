@@ -2365,8 +2365,8 @@
     }
   }
 
-  /* A stack of 100 or more photos has a wider burst badge. The .long-burst
-     rules give that badge its own limits. */
+  /* A stack of 100 or more photos has a wider burst badge, and the RAW chip is
+     wider than R+J. The .long-burst and .chip.raw rules give each its own limits. */
   @container (width < 151px) {
     .has-tally.long-burst > .chip.raw ~ .counts :global(svg) {
       display: none;
@@ -2374,7 +2374,8 @@
   }
 
   @container (width < 146px) {
-    .has-chip.has-tally.long-burst .counts :global(svg) {
+    .has-chip.has-tally.long-burst .counts :global(svg),
+    .has-tally > .chip.raw ~ .counts :global(svg) {
       display: none;
     }
   }
@@ -2573,6 +2574,12 @@
     }
   }
 
+  @container (width < 91px) {
+    .has-tally > .chip.raw {
+      display: none;
+    }
+  }
+
   @container (width < 87px) {
     .has-burst.has-flag > .chip.raw {
       display: none;
@@ -2641,6 +2648,12 @@
   @container (width < 59px) {
     .has-burst.has-flag > .chip.split,
     .has-burst.long-burst > .chip {
+      display: none;
+    }
+  }
+
+  @container (width < 58px) {
+    .has-burst > .chip.raw {
       display: none;
     }
   }
