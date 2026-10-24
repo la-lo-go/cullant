@@ -8,3 +8,13 @@ android {
         }
     }
 }
+
+// Keeping the Rust debug symbols made the debug APK about 1 GB, which made
+// every install over the network slow. Let Gradle strip them.
+android {
+    packaging {
+        jniLibs {
+            keepDebugSymbols.clear()
+        }
+    }
+}
