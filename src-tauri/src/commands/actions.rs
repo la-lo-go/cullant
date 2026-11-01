@@ -144,7 +144,11 @@ pub fn xmp_dirty_count(state: State<'_, AppState>) -> AppResult<i64> {
     committer::xmp_dirty_count(&db)
 }
 
-#[tauri::command]
+/// `async` for the same reason as `commit_execute`: the preview stats every
+/// queued file to hash the plan, and waits for the DB writer thread. Run inline
+/// on the main thread, it froze the whole window before the Review dialog could
+/// paint, and clicks made during the freeze closed the dialog when they arrived.
+#[tauri::command(async)]
 pub fn commit_preview(state: State<'_, AppState>) -> AppResult<CommitPlan> {
     let (db, store) = project(&state)?;
     committer::preview(&db, store.as_ref())
