@@ -1,6 +1,6 @@
 {
   "name": "cullant",
-  "version": "0.15.1",
+  "version": "0.15.2",
   "description": "Fast, keyboard-first photo culling for Windows",
   "type": "module",
   "scripts": {
