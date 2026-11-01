@@ -194,6 +194,13 @@ pub trait ProjectStore: Send + Sync {
 
     /// Size in bytes and mtime in whole seconds of the file at `rel`, or `None`
     /// when it is absent.
+    /// [`stat`](Self::stat) for each of `rels`, in the same order. The default
+    /// calls `stat` once for each file. A store with a round trip for each call
+    /// (SAF) overrides it and lists each parent directory one time.
+    fn stat_many(&self, rels: &[&str]) -> AppResult<Vec<Option<(i64, i64)>>> {
+        rels.iter().map(|rel| self.stat(rel)).collect()
+    }
+
     fn stat(&self, _rel: &str) -> AppResult<Option<(i64, i64)>> {
         Err(AppError::Other(
             "stat is not supported by this store".into(),

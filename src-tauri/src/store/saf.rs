@@ -524,6 +524,41 @@ impl ProjectStore for SafStore {
         Ok(found.map(|e| (e.size as i64, e.mtime / 1000)))
     }
 
+    fn stat_many(&self, rels: &[&str]) -> AppResult<Vec<Option<(i64, i64)>>> {
+        let mut dirs: std::collections::HashMap<
+            &str,
+            std::collections::HashMap<String, (i64, i64)>,
+        > = std::collections::HashMap::new();
+        let mut out = Vec::with_capacity(rels.len());
+        for &rel in rels {
+            super::validate_relative(rel)?;
+            let (parent, name) = super::split_parent(rel);
+            if !dirs.contains_key(parent) {
+                let listed = match self.list_dir(parent) {
+                    Ok(entries) => entries,
+                    // A cached id of a directory that was deleted outside the app.
+                    Err(_) => {
+                        self.cache_forget(parent)?;
+                        self.list_dir(parent)?
+                    }
+                };
+                let entries = listed
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|e| (e.name, (e.size as i64, e.mtime / 1000)))
+                    .collect();
+                dirs.insert(parent, entries);
+            }
+            let found = dirs[parent].get(name).copied();
+            if found.is_none() {
+                // The cache must not claim a file that is gone.
+                self.cache_forget(rel)?;
+            }
+            out.push(found);
+        }
+        Ok(out)
+    }
+
     fn exists(&self, rel: &str) -> AppResult<bool> {
         super::validate_relative(rel)?;
         if rel.is_empty() {

@@ -294,12 +294,22 @@ fn project_hasher(db: &Arc<Db>) -> Xxh3 {
 }
 
 fn hash_pending(db: &Arc<Db>, store: &dyn ProjectStore, items: &[PendingAction]) -> String {
+    // The version comes from one batched stat, not from opening each file. On
+    // SAF an open is one binder round trip per file, so a queue of a few
+    // hundred files kept the Review dialog on "Loading" for minutes.
+    let rels: Vec<&str> = items.iter().map(|p| p.rel_path.as_str()).collect();
+    let versions: Vec<String> = match store.stat_many(&rels) {
+        Ok(stats) => stats
+            .into_iter()
+            .map(|stat| match stat {
+                Some((size, mtime)) => format!("{size}:{mtime}"),
+                None => "missing".to_string(),
+            })
+            .collect(),
+        Err(error) => vec![format!("unavailable: {error}"); items.len()],
+    };
     let mut h = project_hasher(db);
-    for p in items {
-        let version = store
-            .open_read(&p.rel_path)
-            .and_then(|file| Ok(metadata_version(&file.metadata()?)))
-            .unwrap_or_else(|error| format!("unavailable: {error}"));
+    for (p, version) in items.iter().zip(versions) {
         h.update(
             serde_json::json!([p.id, p.file_id, p.rel_path, p.action, p.dest, version])
                 .to_string()
@@ -1635,6 +1645,9 @@ mod tests {
         fn open_read(&self, rel: &str) -> AppResult<std::fs::File> {
             self.0.open_read(rel)
         }
+        fn stat(&self, rel: &str) -> AppResult<Option<(i64, i64)>> {
+            self.0.stat(rel)
+        }
         fn open_write(&self, rel: &str, mime: &str) -> AppResult<std::fs::File> {
             self.0.open_write(rel, mime)
         }
@@ -1667,6 +1680,17 @@ mod tests {
         fn exists(&self, rel: &str) -> AppResult<bool> {
             self.0.exists(rel)
         }
+    }
+
+    #[test]
+    fn a_file_changed_after_the_preview_blocks_the_commit() {
+        let (dir, db, store) = paired_project();
+        queue_file(&db, "IMG_1.jpg", ActionKind::Delete, None);
+        let plan = preview(&db, &store).unwrap();
+        assert_eq!(preview(&db, &store).unwrap().plan_hash, plan.plan_hash);
+        std::fs::write(dir.path().join("IMG_1.jpg"), b"replaced with other bytes").unwrap();
+        assert!(execute(&db, &store, &plan.plan_hash, |_, _, _| {}).is_err());
+        assert!(dir.path().join("IMG_1.jpg").exists());
     }
 
     #[test]
