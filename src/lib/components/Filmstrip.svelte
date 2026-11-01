@@ -795,10 +795,13 @@
     width: 44px;
     height: 18px;
     padding: 0;
-    border: 1px solid var(--border);
-    background: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
+    backdrop-filter: blur(6px);
     color: var(--accent);
     cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.12s, background 0.12s;
   }
 
   .strip-peek.bottom,
@@ -839,7 +842,9 @@
     border-radius: var(--r-md) 0 0 var(--r-md);
   }
 
-  .strip-peek:hover {
+  .strip-peek:hover,
+  .strip-peek:focus-visible {
+    opacity: 1;
     background: var(--hover);
     border-color: var(--accent);
   }
@@ -857,15 +862,20 @@
     width: 64px;
     height: 18px;
     overflow: hidden;
-    border: 1px solid var(--border);
-    background: var(--surface);
+    border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
+    backdrop-filter: blur(6px);
+    opacity: 0.7;
+    transition: opacity 0.12s, background 0.12s;
   }
 
   .strip-tab :global(button:focus-visible) {
     outline-offset: -2px;
   }
 
-  .strip-tab:hover {
+  .strip-tab:hover,
+  .strip-tab:focus-within {
+    opacity: 1;
     background: var(--hover);
     border-color: var(--accent);
   }
