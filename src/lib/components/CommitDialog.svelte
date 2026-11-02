@@ -61,15 +61,66 @@
     trash: "Project _trash folder",
   };
 
+  // True while the backend checks the queued files on disk. The counts and
+  // lists are known at once from the DB, but the plan hashes (which Execute and
+  // the hold-to-run rows need) wait for that check, so the actions stay
+  // disabled until it ends. `slow` shows the progress bar only when the check
+  // takes longer than a moment: a fast check never flashes it.
+  let checking = $state(false);
+  let slow = $state(false);
+  const SLOW_MS = 200;
+  // The draft has no hashes: nothing may run until a full preview replaced it.
+  const unverified = $derived(checking || !plan?.planHash);
+
+  // The counts and lists from the DB only: no file access, so the dialog has
+  // its content at once. The full preview replaces this when it arrives.
+  async function loadDraft(isCurrent: () => boolean) {
+    try {
+      const [pending, xmpCount, mode] = await Promise.all([
+        api.listPending(),
+        api.xmpDirtyCount(),
+        api.getProjectSetting("deletionMode"),
+      ]);
+      if (!isCurrent() || plan) return;
+      plan = {
+        deletes: pending.filter((p) => p.action === "delete"),
+        moves: pending.filter((p) => p.action === "move"),
+        copies: pending.filter((p) => p.action === "copy"),
+        xmpCount,
+        deletionMode: mode === "permanent" ? "permanent" : "trash",
+        conflicts: [],
+        planHash: "",
+        deletesHash: "",
+        movesHash: "",
+        copiesHash: "",
+        xmpHash: "",
+      };
+    } catch {
+      // The full preview reports its own error.
+    }
+  }
+
   async function refresh() {
     const generation = catalog.generation;
     const request = ++refreshRequest;
+    const isCurrent = () => isDialogCurrent(generation) && request === refreshRequest;
     error = "";
+    checking = true;
+    const slowTimer = setTimeout(() => {
+      if (isCurrent()) slow = true;
+    }, SLOW_MS);
+    if (!plan) void loadDraft(isCurrent);
     try {
       const next = await api.commitPreview();
-      if (isDialogCurrent(generation) && request === refreshRequest) plan = next;
+      if (isCurrent()) plan = next;
     } catch (e) {
-      if (isDialogCurrent(generation) && request === refreshRequest) error = String(e);
+      if (isCurrent()) error = String(e);
+    } finally {
+      clearTimeout(slowTimer);
+      if (isCurrent()) {
+        checking = false;
+        slow = false;
+      }
     }
   }
 
@@ -187,13 +238,13 @@
   }
 
   async function executeAll() {
-    if (!plan) return;
+    if (!plan || unverified) return;
     const hash = plan.planHash;
     await runCommit(activePhasesOf(plan), () => api.commitExecute(hash));
   }
 
   async function executeSection(section: CommitSection) {
-    if (!plan || running || !session.commitDialogOpen) return;
+    if (!plan || running || unverified || !session.commitDialogOpen) return;
     const hash = sectionHash(plan, section);
     await runCommit([section], () => api.commitExecuteSection(section, hash));
   }
@@ -281,7 +332,7 @@
     e.stopPropagation();
     if (e.repeat) return;
     if (e.key === "Enter") expanded = expanded === section ? null : section;
-    else startHold(`section:${section}`, holdDuration(section), e, () => void executeSection(section));
+    else if (!unverified) startHold(`section:${section}`, holdDuration(section), e, () => void executeSection(section));
   }
 
   function onRowKeyup(section: CommitSection, e: KeyboardEvent) {
@@ -440,7 +491,7 @@
   }
 
   function onRowPointerDown(section: CommitSection, e: PointerEvent) {
-    if (!plan || running || sectionCount(plan, section) === 0) return;
+    if (!plan || running || unverified || sectionCount(plan, section) === 0) return;
     startHold(`section:${section}`, holdDuration(section), e, () => void executeSection(section));
   }
 
@@ -593,6 +644,9 @@
   const total = $derived(
     plan ? plan.deletes.length + plan.moves.length + plan.copies.length + plan.xmpCount : 0
   );
+
+  /** Files the preview checks on disk; XMP sidecars need no check. */
+  const fileCount = $derived(plan ? plan.deletes.length + plan.moves.length + plan.copies.length : 0);
 
   const deleteRows = $derived(plan ? planRows(plan.deletes) : []);
   const moveRows = $derived(plan ? planRows(plan.moves) : []);
@@ -753,6 +807,13 @@
               </div>
             {/if}
 
+            {#if checking && slow}
+              <div class="checking" role="status">
+                <span>Checking {fileCount} {fileCount === 1 ? "file" : "files"} on disk…</span>
+                <div class="bar" aria-hidden="true"><span></span></div>
+              </div>
+            {/if}
+
             <p class="hint">
               <span class="fine">Click a row to expand · hold it to run that section on its own.</span>
               <span class="coarse">Tap a row to expand · hold it to run that section on its own.</span>
@@ -881,7 +942,7 @@
 
             <footer>
               <span class="summary">{total} {total === 1 ? "operation" : "operations"}</span>
-              <button class="primary" disabled={total === 0} onclick={executeAll}>
+              <button class="primary" disabled={total === 0 || unverified} onclick={executeAll}>
                 {#if plan.deletionMode === "permanent" && plan.deletes.length > 0}
                   <TriangleAlert size={14} style="vertical-align: -2px" />
                   Execute (deletes {plan.deletes.length} {plan.deletes.length === 1 ? "file" : "files"} permanently)
@@ -892,7 +953,12 @@
             </footer>
           {/if}
         {:else}
-          <p>Loading…</p>
+          {#if slow}
+            <div class="checking" role="status">
+              <span>Reading the queue…</span>
+              <div class="bar" aria-hidden="true"><span></span></div>
+            </div>
+          {/if}
           {#if error}<p class="error">{error}</p>{/if}
         {/if}
       </div>
@@ -1292,6 +1358,52 @@
   .tab:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  /* Indeterminate bar: the check reports no progress, so a segment slides
+     along the track to show that work goes on. */
+  .checking {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    opacity: 0.8;
+  }
+
+  .checking .bar {
+    position: relative;
+    height: 3px;
+    overflow: hidden;
+    border-radius: 2px;
+    background: var(--border);
+  }
+
+  .checking .bar span {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 35%;
+    border-radius: 2px;
+    background: var(--accent);
+    animation: checking-slide 1.1s ease-in-out infinite;
+  }
+
+  @keyframes checking-slide {
+    from {
+      left: -35%;
+    }
+    to {
+      left: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .checking .bar span {
+      left: 0;
+      width: 100%;
+      animation: none;
+      opacity: 0.5;
+    }
   }
 
   .loading {
