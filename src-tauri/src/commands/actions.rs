@@ -129,7 +129,7 @@ pub fn clear_pending(app: AppHandle, state: State<'_, AppState>) -> AppResult<()
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_pending(state: State<'_, AppState>) -> AppResult<Vec<PendingAction>> {
     let (db, _) = project(&state)?;
     actions::list(&db)
@@ -138,7 +138,7 @@ pub fn list_pending(state: State<'_, AppState>) -> AppResult<Vec<PendingAction>>
 /// Number of photos with a pending XMP sidecar write. Separate from the pending-
 /// actions queue (XMP dirtiness is a per-file flag), so the toolbar queries it
 /// alongside `list_pending` to decide whether the commit button has work.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn xmp_dirty_count(state: State<'_, AppState>) -> AppResult<i64> {
     let (db, _) = project(&state)?;
     committer::xmp_dirty_count(&db)
@@ -232,7 +232,7 @@ pub fn commit_execute_section(
     Ok(outcome)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_project_setting(key: String, state: State<'_, AppState>) -> AppResult<Option<String>> {
     let (db, _) = project(&state)?;
     committer::get_setting(&db, &key)
